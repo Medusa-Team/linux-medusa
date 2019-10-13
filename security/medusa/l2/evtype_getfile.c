@@ -3,6 +3,7 @@
 /* (C) 2002 Milan Pikula */
 
 #include <linux/fs_struct.h>
+#include <linux/namei.h>
 #include "../../../fs/mount.h" /* real_mount() */
 
 #include "l3/registry.h"
@@ -118,30 +119,48 @@ struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
 static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 		struct path *ndupper, struct path *ndparent);
 
+void inline info_mnt(struct mount *mnt)
+{
+	pr_cont("mountpoint: %pd, vfs mnt root: %pd\n", mnt->mnt_mountpoint, mnt->mnt.mnt_root);
+}
+
 void medusa_get_upper_and_parent(struct path *ndsource,
 		struct path *ndupperp, struct path *ndparentp)
 {
 	*ndupperp = *ndsource;
 	dget(ndupperp->dentry);
-	if (ndupperp->mnt)
+	if (ndupperp->mnt) {
 		mntget(ndupperp->mnt);
-	else if (IS_ROOT(ndupperp->dentry))
+	}
+	else if (IS_ROOT(ndupperp->dentry)) {
+		/* Nepozname mnt a ndupperp nema rodica (je to korenova dentry)
+		 * V tejto casti kodu sa vyhlada struktura vfsmount
+		 * prisluchajuca k danej dentry. Toto je potrebne, ked mame
+		 * iba inode, ale nie je to potrebne, ak pouzivame path hook */
 		ndupperp->mnt = medusa_evocate_mnt(ndupperp->dentry); /* FIXME: may fail [?] */
+	}
 
 	while (IS_ROOT(ndupperp->dentry)) {
+		/* Cyklus pracuje dovtedy, kym nenajdeme dentry, ktora nie je root */
 		struct vfsmount *tmp;
-
-		if (real_mount(ndupperp->mnt)->mnt_parent == real_mount(ndupperp->mnt)->mnt_parent->mnt_parent)
+		if (real_mount(ndupperp->mnt)->mnt_parent == real_mount(ndupperp->mnt)->mnt_parent->mnt_parent) {
+			/* Cyklus skonci, ked rodic mountpointu uz nema dalsieho
+			 * rodica, resp. su totozne. */
 			break;
+		}
+		/* Prechod na vyssi mountpoint, najprv dentry pre mountpoint */
 		dput(ndupperp->dentry);
 		ndupperp->dentry = dget(real_mount(ndupperp->mnt)->mnt_mountpoint);
+		/* A potom samotna mount struktura */
 		tmp = mntget(&real_mount(ndupperp->mnt)->mnt_parent->mnt);
 		mntput(ndupperp->mnt);
 		ndupperp->mnt = tmp;
 	}
 	if (ndparentp) {
-		if (IS_ROOT(ndupperp->dentry))
+		/* Ak si volajuci vyziadal rodica, tak ho vyplnime */
+		if (IS_ROOT(ndupperp->dentry)) {
 			*ndparentp = *ndsource;
+		}
 		else {
 			ndparentp->dentry = ndupperp->dentry->d_parent;
 			ndparentp->mnt = ndupperp->mnt;
@@ -168,6 +187,132 @@ void medusa_put_upper_and_parent(struct path *ndupper, struct path *ndparent)
 	}
 }
 
+// struct dentry* get_upper(struct )
+
+/**
+ * Checks for correctness of current, upper and parent.
+ * @returns: new dir for next dentry computed from ndparent
+ */
+struct path check(struct dentry* dentry, struct path* dir, struct path* c, struct path* u, struct path* p)
+{
+	struct path ndcurrent;
+	struct path ndupper;
+	struct path ndparent;
+
+	ndcurrent.dentry = dentry;
+	ndcurrent.mnt = dir->mnt; /* may be NULL */
+
+	ndupper = ndcurrent;
+
+	if (IS_ROOT(dentry)) {
+		path_get(&ndupper);  // it will be put in follow_up()
+		follow_up(&ndupper);
+	}
+	ndparent.dentry = ndupper.dentry->d_parent;
+	ndparent.mnt = ndupper.mnt;
+
+	if (!path_equal(c, &ndcurrent)) {
+		pr_warn("current not equal: %pd != %pd\n", ndcurrent.dentry, c->dentry);
+		info_mnt(real_mount(ndcurrent.mnt));
+		if (c->mnt)
+			info_mnt(real_mount(c->mnt));
+		else
+			pr_info("mnt is null\n");
+	}
+	if (!path_equal(u, &ndupper)) {
+		pr_warn("upper not equal: %pd != %pd\n", ndupper.dentry, u->dentry);
+		info_mnt(real_mount(ndupper.mnt));
+		if (u->mnt)
+			info_mnt(real_mount(u->mnt));
+		else
+			pr_info("mnt is null\n");
+	}
+	if (!path_equal(p, &ndparent)) {
+		pr_warn("parent not equal: %pd != %pd\n", ndparent.dentry, p->dentry);
+		info_mnt(real_mount(ndparent.mnt));
+		if (p->mnt)
+			info_mnt(real_mount(p->mnt));
+		else
+			pr_info("mnt is null\n");
+	}
+
+	if (IS_ROOT(dentry)) {
+		path_put(&ndupper);
+	}
+
+	return (struct path) {.mnt = ndparent.mnt,
+			.dentry = ndparent.dentry->d_parent};
+}
+
+int file_kobj_validate_dentry_dir(struct dentry *dentry, const struct path* dir)
+{
+	struct path ndcurrent;
+	struct path ndupper;
+	struct path ndparent;
+	struct path parent_dir;
+
+	INIT_MEDUSA_OBJECT_VARS(&inode_security(dentry->d_inode));
+#ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
+	cap_clear(inode_security(dentry->d_inode).pcap);
+	inode_security(dentry->d_inode).icap = CAP_FULL_SET;
+	inode_security(dentry->d_inode).ecap = CAP_FULL_SET;
+#endif
+	ndcurrent.dentry = dentry;
+	ndcurrent.mnt = dir->mnt;
+
+	ndupper = ndcurrent;
+
+	path_get(&ndupper);	// it will be put in follow_up() and new path will
+				// be returned (that has to be put also)
+	if (IS_ROOT(dentry)) {
+		follow_up(&ndupper);
+	}
+	ndparent.dentry = ndupper.dentry->d_parent;
+	ndparent.mnt = ndupper.mnt;
+
+
+	if (ndparent.dentry->d_inode == NULL) {
+		path_put(&ndupper);
+		return 0;
+	}
+
+	if (ndcurrent.dentry != ndparent.dentry) {
+		parent_dir = (struct path) {.mnt = ndparent.mnt,
+			                    .dentry = ndparent.dentry->d_parent};
+		if (!MED_MAGIC_VALID(&inode_security(ndparent.dentry->d_inode)) &&
+			file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, &parent_dir) <= 0) {
+			path_put(&ndupper);
+			return 0;
+		}
+
+		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
+					&inode_security(ndparent.dentry->d_inode))) {
+
+			COPY_MEDUSA_OBJECT_VARS(&inode_security(ndcurrent.dentry->d_inode),
+					&inode_security(ndparent.dentry->d_inode));
+			inode_security(ndcurrent.dentry->d_inode).user = inode_security(ndparent.dentry->d_inode).user;
+#ifdef CONFIG_MEDUSA_FILE_CAPABILITIES                                                
+			inode_security(ndcurrent.dentry->d_inode).icap = inode_security(ndparent.dentry->d_inode).icap;
+			inode_security(ndcurrent.dentry->d_inode).pcap = inode_security(ndparent.dentry->d_inode).pcap;
+			inode_security(ndcurrent.dentry->d_inode).ecap = inode_security(ndparent.dentry->d_inode).ecap;
+#endif
+			path_put(&ndupper);
+			return 1;
+		}
+	}
+
+	/* we're global root, or cannot inherit from our parent */
+
+	if (do_file_kobj_validate_dentry(&ndcurrent, &ndupper, &ndparent)
+			!= MED_ERR) {
+		path_put(&ndupper);
+		return MED_MAGIC_VALID(&inode_security(ndcurrent.dentry->d_inode));
+	}
+	path_put(&ndupper);
+	return -1;
+}
+
+int medusa_l1_inode_alloc_security(struct inode *inode);
 /**
  * file_kobj_validate_dentry - get dentry security information from auth. server
  * @dentry: dentry to get the information for.
@@ -175,13 +320,14 @@ void medusa_put_upper_and_parent(struct path *ndupper, struct path *ndparent)
  *
  * This routine expects the existing, but !is_med_magic_valid Medusa dentry's inode security struct!
  */
-int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt)
+int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struct path *dir)
 {
 	struct path ndcurrent;
 	struct path ndupper;
 	struct path ndparent;
 	struct medusa_l1_inode_s *ndcurrent_inode;
 	struct medusa_l1_inode_s *ndparent_inode;
+	struct path parent_dir;
 
 	init_med_object(&(inode_security(dentry->d_inode)->med_object));
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
@@ -191,7 +337,16 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt)
 #endif
 	ndcurrent.dentry = dentry;
 	ndcurrent.mnt = mnt; /* may be NULL */
+	/* Ak pouzivame path hooky, budeme poznat aj mnt */
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
+	pr_info("current: %pd upper: %pd parent: %pd\n", ndcurrent.dentry, ndupper.dentry, ndparent.dentry);
+	//if (ndcurrent.mnt)
+	//	info_mnt(real_mount(ndcurrent.mnt));
+	//if (ndupper.mnt)
+	//	info_mnt(real_mount(ndupper.mnt));
+	//if (ndparent.mnt)
+	//	info_mnt(real_mount(ndparent.mnt));
+	parent_dir = check(dentry, dir, &ndcurrent, &ndupper, &ndparent);
 
 	if (ndparent.dentry->d_inode == NULL) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
@@ -200,7 +355,7 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt)
 
 	if (ndcurrent.dentry != ndparent.dentry) {
 		if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt) <= 0) {
+			file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, &parent_dir) <= 0) {
 			medusa_put_upper_and_parent(&ndupper, &ndparent);
 			return 0;
 		}

@@ -40,6 +40,7 @@ extern enum medusa_answer_t medusa_readlink(struct dentry *dentry);
  */
 
 extern int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt);
+extern int file_kobj_validate_dentry_dir(struct dentry *dentry, const struct path *dir);
 extern void medusa_get_upper_and_parent(struct path *ndsource, struct path *ndupperp, struct path *ndparentp);
 extern void medusa_put_upper_and_parent(struct path *ndupper, struct path *ndparent);
 extern struct vfsmount *medusa_evocate_mnt(struct dentry *dentry);

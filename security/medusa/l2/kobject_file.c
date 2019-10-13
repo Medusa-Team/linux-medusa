@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
 /* (C) 2002 Milan Pikula */
+#include <linux/namei.h>
 
 #include "l2/kobject_file.h"
 #include "l3/registry.h"
@@ -129,6 +130,35 @@ void file_kobj_live_remove(struct inode *ino)
 		}
 out:
 	write_unlock(&live_lock);
+}
+void file_kobj_dentry2string_dir(struct path *dir, struct dentry *dentry, char *buf)
+{
+	int len;
+
+	if( IS_ROOT(dentry) )
+	{
+		struct path ndcurrent;
+		ndcurrent.dentry = dentry;
+		ndcurrent.mnt = dir->mnt;
+
+		path_get(&ndcurrent);
+		follow_up(&ndcurrent);
+		dentry=dget(ndcurrent.dentry);
+		path_put(&ndcurrent);
+	}
+	else
+		dget(dentry);
+
+	if (!dentry || IS_ERR(dentry) || !dentry->d_name.name) {
+		buf[0] = '\0';
+		dput(dentry);
+		return;
+	}
+	len = dentry->d_name.len < NAME_MAX ?
+		dentry->d_name.len : NAME_MAX;
+	memcpy(buf, dentry->d_name.name, len);
+	buf[len] = '\0';
+	dput(dentry);
 }
 void file_kobj_dentry2string(struct dentry *dentry, char *buf)
 {

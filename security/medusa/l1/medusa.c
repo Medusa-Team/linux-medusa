@@ -292,7 +292,7 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 	if (no_block)
 		return -ECHILD;
 
-	mask &= (MAY_READ|MAY_WRITE|MAY_EXEC|MAY_APPEND);
+	mask &= (MAY_READ|MAY_WRITE|MAY_EXEC|MAY_APPEND);*/
 	/*
 	 * Existence test.
 	 * TODO What about Medusa SEE permission?
@@ -381,6 +381,10 @@ static int medusa_l1_path_mkdir(const struct path *dir, struct dentry *dentry,
 
 static int medusa_l1_path_rmdir(const struct path *dir, struct dentry *dentry)
 {
+	struct mount *mnt = real_mount(dir->mnt);
+	pr_info("rmdir dir dentry: %pd\n", dir->dentry);
+	pr_info("rmdir dentry: %pd\n", dentry);
+	pr_cont("mountpoint: %pd, vfs mnt root: %pd\n", mnt->mnt_mountpoint, mnt->mnt.mnt_root);
 	if (medusa_rmdir(dir, dentry) == MED_DENY)
 		return -EACCES;
 	return 0;

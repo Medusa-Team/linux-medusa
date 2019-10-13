@@ -26,14 +26,14 @@ int __init rmdir_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_rmdir(struct dentry *dentry)
+static enum medusa_answer_t medusa_do_rmdir(const struct path *dir, struct dentry *dentry)
 {
 	struct rmdir_access access;
 	struct process_kobject process;
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	file_kobj_dentry2string(dentry, access.filename);
+	file_kobj_dentry2string_dir(dir, dentry, access.filename);
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, dentry->d_inode);
 	file_kobj_live_add(dentry->d_inode);
@@ -61,7 +61,7 @@ enum medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 	)
 		return MED_DENY;
 	if (MEDUSA_MONITORED_ACCESS_O(rmdir_access, inode_security(dentry->d_inode)))
-		return medusa_do_rmdir(dentry);
+		return medusa_do_rmdir(dir, dentry);
 	return MED_ALLOW;
 }
 
