@@ -3,7 +3,7 @@
 PROGNAME=$0
 
 if [ ! -f .dest ]; then
-        echo -n "Prosim zadaj adresu kam sa maju kopirovat zdrojaky (NONE pre nikam): "
+	echo -n "Please enter the rsync destination location where the source codes should be copied (or leave blank for NONE)"
         read DEST
         echo $DEST > .dest
 fi

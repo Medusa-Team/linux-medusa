@@ -40,9 +40,20 @@ what's really happening in the kernel. Constable is only one example of such an
 authorization server. The protocol allows communication in the form of packets
 which carry all necessary data.
 
+Prerequisites
+-----------
+If you would like to install Medusa security system on Debian distributions, run the following command to ensure that you have installed the required toolchain for the script:
+
+```
+sudo apt install gcc make flex bison fakeroot bc rsync dpkg-dev 
+```
+
+In order to run medusa on other Linux distributions, you need to compile or install the required toolchain by yourself.
+
 Installation
 -----------
-Run the bash file:
+1.Check if you have installed the prerequisites.
+2.Run the bash file:
 
 ```
 build.sh
