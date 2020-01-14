@@ -17,12 +17,12 @@
 #include <linux/kernel.h>
 #include <asm/syscall.h>
 #include <linux/sys.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 
 struct medusa_l1_task_s {
 	kuid_t luid;
-	MEDUSA_SUBJECT_VARS;
-	MEDUSA_OBJECT_VARS;
+	MEDUSA_SUBJECT;
+	MEDUSA_OBJECT;
 	__u32 user;
         char cmdline[128];
 #ifdef CONFIG_MEDUSA_FORCE

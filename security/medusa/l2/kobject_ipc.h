@@ -3,7 +3,7 @@
 #include <linux/syscalls.h>
 #include <../../../ipc/util.h>	// FIXME FIXME FIXME TODO
 #include <linux/medusa/l3/kobject.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l3/constants.h>
 #include <linux/medusa/l1/ipc.h>
@@ -35,7 +35,7 @@ struct medusa_ipc_perm {
 struct ipc_kobject {	
 	unsigned int ipc_class;
 	struct medusa_ipc_perm ipc_perm;
-	MEDUSA_OBJECT_VARS;
+	MEDUSA_OBJECT;
 };
 extern MED_DECLARE_KCLASSOF(ipc_kobject);
 

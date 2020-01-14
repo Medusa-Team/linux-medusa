@@ -38,7 +38,7 @@ medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
         memset(&access, '\0', sizeof(struct setresuid));
         /* process_kobject process is zeroed by process_kern2kobj function */
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_object_valid(task_security(current).med_object) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 

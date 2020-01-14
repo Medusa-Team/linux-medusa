@@ -53,9 +53,9 @@ medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmadd
 		/* for now, we don't support error codes */
 		return MED_NO;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_object_valid(task_security(current).med_object) && process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!MED_MAGIC_VALID(ipc_security(ipcp)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_object_valid(ipc_security(ipcp)->med_object) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_shmat_access, &task_security(current))) {

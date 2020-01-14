@@ -50,16 +50,16 @@ medusa_answer_t medusa_exec(struct dentry ** dentryp)
 
 	if (!*dentryp || IS_ERR(*dentryp) || !(*dentryp)->d_inode)
 		return MED_OK;
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_object_valid(task_security(current).med_object) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (!MED_MAGIC_VALID(&inode_security((*dentryp)->d_inode)) &&
+	if (!is_med_object_valid(inode_security((*dentryp)->d_inode).med_object) &&
 
 			file_kobj_validate_dentry(*dentryp,NULL) <= 0)
 		return MED_OK;
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security((*dentryp)->d_inode))) ||
-		!VS_INTERSECT(VSR(&task_security(current)),VS(&inode_security((*dentryp)->d_inode)))
+	if (!vs_intersects(VSS(&task_security(current)),VS(&inode_security((*dentryp)->d_inode))) ||
+		!vs_intersects(VSR(&task_security(current)),VS(&inode_security((*dentryp)->d_inode)))
 	)
 		return MED_NO;
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, &task_security(current))) {

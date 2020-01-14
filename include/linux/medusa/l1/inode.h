@@ -15,10 +15,10 @@
 #include <linux/limits.h>
 #include <linux/capability.h>
 #include <linux/hashtable.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 
 struct medusa_l1_inode_s {
-	MEDUSA_OBJECT_VARS;
+	MEDUSA_OBJECT;
 	__u32 user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 	kernel_cap_t icap, pcap, ecap;  /* support for POSIX file capabilities */

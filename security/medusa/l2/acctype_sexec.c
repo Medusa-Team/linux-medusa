@@ -4,7 +4,7 @@
 #include <linux/limits.h>
 #include <linux/list.h>
 #include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 
@@ -55,11 +55,11 @@ medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
 {
 	medusa_answer_t retval = MED_OK;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_object_valid(task_security(current).med_object) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (!MED_MAGIC_VALID(&inode_security(DENTRY->d_inode)) &&
+	if (!is_med_object_valid(inode_security(DENTRY->d_inode).med_object) &&
 			file_kobj_validate_dentry(DENTRY,bprm->file->f_path.mnt) <= 0)
 		return MED_OK;
 	/* no sense in checking VS here */

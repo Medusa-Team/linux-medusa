@@ -15,14 +15,14 @@ int file_kobj2kern(struct file_kobject * fk, struct inode * inode)
 	inode->i_mode = fk->mode;
 	inode->i_uid = fk->uid;
 	inode->i_gid = fk->gid;
-	COPY_MEDUSA_OBJECT_VARS(&inode_security(inode), fk);
+	inode_security(inode).med_object = fk->med_object;
 	inode_security(inode).user = fk->user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 	inode_security(inode).ecap = fk->ecap;
 	inode_security(inode).icap = fk->icap;
 	inode_security(inode).pcap = fk->pcap;
 #endif /* CONFIG_MEDUSA_FILE_CAPABILITIES */
-	MED_MAGIC_VALIDATE(&inode_security(inode));
+	med_magic_validate(&(inode_security(inode).med_object));
 	return 0;
 }
 
@@ -40,7 +40,7 @@ int file_kern2kobj(struct file_kobject * fk, struct inode * inode)
 	fk->uid = inode->i_uid;
 	fk->gid = inode->i_gid;
 	fk->rdev = (inode->i_rdev);
-	COPY_MEDUSA_OBJECT_VARS(fk, &inode_security(inode));
+	fk->med_object = inode_security(inode).med_object;
 	fk->user = inode_security(inode).user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 	fk->ecap = inode_security(inode).ecap;
@@ -191,8 +191,8 @@ static void file_unmonitor(struct medusa_kobject_s * kobj)
 
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
 	if (p) {
-		UNMONITOR_MEDUSA_OBJECT_VARS(&inode_security(p));
-		MED_MAGIC_VALIDATE(&inode_security(p));
+		unmonitor_med_object(&(inode_security(p).med_object));
+		med_magic_validate(&(inode_security(p).med_object));
 	}
 	__unlookup();
 }

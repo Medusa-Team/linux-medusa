@@ -36,7 +36,7 @@ struct file_kobject { /* was: m_inode_inf */
 	gid_t gid;
 	unsigned long rdev;
 	
-	MEDUSA_OBJECT_VARS;
+	MEDUSA_OBJECT;
 
 	__u32 user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
@@ -49,7 +49,7 @@ extern MED_DECLARE_KCLASSOF(file_kobject);
 
 struct file_sub_kobject { /* the 'subject' view... */
 	struct file_kobject f;
-	MEDUSA_SUBJECT_VARS;
+	MEDUSA_SUBJECT;
 };
 extern MED_DECLARE_KCLASSOF(file_sub_kobject);
 

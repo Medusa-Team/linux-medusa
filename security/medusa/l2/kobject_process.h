@@ -38,8 +38,8 @@ struct process_kobject { /* was: m_proc_inf */
 
 	kuid_t luid;
 	kernel_cap_t ecap, icap, pcap;
-	MEDUSA_SUBJECT_VARS;
-	MEDUSA_OBJECT_VARS;
+	MEDUSA_SUBJECT;
+	MEDUSA_OBJECT;
 	__u32 user;
 #ifdef CONFIG_MEDUSA_SYSCALL
 	/* FIXME: this is wrong on non-i386 architectures */

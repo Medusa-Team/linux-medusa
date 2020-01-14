@@ -177,7 +177,7 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  * @dentry: dentry to get the information for.
  * @mnt: optional vfsmount structure for that dentry
  *
- * This routine expects the existing, but !MED_MAGIC_VALID Medusa dentry's inode security struct!
+ * This routine expects the existing, but !is_med_object_valid Medusa dentry's inode security struct!
  */
 int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 {
@@ -185,7 +185,7 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	struct path ndupper;
 	struct path ndparent;
 
-	INIT_MEDUSA_OBJECT_VARS(&inode_security(dentry->d_inode));
+	init_med_object(&(inode_security(dentry->d_inode).med_object));
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 	cap_clear(inode_security(dentry->d_inode).pcap);
 	inode_security(dentry->d_inode).icap = CAP_FULL_SET;
@@ -201,7 +201,7 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	}
 
 	if (ndcurrent.dentry != ndparent.dentry) {
-		if (!MED_MAGIC_VALID(&inode_security(ndparent.dentry->d_inode)) &&
+		if (!is_med_object_valid(inode_security(ndparent.dentry->d_inode).med_object) &&
 			file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt) <= 0) {
 			medusa_put_upper_and_parent(&ndupper, &ndparent);
 			return 0;
@@ -210,8 +210,7 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
 					&inode_security(ndparent.dentry->d_inode))) {
 
-			COPY_MEDUSA_OBJECT_VARS(&inode_security(ndcurrent.dentry->d_inode),
-					&inode_security(ndparent.dentry->d_inode));
+			inode_security(ndcurrent.dentry->d_inode).med_object = inode_security(ndcurrent.dentry->d_inode).med_object;
 			inode_security(ndcurrent.dentry->d_inode).user = inode_security(ndparent.dentry->d_inode).user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES                                                
 			inode_security(ndcurrent.dentry->d_inode).icap = inode_security(ndparent.dentry->d_inode).icap;
@@ -228,7 +227,7 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	if (do_file_kobj_validate_dentry(&ndcurrent, &ndupper, &ndparent)
 			!= MED_ERR) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
-		return MED_MAGIC_VALID(&inode_security(ndcurrent.dentry->d_inode));
+		return is_med_object_valid(inode_security(ndcurrent.dentry->d_inode).med_object);
 	}
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
 	return -1;

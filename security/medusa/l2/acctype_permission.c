@@ -6,7 +6,7 @@
 #include <linux/mm.h>
 #include <linux/types.h>
 #include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 
 #include "kobject_process.h"
 #include "kobject_file.h"
@@ -46,22 +46,22 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 	medusa_answer_t retval = MED_YES;
 	struct dentry * dentry;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_object_valid(task_security(current).med_object) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_YES;
 
 	dentry = d_find_alias(inode);
 	if (!dentry || IS_ERR(dentry))
 		return retval;
-	if (!MED_MAGIC_VALID(&inode_security(inode)) &&
+	if (!is_med_object_valid(inode_security(inode).med_object) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		goto out_dput;
 	if (
-		!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(inode))) ||
+		!vs_intersects(VSS(&task_security(current)),VS(&inode_security(inode))) ||
 		( (mask & (S_IRUGO | S_IXUGO)) &&
-		  	!VS_INTERSECT(VSR(&task_security(current)),VS(&inode_security(inode))) ) ||
+		  	!vs_intersects(VSR(&task_security(current)),VS(&inode_security(inode))) ) ||
 		( (mask & S_IWUGO) &&
-		  	!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(inode))) )
+		  	!vs_intersects(VSW(&task_security(current)),VS(&inode_security(inode))) )
 	   ) {
 		retval = -EACCES;
 		goto out_dput;

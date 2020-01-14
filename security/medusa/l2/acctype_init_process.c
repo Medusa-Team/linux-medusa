@@ -30,7 +30,7 @@ medusa_answer_t medusa_init_process(struct task_struct *new)
         /* process_kobject process is zeroed by process_kern2kobj function */
         /* process_kobject parent is zeroed by process_kern2kobj function */
 
-	if (!MED_MAGIC_VALID(&task_security(new)) &&
+	if (!is_med_object_valid(task_security(new).med_object) &&
 		process_kobj_validate_task(new) <= 0)
 		return MED_OK;
 
@@ -47,8 +47,8 @@ medusa_answer_t medusa_init_process(struct task_struct *new)
 
 void medusa_kernel_thread(int (*fn) (void *))
 {
-	INIT_MEDUSA_OBJECT_VARS(&task_security(current));
-	INIT_MEDUSA_SUBJECT_VARS(&task_security(current));
+	init_med_object(&(task_security(current).med_object));
+	init_med_subject(&(task_security(current).med_subject));
 	task_security(current).luid = INVALID_UID;
 }
 __initcall(init_process_acctype_init);

@@ -23,7 +23,7 @@ struct fuck_kobject {
 	unsigned long ino;      /* primary key in 'update' operation */
 	unsigned int dev;       /* primary key in 'update' operation */
 	char action[20];        /* type of operation 'update' ('append' or 'remove') */
-	MEDUSA_OBJECT_VARS;
+	MEDUSA_OBJECT;
 };
 extern MED_DECLARE_KCLASSOF(fuck_kobject);
 

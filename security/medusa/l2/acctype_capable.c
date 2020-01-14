@@ -43,7 +43,7 @@ medusa_answer_t medusa_capable(int cap)
 #warning "finish me"
 		return MED_OK;
 	}
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_object_valid(task_security(current).med_object) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 

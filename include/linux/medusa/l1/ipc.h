@@ -12,7 +12,7 @@
 
 #include <linux/mutex.h>
 #include <linux/msg.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include <linux/medusa/l3/constants.h>
 
 /**
@@ -28,11 +28,11 @@
  *
  * @ipc_class - medusa_l1_ipc_s is stored in 'struct kern_ipc_perm' of each System V object,
  *	so we need store extra information about IPC type in 'ipc_class' struct member
- * @MEDUSA_OBJECT_VARS - members used in Medusa VS access evaluation process
+ * @MEDUSA_OBJECT - members used in Medusa VS access evaluation process
  */
 struct medusa_l1_ipc_s {
 	unsigned int ipc_class;	/* type of a System V IPC object */
-	MEDUSA_OBJECT_VARS;
+	MEDUSA_OBJECT;
 };
 
 extern medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms);

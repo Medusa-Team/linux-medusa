@@ -10,7 +10,7 @@
 #ifndef _MEDUSA_L1_SOCKET_H
 #define _MEDUSA_L1_SOCKET_H
 
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include <linux/medusa/l3/constants.h>
 #include "../../../../security/medusa/l2/kobject_socket.h"
 #include <linux/types.h>
