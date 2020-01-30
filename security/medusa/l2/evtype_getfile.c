@@ -159,9 +159,12 @@ void medusa_get_upper_and_parent(struct path *ndsource,
 	if (ndparentp) {
 		/* Ak si volajuci vyziadal rodica, tak ho vyplnime */
 		if (IS_ROOT(ndupperp->dentry)) {
+			/* Ak je ndupperp root, nastavime parenta rovnakeho ako source
+			 * (rodic je nastaveny tak, aby bol ten isty, aby sme pri iteracii nesli vyssie)*/
 			*ndparentp = *ndsource;
 		}
 		else {
+			/* Ak to nie je root, vytiahneme parenta z ndupperp */
 			ndparentp->dentry = ndupperp->dentry->d_parent;
 			ndparentp->mnt = ndupperp->mnt;
 		}
@@ -270,7 +273,6 @@ int file_kobj_validate_dentry_dir(struct dentry *dentry, const struct path* dir)
 	ndparent.dentry = ndupper.dentry->d_parent;
 	ndparent.mnt = ndupper.mnt;
 
-
 	if (ndparent.dentry->d_inode == NULL) {
 		path_put(&ndupper);
 		return 0;
@@ -280,7 +282,7 @@ int file_kobj_validate_dentry_dir(struct dentry *dentry, const struct path* dir)
 		parent_dir = (struct path) {.mnt = ndparent.mnt,
 			                    .dentry = ndparent.dentry->d_parent};
 		if (!MED_MAGIC_VALID(&inode_security(ndparent.dentry->d_inode)) &&
-			file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, &parent_dir) <= 0) {
+			file_kobj_validate_dentry_dir(ndparent.dentry, &parent_dir) <= 0) {
 			path_put(&ndupper);
 			return 0;
 		}
@@ -396,7 +398,7 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 	enum medusa_answer_t retval;
 
 	file_kern2kobj(&file, ndcurrent->dentry->d_inode);
-	file_kobj_dentry2string(ndupper->dentry, event.filename);
+	file_kobj_dentry2string_dir(ndparent, ndupper->dentry, event.filename);
 	file_kern2kobj(&directory, ndparent->dentry->d_inode);
 	file_kobj_live_add(ndcurrent->dentry->d_inode);
 	file_kobj_live_add(ndparent->dentry->d_inode);

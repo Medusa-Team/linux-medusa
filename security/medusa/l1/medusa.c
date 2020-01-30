@@ -392,6 +392,8 @@ static int medusa_l1_path_rmdir(const struct path *dir, struct dentry *dentry)
 
 static int medusa_l1_path_unlink(const struct path *dir, struct dentry *dentry)
 {
+	if (medusa_unlink(dir, dentry) == MED_NO)
+		return -EPERM;
 	return 0;
 }
 
@@ -1469,7 +1471,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(dentry_init_security, medusa_l1_dentry_init_security),
 
 #ifdef CONFIG_SECURITY_PATH
-	//LSM_HOOK_INIT(path_unlink, medusa_l1_path_unlink),
+	LSM_HOOK_INIT(path_unlink, medusa_l1_path_unlink),
 	//LSM_HOOK_INIT(path_mkdir, medusa_l1_path_mkdir),
 	LSM_HOOK_INIT(path_rmdir, medusa_l1_path_rmdir),
 	//LSM_HOOK_INIT(path_mknod, medusa_l1_path_mknod),
@@ -1485,7 +1487,6 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(inode_init_security, medusa_l1_inode_init_security),
 	LSM_HOOK_INIT(inode_create, medusa_l1_inode_create),
 	LSM_HOOK_INIT(inode_link, medusa_l1_inode_link),
-	//LSM_HOOK_INIT(inode_unlink, medusa_l1_inode_unlink),
 	LSM_HOOK_INIT(inode_symlink, medusa_l1_inode_symlink),
 	//LSM_HOOK_INIT(inode_mkdir, medusa_l1_inode_mkdir),
 	// LSM_HOOK_INIT(inode_rmdir, medusa_l1_inode_rmdir),
