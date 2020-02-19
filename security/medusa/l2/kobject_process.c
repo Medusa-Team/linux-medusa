@@ -57,7 +57,7 @@ medusa_answer_t process_kobj2kern(struct process_kobject * tk, struct task_struc
 #ifdef CONFIG_MEDUSA_SYSCALL
 	memcpy(task_security(ts).med_syscall, tk->med_syscall, sizeof(task_security(ts).med_syscall));
 #endif
-	MED_MAGIC_VALIDATE(&task_security(ts));
+	med_magic_validate(&(&task_security(ts))->med_object);
 	return MED_OK;
 }
 
@@ -181,7 +181,7 @@ static void process_unmonitor(struct medusa_kobject_s * kobj)
 	if (p) {
 		unmonitor_med_object(&(&task_security(p))->med_object);
 		unmonitor_med_subject(&(&task_security(p))->med_subject);
-		MED_MAGIC_VALIDATE(&task_security(p));
+		med_magic_validate(&(&task_security(p))->med_object);
 	}
 	rcu_read_unlock();
 	return;

@@ -134,7 +134,7 @@ static inline medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct
 
 	COPY_WRITE_IPC_VARS(ipcp, &(ipc_kobj->ipc_perm));
 	ipc_security(ipcp)->med_object = ipc_kobj->med_object;
-	MED_MAGIC_VALIDATE(ipc_security(ipcp));
+	med_magic_validate(&(ipc_security(ipcp))->med_object);
 	return MED_OK;
 }
 

@@ -54,7 +54,7 @@ medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 	r = MED_OK;
 	if (MEDUSA_MONITORED_ACCESS_O(rename_access, &inode_security(dentry->d_inode)))
 		r=medusa_do_rename(dentry,newname);
-	MED_MAGIC_INVALIDATE(&inode_security(dentry->d_inode));
+	med_magic_invalidate(&(&inode_security(dentry->d_inode))->med_object);
 	return r;
 }
 

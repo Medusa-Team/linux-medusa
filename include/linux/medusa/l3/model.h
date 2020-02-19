@@ -39,15 +39,6 @@ struct medusa_subject_s {
 #define MED_MAGIC_VALID(pointer) \
 	((pointer)->med_object.magic == medusa_authserver_magic)
 
-#define MED_MAGIC_VALIDATE(pointer) \
-	do { \
-		(pointer)->med_object.magic = medusa_authserver_magic; \
-	} while (0)
-#define MED_MAGIC_INVALIDATE(pointer) \
-	do { \
-		(pointer)->med_object.magic = 0; \
-	} while (0)
-
 static inline void init_med_object(struct medusa_object_s *med_object)
 {
 	int i;

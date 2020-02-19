@@ -22,7 +22,7 @@ int file_kobj2kern(struct file_kobject * fk, struct inode * inode)
 	inode_security(inode).icap = fk->icap;
 	inode_security(inode).pcap = fk->pcap;
 #endif /* CONFIG_MEDUSA_FILE_CAPABILITIES */
-	MED_MAGIC_VALIDATE(&inode_security(inode));
+	med_magic_validate(&(&inode_security(inode))->med_object);
 	return 0;
 }
 
@@ -192,7 +192,7 @@ static void file_unmonitor(struct medusa_kobject_s * kobj)
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
 	if (p) {
 		unmonitor_med_object(&(&inode_security(p))->med_object);
-		MED_MAGIC_VALIDATE(&inode_security(p));
+		med_magic_validate(&(&inode_security(p))->med_object);
 	}
 	__unlookup();
 }
