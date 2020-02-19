@@ -5,6 +5,13 @@
 
 menu "Misc devices"
 
+config MISC_EXAMPLE
+	bool "Misc example"
+
+config MISC_EXAMPLE_TEST
+	bool "Misc example test"
+	depends on MISC_EXAMPLE && KUNIT
+
 config SENSORS_LIS3LV02D
 	tristate
 	depends on INPUT
