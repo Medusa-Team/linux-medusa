@@ -36,34 +36,12 @@ struct medusa_subject_s {
 	s_cinfo_t cinfo;/* l4 hint */
 };
 
-#define INIT_MEDUSA_OBJECT_VARS(ptr) \
-	do { /* don't touch, unless you REALLY know what you are doing. */ \
-		int i;							\
-		for (i=0; i<(CONFIG_MEDUSA_VS+31)/32; i++)		\
-			(ptr)->med_object.vs.vspack[i] = 0xffffffff;	\
-		(ptr)->med_object.act = 0xffffffff;			\
-		(ptr)->med_object.cinfo.data[0] = 0;			\
-		(ptr)->med_object.magic = 0;				\
-	} while (0)
-
 #define UNMONITOR_MEDUSA_OBJECT_VARS(ptr) \
 	do { /* don't touch, unless you REALLY know what you are doing. */ \
 		int i;							\
 		for (i=0; i<(CONFIG_MEDUSA_VS+31)/32; i++)		\
 			(ptr)->med_object.vs.vspack[i] = 0xffffffff;	\
 		(ptr)->med_object.act = 0;				\
-	} while (0)
-
-#define INIT_MEDUSA_SUBJECT_VARS(ptr) \
-	do { /* don't touch, unless you REALLY know what you are doing. */ \
-		int i;							\
-		for (i=0; i<(CONFIG_MEDUSA_VS+31)/32; i++)		\
-			(ptr)->med_subject.vss.vspack[i] =		\
-			(ptr)->med_subject.vsr.vspack[i] =		\
-			(ptr)->med_subject.vsw.vspack[i] =		\
-				 0xffffffff;				\
-		(ptr)->med_subject.act = 0xffffffff;			\
-		(ptr)->med_subject.cinfo.data[0] = 0;			\
 	} while (0)
 
 #define UNMONITOR_MEDUSA_SUBJECT_VARS(ptr) \

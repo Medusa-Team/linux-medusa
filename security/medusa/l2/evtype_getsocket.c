@@ -26,7 +26,7 @@ medusa_answer_t socket_kobj_validate(struct socket *sock) {
 	}
 
 	sk_sec = &sock_security(sock->sk);
-	INIT_MEDUSA_OBJECT_VARS(sk_sec);
+	init_med_object(&(sk_sec->med_object));
 	socket_kern2kobj(&sock_kobj, sock);
 
 	if (MED_DECIDE(socket_event, &event, &sock_kobj, &sock_kobj) == MED_ERR)

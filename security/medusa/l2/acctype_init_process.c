@@ -47,8 +47,8 @@ medusa_answer_t medusa_init_process(struct task_struct *new)
 
 void medusa_kernel_thread(int (*fn) (void *))
 {
-	INIT_MEDUSA_OBJECT_VARS(&task_security(current));
-	INIT_MEDUSA_SUBJECT_VARS(&task_security(current));
+	init_med_object(&(&task_security(current))->med_object);
+	init_med_subject(&(&task_security(current))->med_subject);
 	task_security(current).luid = INVALID_UID;
 }
 __initcall(init_process_acctype_init);

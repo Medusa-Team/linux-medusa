@@ -219,7 +219,7 @@ int medusa_l1_inode_alloc_security(struct inode *inode)
 		return -ENOMEM;
 
 	hash_init(med->fuck);
-	INIT_MEDUSA_OBJECT_VARS(med);
+	init_med_object(&(med->med_object));
 	inode->i_security = med;
 
 	return 0;
@@ -562,7 +562,7 @@ static int medusa_l1_file_open(struct file *file)
 	return validate_fuck(&file->f_path);
 }
 
-/* 
+/*
 * TODO TODO TODO: add support of 'task' in medusa_fork()
 */
 int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
@@ -578,8 +578,8 @@ int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 	if (med == NULL)
 		return -ENOMEM;
 
-	INIT_MEDUSA_OBJECT_VARS(med);
-	INIT_MEDUSA_SUBJECT_VARS(med);
+	init_med_object(&(med->med_object));
+	init_med_subject(&(med->med_subject));
         get_cmdline(task, med->cmdline, sizeof(med->cmdline));
 	task->security = med;
 

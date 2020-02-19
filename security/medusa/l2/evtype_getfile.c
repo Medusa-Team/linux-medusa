@@ -187,7 +187,7 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	struct medusa_l1_inode_s *ndcurrent_inode;
 	struct medusa_l1_inode_s *ndparent_inode;
 
-	INIT_MEDUSA_OBJECT_VARS(&inode_security(dentry->d_inode));
+	init_med_object(&(&inode_security(dentry->d_inode))->med_object);
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 	cap_clear(inode_security(dentry->d_inode).pcap);
 	inode_security(dentry->d_inode).icap = CAP_FULL_SET;

@@ -34,7 +34,7 @@ int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp) {
 	struct ipc_event event;
 	struct ipc_kobject sender;
 
-	INIT_MEDUSA_OBJECT_VARS(ipc_security(ipcp));
+	init_med_object(&(ipc_security(ipcp)->med_object));
 	/* 3-th argument is true: decrement IPC object's refcount in returned object */
 	if (unlikely(ipc_kern2kobj(&sender, ipcp, true) == NULL))
 		return MED_ERR;
