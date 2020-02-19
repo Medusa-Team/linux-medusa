@@ -191,7 +191,7 @@ static void file_unmonitor(struct medusa_kobject_s * kobj)
 
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
 	if (p) {
-		UNMONITOR_MEDUSA_OBJECT_VARS(&inode_security(p));
+		unmonitor_med_object(&(&inode_security(p))->med_object);
 		MED_MAGIC_VALIDATE(&inode_security(p));
 	}
 	__unlookup();

@@ -179,8 +179,8 @@ static void process_unmonitor(struct medusa_kobject_s * kobj)
 	rcu_read_lock();
 	p = find_task_by_pid(((struct process_kobject *)kobj)->pid);
 	if (p) {
-		UNMONITOR_MEDUSA_OBJECT_VARS(&task_security(p));
-		UNMONITOR_MEDUSA_SUBJECT_VARS(&task_security(p));
+		unmonitor_med_object(&(&task_security(p))->med_object);
+		unmonitor_med_subject(&(&task_security(p))->med_subject);
 		MED_MAGIC_VALIDATE(&task_security(p));
 	}
 	rcu_read_unlock();
