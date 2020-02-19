@@ -36,11 +36,6 @@ struct medusa_subject_s {
 	s_cinfo_t cinfo;/* l4 hint */
 };
 
-#define COPY_MEDUSA_OBJECT_VARS(to,from) \
-	do { \
-		(to)->med_object = (from)->med_object; \
-	} while (0)
-
 #define INIT_MEDUSA_OBJECT_VARS(ptr) \
 	do { /* don't touch, unless you REALLY know what you are doing. */ \
 		int i;							\
@@ -57,11 +52,6 @@ struct medusa_subject_s {
 		for (i=0; i<(CONFIG_MEDUSA_VS+31)/32; i++)		\
 			(ptr)->med_object.vs.vspack[i] = 0xffffffff;	\
 		(ptr)->med_object.act = 0;				\
-	} while (0)
-
-#define COPY_MEDUSA_SUBJECT_VARS(to,from) \
-	do { \
-		(to)->med_subject = (from)->med_subject; \
 	} while (0)
 
 #define INIT_MEDUSA_SUBJECT_VARS(ptr) \

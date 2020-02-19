@@ -184,6 +184,8 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	struct path ndcurrent;
 	struct path ndupper;
 	struct path ndparent;
+	struct medusa_l1_inode_s *ndcurrent_inode;
+	struct medusa_l1_inode_s *ndparent_inode;
 
 	INIT_MEDUSA_OBJECT_VARS(&inode_security(dentry->d_inode));
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
@@ -209,11 +211,11 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
 					&inode_security(ndparent.dentry->d_inode))) {
-
-			COPY_MEDUSA_OBJECT_VARS(&inode_security(ndcurrent.dentry->d_inode),
-					&inode_security(ndparent.dentry->d_inode));
+			ndcurrent_inode = &(inode_security(ndcurrent.dentry->d_inode));
+			ndparent_inode = &(inode_security(ndparent.dentry->d_inode));
+			ndcurrent_inode->med_object = ndparent_inode->med_object;
 			inode_security(ndcurrent.dentry->d_inode).user = inode_security(ndparent.dentry->d_inode).user;
-#ifdef CONFIG_MEDUSA_FILE_CAPABILITIES                                                
+#ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 			inode_security(ndcurrent.dentry->d_inode).icap = inode_security(ndparent.dentry->d_inode).icap;
 			inode_security(ndcurrent.dentry->d_inode).pcap = inode_security(ndparent.dentry->d_inode).pcap;
 			inode_security(ndcurrent.dentry->d_inode).ecap = inode_security(ndparent.dentry->d_inode).ecap;

@@ -56,8 +56,8 @@
 #include <linux/posix-timers.h>
 #include <linux/cred.h>
 #include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/inode.h> 
-#include <linux/medusa/l1/ipc.h> 
+#include <linux/medusa/l1/inode.h>
+#include <linux/medusa/l1/ipc.h>
 #include <linux/medusa/l4/comm.h>
 #include <linux/medusa/l1/file_handlers.h>
 #include <linux/medusa/l1/task.h>
@@ -1116,7 +1116,7 @@ static void medusa_l1_sk_clone_security(const struct sock *sk, struct sock *news
 
 	newsk_sec = (struct medusa_l1_socket_s*) kmalloc(sizeof(struct medusa_l1_socket_s), GFP_KERNEL);
 	newsk_sec->addrlen = 0;
-	COPY_MEDUSA_OBJECT_VARS(newsk_sec, sk_sec);
+	newsk_sec->med_object = sk_sec->med_object;
 }
 */
 

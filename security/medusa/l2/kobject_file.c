@@ -15,7 +15,7 @@ int file_kobj2kern(struct file_kobject * fk, struct inode * inode)
 	inode->i_mode = fk->mode;
 	inode->i_uid = fk->uid;
 	inode->i_gid = fk->gid;
-	COPY_MEDUSA_OBJECT_VARS(&inode_security(inode), fk);
+	(&inode_security(inode))->med_object = fk->med_object;
 	inode_security(inode).user = fk->user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 	inode_security(inode).ecap = fk->ecap;
@@ -40,7 +40,7 @@ int file_kern2kobj(struct file_kobject * fk, struct inode * inode)
 	fk->uid = inode->i_uid;
 	fk->gid = inode->i_gid;
 	fk->rdev = (inode->i_rdev);
-	COPY_MEDUSA_OBJECT_VARS(fk, &inode_security(inode));
+	fk->med_object = (&inode_security(inode))->med_object;
 	fk->user = inode_security(inode).user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 	fk->ecap = inode_security(inode).ecap;

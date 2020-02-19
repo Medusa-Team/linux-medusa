@@ -95,7 +95,7 @@ inline struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject * ipc_kobj, struct k
 	ipc_kobj->ipc_class = ipc_security(ipcp)->ipc_class;
 	COPY_WRITE_IPC_VARS(&(ipc_kobj->ipc_perm), ipcp);
 	COPY_READ_IPC_VARS(&(ipc_kobj->ipc_perm), ipcp);
-	COPY_MEDUSA_OBJECT_VARS(ipc_kobj, ipc_security(ipcp));
+	ipc_kobj->med_object = ipc_security(ipcp)->med_object;
 	rcu_read_unlock();
 
 	/*
@@ -133,9 +133,8 @@ static inline medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct
 	}
 
 	COPY_WRITE_IPC_VARS(ipcp, &(ipc_kobj->ipc_perm));
-	COPY_MEDUSA_OBJECT_VARS(ipc_security(ipcp), ipc_kobj);
+	ipc_security(ipcp)->med_object = ipc_kobj->med_object;
 	MED_MAGIC_VALIDATE(ipc_security(ipcp));
-	
 	return MED_OK;
 }
 
