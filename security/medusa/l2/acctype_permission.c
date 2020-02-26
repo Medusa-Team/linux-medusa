@@ -46,14 +46,14 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 	medusa_answer_t retval = MED_YES;
 	struct dentry * dentry;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(&task_security(current))->med_object) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_YES;
 
 	dentry = d_find_alias(inode);
 	if (!dentry || IS_ERR(dentry))
 		return retval;
-	if (!MED_MAGIC_VALID(&inode_security(inode)) &&
+	if (!is_med_magic_valid(&(&inode_security(inode))->med_object) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		goto out_dput;
 	if (

@@ -39,7 +39,7 @@ medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 	if (!dentry || IS_ERR(dentry))
 		return MED_OK;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(&task_security(current))->med_object) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
@@ -49,7 +49,7 @@ medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 	
 	file_kobj_validate_dentry(ndparent.dentry,ndparent.mnt);
 
-	if (!MED_MAGIC_VALID(&inode_security(ndparent.dentry->d_inode)) &&
+	if (!is_med_magic_valid(&(&inode_security(ndparent.dentry->d_inode))->med_object) &&
 			file_kobj_validate_dentry(ndparent.dentry,ndparent.mnt) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_OK;

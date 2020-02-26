@@ -28,7 +28,7 @@ MED_EVTYPE(getprocess_event, "getprocess", process_kobject, "process",
 		process_kobject, "process");
 
 /*
- * This routine expects the existing, but !MED_MAGIC_VALID Medusa task_struct security struct!
+ * This routine expects the existing, but !is_med_magic_valid Medusa task_struct security struct!
  */
 int process_kobj_validate_task(struct task_struct * ts)
 {

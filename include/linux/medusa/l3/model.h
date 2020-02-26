@@ -36,9 +36,6 @@ struct medusa_subject_s {
 	s_cinfo_t cinfo;/* l4 hint */
 };
 
-#define MED_MAGIC_VALID(pointer) \
-	((pointer)->med_object.magic == medusa_authserver_magic)
-
 static inline void init_med_object(struct medusa_object_s *med_object)
 {
 	int i;

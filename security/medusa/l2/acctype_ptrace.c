@@ -35,11 +35,11 @@ medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * 
         /* process_kobject tracer_p is zeroed by process_kern2kobj function */
         /* process_kobject tracee_p is zeroed by process_kern2kobj function */
 
-	if (!MED_MAGIC_VALID(&task_security(tracer)) &&
+	if (!is_med_magic_valid(&(&task_security(tracer))->med_object) &&
 		process_kobj_validate_task(tracer) <= 0)
 		return MED_OK;
 
-	if (!MED_MAGIC_VALID(&task_security(tracee)) &&
+	if (!is_med_magic_valid(&(&task_security(tracee))->med_object) &&
 		process_kobj_validate_task(tracee) <= 0)
 		return MED_OK;
 
