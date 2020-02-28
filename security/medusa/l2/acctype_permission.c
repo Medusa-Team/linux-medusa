@@ -57,11 +57,11 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		goto out_dput;
 	if (
-		!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(inode))) ||
+		!vs_intersects(VSS(&task_security(current)),VS(&inode_security(inode))) ||
 		( (mask & (S_IRUGO | S_IXUGO)) &&
-		  	!VS_INTERSECT(VSR(&task_security(current)),VS(&inode_security(inode))) ) ||
+		  	!vs_intersects(VSR(&task_security(current)),VS(&inode_security(inode))) ) ||
 		( (mask & S_IWUGO) &&
-		  	!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(inode))) )
+		  	!vs_intersects(VSW(&task_security(current)),VS(&inode_security(inode))) )
 	   ) {
 		retval = -EACCES;
 		goto out_dput;

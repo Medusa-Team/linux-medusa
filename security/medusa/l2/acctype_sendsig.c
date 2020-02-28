@@ -67,8 +67,8 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
 		process_kobj_validate_task(p) <= 0)
 		return MED_OK;
 
-	if (!VS_INTERSECT(VSS(&task_security(current)), VS(&task_security(p))) ||
-			!VS_INTERSECT(VSW(&task_security(current)), VS(&task_security(p))))
+	if (!vs_intersects(VSS(&task_security(current)), VS(&task_security(p))) ||
+			!vs_intersects(VSW(&task_security(current)), VS(&task_security(p))))
 		return MED_NO;
 
 	if (MEDUSA_MONITORED_ACCESS_S(send_signal, &task_security(current))) {

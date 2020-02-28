@@ -43,8 +43,8 @@ medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * 
 		process_kobj_validate_task(tracee) <= 0)
 		return MED_OK;
 
-	if (!VS_INTERSECT(VSS(&task_security(tracer)), VS(&task_security(tracee))) ||
-		!VS_INTERSECT(VSW(&task_security(tracer)), VS(&task_security(tracee))))
+	if (!vs_intersects(VSS(&task_security(tracer)), VS(&task_security(tracee))) ||
+		!vs_intersects(VSW(&task_security(tracer)), VS(&task_security(tracee))))
 		return MED_NO;
 	if (MEDUSA_MONITORED_ACCESS_S(ptrace_access, &task_security(tracer))) {
 		process_kern2kobj(&tracer_p, tracer);

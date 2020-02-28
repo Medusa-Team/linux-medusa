@@ -53,8 +53,8 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_OK;
 	}
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode)))
+	if (!vs_intersects(VSS(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode))) ||
+		!vs_intersects(VSW(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode)))
 	) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_NO;

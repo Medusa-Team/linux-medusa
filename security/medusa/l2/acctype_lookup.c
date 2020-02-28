@@ -40,7 +40,7 @@ medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry)
 	if (!is_med_magic_valid(&(&inode_security((*dentry)->d_inode))->med_object) &&
 			file_kobj_validate_dentry(*dentry,NULL) <= 0)
 		return MED_OK;
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security((*dentry)->d_inode))))
+	if (!vs_intersects(VSS(&task_security(current)),VS(&inode_security((*dentry)->d_inode))))
 		return MED_SKIP;
 	if (MEDUSA_MONITORED_ACCESS_O(lookup_access, &inode_security((*dentry)->d_inode)))
 		return medusa_do_lookup(*dentry);

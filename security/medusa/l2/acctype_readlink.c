@@ -42,8 +42,8 @@ medusa_answer_t medusa_readlink(struct dentry *dentry)
 			file_kobj_validate_dentry(dentry,NULL) <= 0) {
 		return MED_OK;
 	}
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(dentry->d_inode)))
+	if (!vs_intersects(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSW(&task_security(current)),VS(&inode_security(dentry->d_inode)))
 	)
 		return MED_NO;
 	if (MEDUSA_MONITORED_ACCESS_O(readlink_access, &inode_security(dentry->d_inode)))

@@ -34,8 +34,8 @@ medusa_answer_t medusa_read(struct file * file)
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		return MED_OK;
 	if (
-		!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
-		!VS_INTERSECT(VSR(&task_security(current)),VS(&inode_security(dentry->d_inode)))
+		!vs_intersects(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSR(&task_security(current)),VS(&inode_security(dentry->d_inode)))
 	   ) {
 		return MED_NO;
 	}
@@ -63,8 +63,8 @@ medusa_answer_t medusa_write(struct file * file)
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		return MED_OK;
 	if (
-		!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(dentry->d_inode)))
+		!vs_intersects(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSW(&task_security(current)),VS(&inode_security(dentry->d_inode)))
 	   ) {
 		return MED_NO;
 	}

@@ -2,6 +2,7 @@
 #define _VSMODEL_H
 
 #include <linux/medusa/l3/config.h>
+#include <linux/bitmap.h>
 
 #define _VS(X)	((X)->vs)
 #define _VSR(X)	((X)->vsr)
@@ -16,18 +17,17 @@
 #if CONFIG_MEDUSA_VS <= 32
 	#define VSPACK_LENGTH 1
 #else
-	#define VSPACK_LENGTH 1 + (CONFIG_MEDUSA_VS-1)/32
+	#define VSPACK_LENGTH (1 + (CONFIG_MEDUSA_VS-1)/32)
 #endif
+
+#define VS_TOTAL_BITS (VSPACK_LENGTH*32)
 
 typedef struct { u_int32_t vspack[VSPACK_LENGTH]; } vs_t;
 
-static inline int VS_INTERSECT(vs_t X, vs_t Y)
+static inline int vs_intersects(vs_t X, vs_t Y)
 {
-	int i;
-	for (i=0; i<(CONFIG_MEDUSA_VS+31)/32; i++)
-		if (X.vspack[i] & Y.vspack[i])
-			return 1;
-	return 0;
+	return bitmap_intersects((uintptr_t*)X.vspack,
+				(uintptr_t*)Y.vspack, VS_TOTAL_BITS);
 }
 
 #endif /* VSMODEL_H */

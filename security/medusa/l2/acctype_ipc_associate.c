@@ -63,8 +63,8 @@ medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(ipc_security(ipcp))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(ipc_security(ipcp)))
+	if (!vs_intersects(VSS(&task_security(current)),VS(ipc_security(ipcp))) ||
+		!vs_intersects(VSW(&task_security(current)),VS(ipc_security(ipcp)))
 	) {
 		retval = MED_NO;
 		goto out;

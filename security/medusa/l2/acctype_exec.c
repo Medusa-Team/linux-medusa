@@ -58,8 +58,8 @@ medusa_answer_t medusa_exec(struct dentry ** dentryp)
 
 			file_kobj_validate_dentry(*dentryp,NULL) <= 0)
 		return MED_OK;
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security((*dentryp)->d_inode))) ||
-		!VS_INTERSECT(VSR(&task_security(current)),VS(&inode_security((*dentryp)->d_inode)))
+	if (!vs_intersects(VSS(&task_security(current)),VS(&inode_security((*dentryp)->d_inode))) ||
+		!vs_intersects(VSR(&task_security(current)),VS(&inode_security((*dentryp)->d_inode)))
 	)
 		return MED_NO;
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, &task_security(current))) {

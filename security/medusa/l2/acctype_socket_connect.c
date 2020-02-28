@@ -37,8 +37,8 @@ medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *addr
 	if (!is_med_magic_valid(&(&sock_security(sock->sk))->med_object) && socket_kobj_validate(sock) <= 0)
 		return MED_YES;
 
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&sock_security(sock->sk))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&sock_security(sock->sk))))
+	if (!vs_intersects(VSS(&task_security(current)),VS(&sock_security(sock->sk))) ||
+		!vs_intersects(VSW(&task_security(current)),VS(&sock_security(sock->sk))))
 		return MED_ERR;
 
 	if (MEDUSA_MONITORED_ACCESS_S(socket_connect_access, &task_security(current))) {
