@@ -6,9 +6,6 @@
 
 extern int medusa_authserver_magic;
 
-#define MEDUSA_OBJECT_VARS struct medusa_object_s med_object
-#define MEDUSA_SUBJECT_VARS struct medusa_subject_s med_subject
-
 #define ALL_VS_ALLOWED 0xffffffff
 
 typedef struct {

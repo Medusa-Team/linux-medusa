@@ -7,7 +7,7 @@
 #include <linux/limits.h>
 #include <linux/list.h>
 #include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include <linux/init.h>
 
 #include "kobject_process.h"

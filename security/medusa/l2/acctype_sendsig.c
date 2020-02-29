@@ -3,7 +3,7 @@
 #include <linux/signal.h>
 #include <linux/interrupt.h>
 #include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include "kobject_process.h"
 #include <linux/medusa/l1/task.h>
 #include <linux/init.h>

@@ -39,10 +39,10 @@ typedef union MED_ADDRESS MED_ADDRESS;
 /**
  * struct medusa_l1_socket_s - additional security struct for socket objects
  *
- * @MEDUSA_OBJECT_VARS - members used in Medusa VS access evaluation process
+ * @struct medusa_object_s - members used in Medusa VS access evaluation process
  */
 struct medusa_l1_socket_s {
-	MEDUSA_OBJECT_VARS;
+	struct medusa_object_s med_object;
 	int addrlen;
 	MED_ADDRESS address;
 };
@@ -57,7 +57,7 @@ struct socket_kobject {
 	union MED_ADDRESS address;
 	kuid_t uid;
 
-	MEDUSA_OBJECT_VARS;
+	struct medusa_object_s med_object;
 };
 extern MED_DECLARE_KCLASSOF(socket_kobject);
 

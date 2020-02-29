@@ -11,8 +11,7 @@
  * defined in medusa/l1/task.h.
  */
 
-// #include <linux/medusa/l1/task.h>
-#include <linux/sched.h>	/* contains all includes we need ;) */
+#include <linux/sched.h>
 #include <linux/medusa/l3/kobject.h>
 
 struct process_kobject { /* was: m_proc_inf */
@@ -25,8 +24,8 @@ struct process_kobject { /* was: m_proc_inf */
 
 	uid_t luid;
 	kernel_cap_t ecap, icap, pcap;
-	MEDUSA_SUBJECT_VARS;
-	MEDUSA_OBJECT_VARS;
+	struct medusa_object_s med_object;
+	struct medusa_subject_s med_subject;
 	__u32 user;
 #ifdef CONFIG_MEDUSA_SYSCALL
 	/* FIXME: this is wrong on non-i386 architectures */

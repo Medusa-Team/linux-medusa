@@ -22,7 +22,7 @@
 
 #include <linux/medusa/l3/arch.h>
 #include <linux/medusa/l3/constants.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include <linux/types.h>
 
 struct medusa_attribute_s;
