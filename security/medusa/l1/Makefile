@@ -7,5 +7,5 @@ O_TARGET := l1
 
 export-objs := 
 
-obj-y:= medusa.o
+obj-y:= medusa.o medusafs.o
 

@@ -1,5 +1,6 @@
 #include <linux/medusa/l3/arch.h>
 #include <linux/medusa/l3/registry.h>
+#include <linux/medusa/l1/medusafs.h>
 #include "l3_internals.h"
 
 /* nesting as follows: registry_lock is outer, usecount_lock is inner. */
@@ -221,6 +222,9 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 
 	med_evtype->next = evtypes;
 	med_evtype->bitnr = flags;
+
+	medusafs_register_evtype(ptr->name);
+	
 
 #define MASK (~(MEDUSA_EVTYPE_TRIGGEREDATOBJECT | MEDUSA_EVTYPE_TRIGGEREDATSUBJECT))
 	if (flags != MEDUSA_EVTYPE_NOTTRIGGERED)
