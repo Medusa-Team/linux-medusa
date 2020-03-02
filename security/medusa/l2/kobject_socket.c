@@ -18,9 +18,7 @@ MED_ATTRS(socket_kobject) {
 int socket_kobj2kern(struct socket_kobject * sock_kobj, struct socket * sock)
 {
 	struct medusa_l1_socket_s *sk_sec = &sock_security(sock->sk);
-
-	COPY_MEDUSA_OBJECT_VARS(sock_kobj, sk_sec);
-
+	sock_kobj->med_object = sk_sec->med_object;
 	return 0;
 }
 
@@ -53,8 +51,7 @@ int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
 				break;
 		}
 	}
-	COPY_MEDUSA_OBJECT_VARS(sock_kobj, sk_sec);
-
+	sock_kobj->med_object = sk_sec->med_object;
 	return MED_YES;
 }
 

@@ -39,7 +39,7 @@ medusa_answer_t process_kobj2kern(struct process_kobject * tk, struct task_struc
 		new->user =  new_user;
 		free_uid(old_user);
 	}
-	
+
 	new->euid = tk->euid;
 	new->suid = tk->suid; new->fsuid = tk->fsuid;
 
@@ -48,16 +48,16 @@ medusa_answer_t process_kobj2kern(struct process_kobject * tk, struct task_struc
 	new->cap_effective = tk->ecap;
 	new->cap_inheritable = tk->icap;
 	new->cap_permitted = tk->pcap;
-	
+
 	if(! uid_valid(task_security(ts).luid) )
 		task_security(ts).luid = tk->luid;
-	COPY_MEDUSA_SUBJECT_VARS(&task_security(ts),tk);
-	COPY_MEDUSA_OBJECT_VARS(&task_security(ts),tk);
+	(&task_security(ts))->med_subject = tk->med_subject;
+	(&task_security(ts))->med_object = tk->med_object;
 	task_security(ts).user = tk->user;
 #ifdef CONFIG_MEDUSA_SYSCALL
 	memcpy(task_security(ts).med_syscall, tk->med_syscall, sizeof(task_security(ts).med_syscall));
 #endif
-	MED_MAGIC_VALIDATE(&task_security(ts));
+	med_magic_validate(&(&task_security(ts))->med_object);
 	return MED_OK;
 }
 
@@ -86,10 +86,10 @@ int process_kern2kobj(struct process_kobject * tk, struct task_struct * ts)
 	//unsigned __capi;
 	//CAP_FOR_EACH_U32(__capi)
 	//	med_pr_debug("MEDUSA: ECAP[%d]=%08x\n", __capi, (tk->ecap).cap[CAP_LAST_U32 - __capi]);
-	
+
 	tk->luid = task_security(ts).luid;
-	COPY_MEDUSA_SUBJECT_VARS(tk,&task_security(ts));
-	COPY_MEDUSA_OBJECT_VARS(tk,&task_security(ts));
+	tk->med_subject = (&task_security(ts))->med_subject;
+	tk->med_object = (&task_security(ts))->med_object;
 	tk->user = task_security(ts).user;
 #ifdef CONFIG_MEDUSA_SYSCALL
 	memcpy(tk->med_syscall, task_security(ts).med_syscall, sizeof(tk->med_syscall));
@@ -179,9 +179,9 @@ static void process_unmonitor(struct medusa_kobject_s * kobj)
 	rcu_read_lock();
 	p = find_task_by_pid(((struct process_kobject *)kobj)->pid);
 	if (p) {
-		UNMONITOR_MEDUSA_OBJECT_VARS(&task_security(p));
-		UNMONITOR_MEDUSA_SUBJECT_VARS(&task_security(p));
-		MED_MAGIC_VALIDATE(&task_security(p));
+		unmonitor_med_object(&(&task_security(p))->med_object);
+		unmonitor_med_subject(&(&task_security(p))->med_subject);
+		med_magic_validate(&(&task_security(p))->med_object);
 	}
 	rcu_read_unlock();
 	return;
