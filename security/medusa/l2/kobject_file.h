@@ -22,7 +22,7 @@
 #include <linux/medusa/l1/file_handlers.h>
 #include <linux/medusa/l1/inode.h>
 
-#define inode_security(inode) (*(struct medusa_l1_inode_s*)(inode->i_security))
+#define inode_security(inode) ((struct medusa_l1_inode_s*)(inode->i_security))
 
 struct file_kobject { /* was: m_inode_inf */
 /*

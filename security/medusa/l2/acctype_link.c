@@ -36,19 +36,19 @@ medusa_answer_t medusa_link(struct dentry *dentry, const char * newname)
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
 		return MED_OK;
 
-	if (!is_med_magic_valid(&(&task_security(current))->med_object) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (!is_med_magic_valid(&(&inode_security(dentry->d_inode))->med_object) &&
+	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0) {
 		return MED_OK;
 	}
-	if (!vs_intersects(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(&task_security(current)),VS(&inode_security(dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
 	)
 		return MED_NO;
-	if (MEDUSA_MONITORED_ACCESS_O(link_access, &inode_security(dentry->d_inode)))
+	if (MEDUSA_MONITORED_ACCESS_O(link_access, inode_security(dentry->d_inode)))
 		return medusa_do_link(dentry, newname);
 	return MED_OK;
 }

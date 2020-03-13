@@ -13,7 +13,7 @@
 #include <linux/medusa/l3/registry.h>
 #include "../../fs/internal.h" // For user_get_super()
 
-#define sock_security(sk) (*(struct medusa_l1_socket_s*)(sk->sk_security))
+#define sock_security(sk) ((struct medusa_l1_socket_s*)(sk->sk_security))
 
 struct med_inet6_addr_i {
 	__be16 port;

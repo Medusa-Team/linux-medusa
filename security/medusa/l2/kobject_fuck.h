@@ -9,8 +9,7 @@
 #include <linux/errno.h>
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l1/inode.h>
-
-#define inode_security(inode) (*(struct medusa_l1_inode_s*)(inode->i_security))
+#include "kobject_file.h"
 
 int validate_fuck_link(struct dentry *old_dentry);
 int validate_fuck(const struct path *fuck_path);

@@ -53,12 +53,12 @@ medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmadd
 		/* for now, we don't support error codes */
 		return MED_NO;
 
-	if (!is_med_magic_valid(&(&task_security(current))->med_object) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
-	if (MEDUSA_MONITORED_ACCESS_S(ipc_shmat_access, &task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(ipc_shmat_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		if (ipc_kern2kobj(&object, ipcp, true) == NULL)

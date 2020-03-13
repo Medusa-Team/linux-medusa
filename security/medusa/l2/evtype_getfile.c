@@ -187,11 +187,11 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	struct medusa_l1_inode_s *ndcurrent_inode;
 	struct medusa_l1_inode_s *ndparent_inode;
 
-	init_med_object(&(&inode_security(dentry->d_inode))->med_object);
+	init_med_object(&(inode_security(dentry->d_inode)->med_object));
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
-	cap_clear(inode_security(dentry->d_inode).pcap);
-	inode_security(dentry->d_inode).icap = CAP_FULL_SET;
-	inode_security(dentry->d_inode).ecap = CAP_FULL_SET;
+	cap_clear(inode_security(dentry->d_inode)->pcap);
+	inode_security(dentry->d_inode)->icap = CAP_FULL_SET;
+	inode_security(dentry->d_inode)->ecap = CAP_FULL_SET;
 #endif
 	ndcurrent.dentry = dentry;
 	ndcurrent.mnt = mnt; /* may be NULL */
@@ -203,22 +203,22 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	}
 
 	if (ndcurrent.dentry != ndparent.dentry) {
-		if (!is_med_magic_valid(&(&inode_security(ndparent.dentry->d_inode))->med_object) &&
+		if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt) <= 0) {
 			medusa_put_upper_and_parent(&ndupper, &ndparent);
 			return 0;
 		}
 
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
-					&inode_security(ndparent.dentry->d_inode))) {
-			ndcurrent_inode = &(inode_security(ndcurrent.dentry->d_inode));
-			ndparent_inode = &(inode_security(ndparent.dentry->d_inode));
+					inode_security(ndparent.dentry->d_inode))) {
+			ndcurrent_inode = inode_security(ndcurrent.dentry->d_inode);
+			ndparent_inode = inode_security(ndparent.dentry->d_inode);
 			ndcurrent_inode->med_object = ndparent_inode->med_object;
-			inode_security(ndcurrent.dentry->d_inode).user = inode_security(ndparent.dentry->d_inode).user;
+			inode_security(ndcurrent.dentry->d_inode)->user = inode_security(ndparent.dentry->d_inode)->user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
-			inode_security(ndcurrent.dentry->d_inode).icap = inode_security(ndparent.dentry->d_inode).icap;
-			inode_security(ndcurrent.dentry->d_inode).pcap = inode_security(ndparent.dentry->d_inode).pcap;
-			inode_security(ndcurrent.dentry->d_inode).ecap = inode_security(ndparent.dentry->d_inode).ecap;
+			inode_security(ndcurrent.dentry->d_inode)->icap = inode_security(ndparent.dentry->d_inode)->icap;
+			inode_security(ndcurrent.dentry->d_inode)->pcap = inode_security(ndparent.dentry->d_inode)->pcap;
+			inode_security(ndcurrent.dentry->d_inode)->ecap = inode_security(ndparent.dentry->d_inode)->ecap;
 #endif
 			medusa_put_upper_and_parent(&ndupper, &ndparent);
 			return 1;
@@ -230,7 +230,7 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	if (do_file_kobj_validate_dentry(&ndcurrent, &ndupper, &ndparent)
 			!= MED_ERR) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
-		return is_med_magic_valid(&(&inode_security(ndcurrent.dentry->d_inode))->med_object);
+		return is_med_magic_valid(&(inode_security(ndcurrent.dentry->d_inode)->med_object));
 	}
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
 	return -1;

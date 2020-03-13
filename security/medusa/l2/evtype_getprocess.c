@@ -39,10 +39,10 @@ int process_kobj_validate_task(struct task_struct * ts)
         memset(&event, '\0', sizeof(struct getprocess_event));
         /* process_kobject proc is zeroed by process_kern2kobj function */
 
-	init_med_object(&(&task_security(ts))->med_object);
-	init_med_subject(&(&task_security(ts))->med_subject);
+	init_med_object(&(task_security(ts)->med_object));
+	init_med_subject(&(task_security(ts)->med_subject));
 #ifdef CONFIG_MEDUSA_FORCE
-	task_security(ts).force_code = NULL;
+	task_security(ts)->force_code = NULL;
 #endif
 	process_kern2kobj(&proc, ts);
 	retval = MED_DECIDE(getprocess_event, &event, &proc, &proc);
