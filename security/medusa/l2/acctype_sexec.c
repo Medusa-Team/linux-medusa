@@ -55,15 +55,15 @@ medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
 {
 	medusa_answer_t retval = MED_OK;
 
-	if (!is_med_magic_valid(&(&task_security(current))->med_object) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (!is_med_magic_valid(&(&inode_security(DENTRY->d_inode))->med_object) &&
+	if (!is_med_magic_valid(&(inode_security(DENTRY->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(DENTRY,bprm->file->f_path.mnt) <= 0)
 		return MED_OK;
 	/* no sense in checking VS here */
-	if (MEDUSA_MONITORED_ACCESS_S(sexec_access, &task_security(current)))
+	if (MEDUSA_MONITORED_ACCESS_S(sexec_access, task_security(current)))
 		retval = medusa_do_sexec(bprm);
 	return retval;
 }

@@ -39,28 +39,28 @@ medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 	if (!dentry || IS_ERR(dentry))
 		return MED_OK;
 
-	if (!is_med_magic_valid(&(&task_security(current))->med_object) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
 	ndcurrent.dentry = dentry;
 	ndcurrent.mnt = NULL;
 	medusa_get_upper_and_parent(&ndcurrent,&ndupper,&ndparent);
-	
+
 	file_kobj_validate_dentry(ndparent.dentry,ndparent.mnt);
 
-	if (!is_med_magic_valid(&(&inode_security(ndparent.dentry->d_inode))->med_object) &&
+	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(ndparent.dentry,ndparent.mnt) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_OK;
 	}
-	if (!vs_intersects(VSS(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode))) ||
-		!vs_intersects(VSW(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(ndparent.dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)),VS(inode_security(ndparent.dentry->d_inode)))
 	) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_NO;
 	}
-	if (MEDUSA_MONITORED_ACCESS_O(symlink_access, &inode_security(ndparent.dentry->d_inode)))
+	if (MEDUSA_MONITORED_ACCESS_O(symlink_access, inode_security(ndparent.dentry->d_inode)))
 		retval = medusa_do_symlink(ndparent.dentry, ndupper.dentry, oldname);
 	else
 		retval = MED_OK;

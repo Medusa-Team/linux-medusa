@@ -46,28 +46,28 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 	medusa_answer_t retval = MED_YES;
 	struct dentry * dentry;
 
-	if (!is_med_magic_valid(&(&task_security(current))->med_object) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_YES;
 
 	dentry = d_find_alias(inode);
 	if (!dentry || IS_ERR(dentry))
 		return retval;
-	if (!is_med_magic_valid(&(&inode_security(inode))->med_object) &&
+	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		goto out_dput;
 	if (
-		!vs_intersects(VSS(&task_security(current)),VS(&inode_security(inode))) ||
+		!vs_intersects(VSS(task_security(current)),VS(inode_security(inode))) ||
 		( (mask & (S_IRUGO | S_IXUGO)) &&
-		  	!vs_intersects(VSR(&task_security(current)),VS(&inode_security(inode))) ) ||
+		  	!vs_intersects(VSR(task_security(current)),VS(inode_security(inode))) ) ||
 		( (mask & S_IWUGO) &&
-		  	!vs_intersects(VSW(&task_security(current)),VS(&inode_security(inode))) )
+		  	!vs_intersects(VSW(task_security(current)),VS(inode_security(inode))) )
 	   ) {
 		retval = -EACCES;
 		goto out_dput;
 	}
 
-	if (MEDUSA_MONITORED_ACCESS_O(permission_access, &inode_security(inode)))
+	if (MEDUSA_MONITORED_ACCESS_O(permission_access, inode_security(inode)))
 		retval = medusa_do_permission(dentry, inode, mask);
 out_dput:
 	dput(dentry);

@@ -17,15 +17,16 @@
 
 #include "kobject_process.h"
 
-medusa_answer_t process_kobj2kern(struct process_kobject * tk, struct task_struct * ts)
+medusa_answer_t process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 {
 	// ts->pgrp = tk->pgrp;
 	struct cred* new = (struct cred*)ts->cred;
+	struct medusa_l1_task_s *ts_security = task_security(ts);
 	kuid_t tsuid;
 
 	tsuid = task_uid(ts);
 	if (uid_eq(tsuid, tk->uid)) { /* copied from sys.c:set_user() */
-		struct user_struct * old_user, * new_user;
+		struct user_struct *old_user, *new_user;
 
 		new_user = alloc_uid(tk->uid);
 		if (!new_user)
@@ -33,8 +34,8 @@ medusa_answer_t process_kobj2kern(struct process_kobject * tk, struct task_struc
 		old_user = find_user(tsuid);
 		atomic_dec(&old_user->processes);
 		atomic_inc(&new_user->processes);
-		if (!uid_valid(task_security(ts).luid))
-			task_security(ts).luid = (! uid_valid(tk->uid) ? KUIDT_INIT(-2) : tk->uid);
+		if (!uid_valid(ts_security->luid))
+			ts_security->luid = (! uid_valid(tk->uid) ? KUIDT_INIT(-2) : tk->uid);
 		new->uid = tk->uid;
 		new->user =  new_user;
 		free_uid(old_user);
@@ -49,15 +50,15 @@ medusa_answer_t process_kobj2kern(struct process_kobject * tk, struct task_struc
 	new->cap_inheritable = tk->icap;
 	new->cap_permitted = tk->pcap;
 
-	if(! uid_valid(task_security(ts).luid) )
-		task_security(ts).luid = tk->luid;
-	(&task_security(ts))->med_subject = tk->med_subject;
-	(&task_security(ts))->med_object = tk->med_object;
-	task_security(ts).user = tk->user;
+	if(!uid_valid(task_security(ts)->luid) )
+		task_security(ts)->luid = tk->luid;
+	ts_security->med_subject = tk->med_subject;
+	ts_security->med_object = tk->med_object;
+	ts_security->user = tk->user;
 #ifdef CONFIG_MEDUSA_SYSCALL
-	memcpy(task_security(ts).med_syscall, tk->med_syscall, sizeof(task_security(ts).med_syscall));
+	memcpy(ts_security->med_syscall, tk->med_syscall, sizeof(ts_security->med_syscall));
 #endif
-	med_magic_validate(&(&task_security(ts))->med_object);
+	med_magic_validate(&(ts_security->med_object));
 	return MED_OK;
 }
 
@@ -66,6 +67,8 @@ medusa_answer_t process_kobj2kern(struct process_kobject * tk, struct task_struc
  */
 int process_kern2kobj(struct process_kobject * tk, struct task_struct * ts)
 {
+	struct medusa_l1_task_s *ts_security = task_security(ts);
+
         memset(tk, '\0', sizeof(struct process_kobject));
 
 	tk->parent_pid = tk->child_pid = tk->sibling_pid = 0;
@@ -87,14 +90,14 @@ int process_kern2kobj(struct process_kobject * tk, struct task_struct * ts)
 	//CAP_FOR_EACH_U32(__capi)
 	//	med_pr_debug("MEDUSA: ECAP[%d]=%08x\n", __capi, (tk->ecap).cap[CAP_LAST_U32 - __capi]);
 
-	tk->luid = task_security(ts).luid;
-	tk->med_subject = (&task_security(ts))->med_subject;
-	tk->med_object = (&task_security(ts))->med_object;
-	tk->user = task_security(ts).user;
+	tk->luid = ts_security->luid;
+	tk->med_subject = ts_security->med_subject;
+	tk->med_object = ts_security->med_object;
+	tk->user = ts_security->user;
 #ifdef CONFIG_MEDUSA_SYSCALL
-	memcpy(tk->med_syscall, task_security(ts).med_syscall, sizeof(tk->med_syscall));
+	memcpy(tk->med_syscall, ts_security->med_syscall, sizeof(tk->med_syscall));
 #endif
-	memcpy(tk->cmdline, task_security(ts).cmdline, sizeof(tk->cmdline));
+	memcpy(tk->cmdline, ts_security->cmdline, sizeof(tk->cmdline));
 	return 0;
 }
 
@@ -179,9 +182,9 @@ static void process_unmonitor(struct medusa_kobject_s * kobj)
 	rcu_read_lock();
 	p = find_task_by_pid(((struct process_kobject *)kobj)->pid);
 	if (p) {
-		unmonitor_med_object(&(&task_security(p))->med_object);
-		unmonitor_med_subject(&(&task_security(p))->med_subject);
-		med_magic_validate(&(&task_security(p))->med_object);
+		unmonitor_med_object(&(task_security(p)->med_object));
+		unmonitor_med_subject(&(task_security(p)->med_subject));
+		med_magic_validate(&(task_security(p)->med_object));
 	}
 	rcu_read_unlock();
 	return;

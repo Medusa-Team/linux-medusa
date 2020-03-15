@@ -59,19 +59,19 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
 			return MED_OK;
 	}
 	*/
-	if (!is_med_magic_valid(&(&task_security(current))->med_object) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (!is_med_magic_valid(&(&task_security(p))->med_object) &&
+	if (!is_med_magic_valid(&(task_security(p)->med_object)) &&
 		process_kobj_validate_task(p) <= 0)
 		return MED_OK;
 
-	if (!vs_intersects(VSS(&task_security(current)), VS(&task_security(p))) ||
-			!vs_intersects(VSW(&task_security(current)), VS(&task_security(p))))
+	if (!vs_intersects(VSS(task_security(current)), VS(task_security(p))) ||
+			!vs_intersects(VSW(task_security(current)), VS(task_security(p))))
 		return MED_NO;
 
-	if (MEDUSA_MONITORED_ACCESS_S(send_signal, &task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(send_signal, task_security(current))) {
 		access.signal_number = sig;
 		process_kern2kobj(&sender, current);
 		process_kern2kobj(&receiver, p);

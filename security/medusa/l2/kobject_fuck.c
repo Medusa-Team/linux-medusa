@@ -77,8 +77,8 @@ int validate_fuck(const struct path* fuck_path) {
 		med_pr_info("medusa: empty inode\n");
 		goto out;
 	}
-		
-	if (unlikely(hash_empty(inode_security(fuck_inode).fuck)))
+
+	if (unlikely(hash_empty(inode_security(fuck_inode)->fuck)))
 		goto out;
 
 	buf = (char *) kmalloc(sizeof(char) * (PATH_MAX + 1), GFP_KERNEL);
@@ -93,7 +93,7 @@ int validate_fuck(const struct path* fuck_path) {
 	}
 
 	hash = hash_function(accessed_path);
-	if (likely(get_from_hash(accessed_path, hash, &inode_security(fuck_inode)) == NULL)) {
+	if (likely(get_from_hash(accessed_path, hash, inode_security(fuck_inode)) == NULL)) {
 		med_pr_notice("VALIDATE_FUCK: denied path (not defined in allowed path list)\n");
 		ret = -EPERM;
 	}
@@ -107,7 +107,7 @@ out:
 int validate_fuck_link(struct dentry *old_dentry) {
 	struct inode *fuck_inode = old_dentry->d_inode;
 	//if inode has no protected paths defined, allow hard link alse deny
-	if(hash_empty(inode_security(fuck_inode).fuck))
+	if(hash_empty(inode_security(fuck_inode)->fuck))
 		return 0;
 	return -EPERM;
 }
@@ -182,10 +182,10 @@ static medusa_answer_t fuck_update(struct medusa_kobject_s * kobj)
 
 		/* don't check for duplicity in hash table
 		   is up to admin do not add the same 'path' more than once */
-		hash_add(inode_security(fuck_inode).fuck, &fuck_path->list, hash);
+		hash_add(inode_security(fuck_inode)->fuck, &fuck_path->list, hash);
 	} else if (strcmp(fkobj->action, "remove") == 0) {
 		/* remove non-existing path in hash table is ok */
-		if ((fuck_path = get_from_hash(fkobj->path, hash, &inode_security(fuck_inode))) == NULL)
+		if ((fuck_path = get_from_hash(fkobj->path, hash, inode_security(fuck_inode))) == NULL)
 			goto out;
 		hash_del(&fuck_path->list);
 		kfree(fuck_path);

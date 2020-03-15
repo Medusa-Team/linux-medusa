@@ -928,7 +928,7 @@ static int medusa_l1_socket_post_create(struct socket *sock, int family, int typ
 	struct medusa_l1_socket_s *sk_sec;
 
 	if (sock->sk) {
-		sk_sec = &sock_security(sock->sk);
+		sk_sec = sock_security(sock->sk);
 		sk_sec->addrlen = 0;
 	}
 
