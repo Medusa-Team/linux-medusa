@@ -109,7 +109,7 @@ int validate_fuck_link(struct dentry *old_dentry) {
 	//if inode has no protected paths defined, allow hard link alse deny
 	if(hash_empty(inode_security(fuck_inode)->fuck))
 		return 0;
-	return -EPERM;
+	return -EACCES;
 }
 
 static struct medusa_kobject_s * fuck_fetch(struct medusa_kobject_s * kobj)
