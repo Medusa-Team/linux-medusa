@@ -30,14 +30,14 @@
 #define MEDUSA_ACCNAME_MAX	MEDUSA_EVNAME_MAX
 #define MEDUSA_SERVERNAME_MAX	128
 
-/* answer codes */
+#define not_supported ("do not use - behavior not supported by LSM")
 
 typedef enum {
-	MED_ERR =	-1,	/* error */
-	MED_YES =	 0,	/* permit the operation */
-	MED_NO =	 1,	/* forbid the operation */
-	MED_SKIP =	 2,	/* forbid the operation, but return success */
-	MED_OK =	 3	/* permit the operation, but proceed with
+	MED_ERR =		-1,	/* error */
+	MED_FORCE_ALLOW __attribute__ ((deprecated(not_supported))),	/* permit the operation */
+	MED_DENY =		 1,	/* forbid the operation */
+	MED_FAKE_ALLOW __attribute__ ((deprecated(not_supported))),	/* forbid the operation, but return success */
+	MED_ALLOW =		 3	/* permit the operation, but proceed with
 				   standard system permission check if any */
 } medusa_answer_t;
 

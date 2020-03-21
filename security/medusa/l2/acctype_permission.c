@@ -43,12 +43,12 @@ medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inod
  */
 medusa_answer_t medusa_permission(struct inode *inode, int mask)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct dentry *dentry;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	dentry = d_find_alias(inode);
 	if (!dentry || IS_ERR(dentry))
@@ -63,7 +63,7 @@ medusa_answer_t medusa_permission(struct inode *inode, int mask)
 		( (mask & S_IWUGO) &&
 		  	!vs_intersects(VSW(task_security(current)),VS(inode_security(inode))) )
 	   ) {
-		retval = MED_NO;
+		retval = MED_DENY;
 		goto out_dput;
 	}
 

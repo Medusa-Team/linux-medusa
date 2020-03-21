@@ -143,7 +143,7 @@ struct medusa_kclass_s * med_get_kclass_by_pointer(struct medusa_kclass_s * ptr)
  * No new servers and/or event types will be able to attach to the kclass,
  * and it waits for its final deletion by med_unregister_kclass().
  *
- * callers, who call med_unlink_kclass and get MED_OK, should really call
+ * callers, who call med_unlink_kclass and get MED_ALLOW, should really call
  * med_unregister_kclass soon.
  */
 

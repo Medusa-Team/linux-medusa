@@ -19,14 +19,14 @@ medusa_answer_t development_converter(authserver_answer_t code)
 		case AUTHS_DBG_ALLOW:
 		case AUTHS_FORCE_ALLOW:
 		case AUTHS_NOT_REACHED:
-			retval = MED_OK;
+			retval = MED_ALLOW;
 			break;
 		case AUTHS_DENY:
 		case AUTHS_SKIP:
-			retval = MED_NO;
+			retval = MED_DENY;
 			break;
 		default:
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	}
 	return retval;
 }
@@ -40,15 +40,15 @@ medusa_answer_t production_converter(authserver_answer_t code)
 			break;
 		case AUTHS_ALLOW:
 		case AUTHS_FORCE_ALLOW:
-			retval = MED_OK;
+			retval = MED_ALLOW;
 			break;
 		case AUTHS_DENY:
 		case AUTHS_NOT_REACHED:
 		case AUTHS_SKIP:
-			retval = MED_NO;
+			retval = MED_DENY;
 			break;
 		default:
-			retval = MED_NO;
+			retval = MED_DENY;
 	}
 	return retval;
 }
@@ -72,7 +72,7 @@ medusa_answer_t med_decide(struct medusa_evtype_s * evtype, void * event, void *
 	medusa_answer_t retval;
 
 	if (ARCH_CANNOT_DECIDE(evtype))
-		return MED_OK;
+		return MED_ALLOW;
 
 	MED_LOCK_W(registry_lock);
 #ifdef CONFIG_MEDUSA_PROFILING
@@ -87,7 +87,7 @@ medusa_answer_t med_decide(struct medusa_evtype_s * evtype, void * event, void *
 		if (evtype->arg_kclass[1]->unmonitor)
 			evtype->arg_kclass[1]->unmonitor((struct medusa_kobject_s *) o2);
 		MED_UNLOCK_W(registry_lock);
-		return MED_OK;
+		return MED_ALLOW;
 	}
 	MED_UNLOCK_W(registry_lock);
 

@@ -29,7 +29,7 @@ medusa_answer_t process_kobj2kern(struct process_kobject *tk, struct task_struct
 
 		new_user = alloc_uid(tk->uid);
 		if (!new_user)
-			return MED_NO;
+			return MED_DENY;
 		old_user = find_user(tsuid);
 		atomic_dec(&old_user->processes);
 		atomic_inc(&new_user->processes);
@@ -58,7 +58,7 @@ medusa_answer_t process_kobj2kern(struct process_kobject *tk, struct task_struct
 	memcpy(ts_security->med_syscall, tk->med_syscall, sizeof(ts_security->med_syscall));
 #endif
 	med_magic_validate(&(ts_security->med_object));
-	return MED_OK;
+	return MED_ALLOW;
 }
 
 /*

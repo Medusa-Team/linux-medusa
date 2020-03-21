@@ -29,7 +29,7 @@ medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 	struct process_kobject process;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(socket_create_access, task_security(current))) {
 		process_kern2kobj(&process, current);
@@ -41,7 +41,7 @@ medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 		return MED_DECIDE(socket_create_access, &access, &process, &process);
 	}
 
-	return MED_OK;
+	return MED_ALLOW;
 }
 
 __initcall(socket_create_acctype_init);

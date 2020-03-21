@@ -66,7 +66,7 @@ int __init memory_kobject_init(void)
 /* After this is called, and returns 0, memory_kobject_rmmod should be. */
 static int __exit memory_kobject_unload_check(void)
 {
-	if (med_unlink_kclass(&MED_KCLASSOF(memory_kobject)) != MED_OK)
+	if (med_unlink_kclass(&MED_KCLASSOF(memory_kobject)) != MED_ALLOW)
 		return -EBUSY;
 	return 0;
 }
@@ -133,7 +133,7 @@ static medusa_answer_t memory_update(struct medusa_kobject_s * kobj)
 		//free_task_struct(p);
 		free_task(p);
 		return (ret == ((struct memory_kobject *) kobj)->size) ?
-			MED_OK : MED_ERR;
+			MED_ALLOW : MED_ERR;
 	}
 	rcu_read_unlock();
 	return MED_ERR;
