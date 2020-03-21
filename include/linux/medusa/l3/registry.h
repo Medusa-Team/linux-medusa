@@ -3,7 +3,7 @@
  * This header file defines the routines and data structures
  * for L2 and L4 code to interact with L3. This means access
  * to both registry functions, and decision process.
- * 
+ *
  * The name or contents of this file should probably change.
  */
 
@@ -18,8 +18,8 @@ extern int authserver_magic; /* to be checked against magic in objects */
 
 /* interface to L2 */
 extern int med_register_kclass(struct medusa_kclass_s * ptr);
-medusa_answer_t med_unlink_kclass(struct medusa_kclass_s * ptr);
-extern void med_unregister_kclass(struct medusa_kclass_s * ptr);
+extern int med_unlink_kclass(struct medusa_kclass_s * ptr);
+extern int med_unregister_kclass(struct medusa_kclass_s * ptr);
 #define MED_REGISTER_KCLASS(structname) \
 		med_register_kclass(&MED_KCLASSOF(structname))
 #define MED_UNLINK_KCLASS(structname) \
@@ -49,11 +49,11 @@ extern medusa_answer_t med_decide(struct medusa_evtype_s * acctype, void * acces
 		med_decide(&MED_EVTYPEOF(structname), arg1, arg2, arg3)
 
 /* interface to L2 and L4 */
-extern medusa_answer_t med_get_kclass(struct medusa_kclass_s * ptr);
+extern void med_get_kclass(struct medusa_kclass_s * ptr);
 extern void med_put_kclass(struct medusa_kclass_s * ptr);
 extern struct medusa_kclass_s * med_get_kclass_by_name(char * name);
 extern struct medusa_kclass_s * med_get_kclass_by_cinfo(cinfo_t cinfo);
-struct medusa_kclass_s * med_get_kclass_by_pointer(struct medusa_kclass_s * ptr);
+extern struct medusa_kclass_s * med_get_kclass_by_pointer(struct medusa_kclass_s * ptr);
 extern struct medusa_authserver_s * med_get_authserver(void);
 extern void med_put_authserver(struct medusa_authserver_s * ptr);
 

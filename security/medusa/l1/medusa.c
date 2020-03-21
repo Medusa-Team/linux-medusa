@@ -352,7 +352,10 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 	if (mask == 0)
 		return 0;
 
-	return medusa_permission(inode, mask);
+	if(medusa_permission(inode, mask) == MED_NO) {
+		return -EACCES;
+	}
+	return 0;
 }
 
 /*
@@ -449,7 +452,6 @@ static int medusa_l1_path_symlink(const struct path *dir, struct dentry *dentry,
 static int medusa_l1_path_link(struct dentry *old_dentry, const struct path *new_dir,
 			 struct dentry *new_dentry)
 {
-
 	return validate_fuck_link(old_dentry);
 }
 
@@ -912,7 +914,7 @@ static int medusa_l1_socket_create(int family, int type, int protocol, int kern)
 	if (kern)
 		return 0;
 
-	if (medusa_socket_create(family, type, protocol) == MED_ERR)
+	if (medusa_socket_create(family, type, protocol) == MED_NO)
 		return -EACCES;
 
 	return 0;
@@ -942,7 +944,7 @@ static int medusa_l1_socket_bind(struct socket *sock, struct sockaddr *address,
 		return 0;
 	}
 
-	if (medusa_socket_bind(sock, address, addrlen) == MED_ERR)
+	if (medusa_socket_bind(sock, address, addrlen) == MED_NO)
 		return -EACCES;
 
 	return 0;
@@ -957,7 +959,7 @@ static int medusa_l1_socket_connect(struct socket *sock, struct sockaddr *addres
 		return 0;
 	}
 
-	if (medusa_socket_connect(sock, address, addrlen) == MED_ERR)
+	if (medusa_socket_connect(sock, address, addrlen) == MED_NO)
 		return -EACCES;
 
 	return 0;
@@ -971,7 +973,7 @@ static int medusa_l1_socket_listen(struct socket *sock, int backlog)
 		return 0;
 	}
 
-	if (medusa_socket_listen(sock, backlog) == MED_ERR)
+	if (medusa_socket_listen(sock, backlog) == MED_NO)
 		return -EACCES;
 
 	return 0;
@@ -985,7 +987,7 @@ static int medusa_l1_socket_accept(struct socket *sock, struct socket *newsock)
 		return 0;
 	}
 
-	if (medusa_socket_accept(sock, newsock) == MED_ERR)
+	if (medusa_socket_accept(sock, newsock) == MED_NO)
 		return -EACCES;
 
 	return 0;
@@ -999,7 +1001,7 @@ static int medusa_l1_socket_sendmsg(struct socket *sock, struct msghdr *msg, int
 		return 0;
 	}
 
-	if (medusa_socket_sendmsg(sock, msg, size) == MED_ERR)
+	if (medusa_socket_sendmsg(sock, msg, size) == MED_NO)
 		return -EACCES;
 
 	return 0;
@@ -1014,7 +1016,7 @@ static int medusa_l1_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 		return 0;
 	}
 
-	if (medusa_socket_recvmsg(sock, msg, size, flags) == MED_ERR)
+	if (medusa_socket_recvmsg(sock, msg, size, flags) == MED_NO)
 		return -EACCES;
 
 	return 0;

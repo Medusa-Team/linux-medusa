@@ -146,7 +146,7 @@ static int l4_add_kclass(struct medusa_kclass_s * cl)
 	barrier();
 	wakeup(&userspace);
 	MED_UNLOCK_W(registration_lock);
-	return MED_YES;
+	return 0;
 }
 
 static int l4_add_evtype(struct medusa_evtype_s * at)
@@ -159,7 +159,7 @@ static int l4_add_evtype(struct medusa_evtype_s * at)
 	barrier();
 	wakeup(&userspace);
 	MED_UNLOCK_W(registration_lock);
-	return MED_YES;
+	return 0;
 }
 
 /* the sad fact about this routine is that it sleeps...

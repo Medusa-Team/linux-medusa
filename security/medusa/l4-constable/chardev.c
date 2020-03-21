@@ -386,7 +386,7 @@ static int l4_add_kclass(struct medusa_kclass_s * cl)
 	up(&queue_items);
 	wake_up(&userspace_chardev);
 	MED_UNLOCK_W(registration_lock);
-	return MED_YES;
+	return 0;
 }
 
 static int l4_add_evtype(struct medusa_evtype_s * at)
@@ -442,7 +442,7 @@ static int l4_add_evtype(struct medusa_evtype_s * at)
 	up(&queue_items);
 	wake_up(&userspace_chardev);
 	MED_UNLOCK_W(registration_lock);
-	return MED_YES;
+	return 0;
 }
 
 inline static void ls_lock(lightswitch_t* ls, struct semaphore* sem) {

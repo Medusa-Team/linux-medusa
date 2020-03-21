@@ -69,12 +69,7 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
 		process_kern2kobj(&proc, current);
 		retval = MED_DECIDE(syscall_access, &access, &proc, &proc);
 	}
-	/* this needs more optimization some day */
-	if (retval == MED_NO)
-			return 0; /* deny */
-	if (retval != MED_SKIP)
-		return 1; /* allow */
-	return 2; /* skip trace code */
+	return retval;
 }
 
 __initcall(syscall_acctype_init);
