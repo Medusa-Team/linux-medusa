@@ -47,7 +47,6 @@
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l3/server.h>
 #include <linux/medusa/l4/comm.h>
-#include <linux/medusa/l4/interface.h>
 
 #include "teleport.h"
 
@@ -86,7 +85,7 @@ static atomic_t announce_ready = ATOMIC_INIT(0);
 static atomic_t questions = ATOMIC_INIT(0);
 static atomic_t questions_waiting = ATOMIC_INIT(0);
 /* and the answer */
-static authserver_answer_t user_answer = AUTHS_ERR;
+static medusa_answer_t user_answer = MED_ERR;
 static DEFINE_SEMAPHORE(waitlist_sem);
 static LIST_HEAD(answer_waitlist);
 struct waitlist_item {
@@ -138,13 +137,15 @@ static lightswitch_t lightswitch = {
 
 #ifdef GDB_HACK
 static pid_t gdb_pid = -1;
+//MODULE_PARM(gdb_pid, "i");
+//MODULE_PARM_DESC(gdb_pid, "PID to exclude from monitoring");
 #endif
 
 /*******************************************************************************
  * kernel-space interface
  */
 
-static authserver_answer_t l4_decide( struct medusa_event_s * event,
+static medusa_answer_t l4_decide( struct medusa_event_s * event,
 		struct medusa_kobject_s * o1,
 		struct medusa_kobject_s * o2);
 static int l4_add_kclass(struct medusa_kclass_s * cl);
@@ -468,10 +469,10 @@ inline static void ls_unlock(lightswitch_t* ls, struct semaphore* sem) {
  * eating one processor by a constable... ;) One can imagine
  * the performance improvement, and buy one more CPU in advance :)
  */
-static authserver_answer_t l4_decide(struct medusa_event_s * event,
+static medusa_answer_t l4_decide(struct medusa_event_s * event,
 		struct medusa_kobject_s * o1, struct medusa_kobject_s * o2)
 {
-	authserver_answer_t retval;
+	medusa_answer_t retval;
 	teleport_insn_t tele_mem_decide[6];
 	struct tele_item *local_tele_item;
 	struct waitlist_item local_waitlist_item;
@@ -479,25 +480,25 @@ static authserver_answer_t l4_decide(struct medusa_event_s * event,
 	if (in_interrupt()) {
 		/* houston, we have a problem! */
 		med_pr_err("decide called from interrupt context :(\n");
-		return AUTHS_NOT_REACHED;
+		return MED_ERR;
 	}
 	if (am_i_constable() || current == gdb) {
-		return AUTHS_DBG_ALLOW;
+		return MED_ALLOW;
 	}
 
 	if (current->pid < 1) {
-		return AUTHS_NOT_REACHED;
+		return MED_ERR;
 	}
 #ifdef GDB_HACK
 	if (gdb_pid == current->pid) {
-		return AUTHS_DBG_ALLOW;
+		return MED_ALLOW;
 	}
 #endif
 
 	local_tele_item = (struct tele_item*)
 		med_cache_alloc_size(sizeof(struct tele_item));
 	if (!local_tele_item)
-		return AUTHS_ERR;
+		return MED_ERR;
 	local_tele_item->tele = tele_mem_decide;
 	local_tele_item->size = 0;
 	local_tele_item->post = NULL;
@@ -535,7 +536,7 @@ static authserver_answer_t l4_decide(struct medusa_event_s * event,
 	if (!atomic_read(&constable_present)) {
 		med_cache_free(local_tele_item);
 		ls_unlock(&lightswitch, &ls_switch);
-		return AUTHS_ERR;
+		return MED_ERR;
 	}
 	pr_debug("medusa: new question %px\n", current);
 	// prepare for next decision
@@ -570,7 +571,7 @@ static authserver_answer_t l4_decide(struct medusa_event_s * event,
 		pr_info("medusa: question %p answered %i\n", current, retval);
 	}
 	else {
-		retval = AUTHS_ERR;
+		retval = MED_ERR;
 		pr_err("medusa: question %p not answered, authserver disconnected\n",
 			current);
 	}
@@ -786,7 +787,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	struct medusa_kclass_s * cl;
 	teleport_insn_t *tele_mem_write;
 	struct tele_item *local_tele_item;
-	authserver_answer_t answ_result;
+	medusa_answer_t answ_result;
 	MCPptr_t recv_type;
 	MCPptr_t answ_kclassid = 0;
 	struct medusa_kobject_s * answ_kobj = NULL;
@@ -914,7 +915,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 				answ_result = cl->update(
 						(struct medusa_kobject_s *)kclass_buf);
 			else
-				answ_result = AUTHS_ERR;
+				answ_result = MED_ERR;
 			med_cache_free(kclass_buf);
 		}
 		// Dynamic telemem structure for fetch/update
@@ -1165,7 +1166,7 @@ static int user_release(struct inode *inode, struct file *file)
 
 	// All threads waiting for an answer will get an error, order of these
 	// functions is important!
-	user_answer = AUTHS_ERR;
+	user_answer = MED_ERR;
 	atomic_set(&constable_present, 0);
 	constable = NULL;
 	gdb = NULL;

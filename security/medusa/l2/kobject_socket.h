@@ -62,8 +62,8 @@ struct socket_kobject {
 extern MED_DECLARE_KCLASSOF(socket_kobject);
 
 /* the conversion routines */
-void socket_kobj2kern(struct socket_kobject * sock_kobj, struct socket * sock);
-void socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock);
+int socket_kobj2kern(struct socket_kobject * sock_kobj, struct socket * sock);
+int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock);
 
 struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj);
 medusa_answer_t socket_update(struct medusa_kobject_s *kobj);

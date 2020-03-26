@@ -10,7 +10,6 @@
 
 #include <linux/medusa/l3/constants.h>
 #include <linux/medusa/l3/kobject.h>
-#include <linux/medusa/l4/interface.h>
 
 struct medusa_authserver_s {
 	char name[MEDUSA_SERVERNAME_MAX];
@@ -50,7 +49,7 @@ struct medusa_authserver_s {
 	 * May sleep. I hope.
 	 */
 
-	authserver_answer_t (*decide)(struct medusa_event_s * req,
+	medusa_answer_t (*decide)(struct medusa_event_s * req,
 		struct medusa_kobject_s * o1,
 		struct medusa_kobject_s * o2);
 };

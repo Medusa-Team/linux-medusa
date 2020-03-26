@@ -15,13 +15,14 @@ MED_ATTRS(socket_kobject) {
 	MED_ATTR_END
 };
 
-void socket_kobj2kern(struct socket_kobject *sock_kobj, struct socket *sock)
+int socket_kobj2kern(struct socket_kobject * sock_kobj, struct socket * sock)
 {
 	struct medusa_l1_socket_s *sk_sec = sock_security(sock->sk);
 	sock_kobj->med_object = sk_sec->med_object;
+	return 0;
 }
 
-void socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
+int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
 {
 	struct inode *inode = SOCK_INODE(sock);
 	struct medusa_l1_socket_s *sk_sec = sock_security(sock->sk);
@@ -51,6 +52,7 @@ void socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
 		}
 	}
 	sock_kobj->med_object = sk_sec->med_object;
+	return 0;
 }
 
 static struct socket_kobject storage;
@@ -78,9 +80,9 @@ struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 	return NULL;
 }
 
-int socket_update(struct medusa_kobject_s *kobj)
+medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
 {
-	struct socket *sock;
+	struct socket * sock;
 	struct inode *inode;
 	struct super_block *sb;
 	struct socket_kobject *s_kobj = (struct socket_kobject*) kobj;
@@ -95,10 +97,10 @@ int socket_update(struct medusa_kobject_s *kobj)
 		sock = SOCKET_I(inode);
 		socket_kobj2kern(s_kobj, sock);
 		iput(inode);
-		return 0;
+		return MED_ALLOW;
 	}
 
-	return -1;
+	return MED_ERR;
 }
 
 MED_KCLASS(socket_kobject) {

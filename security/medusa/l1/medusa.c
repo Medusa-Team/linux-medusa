@@ -352,9 +352,8 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 	if (mask == 0)
 		return 0;
 
-	if(medusa_permission(inode, mask) == MED_DENY) {
+	if(medusa_permission(inode, mask) == MED_DENY)
 		return -EACCES;
-	}
 	return 0;
 }
 
