@@ -36,22 +36,22 @@ medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 	medusa_answer_t r;
 
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0) {
-		return MED_OK;
+		return MED_ALLOW;
 	}
 	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
 		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
 	)
-		return MED_NO;
+		return MED_DENY;
 #warning FIXME - add target directory checking
-	r = MED_OK;
+	r = MED_ALLOW;
 	if (MEDUSA_MONITORED_ACCESS_O(rename_access, inode_security(dentry->d_inode)))
 		r=medusa_do_rename(dentry,newname);
 	med_magic_invalidate(&(inode_security(dentry->d_inode)->med_object));
@@ -84,6 +84,6 @@ static medusa_answer_t medusa_do_rename(struct dentry *dentry, const char * newn
 	file_kobj_live_remove(dentry->d_inode);
 	if (retval != MED_ERR)
 		return retval;
-	return MED_OK;
+	return MED_ALLOW;
 }
 __initcall(rename_acctype_init);

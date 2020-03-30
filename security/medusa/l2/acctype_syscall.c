@@ -49,7 +49,7 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
 	volatile unsigned int p4,
 	volatile unsigned int p5)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct syscall_access access;
 	struct process_kobject proc;
 
@@ -58,7 +58,7 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(syscall_access, task_security(current))) {
 		access.sysnr = eax;
@@ -70,9 +70,9 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
 		retval = MED_DECIDE(syscall_access, &access, &proc, &proc);
 	}
 	/* this needs more optimization some day */
-	if (retval == MED_NO)
+	if (retval == MED_DENY)
 			return 0; /* deny */
-	if (retval != MED_SKIP)
+	if (retval != MED_FAKE_ALLOW)
 		return 1; /* allow */
 	return 2; /* skip trace code */
 }

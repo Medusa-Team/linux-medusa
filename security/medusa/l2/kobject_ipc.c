@@ -116,7 +116,7 @@ inline struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject * ipc_kobj, struct k
  * ipc_kobj2kern - convert function from kobject to kernel structure
  * @ipc_kobj - pointer to ipc_kobject used to get data
  * @ipcp - pointer to kernel structure where data will be stored
- * Return: MED_ERR on error (@ipc_kobj or @ipcp->security NULL), MED_OK otherwise
+ * Return: MED_ERR on error (@ipc_kobj or @ipcp->security NULL), MED_ALLOW otherwise
  *
  * This routine expects existing Medusa @ipcp security struct.
  * Due to write acces to an IPC object, this function must be called
@@ -135,7 +135,7 @@ static inline medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct
 	COPY_WRITE_IPC_VARS(ipcp, &(ipc_kobj->ipc_perm));
 	ipc_security(ipcp)->med_object = ipc_kobj->med_object;
 	med_magic_validate(&(ipc_security(ipcp))->med_object);
-	return MED_OK;
+	return MED_ALLOW;
 }
 
 /**
@@ -189,7 +189,7 @@ out_err:
  * ipc_update - update kernel-side data related to related IPC object @kobj
  * @kobj - pointer to ipc_kobject which one holds identification of therelated
  *	IPC object
- * Return: MED_OK if successfull, MED_ERR otherwise
+ * Return: MED_ALLOW if successfull, MED_ERR otherwise
  */
 medusa_answer_t ipc_update(struct medusa_kobject_s * kobj)
 {

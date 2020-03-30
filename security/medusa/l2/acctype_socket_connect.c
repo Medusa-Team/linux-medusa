@@ -33,13 +33,13 @@ medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *addr
 	struct socket_kobject sock_kobj;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
-		return MED_YES;
+		return MED_ALLOW;
 	if (!is_med_magic_valid(&(sock_security(sock->sk)->med_object)) && socket_kobj_validate(sock) <= 0)
-		return MED_YES;
+		return MED_ALLOW;
 
 	if (!vs_intersects(VSS(task_security(current)),VS(sock_security(sock->sk))) ||
 		!vs_intersects(VSW(task_security(current)),VS(sock_security(sock->sk))))
-		return MED_ERR;
+		return MED_DENY;
 
 	if (MEDUSA_MONITORED_ACCESS_S(socket_connect_access, task_security(current))) {
 		process_kern2kobj(&process, current);
@@ -49,13 +49,13 @@ medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *addr
 		switch(address->sa_family) {
 			case AF_INET:
 				if (addrlen < sizeof(struct sockaddr_in))
-					return -EINVAL;
+					return MED_ERR;
 				access.address.inet_i.port = ((struct sockaddr_in *) address)->sin_port;
 				memcpy(access.address.inet_i.addrdata, (__be32 *)&((struct sockaddr_in *) address)->sin_addr, 4);
 				break;
 			case AF_INET6:
 				if (addrlen < SIN6_LEN_RFC2133)
-					return -EINVAL;
+					return MED_ERR;
 				access.address.inet6_i.port = ((struct sockaddr_in6 *) address)->sin6_port;
 				memcpy(access.address.inet6_i.addrdata, (__be32 *)((struct sockaddr_in6 *)address)->sin6_addr.s6_addr, 16);
 				break;
@@ -63,12 +63,12 @@ medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *addr
 				memcpy(access.address.unix_i.addrdata, ((struct sockaddr_un *) address)->sun_path, UNIX_PATH_MAX);
 				break;
 			default:
-				return MED_YES;
+				return MED_ALLOW;
 		}
 
 		return MED_DECIDE(socket_connect_access, &access, &process, &sock_kobj);
 	}
-	return MED_YES;
+	return MED_ALLOW;
 }
 
 __initcall(socket_connect_access_init);
