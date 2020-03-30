@@ -69,7 +69,7 @@ int __init ipc_acctype_ctl_init(void) {
  */
 medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct ipc_ctl_access access;
 	struct process_kobject process;
 	struct ipc_kobject object, *object_p = NULL;
@@ -79,7 +79,7 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 		/* second argument false: don't need to unlock IPC object */
 		if (unlikely(ipc_getref(ipcp, false)))
 			/* for now, we don't support error codes */
-			return MED_NO;
+			return MED_DENY;
 
 		object_p = &object;
 		if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
@@ -105,14 +105,14 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 		/* in case of NULL 'ipcp', 'object_p' is NULL too */
 		retval = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
 		if (retval == MED_ERR)
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	}
 out:
 	if (likely(ipcp)) {
 		/* second argument false: don't need to lock IPC object */
 		if (unlikely(ipc_putref(ipcp, false)))
 			/* for now, we don't support error codes */
-			retval = MED_NO;
+			retval = MED_DENY;
 	}
 	return retval;
 }

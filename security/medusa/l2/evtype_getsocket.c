@@ -22,7 +22,7 @@ medusa_answer_t socket_kobj_validate(struct socket *sock) {
 	struct medusa_l1_socket_s *sk_sec;
 
 	if (!sock->sk) {
-		return MED_YES;
+		return MED_ALLOW;
 	}
 
 	sk_sec = sock_security(sock->sk);
@@ -32,7 +32,7 @@ medusa_answer_t socket_kobj_validate(struct socket *sock) {
 	if (MED_DECIDE(socket_event, &event, &sock_kobj, &sock_kobj) == MED_ERR)
 		return MED_ERR;
 
-	return MED_YES;
+	return MED_ALLOW;
 }
 
 __initcall(socket_evtype_init);

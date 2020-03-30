@@ -43,7 +43,7 @@ int __init ipc_acctype_shmat_init(void) {
  */
 medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmaddr, int shmflg)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct ipc_shmat_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
@@ -51,7 +51,7 @@ medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmadd
 	/* second argument false: don't need to unlock IPC object */
 	if (unlikely(ipc_getref(ipcp, false)))
 		/* for now, we don't support error codes */
-		return MED_NO;
+		return MED_DENY;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
@@ -71,13 +71,13 @@ medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmadd
 
 		retval = MED_DECIDE(ipc_shmat_access, &access, &process, &object);
 		if (retval == MED_ERR)
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	}
 out:
 	/* second argument false: don't need to lock IPC object */
 	if (unlikely(ipc_putref(ipcp, false)))
 		/* for now, we don't support error codes */
-		retval = MED_NO;
+		retval = MED_DENY;
 	return retval;
 }
 __initcall(ipc_acctype_shmat_init);

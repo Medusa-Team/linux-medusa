@@ -260,7 +260,7 @@ static int medusa_l1_inode_init_security(
 static int medusa_l1_inode_create(struct inode *inode, struct dentry *dentry,
 				umode_t mode)
 {
-	if (medusa_create(dentry, mode) == MED_NO)
+	if (medusa_create(dentry, mode) == MED_DENY)
 		return -EACCES;
 
 	return 0;
@@ -269,16 +269,16 @@ static int medusa_l1_inode_create(struct inode *inode, struct dentry *dentry,
 static int medusa_l1_inode_link(struct dentry *old_dentry, struct inode *inode,
 			struct dentry *new_dentry)
 {
-	if (medusa_link(old_dentry, new_dentry->d_name.name) == MED_NO)
-		return -EPERM;
+	if (medusa_link(old_dentry, new_dentry->d_name.name) == MED_DENY)
+		return -EACCES;
 
 	return 0;
 }
 
 static int medusa_l1_inode_unlink(struct inode *inode, struct dentry *dentry)
 {
-	//if (medusa_unlink(dentry) == MED_NO)
-	//	return -EPERM;
+	//if (medusa_unlink(dentry) == MED_DENY)
+	//	return -EACCES;
 
 	return 0;
 }
@@ -286,25 +286,25 @@ static int medusa_l1_inode_unlink(struct inode *inode, struct dentry *dentry)
 static int medusa_l1_inode_symlink(struct inode *inode, struct dentry *dentry,
 				 const char *name)
 {
-	if (medusa_symlink(dentry, name) == MED_NO)
-		return -EPERM;
-	
+	if (medusa_symlink(dentry, name) == MED_DENY)
+		return -EACCES;
+
 	return 0;
 }
 
 static int medusa_l1_inode_mkdir(struct inode *inode, struct dentry *dentry,
 				umode_t mask)
 {
-	//if(medusa_mkdir(dentry, mask) == MED_NO)
-	//	return -EPERM;
+	//if(medusa_mkdir(dentry, mask) == MED_DENY)
+	//	return -EACCES;
 
 	return 0;
 }
 
 static int medusa_l1_inode_rmdir(struct inode *inode, struct dentry *dentry)
 {
-	//if (medusa_rmdir(dentry) == MED_NO)
-	//	return -EPERM;
+	//if (medusa_rmdir(dentry) == MED_DENY)
+	//	return -EACCES;
 
 	return 0;
 }
@@ -312,23 +312,23 @@ static int medusa_l1_inode_rmdir(struct inode *inode, struct dentry *dentry)
 static int medusa_l1_inode_mknod(struct inode *inode, struct dentry *dentry,
 			umode_t mode, dev_t dev)
 {
-	if(medusa_mknod(dentry, dev, mode) == MED_NO)
-		return -EPERM;
+	if(medusa_mknod(dentry, dev, mode) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_inode_rename(struct inode *old_inode, struct dentry *old_dentry,
 				struct inode *new_inode, struct dentry *new_dentry)
 {
-	//if (medusa_rename(old_dentry, new_dentry->d_name.name) == MED_NO)
-	//	return -EPERM;
+	//if (medusa_rename(old_dentry, new_dentry->d_name.name) == MED_DENY)
+	//	return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_inode_readlink(struct dentry *dentry)
 {
-	if (medusa_readlink(dentry) == MED_NO)
-		return -EPERM;
+	if (medusa_readlink(dentry) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -352,7 +352,9 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 	if (mask == 0)
 		return 0;
 
-	return medusa_permission(inode, mask);
+	if(medusa_permission(inode, mask) == MED_DENY)
+		return -EACCES;
+	return 0;
 }
 
 /*
@@ -430,8 +432,8 @@ static int medusa_l1_path_mkdir(const struct path *dir, struct dentry *dentry, u
 
 static int medusa_l1_path_rmdir(const struct path *dir, struct dentry *dentry)
 {
-	if (medusa_rmdir(dir, dentry) == MED_NO)
-		return -EPERM;
+	if (medusa_rmdir(dir, dentry) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -449,15 +451,14 @@ static int medusa_l1_path_symlink(const struct path *dir, struct dentry *dentry,
 static int medusa_l1_path_link(struct dentry *old_dentry, const struct path *new_dir,
 			 struct dentry *new_dentry)
 {
-
 	return validate_fuck_link(old_dentry);
 }
 
 static int medusa_l1_path_rename(const struct path *old_path, struct dentry *old_dentry,
 			const struct path *new_path, struct dentry *new_dentry)
 {
-	if (medusa_rename(old_dentry, new_dentry->d_name.name) == MED_NO)
-	        return -EPERM;
+	if (medusa_rename(old_dentry, new_dentry->d_name.name) == MED_DENY)
+	        return -EACCES;
 	return 0;
 }
 
@@ -558,7 +559,7 @@ static int medusa_l1_file_receive(struct file *file)
 
 static int medusa_l1_file_open(struct file *file)
 {
-	
+
 	return validate_fuck(&file->f_path);
 }
 
@@ -570,8 +571,8 @@ int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 	struct medusa_l1_task_s* med;
 
 	// can @current do fork/clone?
-	//if(medusa_fork(clone_flags) == MED_NO)
-	//	return -EPERM;
+	//if(medusa_fork(clone_flags) == MED_DENY)
+	//	return -EACCES;
 
 	// alloc security struct for new task
 	med = (struct medusa_l1_task_s*) kzalloc(sizeof(struct medusa_l1_task_s), GFP_KERNEL);
@@ -708,8 +709,6 @@ static int medusa_l1_task_movememory(struct task_struct *p)
 static int medusa_l1_task_kill(struct task_struct *p, struct siginfo *info,
 			 int sig, u32 secid)
 {
-	/* if(medusa_sendsig(sig, info, p) == MED_NO)
-		return -EPERM; */
 	return 0;
 }
 
@@ -743,7 +742,7 @@ int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp, unsigned int ipc_cl
 void medusa_l1_ipc_free_security(struct kern_ipc_perm *ipcp)
 {
 	struct medusa_l1_ipc_s *med;
-	
+
 	if(ipcp->security != NULL) {
 		med = ipcp->security;
 		ipcp->security = NULL;
@@ -753,8 +752,8 @@ void medusa_l1_ipc_free_security(struct kern_ipc_perm *ipcp)
 
 static int medusa_l1_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 {
-	if(medusa_ipc_permission(ipcp, flag) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_permission(ipcp, flag) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -797,31 +796,31 @@ void medusa_l1_msg_queue_free_security(struct kern_ipc_perm *msq)
 
 static int medusa_l1_msg_queue_associate(struct kern_ipc_perm *msq, int msqflg)
 {
-	if(medusa_ipc_associate(msq, msqflg) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_associate(msq, msqflg) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_msg_queue_msgctl(struct kern_ipc_perm *msq, int cmd)
 {
-	if(medusa_ipc_ctl(msq, cmd) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_ctl(msq, cmd) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_msg_queue_msgsnd(struct kern_ipc_perm *msq, struct msg_msg *msg,
 				int msgflg)
 {
-	if(medusa_ipc_msgsnd(msq, msg, msgflg) == MED_NO)
-		return -EPERM;
+	if(medusa_ipc_msgsnd(msq, msg, msgflg) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_msg_queue_msgrcv(struct kern_ipc_perm *msq, struct msg_msg *msg,
 				struct task_struct *target, long type, int mode)
 {
-	if(medusa_ipc_msgrcv(msq, msg, target, type, mode) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_msgrcv(msq, msg, target, type, mode) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -833,28 +832,28 @@ int medusa_l1_shm_alloc_security(struct kern_ipc_perm *shp)
 
 void medusa_l1_shm_free_security(struct kern_ipc_perm *shp)
 {
-	return medusa_l1_ipc_free_security(shp);	
+	return medusa_l1_ipc_free_security(shp);
 }
 
 static int medusa_l1_shm_associate(struct kern_ipc_perm *shp, int shmflg)
 {
-	if(medusa_ipc_associate(shp, shmflg) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_associate(shp, shmflg) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_shm_shmctl(struct kern_ipc_perm *shp, int cmd)
 {
-	if(medusa_ipc_ctl(shp, cmd) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_ctl(shp, cmd) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_shm_shmat(struct kern_ipc_perm *shp, char __user *shmaddr,
 			 int shmflg)
 {
-	if(medusa_ipc_shmat(shp, shmaddr, shmflg) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_shmat(shp, shmaddr, shmflg) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -871,23 +870,23 @@ void medusa_l1_sem_free_security(struct kern_ipc_perm *sma)
 
 static int medusa_l1_sem_associate(struct kern_ipc_perm *sma, int semflg)
 {
-	if(medusa_ipc_associate(sma, semflg) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_associate(sma, semflg) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_sem_semctl(struct kern_ipc_perm *sma, int cmd)
 {
-	if(medusa_ipc_ctl(sma, cmd) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_ctl(sma, cmd) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_sem_semop(struct kern_ipc_perm *sma, struct sembuf *sops,
 			 unsigned nsops, int alter)
 {
-	if(medusa_ipc_semop(sma, sops, nsops, alter) == MED_NO)
-		return -EPERM;	
+	if(medusa_ipc_semop(sma, sops, nsops, alter) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -914,7 +913,7 @@ static int medusa_l1_socket_create(int family, int type, int protocol, int kern)
 	if (kern)
 		return 0;
 
-	if (medusa_socket_create(family, type, protocol) == MED_ERR)
+	if (medusa_socket_create(family, type, protocol) == MED_DENY)
 		return -EACCES;
 
 	return 0;
@@ -944,7 +943,7 @@ static int medusa_l1_socket_bind(struct socket *sock, struct sockaddr *address,
 		return 0;
 	}
 
-	if (medusa_socket_bind(sock, address, addrlen) == MED_ERR)
+	if (medusa_socket_bind(sock, address, addrlen) == MED_DENY)
 		return -EACCES;
 
 	return 0;
@@ -959,7 +958,7 @@ static int medusa_l1_socket_connect(struct socket *sock, struct sockaddr *addres
 		return 0;
 	}
 
-	if (medusa_socket_connect(sock, address, addrlen) == MED_ERR)
+	if (medusa_socket_connect(sock, address, addrlen) == MED_DENY)
 		return -EACCES;
 
 	return 0;
@@ -973,7 +972,7 @@ static int medusa_l1_socket_listen(struct socket *sock, int backlog)
 		return 0;
 	}
 
-	if (medusa_socket_listen(sock, backlog) == MED_ERR)
+	if (medusa_socket_listen(sock, backlog) == MED_DENY)
 		return -EACCES;
 
 	return 0;
@@ -987,7 +986,7 @@ static int medusa_l1_socket_accept(struct socket *sock, struct socket *newsock)
 		return 0;
 	}
 
-	if (medusa_socket_accept(sock, newsock) == MED_ERR)
+	if (medusa_socket_accept(sock, newsock) == MED_DENY)
 		return -EACCES;
 
 	return 0;
@@ -1001,7 +1000,7 @@ static int medusa_l1_socket_sendmsg(struct socket *sock, struct msghdr *msg, int
 		return 0;
 	}
 
-	if (medusa_socket_sendmsg(sock, msg, size) == MED_ERR)
+	if (medusa_socket_sendmsg(sock, msg, size) == MED_DENY)
 		return -EACCES;
 
 	return 0;
@@ -1016,7 +1015,7 @@ static int medusa_l1_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 		return 0;
 	}
 
-	if (medusa_socket_recvmsg(sock, msg, size, flags) == MED_ERR)
+	if (medusa_socket_recvmsg(sock, msg, size, flags) == MED_DENY)
 		return -EACCES;
 
 	return 0;

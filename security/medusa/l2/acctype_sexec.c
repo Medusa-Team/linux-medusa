@@ -53,15 +53,15 @@ static medusa_answer_t medusa_do_sexec(struct linux_binprm * bprm);
 
 medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(DENTRY->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(DENTRY,bprm->file->f_path.mnt) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 	/* no sense in checking VS here */
 	if (MEDUSA_MONITORED_ACCESS_S(sexec_access, task_security(current)))
 		retval = medusa_do_sexec(bprm);
@@ -92,7 +92,7 @@ static medusa_answer_t medusa_do_sexec(struct linux_binprm * bprm)
 	file_kobj_live_remove(DENTRY->d_inode);
 	if (retval != MED_ERR)
 		return retval;
-	return MED_OK;
+	return MED_ALLOW;
 }
 #undef DENTRY
 

@@ -41,11 +41,11 @@ medusa_answer_t medusa_capable(int cap)
 	if (in_interrupt()) {
 		med_pr_warn("CAPABLE IN INTERRUPT\n");
 #warning "finish me"
-		return MED_OK;
+		return MED_ALLOW;
 	}
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(capable_access,task_security(current))) {
 		access.cap = CAP_TO_MASK(cap);
@@ -54,6 +54,6 @@ medusa_answer_t medusa_capable(int cap)
 		if (retval != MED_ERR)
 			return retval;
 	}
-	return MED_OK;
+	return MED_ALLOW;
 }
 __initcall(capable_acctype_init);

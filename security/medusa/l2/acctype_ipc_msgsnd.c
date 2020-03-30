@@ -45,7 +45,7 @@ int __init ipc_acctype_msgsnd_init(void) {
  */
 medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *msg, int msgflg)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct ipc_msgsnd_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
@@ -53,7 +53,7 @@ medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 	/* second argument true: returns with unlocked IPC object */
 	if (unlikely(ipc_getref(ipcp, true)))
 		/* for now, we don't support error codes */
-		return MED_NO;
+		return MED_DENY;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
@@ -74,13 +74,13 @@ medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 
 		retval = MED_DECIDE(ipc_msgsnd_access, &access, &process, &object);
 		if (retval == MED_ERR)
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	}
 out:
 	/* second argument true: returns with locked IPC object */
 	if (unlikely(ipc_putref(ipcp, true)))
 		/* for now, we don't support error codes */
-		retval = MED_NO;
+		retval = MED_DENY;
 	return retval;
 }
 __initcall(ipc_acctype_msgsnd_init);
