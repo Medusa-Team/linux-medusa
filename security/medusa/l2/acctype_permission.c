@@ -7,6 +7,7 @@
 #include <linux/types.h>
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l3/model.h>
+#include <linux/medusa/l2/audit_medusa.h>
 
 #include "kobject_process.h"
 #include "kobject_file.h"
@@ -45,17 +46,27 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 {
 	medusa_answer_t retval = MED_YES;
 	struct dentry * dentry;
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
+
+	dentry = d_find_alias(inode);
+
+	if (!dentry || IS_ERR(dentry))
+		return retval;
+
+	cad.type = LSM_AUDIT_DATA_DENTRY;
+	cad.u.dentry = dentry;
 
 	if (!MED_MAGIC_VALID(&task_security(current)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_YES;
-
-	dentry = d_find_alias(inode);
-	if (!dentry || IS_ERR(dentry))
-		return retval;
+		goto audit;
 	if (!MED_MAGIC_VALID(&inode_security(inode)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
-		goto out_dput;
+		goto audit;
+
+	mad.med_subject = task_security(current)->med_subject;
+	mad.med_object = inode_security(dentry->d_inode)->med_object;
+
 	if (
 		!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(inode))) ||
 		( (mask & (S_IRUGO | S_IXUGO)) &&
@@ -63,13 +74,24 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 		( (mask & S_IWUGO) &&
 		  	!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(inode))) )
 	   ) {
-		retval = -EACCES;
-		goto out_dput;
-	}
+		retval = -EACCES;// ??? audit Q
+		mad.vsi = VSI_SRW_N;
+		goto audit;
+	} else
+		mad.vsi = VSI_SRW;
 
-	if (MEDUSA_MONITORED_ACCESS_O(permission_access, &inode_security(inode)))
+	if (MEDUSA_MONITORED_ACCESS_O(permission_access, &inode_security(inode))) {
 		retval = medusa_do_permission(dentry, inode, mask);
-out_dput:
+		mad.event = EVENT_MONITORED;
+	} else
+		mad.event = EVENT_MONITORED_N;
+audit:
+#ifdef CONFIG_AUDIT
+	mad.function = __func__;
+	mad.med_answer = retval;
+	cad.medusa_audit_data = &mad;
+	medusa_audit_log_callback(&cad);
+#endif
 	dput(dentry);
 	return retval;
 }

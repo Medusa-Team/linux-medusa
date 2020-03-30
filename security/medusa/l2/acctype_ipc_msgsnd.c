@@ -1,4 +1,5 @@
 #include <linux/medusa/l3/registry.h>
+#include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
 #include <linux/init.h>
@@ -46,6 +47,8 @@ int __init ipc_acctype_msgsnd_init(void) {
 medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *msg, int msgflg)
 {
 	medusa_answer_t retval = MED_OK;
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = { .vsi = VSI_NONE , .event = EVENT_UNKNOWN };
 	struct ipc_msgsnd_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
@@ -54,13 +57,20 @@ medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 	if (unlikely(ipc_getref(ipcp, true)))
 		/* for now, we don't support error codes */
 		return MED_NO;
+	
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
 
 	if (!MED_MAGIC_VALID(&task_security(current)) && process_kobj_validate_task(current) <= 0)
 		goto out;
 	if (!MED_MAGIC_VALID(ipc_security(ipcp)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
+	
+	mad.med_subject = task_security(current)->med_subject;
+	mad.med_object = ipc_security(ipcp)->med_object;
 
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_msgsnd_access, &task_security(current))) {
+		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		if (ipc_kern2kobj(&object, ipcp, true) == NULL)
@@ -75,12 +85,19 @@ medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 		retval = MED_DECIDE(ipc_msgsnd_access, &access, &process, &object);
 		if (retval == MED_ERR)
 			retval = MED_OK;
-	}
+	} else
+		mad.event = EVENT_MONITORED_N;
 out:
 	/* second argument true: returns with locked IPC object */
 	if (unlikely(ipc_putref(ipcp, true)))
 		/* for now, we don't support error codes */
 		retval = MED_NO;
+#ifdef CONFIG_AUDIT
+	mad.function = __func__;
+	mad.med_answer = retval;
+	cad.medusa_audit_data = &mad;
+	medusa_audit_log_callback(&cad);
+#endif	
 	return retval;
 }
 __initcall(ipc_acctype_msgsnd_init);

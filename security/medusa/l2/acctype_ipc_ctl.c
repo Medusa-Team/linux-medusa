@@ -1,4 +1,5 @@
 #include <linux/medusa/l3/registry.h>
+#include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
 #include <linux/init.h>
@@ -70,10 +71,14 @@ int __init ipc_acctype_ctl_init(void) {
 medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 {
 	medusa_answer_t retval = MED_OK;
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = { .vsi = VSI_NONE , .event = EVENT_UNKNOWN };
 	struct ipc_ctl_access access;
 	struct process_kobject process;
 	struct ipc_kobject object, *object_p = NULL;
 
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
 	/* 'ipcp' is NULL in case of 'cmd': IPC_INFO, MSG_INFO, SEM_INFO, SHM_INFO */
 	if (likely(ipcp)) {
 		/* second argument false: don't need to unlock IPC object */
@@ -88,8 +93,10 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 
 	if (!MED_MAGIC_VALID(&task_security(current)) && process_kobj_validate_task(current) <= 0)
 		goto out;
-
+	mad.med_object = ipc_security(ipcp)->med_object;
+	mad.med_subject = task_security(current)->med_subject;
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_ctl_access, &task_security(current))) {
+		mad.event = EVENT_MONITORED;
 		memset(&access, '\0', sizeof(struct ipc_ctl_access));
 		access.cmd = cmd;
 		access.ipc_class = MED_IPC_UNDEFINED;
@@ -106,7 +113,8 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 		retval = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
 		if (retval == MED_ERR)
 			retval = MED_OK;
-	}
+	} else
+		mad.event = EVENT_MONITORED_N;
 out:
 	if (likely(ipcp)) {
 		/* second argument false: don't need to lock IPC object */
@@ -114,6 +122,12 @@ out:
 			/* for now, we don't support error codes */
 			retval = MED_NO;
 	}
+#ifdef CONFIG_AUDIT
+	mad.function = __func__;
+	mad.med_answer = retval;
+	cad.medusa_audit_data = &mad;
+	medusa_audit_log_callback(&cad);
+#endif
 	return retval;
 }
 __initcall(ipc_acctype_ctl_init);

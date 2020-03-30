@@ -3,6 +3,7 @@
 #include <linux/limits.h>
 #include <linux/init.h>
 #include <linux/mm.h>
+#include <linux/medusa/l2/audit_medusa.h>
 
 #include "kobject_process.h"
 #include "kobject_file.h"
@@ -36,13 +37,19 @@ static medusa_answer_t medusa_do_mknod(struct dentry * parent, struct dentry *de
 medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 {
 	struct path ndcurrent, ndupper, ndparent;
-	medusa_answer_t retval;
+	medusa_answer_t retval = MED_OK;
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
 
 	if (!dentry || IS_ERR(dentry))
 		return MED_OK;
+
+	cad.type = LSM_AUDIT_DATA_DENTRY;
+	cad.u.dentry = dentry;
+
 	if (!MED_MAGIC_VALID(&task_security(current)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		goto audit;
 
 	ndcurrent.dentry = dentry;
 	ndcurrent.mnt = NULL;
@@ -51,19 +58,34 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	if (!MED_MAGIC_VALID(&inode_security(ndparent.dentry->d_inode)) &&
 			file_kobj_validate_dentry(ndparent.dentry,ndparent.mnt) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
-		return MED_OK;
+		goto audit;
 	}
+
+	mad.med_subject = task_security(current)->med_subject;
+	mad.med_object = inode_security(ndparent.dentry->d_inode)->med_object;
+
 	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode))) ||
 		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode)))
 	) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
-		return MED_NO;
-	}
-	if (MEDUSA_MONITORED_ACCESS_O(mknod_access, &inode_security(ndparent.dentry->d_inode)))
+		retval = MED_NO;
+		mad.vsi = VSI_SW_N;
+		goto audit;
+	} else
+		mad.vsi = VSI_SW;
+	if (MEDUSA_MONITORED_ACCESS_O(mknod_access, &inode_security(ndparent.dentry->d_inode))) {
 		retval = medusa_do_mknod(ndparent.dentry, ndupper.dentry, dev, mode);
-	else
-		retval = MED_OK;
+		mad.event = EVENT_MONITORED;
+	} else 
+		mad.event = EVENT_MONITORED_N;
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
+audit:
+#ifdef CONFIG_AUDIT
+	mad.function = __func__;
+	mad.med_answer = retval;
+	cad.medusa_audit_data = &mad;
+	medusa_audit_log_callback(&cad);
+#endif
 	return retval;
 }
 

@@ -3,6 +3,7 @@
 #include <linux/limits.h>
 #include <linux/init.h>
 #include <linux/mm.h>
+#include <linux/medusa/l2/audit_medusa.h>
 
 #include "kobject_process.h"
 #include "kobject_file.h"
@@ -32,23 +33,49 @@ int __init readlink_acctype_init(void) {
 static medusa_answer_t medusa_do_readlink(struct dentry *dentry);
 medusa_answer_t medusa_readlink(struct dentry *dentry)
 {
+	medusa_answer_t retval = MED_OK;
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
+
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
 		return MED_OK;
 
+	cad.type = LSM_AUDIT_DATA_DENTRY;
+	cad.u.dentry = dentry;
+
 	if (!MED_MAGIC_VALID(&task_security(current)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		goto audit;
+
 	if (!MED_MAGIC_VALID(&inode_security(dentry->d_inode)) &&
-			file_kobj_validate_dentry(dentry,NULL) <= 0) {
-		return MED_OK;
-	}
+			file_kobj_validate_dentry(dentry,NULL) <= 0)
+		goto audit;
+	
+	mad.med_subject = task_security(current)->med_subject;
+	mad.med_object = inode_security(dentry->d_inode)->med_object;
+
 	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
 		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(dentry->d_inode)))
-	)
-		return MED_NO;
-	if (MEDUSA_MONITORED_ACCESS_O(readlink_access, &inode_security(dentry->d_inode)))
-		return medusa_do_readlink(dentry);
-	return MED_OK;
+	) {
+		retval = MED_NO;
+		mad.vsi = VSI_SW_N;
+		goto audit;
+	} else
+		mad.vsi = VSI_SW;
+	if (MEDUSA_MONITORED_ACCESS_O(readlink_access, &inode_security(dentry->d_inode))) {
+		retval = medusa_do_readlink(dentry);
+		mad.event = EVENT_MONITORED;
+	} else
+		mad.event = EVENT_MONITORED_N;
+	
+audit:
+#ifdef CONFIG_AUDIT
+	mad.function = __func__;
+	mad.med_answer = retval;
+	cad.medusa_audit_data = &mad;
+	medusa_audit_log_callback(&cad);
+#endif
+	return retval;	
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
