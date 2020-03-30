@@ -51,7 +51,7 @@ medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 {
 	medusa_answer_t retval = MED_OK;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VSI_NONE , .event = EVENT_UNKNOWN };
+	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
 	struct ipc_associate_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;

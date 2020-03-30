@@ -76,7 +76,7 @@ static void medusa_post(struct audit_buffer *ab, void *pcad){
 	} else if (mad->event == EVENT_MONITORED_N) {
 		audit_log_format(ab, "~monitored");
 	} else {
-		audit_log_format(ab, "none");
+		audit_log_format(ab, "unknown");
 	}
 }
 

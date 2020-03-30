@@ -76,10 +76,8 @@ medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 	if (MEDUSA_MONITORED_ACCESS_O(symlink_access, &inode_security(ndparent.dentry->d_inode))) {
 		retval = medusa_do_symlink(ndparent.dentry, ndupper.dentry, oldname);
 		mad.event = EVENT_MONITORED;
-	} else {
-		retval = MED_OK;
+	} else
 		mad.event = EVENT_MONITORED_N;
-	}
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
 audit:
 #ifdef CONFIG_AUDIT
