@@ -39,7 +39,7 @@ medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(afterexec_access, task_security(current))) {
 		process_kern2kobj(&process, current);
@@ -48,7 +48,7 @@ medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 		if (retval != MED_ERR)
 			return retval;
 	}
-	return MED_OK;
+	return MED_ALLOW;
 }
 int medusa_monitored_afterexec(void)
 {

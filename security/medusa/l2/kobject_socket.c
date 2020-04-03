@@ -52,7 +52,7 @@ int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
 		}
 	}
 	sock_kobj->med_object = sk_sec->med_object;
-	return MED_YES;
+	return 0;
 }
 
 static struct socket_kobject storage;
@@ -97,7 +97,7 @@ medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
 		sock = SOCKET_I(inode);
 		socket_kobj2kern(s_kobj, sock);
 		iput(inode);
-		return MED_YES;
+		return MED_ALLOW;
 	}
 
 	return MED_ERR;

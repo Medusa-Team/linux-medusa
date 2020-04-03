@@ -21,7 +21,7 @@ int __init init_process_acctype_init(void) {
 
 medusa_answer_t medusa_init_process(struct task_struct *new)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct init_process access;
 	struct process_kobject process;
 	struct process_kobject parent;
@@ -32,7 +32,7 @@ medusa_answer_t medusa_init_process(struct task_struct *new)
 
 	if (!is_med_magic_valid(&(task_security(new)->med_object)) &&
 		process_kobj_validate_task(new) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	/* inherit from parent if the action isn't monitored? */
 	if (MEDUSA_MONITORED_ACCESS_S(init_process, task_security(new))) {
@@ -40,7 +40,7 @@ medusa_answer_t medusa_init_process(struct task_struct *new)
 		process_kern2kobj(&parent, current);
 		retval = MED_DECIDE(init_process, &access, &process, &parent);
 		if (retval == MED_ERR)
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	}
 	return retval;
 }

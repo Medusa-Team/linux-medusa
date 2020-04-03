@@ -25,13 +25,13 @@ medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *newsock
 	struct socket_kobject sock_kobj;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
-		return MED_YES;
+		return MED_ALLOW;
 	if (!is_med_magic_valid(&(sock_security(sock->sk)->med_object)) && socket_kobj_validate(sock) <= 0)
-		return MED_YES;
+		return MED_ALLOW;
 
 	if (!vs_intersects(VSS(task_security(current)),VS(sock_security(sock->sk))) ||
 		!vs_intersects(VSW(task_security(current)),VS(sock_security(sock->sk))))
-		return MED_ERR;
+		return MED_DENY;
 
 	if (MEDUSA_MONITORED_ACCESS_S(socket_accept_access, task_security(current))) {
 		socket_kern2kobj(&sock_kobj, sock);
@@ -39,7 +39,7 @@ medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *newsock
 
 		return MED_DECIDE(socket_accept_access, &access, &process, &sock_kobj);
 	}
-	return MED_YES;
+	return MED_ALLOW;
 }
 
 __initcall(socket_accept_access_init);

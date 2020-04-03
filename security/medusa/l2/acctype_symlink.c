@@ -35,12 +35,12 @@ static medusa_answer_t medusa_do_symlink(struct dentry * parent, struct dentry *
 medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 {
 	struct path ndcurrent, ndupper, ndparent;
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
 
 	if (!dentry || IS_ERR(dentry))
-		return MED_OK;
+		return MED_ALLOW;
 
 
 	cad.type = LSM_AUDIT_DATA_DENTRY;
@@ -69,7 +69,7 @@ medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 		!vs_intersects(VSW(task_security(current)),VS(inode_security(ndparent.dentry->d_inode)))
 	) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
-		retval = MED_NO;
+		retval = MED_DENY;
 		mad.vsi = VSI_SW_N;
 		goto audit;
 	} else
@@ -116,6 +116,6 @@ static medusa_answer_t medusa_do_symlink(struct dentry * parent, struct dentry *
 	file_kobj_live_remove(parent->d_inode);
 	if (retval != MED_ERR)
 		return retval;
-	return MED_OK;
+	return MED_ALLOW;
 }
 __initcall(symlink_acctype_init);

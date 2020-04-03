@@ -109,7 +109,7 @@ int validate_fuck_link(struct dentry *old_dentry) {
 	//if inode has no protected paths defined, allow hard link alse deny
 	if(hash_empty(inode_security(fuck_inode)->fuck))
 		return 0;
-	return -EPERM;
+	return -EACCES;
 }
 
 static struct medusa_kobject_s * fuck_fetch(struct medusa_kobject_s * kobj)
@@ -144,7 +144,7 @@ static struct medusa_kobject_s * fuck_fetch(struct medusa_kobject_s * kobj)
  *					  'append': add 'path' to allowed access paths for dev/ino
  *
  *	  return values:
- *			  MED_OK:
+ *			  MED_ALLOW:
  *					  - successfully appended/removed path
  *					  - attempt to remove path from empty list
  *					  - attempt to remove non-existing path in list
@@ -167,7 +167,7 @@ static medusa_answer_t fuck_update(struct medusa_kobject_s * kobj)
 	drop_super(sb);
 
 	if (!fuck_inode)
-		return MED_OK;
+		return MED_ALLOW;
 
 	fkobj->path[sizeof(fkobj->path)-1] = '\0';
 	hash = hash_function(fkobj->path);
@@ -196,7 +196,7 @@ static medusa_answer_t fuck_update(struct medusa_kobject_s * kobj)
 
 out:
 	iput(fuck_inode);
-	return MED_OK;
+	return MED_ALLOW;
 }
 
 MED_KCLASS(fuck_kobject) {

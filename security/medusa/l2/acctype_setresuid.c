@@ -33,14 +33,14 @@ medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 {
 	struct setresuid access;
 	struct process_kobject process;
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 
         memset(&access, '\0', sizeof(struct setresuid));
         /* process_kobject process is zeroed by process_kern2kobj function */
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(setresuid, task_security(current))) {
 		access.ruid = ruid;
@@ -49,7 +49,7 @@ medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(setresuid, &access, &process, &process);
 		if (retval == MED_ERR)
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	}
 
 	return retval;

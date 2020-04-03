@@ -52,7 +52,7 @@ int __init ipc_acctype_semop_init(void) {
  */
 medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops, unsigned nsops, int alter)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .vsi = VSI_NONE , .event = EVENT_UNKNOWN };
 	struct ipc_semop_access access;
@@ -62,7 +62,7 @@ medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops
 	/* second argument false: don't need to unlock IPC object */
 	if (unlikely(ipc_getref(ipcp, false)))
 		/* for now, we don't support error codes */
-		return MED_NO;
+		return MED_DENY;
 
 	cad.type = LSM_AUDIT_DATA_IPC;
 	cad.u.ipc_id = ipcp->key;
@@ -92,14 +92,14 @@ medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops
 
 		retval = MED_DECIDE(ipc_semop_access, &access, &process, &object);
 		if (retval == MED_ERR)
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	} else
 		mad.event = EVENT_MONITORED_N;
 out:
 	/* second argument false: don't need to lock IPC object */
 	if (unlikely(ipc_putref(ipcp, false)))
 		/* for now, we don't support error codes */
-		retval = MED_NO;
+		retval = MED_DENY;
 #ifdef CONFIG_AUDIT
 	mad.function = __func__;
 	mad.med_answer = retval;

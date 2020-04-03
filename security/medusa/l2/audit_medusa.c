@@ -7,17 +7,17 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad){
 
 	audit_log_format(ab,"medusa {op=%s answer=",mad->function);
 	switch (mad->med_answer) {
-	case MED_OK:
-		audit_log_format(ab,"MED_OK ");
+	case MED_ALLOW:
+		audit_log_format(ab,"MED_ALLOW ");
 		break;
-	case MED_SKIP:
-		audit_log_format(ab,"MED_SKIP ");
+	case MED_DENY:
+		audit_log_format(ab,"MED_DENY ");
 		break;
-	case MED_NO:
-		audit_log_format(ab,"MED_NO ");
+	case MED_FAKE_ALLOW:
+		audit_log_format(ab,"MED_FAKE_ALLOW ");
 		break;
-	case MED_YES:
-		audit_log_format(ab,"MED_YES ");
+	case MED_FORCE_ALLOW:
+		audit_log_format(ab,"MED_FORCE_ALLOW ");
 		break;
 	case MED_ERR:
 		audit_log_format(ab,"MED_ERR ");

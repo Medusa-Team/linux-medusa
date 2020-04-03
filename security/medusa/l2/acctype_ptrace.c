@@ -37,15 +37,15 @@ medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * 
 
 	if (!is_med_magic_valid(&(task_security(tracer)->med_object)) &&
 		process_kobj_validate_task(tracer) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(tracee)->med_object)) &&
 		process_kobj_validate_task(tracee) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (!vs_intersects(VSS(task_security(tracer)), VS(task_security(tracee))) ||
 		!vs_intersects(VSW(task_security(tracer)), VS(task_security(tracee))))
-		return MED_NO;
+		return MED_DENY;
 	if (MEDUSA_MONITORED_ACCESS_S(ptrace_access, task_security(tracer))) {
 		process_kern2kobj(&tracer_p, tracer);
 		process_kern2kobj(&tracee_p, tracee);
@@ -53,6 +53,6 @@ medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * 
 		if (retval != MED_ERR)
 			return retval;
 	}
-	return MED_OK;
+	return MED_ALLOW;
 }
 __initcall(ptrace_acctype_init);

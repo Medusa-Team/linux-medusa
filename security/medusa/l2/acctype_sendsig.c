@@ -44,10 +44,10 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
         /* process_kobject receiver is zeroed by process_kern2kobj function */
 
 	if (in_interrupt())
-		return MED_OK;
+		return MED_ALLOW;
 	/* always allow signals coming from kernel - see kernel/signal.c:send_signalnal() */
 	if (info == SEND_SIG_PRIV)
-		return MED_OK;
+		return MED_ALLOW;
 	/*
 	if (info) switch (info->si_code) {
 		case CLD_TRAPPED:
@@ -56,20 +56,20 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
 		case CLD_KILLED:
 		case CLD_EXITED:
 		case SI_KERNEL:
-			return MED_OK;
+			return MED_ALLOW;
 	}
 	*/
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(p)->med_object)) &&
 		process_kobj_validate_task(p) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (!vs_intersects(VSS(task_security(current)), VS(task_security(p))) ||
 			!vs_intersects(VSW(task_security(current)), VS(task_security(p))))
-		return MED_NO;
+		return MED_DENY;
 
 	if (MEDUSA_MONITORED_ACCESS_S(send_signal, task_security(current))) {
 		access.signal_number = sig;
@@ -79,7 +79,7 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
 		if (retval != MED_ERR)
 			return retval;
 	}
-	return MED_OK;
+	return MED_ALLOW;
 }
 
 __initcall(sendsig_acctype_init);

@@ -17,9 +17,8 @@
 
 #include "kobject_process.h"
 
-medusa_answer_t process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
+int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 {
-	// ts->pgrp = tk->pgrp;
 	struct cred* new = (struct cred*)ts->cred;
 	struct medusa_l1_task_s *ts_security = task_security(ts);
 	kuid_t tsuid;
@@ -30,7 +29,7 @@ medusa_answer_t process_kobj2kern(struct process_kobject *tk, struct task_struct
 
 		new_user = alloc_uid(tk->uid);
 		if (!new_user)
-			return MED_SKIP;
+			return -1;
 		old_user = find_user(tsuid);
 		atomic_dec(&old_user->processes);
 		atomic_inc(&new_user->processes);
@@ -59,7 +58,7 @@ medusa_answer_t process_kobj2kern(struct process_kobject *tk, struct task_struct
 	memcpy(ts_security->med_syscall, tk->med_syscall, sizeof(ts_security->med_syscall));
 #endif
 	med_magic_validate(&(ts_security->med_object));
-	return MED_OK;
+	return 0;
 }
 
 /*
@@ -85,10 +84,6 @@ int process_kern2kobj(struct process_kobject * tk, struct task_struct * ts)
 	tk->ecap = task_cap_effective(ts);
 	tk->icap = task_cap_inheritable(ts);
 	tk->pcap = task_cap_permitted(ts);
-
-	//unsigned __capi;
-	//CAP_FOR_EACH_U32(__capi)
-	//	med_pr_debug("MEDUSA: ECAP[%d]=%08x\n", __capi, (tk->ecap).cap[CAP_LAST_U32 - __capi]);
 
 	tk->luid = ts_security->luid;
 	tk->med_subject = ts_security->med_subject;
@@ -137,8 +132,6 @@ MED_ATTRS(process_kobject) {
 
 	MED_ATTR_END
 };
-
-// static struct process_kobject storage;
 
 struct task_struct* find_task_by_pid(pid_t pid) {
 	return pid_task(find_vpid(pid), PIDTYPE_PID);

@@ -46,9 +46,9 @@ medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inod
  * @mask: mask of access rights to validate
  *
  */
-medusa_answer_t medusa_permission(struct inode * inode, int mask)
+medusa_answer_t medusa_permission(struct inode *inode, int mask)
 {
-	medusa_answer_t retval = MED_YES;
+	medusa_answer_t retval = MED_ALLOW;
 	struct dentry * dentry;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
@@ -78,7 +78,7 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 		( (mask & S_IWUGO) &&
 		  	!vs_intersects(VSW(task_security(current)),VS(inode_security(inode))) )
 	   ) {
-		retval = -EACCES;// ??? audit Q
+		retval = MED_DENY;
 		mad.vsi = VSI_SRW_N;
 		goto audit;
 	} else
@@ -118,8 +118,6 @@ medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inod
 	file_kobj_live_add(inode);
 	retval = MED_DECIDE(permission_access, &access, &process, &file);
 	file_kobj_live_remove(inode);
-	if (retval == MED_NO)
-		return -EACCES;
-	return MED_YES;
+	return retval;
 }
 __initcall(permission_acctype_init);

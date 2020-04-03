@@ -49,29 +49,29 @@ medusa_answer_t medusa_exec(struct dentry ** dentryp)
 	medusa_answer_t retval;
 
 	if (!*dentryp || IS_ERR(*dentryp) || !(*dentryp)->d_inode)
-		return MED_OK;
+		return MED_ALLOW;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security((*dentryp)->d_inode)->med_object)) &&
 
 			file_kobj_validate_dentry(*dentryp,NULL) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 	if (!vs_intersects(VSS(task_security(current)),VS(inode_security((*dentryp)->d_inode))) ||
 		!vs_intersects(VSR(task_security(current)),VS(inode_security((*dentryp)->d_inode)))
 	)
-		return MED_NO;
+		return MED_DENY;
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current))) {
 		retval = medusa_do_pexec(*dentryp);
-		if (retval == MED_NO)
+		if (retval == MED_DENY)
 			return retval;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(exec_faccess, inode_security((*dentryp)->d_inode))) {
 		retval = medusa_do_fexec(*dentryp);
 		return retval;
 	}
-	return MED_OK;
+	return MED_ALLOW;
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
@@ -94,7 +94,7 @@ static medusa_answer_t medusa_do_fexec(struct dentry * dentry)
 	file_kobj_live_remove(dentry->d_inode);
 	if (retval != MED_ERR)
 		return retval;
-	return MED_OK;
+	return MED_ALLOW;
 }
 static medusa_answer_t medusa_do_pexec(struct dentry *dentry)
 {
@@ -110,7 +110,7 @@ static medusa_answer_t medusa_do_pexec(struct dentry *dentry)
 	retval = MED_DECIDE(exec_paccess, &access, &process, &file);
 	file_kobj_live_remove(dentry->d_inode);
 	if (retval == MED_ERR)
-		retval = MED_OK;
+		retval = MED_ALLOW;
 	return retval;
 }
 int medusa_monitored_pexec(void)

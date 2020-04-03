@@ -25,7 +25,7 @@ int __init fork_acctype_init(void) {
 
 medusa_answer_t medusa_fork(unsigned long clone_flags)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct fork_access access;
 	struct process_kobject parent;
 
@@ -34,14 +34,14 @@ medusa_answer_t medusa_fork(unsigned long clone_flags)
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_OK;
+		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(fork_access, task_security(current))) {
 		access.clone_flags = clone_flags;
 		process_kern2kobj(&parent, current);
 		retval = MED_DECIDE(fork_access, &access, &parent, &parent);
 		if (retval == MED_ERR)
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	}
 	return retval;
 }

@@ -55,7 +55,7 @@ static medusa_answer_t force_update(struct medusa_kobject_s * kobj)
 		((struct force_kobject *)kobj)->code[3]
 	);
 	task_security(p).force_code = buf;
-	retval = MED_OK;
+	retval = MED_ALLOW;
 	goto out_unlock;
 out_kfree:
 	kfree(buf);

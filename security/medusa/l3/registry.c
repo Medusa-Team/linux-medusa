@@ -34,12 +34,11 @@ static int mystrcmp(char * p1, char * p2)
  * This increments the use-count; works great even if you want to sleep.
  * when calling this function, the use-count must already be non-zero.
  */
-medusa_answer_t med_get_kclass(struct medusa_kclass_s * ptr)
+void med_get_kclass(struct medusa_kclass_s * ptr)
 {
 	MED_LOCK_W(usecount_lock);
 	ptr->use_count++;
 	MED_UNLOCK_W(usecount_lock);
-	return MED_OK;
 }
 
 /**
@@ -144,13 +143,13 @@ struct medusa_kclass_s * med_get_kclass_by_pointer(struct medusa_kclass_s * ptr)
  * No new servers and/or event types will be able to attach to the kclass,
  * and it waits for its final deletion by med_unregister_kclass().
  *
- * callers, who call med_unlink_kclass and get MED_OK, should really call
+ * callers, who call med_unlink_kclass and get MED_ALLOW, should really call
  * med_unregister_kclass soon.
  */
- 
-medusa_answer_t med_unlink_kclass(struct medusa_kclass_s * ptr)
+
+int med_unlink_kclass(struct medusa_kclass_s * ptr)
 {
-	int retval = MED_OK;
+	int retval = 0;
 	struct medusa_kclass_s * tmp;
 
 	MED_LOCK_W(registry_lock);
@@ -167,7 +166,7 @@ medusa_answer_t med_unlink_kclass(struct medusa_kclass_s * ptr)
 		/* TODO: verify whether we found it! */
 		ptr->next = NULL;
 	} else
-		retval = MED_ERR;
+		retval = -1;
 	MED_UNLOCK_R(usecount_lock);
 	MED_UNLOCK_W(registry_lock);
 	return retval;
@@ -184,7 +183,7 @@ medusa_answer_t med_unlink_kclass(struct medusa_kclass_s * ptr)
  *
  * The callbacks called from here may sleep.
  */
-void med_unregister_kclass(struct medusa_kclass_s * ptr)
+int med_unregister_kclass(struct medusa_kclass_s * ptr)
 {
 	med_pr_info("Unregistering kclass %s\n", ptr->name);
 	MED_LOCK_R(registry_lock);
@@ -193,15 +192,16 @@ void med_unregister_kclass(struct medusa_kclass_s * ptr)
 		med_pr_crit("A fatal ERROR has occured; expect system crash. If you're removing a file-related kclass, press reset. Otherwise save now.\n");
 		MED_UNLOCK_R(usecount_lock);
 		MED_UNLOCK_R(registry_lock);
-		return;
+		return -1;
 	}
 	MED_UNLOCK_R(usecount_lock);
 	MED_UNLOCK_R(registry_lock);
 	if (authserver && authserver->del_kclass)
 		authserver->del_kclass(ptr);
 	/* FIXME: this isn't safe. add use-count to authserver too... */
+	return 0;
 }
- 
+
 /**
  * med_register_kclass - register a kclass of k-objects and notify the authserver
  * @ptr: pointer to the kclass to register

@@ -8,11 +8,11 @@
 
 medusa_answer_t med_decide(struct medusa_evtype_s * evtype, void * event, void * o1, void * o2)
 {
-	int retval;
+	medusa_answer_t retval;
 	struct medusa_authserver_s * authserver;
 
 	if (ARCH_CANNOT_DECIDE(evtype))
-		return MED_OK;
+		return MED_ALLOW;
 
 	MED_LOCK_W(registry_lock);
 #ifdef CONFIG_MEDUSA_PROFILING
@@ -27,7 +27,7 @@ medusa_answer_t med_decide(struct medusa_evtype_s * evtype, void * event, void *
 		if (evtype->arg_kclass[1]->unmonitor)
 			evtype->arg_kclass[1]->unmonitor((struct medusa_kobject_s *) o2);
 		MED_UNLOCK_W(registry_lock);
-		return MED_OK;
+		return MED_ALLOW;
 	}
 	MED_UNLOCK_W(registry_lock);
 

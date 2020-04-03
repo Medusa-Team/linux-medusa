@@ -4,7 +4,7 @@
  *
  * This program comes with both BSD and GNU GPL v2 licenses. Check the
  * documentation for more information.
- * 
+ *
  *
  * This server communicates with an user-space
  * authorization daemon, using a character device
@@ -386,7 +386,7 @@ static int l4_add_kclass(struct medusa_kclass_s * cl)
 	up(&queue_items);
 	wake_up(&userspace_chardev);
 	MED_UNLOCK_W(registration_lock);
-	return MED_YES;
+	return 0;
 }
 
 static int l4_add_evtype(struct medusa_evtype_s * at)
@@ -442,7 +442,7 @@ static int l4_add_evtype(struct medusa_evtype_s * at)
 	up(&queue_items);
 	wake_up(&userspace_chardev);
 	MED_UNLOCK_W(registration_lock);
-	return MED_YES;
+	return 0;
 }
 
 inline static void ls_lock(lightswitch_t* ls, struct semaphore* sem) {
@@ -472,7 +472,7 @@ inline static void ls_unlock(lightswitch_t* ls, struct semaphore* sem) {
 static medusa_answer_t l4_decide(struct medusa_event_s * event,
 		struct medusa_kobject_s * o1, struct medusa_kobject_s * o2)
 {
-	int retval;
+	medusa_answer_t retval;
 	teleport_insn_t tele_mem_decide[6];
 	struct tele_item *local_tele_item;
 	struct waitlist_item local_waitlist_item;
@@ -483,7 +483,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 		return MED_ERR;
 	}
 	if (am_i_constable() || current == gdb) {
-		return MED_OK;
+		return MED_ALLOW;
 	}
 
 	if (current->pid < 1) {
@@ -491,7 +491,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 	}
 #ifdef GDB_HACK
 	if (gdb_pid == current->pid) {
-		return MED_OK;
+		return MED_ALLOW;
 	}
 #endif
 

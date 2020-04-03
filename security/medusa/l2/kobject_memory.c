@@ -20,7 +20,7 @@
 
 struct memory_kobject {
 	pid_t  pid;		/* pid of process to read/write */
-	void * address;		/* address for read/write */
+	void *address;		/* address for read/write */
 	size_t size;		/* size of the data, must be <= 512 */
 	ssize_t retval;		/* either the size of data, or errno */
 	char data[512];		/* data to be written, or data read */
@@ -66,7 +66,7 @@ int __init memory_kobject_init(void)
 /* After this is called, and returns 0, memory_kobject_rmmod should be. */
 static int __exit memory_kobject_unload_check(void)
 {
-	if (med_unlink_kclass(&MED_KCLASSOF(memory_kobject)) != MED_OK)
+	if (med_unlink_kclass(&MED_KCLASSOF(memory_kobject)) != 0)
 		return -EBUSY;
 	return 0;
 }
@@ -81,7 +81,7 @@ module_exit(memory_kobject_rmmod);
 /* quoting the comment in module.h:
  *
  * There are dual licensed components, but when running with Linux it is the
- * GPL that is relevant so this is a non issue. 
+ * GPL that is relevant so this is a non issue.
  */
 MODULE_LICENSE("GPL");
 
@@ -89,10 +89,10 @@ MODULE_LICENSE("GPL");
 
 // static struct memory_kobject storage;
 
-static struct medusa_kobject_s * memory_fetch(struct medusa_kobject_s * key_obj)
+static struct medusa_kobject_s *memory_fetch(struct medusa_kobject_s *key_obj)
 {
 	int ret;
-	struct task_struct * p;
+	struct task_struct *p;
 	struct memory_kobject* kobj = (struct memory_kobject *) key_obj;
 
 	rcu_read_lock();
@@ -113,10 +113,10 @@ static struct medusa_kobject_s * memory_fetch(struct medusa_kobject_s * key_obj)
 	return key_obj;
 }
 
-static medusa_answer_t memory_update(struct medusa_kobject_s * kobj)
+static medusa_answer_t memory_update(struct medusa_kobject_s *kobj)
 {
 	int ret;
-	struct task_struct * p;
+	struct task_struct *p;
 
 	rcu_read_lock();
 	//p = find_task_by_pid(((struct memory_kobject *) kobj)->pid);
@@ -133,7 +133,7 @@ static medusa_answer_t memory_update(struct medusa_kobject_s * kobj)
 		//free_task_struct(p);
 		free_task(p);
 		return (ret == ((struct memory_kobject *) kobj)->size) ?
-			MED_OK : MED_ERR;
+			MED_ALLOW : MED_ERR;
 	}
 	rcu_read_unlock();
 	return MED_ERR;

@@ -67,7 +67,7 @@ int __init cstrmem_kobject_init(void)
 /* After this is called, and returns 0, cstrmem_kobject_rmmod should be. */
 static int __exit cstrmem_kobject_unload_check(void)
 {
-	if (med_unlink_kclass(&MED_KCLASSOF(cstrmem_kobject)) != MED_OK)
+	if (med_unlink_kclass(&MED_KCLASSOF(cstrmem_kobject)) != MED_ALLOW)
 		return -EBUSY;
 	return 0;
 }

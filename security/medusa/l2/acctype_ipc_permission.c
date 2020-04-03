@@ -57,7 +57,7 @@ int __init ipc_acctype_init(void) {
  */
 medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .vsi = VSI_NONE , .event = EVENT_UNKNOWN };
 	struct ipc_perm_access access;
@@ -103,8 +103,8 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 		 * determine, whether the spinlock can be or not (un)locked.
 		 *
 		 * We should return MED_ERR, because Medusa subsystem can't make a decision,
-		 * but this value has to be converted to MED_OK, so function directly
-		 * returns MED_OK.
+		 * but this value has to be converted to MED_ALLOW, so function directly
+		 * returns MED_ALLOW.
 		 *
 		 * Note:
 		 * Yes, due to nondeterministic behaviour of IPC object's spinlock
@@ -123,7 +123,7 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	 */
 	if (unlikely(ipc_getref(ipcp, use_locking)))
 		/* for now, we don't support error codes */
-		return MED_NO;
+		return MED_DENY;
 
 
 	cad.type = LSM_AUDIT_DATA_IPC;
@@ -150,7 +150,7 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 
 		retval = MED_DECIDE(ipc_perm_access, &access, &process, &object);
 		if (retval == MED_ERR)
-			retval = MED_OK;
+			retval = MED_ALLOW;
 	} else
 		mad.event = EVENT_MONITORED_N;
 out:
@@ -161,7 +161,7 @@ out:
 	 */
 	if (unlikely(ipc_putref(ipcp, use_locking)))
 		/* for now, we don't support error codes */
-		retval = MED_NO;
+		retval = MED_DENY;
 #ifdef CONFIG_AUDIT
 	mad.function = __func__;
 	mad.med_answer = retval;

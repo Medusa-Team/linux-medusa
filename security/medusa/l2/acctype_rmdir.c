@@ -34,7 +34,7 @@ int __init rmdir_acctype_init(void) {
 static medusa_answer_t medusa_do_rmdir(struct dentry *dentry);
 medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
 
@@ -57,7 +57,7 @@ medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
 		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
 	) {
-		retval = MED_NO;
+		retval = MED_DENY;
 		mad.vsi = VSI_SW_N;
 		goto audit;
 	} else
@@ -98,6 +98,6 @@ static medusa_answer_t medusa_do_rmdir(struct dentry *dentry)
 	file_kobj_live_remove(dentry->d_inode);
 	if (retval != MED_ERR)
 		return retval;
-	return MED_OK;
+	return MED_ALLOW;
 }
 __initcall(rmdir_acctype_init);

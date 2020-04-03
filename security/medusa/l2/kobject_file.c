@@ -205,7 +205,7 @@ static medusa_answer_t file_update(struct medusa_kobject_s * kobj)
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
 	if (p) {
 		file_kobj2kern((struct file_kobject *)kobj, p);
-		retval = MED_OK;
+		retval = MED_ALLOW;
 	}
 	__unlookup();
 	return retval;

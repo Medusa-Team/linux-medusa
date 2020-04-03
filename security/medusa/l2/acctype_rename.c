@@ -34,12 +34,12 @@ int __init rename_acctype_init(void) {
 static medusa_answer_t medusa_do_rename(struct dentry *dentry, const char * newname);
 medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 {
-	medusa_answer_t retval = MED_OK;
+	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
 
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
-		return MED_OK;
+		return MED_ALLOW;
 
 	cad.type = LSM_AUDIT_DATA_DENTRY;
 	cad.u.dentry = dentry;
@@ -57,14 +57,13 @@ medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
 		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
 	) {
-		retval = MED_NO;
+		retval = MED_DENY;
 		mad.vsi = VSI_SW_N;
 		goto audit;
 	} else 
 		mad.vsi = VSI_SW;
 
 #warning FIXME - add target directory checking
-	retval = MED_OK;
 	if (MEDUSA_MONITORED_ACCESS_O(rename_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_rename(dentry,newname);
 		mad.event = EVENT_MONITORED;
@@ -107,6 +106,6 @@ static medusa_answer_t medusa_do_rename(struct dentry *dentry, const char * newn
 	file_kobj_live_remove(dentry->d_inode);
 	if (retval != MED_ERR)
 		return retval;
-	return MED_OK;
+	return MED_ALLOW;
 }
 __initcall(rename_acctype_init);

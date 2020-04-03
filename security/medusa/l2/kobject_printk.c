@@ -24,7 +24,7 @@ static medusa_answer_t printk_update(struct medusa_kobject_s * kobj)
 {
 	((struct printk_kobject *) kobj)->message[sizeof(((struct printk_kobject *) kobj)->message)-1] = '\0';
 	med_pr_debug("%s",((struct printk_kobject *) kobj)->message);
-	return MED_OK;
+	return MED_ALLOW;
 }
 
 MED_KCLASS(printk_kobject) {
@@ -54,7 +54,7 @@ int __init printk_kobject_init(void) {
 /* After this is called, and returns 0, printk_kobject_rmmod should be. */
 static int __exit printk_kobject_unload_check(void)
 {
-	if (med_unlink_kclass(&MED_KCLASSOF(printk_kobject)) != MED_OK)
+	if (med_unlink_kclass(&MED_KCLASSOF(printk_kobject)) != MED_ALLOW)
 		return -EBUSY;
 	return 0;
 }
