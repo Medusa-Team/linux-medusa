@@ -91,6 +91,7 @@ modules.order
 !.gitattributes
 !.gitignore
 !.mailmap
+!.kunitconfig
 
 #
 # Generated include files

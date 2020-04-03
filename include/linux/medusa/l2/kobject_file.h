@@ -14,8 +14,7 @@
 #ifndef _INODE_KOBJECT_H
 #define _INODE_KOBJECT_H
 
-//#include <medusa/l1/inode.h>
-#include <linux/fs.h>		/* contains all includes we need ;) */
+#include <linux/fs.h>
 #include <linux/medusa/l3/kobject.h>
 
 struct file_kobject { /* was: m_inode_inf */
@@ -24,7 +23,7 @@ struct file_kobject { /* was: m_inode_inf */
  * As a preparation for the total deletion of device numbers,
  * we introduce a type unsigned long to hold them. No information about
  * this type is known outside of this include file.
- * 
+ *
  * ... for more folklore read the comment in kdev_t.h ;)
  */
 	unsigned long dev;
@@ -35,13 +34,13 @@ struct file_kobject { /* was: m_inode_inf */
 	uid_t uid;
 	gid_t gid;
 	unsigned long rdev;
-	
-	MEDUSA_OBJECT_VARS;
+
+	struct medusa_object_s med_object;
 
 	__u32 user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
-	kernel_cap_t icap;	/* support for Linux capabilities */
-	kernel_cap_t pcap; 
+	kernel_cap_t icap;
+	kernel_cap_t pcap;
 	kernel_cap_t ecap;
 #endif /* CONFIG_MEDUSA_FILE_CAPABILITIES */
 };
@@ -49,7 +48,7 @@ extern MED_DECLARE_KCLASSOF(file_kobject);
 
 struct file_sub_kobject { /* the 'subject' view... */
 	struct file_kobject f;
-	MEDUSA_SUBJECT_VARS;
+	struct medusa_subject_s med_subject;
 };
 extern MED_DECLARE_KCLASSOF(file_sub_kobject);
 

@@ -76,15 +76,15 @@ medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 	cad.type = LSM_AUDIT_DATA_IPC;
 	cad.u.ipc_id = ipcp->key;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!MED_MAGIC_VALID(ipc_security(ipcp)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	mad.med_subject = task_security(current)->med_subject;
 	mad.med_object = ipc_security(ipcp)->med_object;
 
-	if (MEDUSA_MONITORED_ACCESS_S(ipc_msgrcv_access, &task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(ipc_msgrcv_access, task_security(current))) {
 		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */

@@ -33,7 +33,7 @@ int __init mknod_acctype_init(void) {
 	return 0;
 }
 
-static medusa_answer_t medusa_do_mknod(struct dentry * parent, struct dentry *dentry, dev_t dev, int mode);
+static medusa_answer_t medusa_do_mknod(struct dentry *parent, struct dentry *dentry, dev_t dev, int mode);
 medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 {
 	struct path ndcurrent, ndupper, ndparent;
@@ -47,7 +47,7 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	cad.type = LSM_AUDIT_DATA_DENTRY;
 	cad.u.dentry = dentry;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		goto audit;
 
@@ -55,7 +55,7 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	ndcurrent.mnt = NULL;
 	medusa_get_upper_and_parent(&ndcurrent,&ndupper,&ndparent);
 
-	if (!MED_MAGIC_VALID(&inode_security(ndparent.dentry->d_inode)) &&
+	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(ndparent.dentry,ndparent.mnt) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		goto audit;
@@ -64,16 +64,15 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	mad.med_subject = task_security(current)->med_subject;
 	mad.med_object = inode_security(ndparent.dentry->d_inode)->med_object;
 
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(ndparent.dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(ndparent.dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)),VS(inode_security(ndparent.dentry->d_inode)))
 	) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		retval = MED_NO;
 		mad.vsi = VSI_SW_N;
 		goto audit;
-	} else
-		mad.vsi = VSI_SW;
-	if (MEDUSA_MONITORED_ACCESS_O(mknod_access, &inode_security(ndparent.dentry->d_inode))) {
+	}
+	if (MEDUSA_MONITORED_ACCESS_O(mknod_access, inode_security(ndparent.dentry->d_inode)))
 		retval = medusa_do_mknod(ndparent.dentry, ndupper.dentry, dev, mode);
 		mad.event = EVENT_MONITORED;
 	} else 
@@ -90,7 +89,7 @@ audit:
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_mknod(struct dentry * parent, struct dentry *dentry, dev_t dev, int mode)
+static medusa_answer_t medusa_do_mknod(struct dentry *parent, struct dentry *dentry, dev_t dev, int mode)
 {
 	struct mknod_access access;
 	struct process_kobject process;

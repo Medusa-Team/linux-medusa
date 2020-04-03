@@ -3,12 +3,12 @@
 #include <linux/syscalls.h>
 #include <../../../ipc/util.h>	// FIXME FIXME FIXME TODO
 #include <linux/medusa/l3/kobject.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l3/constants.h>
 #include <linux/medusa/l1/ipc.h>
 
-#define ipc_security(ipc) ((struct medusa_l1_ipc_s*)(ipcp->security))
+#define ipc_security(ipc) ((struct medusa_l1_ipc_s*)(ipc->security))
 
 /*
  * medusa_ipc_perm - struct holding relevant entries from 'kern_ipc_perm' (see linux/ipc.h)
@@ -32,10 +32,10 @@ struct medusa_ipc_perm {
  * @ipc_class - type of System V IPC (sem, or msg, or shm)
  * @ipc_perm - copy of relevant entries from kernel IPC permission structure
  */
-struct ipc_kobject {	
+struct ipc_kobject {
 	unsigned int ipc_class;
 	struct medusa_ipc_perm ipc_perm;
-	MEDUSA_OBJECT_VARS;
+	struct medusa_object_s med_object;
 };
 extern MED_DECLARE_KCLASSOF(ipc_kobject);
 

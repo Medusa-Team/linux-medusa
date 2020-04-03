@@ -15,14 +15,14 @@ int file_kobj2kern(struct file_kobject * fk, struct inode * inode)
 	inode->i_mode = fk->mode;
 	inode->i_uid = fk->uid;
 	inode->i_gid = fk->gid;
-	COPY_MEDUSA_OBJECT_VARS(&inode_security(inode), fk);
-	inode_security(inode).user = fk->user;
+	inode_security(inode)->med_object = fk->med_object;
+	inode_security(inode)->user = fk->user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
-	inode_security(inode).ecap = fk->ecap;
-	inode_security(inode).icap = fk->icap;
-	inode_security(inode).pcap = fk->pcap;
+	inode_security(inode)->ecap = fk->ecap;
+	inode_security(inode)->icap = fk->icap;
+	inode_security(inode)->pcap = fk->pcap;
 #endif /* CONFIG_MEDUSA_FILE_CAPABILITIES */
-	MED_MAGIC_VALIDATE(&inode_security(inode));
+	med_magic_validate(&(inode_security(inode)->med_object));
 	return 0;
 }
 
@@ -40,12 +40,12 @@ int file_kern2kobj(struct file_kobject * fk, struct inode * inode)
 	fk->uid = inode->i_uid;
 	fk->gid = inode->i_gid;
 	fk->rdev = (inode->i_rdev);
-	COPY_MEDUSA_OBJECT_VARS(fk, &inode_security(inode));
-	fk->user = inode_security(inode).user;
+	fk->med_object = inode_security(inode)->med_object;
+	fk->user = inode_security(inode)->user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
-	fk->ecap = inode_security(inode).ecap;
-	fk->icap = inode_security(inode).icap;
-	fk->pcap = inode_security(inode).pcap;
+	fk->ecap = inode_security(inode)->ecap;
+	fk->icap = inode_security(inode)->icap;
+	fk->pcap = inode_security(inode)->pcap;
 #endif /* CONFIG_MEDUSA_FILE_CAPABILITIES */
 	return 0;
 }
@@ -91,32 +91,32 @@ void file_kobj_live_add(struct inode * ino)
 	struct inode * tmp;
 
 	write_lock(&live_lock);
-	for (tmp = live_inodes; tmp; tmp = inode_security(tmp).next_live)
+	for (tmp = live_inodes; tmp; tmp = inode_security(tmp)->next_live)
 		if (tmp == ino) {
-			inode_security(tmp).use_count++;
+			inode_security(tmp)->use_count++;
 			write_unlock(&live_lock);
 			return;
 		}
-	inode_security(ino).next_live = live_inodes;
-	inode_security(ino).use_count = 1;
+	inode_security(ino)->next_live = live_inodes;
+	inode_security(ino)->use_count = 1;
 	live_inodes = ino;
 	write_unlock(&live_lock);
 }
-void file_kobj_live_remove(struct inode * ino)
+void file_kobj_live_remove(struct inode *ino)
 {
-	struct inode * tmp;
+	struct inode *tmp;
 
 	write_lock(&live_lock);
-	if (--inode_security(ino).use_count)
+	if (--inode_security(ino)->use_count)
 		goto out;
 	if (ino == live_inodes) {
-		live_inodes = inode_security(ino).next_live;
+		live_inodes = inode_security(ino)->next_live;
 		write_unlock(&live_lock);
 		return;
 	}
-	for (tmp = live_inodes; inode_security(tmp).next_live; tmp = inode_security(tmp).next_live)
-		if (inode_security(tmp).next_live == ino) {
-			inode_security(tmp).next_live = inode_security(ino).next_live;
+	for (tmp = live_inodes; inode_security(tmp)->next_live; tmp = inode_security(tmp)->next_live)
+		if (inode_security(tmp)->next_live == ino) {
+			inode_security(tmp)->next_live = inode_security(ino)->next_live;
 			break;
 		}
 out:
@@ -158,7 +158,7 @@ static inline struct inode * __lookup_inode_by_key(struct file_kobject * key_obj
 	struct inode * p;
 
 	read_lock(&live_lock);
-	for (p = live_inodes; p; p = inode_security(p).next_live)
+	for (p = live_inodes; p; p = inode_security(p)->next_live)
 		if (p->i_ino == key_obj->ino)
 			if (p->i_sb->s_dev == key_obj->dev)
 				break;
@@ -191,8 +191,8 @@ static void file_unmonitor(struct medusa_kobject_s * kobj)
 
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
 	if (p) {
-		UNMONITOR_MEDUSA_OBJECT_VARS(&inode_security(p));
-		MED_MAGIC_VALIDATE(&inode_security(p));
+		unmonitor_med_object(&(inode_security(p)->med_object));
+		med_magic_validate(&(inode_security(p)->med_object));
 	}
 	__unlookup();
 }

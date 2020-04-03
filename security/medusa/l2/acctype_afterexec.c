@@ -37,11 +37,11 @@ medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
         memset(&access, '\0', sizeof(struct afterexec_access));
         /* process_kobject process is zeroed by process_kern2kobj function */
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (MEDUSA_MONITORED_ACCESS_S(afterexec_access, &task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(afterexec_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(afterexec_access, &access,
 				&process, &process);
@@ -52,16 +52,16 @@ medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 }
 int medusa_monitored_afterexec(void)
 {
-	return MEDUSA_MONITORED_ACCESS_S(afterexec_access, &task_security(current));
+	return MEDUSA_MONITORED_ACCESS_S(afterexec_access, task_security(current));
 }
 
 void medusa_monitor_afterexec(int flag)
 {
 	if (flag)
 		MEDUSA_MONITOR_ACCESS_S(afterexec_access,
-				&task_security(current));
+				task_security(current));
 	else
 		MEDUSA_UNMONITOR_ACCESS_S(afterexec_access,
-				&task_security(current));
+				task_security(current));
 }
 __initcall(afterexec_acctype_init);

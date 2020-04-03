@@ -56,8 +56,8 @@
 #include <linux/posix-timers.h>
 #include <linux/cred.h>
 #include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/inode.h> 
-#include <linux/medusa/l1/ipc.h> 
+#include <linux/medusa/l1/inode.h>
+#include <linux/medusa/l1/ipc.h>
 #include <linux/medusa/l4/comm.h>
 #include <linux/medusa/l1/file_handlers.h>
 #include <linux/medusa/l1/task.h>
@@ -219,7 +219,7 @@ int medusa_l1_inode_alloc_security(struct inode *inode)
 		return -ENOMEM;
 
 	hash_init(med->fuck);
-	INIT_MEDUSA_OBJECT_VARS(med);
+	init_med_object(&(med->med_object));
 	inode->i_security = med;
 
 	return 0;
@@ -562,7 +562,7 @@ static int medusa_l1_file_open(struct file *file)
 	return validate_fuck(&file->f_path);
 }
 
-/* 
+/*
 * TODO TODO TODO: add support of 'task' in medusa_fork()
 */
 int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
@@ -578,8 +578,8 @@ int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 	if (med == NULL)
 		return -ENOMEM;
 
-	INIT_MEDUSA_OBJECT_VARS(med);
-	INIT_MEDUSA_SUBJECT_VARS(med);
+	init_med_object(&(med->med_object));
+	init_med_subject(&(med->med_subject));
         get_cmdline(task, med->cmdline, sizeof(med->cmdline));
 	task->security = med;
 
@@ -928,7 +928,7 @@ static int medusa_l1_socket_post_create(struct socket *sock, int family, int typ
 	struct medusa_l1_socket_s *sk_sec;
 
 	if (sock->sk) {
-		sk_sec = &sock_security(sock->sk);
+		sk_sec = sock_security(sock->sk);
 		sk_sec->addrlen = 0;
 	}
 
@@ -1116,7 +1116,7 @@ static void medusa_l1_sk_clone_security(const struct sock *sk, struct sock *news
 
 	newsk_sec = (struct medusa_l1_socket_s*) kmalloc(sizeof(struct medusa_l1_socket_s), GFP_KERNEL);
 	newsk_sec->addrlen = 0;
-	COPY_MEDUSA_OBJECT_VARS(newsk_sec, sk_sec);
+	newsk_sec->med_object = sk_sec->med_object;
 }
 */
 

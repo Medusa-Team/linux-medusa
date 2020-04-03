@@ -28,7 +28,7 @@ MED_EVTYPE(getprocess_event, "getprocess", process_kobject, "process",
 		process_kobject, "process");
 
 /*
- * This routine expects the existing, but !MED_MAGIC_VALID Medusa task_struct security struct!
+ * This routine expects the existing, but !is_med_magic_valid Medusa task_struct security struct!
  */
 int process_kobj_validate_task(struct task_struct * ts)
 {
@@ -39,10 +39,10 @@ int process_kobj_validate_task(struct task_struct * ts)
         memset(&event, '\0', sizeof(struct getprocess_event));
         /* process_kobject proc is zeroed by process_kern2kobj function */
 
-	INIT_MEDUSA_OBJECT_VARS(&task_security(ts));
-	INIT_MEDUSA_SUBJECT_VARS(&task_security(ts));
+	init_med_object(&(task_security(ts)->med_object));
+	init_med_subject(&(task_security(ts)->med_subject));
 #ifdef CONFIG_MEDUSA_FORCE
-	task_security(ts).force_code = NULL;
+	task_security(ts)->force_code = NULL;
 #endif
 	process_kern2kobj(&proc, ts);
 	retval = MED_DECIDE(getprocess_event, &event, &proc, &proc);

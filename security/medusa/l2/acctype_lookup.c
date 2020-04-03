@@ -33,16 +33,16 @@ medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry)
 {
 	if (!*dentry || IS_ERR(*dentry) || !(*dentry)->d_inode)
 		return MED_OK;
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (!MED_MAGIC_VALID(&inode_security((*dentry)->d_inode)) &&
+	if (!is_med_magic_valid(&(inode_security((*dentry)->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(*dentry,NULL) <= 0)
 		return MED_OK;
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security((*dentry)->d_inode))))
+	if (!vs_intersects(VSS(task_security(current)),VS(inode_security((*dentry)->d_inode))))
 		return MED_SKIP;
-	if (MEDUSA_MONITORED_ACCESS_O(lookup_access, &inode_security((*dentry)->d_inode)))
+	if (MEDUSA_MONITORED_ACCESS_O(lookup_access, inode_security((*dentry)->d_inode)))
 		return medusa_do_lookup(*dentry);
 	return MED_OK;
 }

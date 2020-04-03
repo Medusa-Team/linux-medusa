@@ -11,13 +11,12 @@
  * defined in medusa/l1/task.h.
  */
 
-// #include <linux/medusa/l1/task.h>
 #include <linux/sched.h>	/* contains all includes we need ;) */
 #include <linux/medusa/l3/kobject.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/process_handlers.h>
 
-#define task_security(task) (*((struct medusa_l1_task_s*)(task->security)))
+#define task_security(task) ((struct medusa_l1_task_s*)(task->security))
 #define task_suid(task) (task_cred_xxx((task), suid))
 #define task_fsuid(task) (task_cred_xxx((task), fsuid))
 #define task_gid(task) (task_cred_xxx((task), gid))
@@ -38,8 +37,8 @@ struct process_kobject { /* was: m_proc_inf */
 
 	kuid_t luid;
 	kernel_cap_t ecap, icap, pcap;
-	MEDUSA_SUBJECT_VARS;
-	MEDUSA_OBJECT_VARS;
+	struct medusa_object_s med_object;
+	struct medusa_subject_s med_subject;
 	__u32 user;
 #ifdef CONFIG_MEDUSA_SYSCALL
 	/* FIXME: this is wrong on non-i386 architectures */

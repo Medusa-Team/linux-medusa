@@ -1,6 +1,6 @@
 #include <linux/linkage.h>
 #include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 #include "kobject_process.h"
 #include <linux/medusa/l1/task.h>
 #include <linux/init.h>
@@ -56,11 +56,11 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
         memset(&access, '\0', sizeof(struct syscall_access));
         /* process_kobject proc is zeroed by process_kern2kobj function */
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (MEDUSA_MONITORED_ACCESS_S(syscall_access, &task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(syscall_access, task_security(current))) {
 		access.sysnr = eax;
 		access.arg1 = p1; access.arg2 = p2;
 		access.arg3 = p3; access.arg4 = p4;

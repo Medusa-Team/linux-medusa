@@ -30,19 +30,19 @@ medusa_answer_t medusa_socket_recvmsg(struct socket *sock, struct msghdr *msg, i
 	struct socket_recvmsg_access access;
 	struct process_kobject process;
 	struct socket_kobject sock_kobj;
-	
+
 	if (!address || !sock->sk->sk_family)
 		return MED_YES;
-	if (!MED_MAGIC_VALID(&task_security(current)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		return MED_YES;
-	if (!MED_MAGIC_VALID(&sock_security(sock->sk)) && socket_kobj_validate(sock) <= 0)
+	if (!is_med_magic_valid(&(sock_security(sock->sk)->med_object)) && socket_kobj_validate(sock) <= 0)
 		return MED_YES;
 
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&sock_security(sock->sk))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&sock_security(sock->sk))))
+	if (!vs_intersects(VSS(task_security(current)),VS(sock_security(sock->sk))) ||
+		!vs_intersects(VSW(task_security(current)),VS(sock_security(sock->sk))))
 		return MED_ERR;
 
-	if (MEDUSA_MONITORED_ACCESS_S(socket_recvmsg_access, &task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(socket_recvmsg_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		socket_kern2kobj(&sock_kobj, sock);
 		switch(sock->sk->sk_family) {

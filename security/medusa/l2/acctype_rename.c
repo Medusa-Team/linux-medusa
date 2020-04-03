@@ -44,18 +44,18 @@ medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 	cad.type = LSM_AUDIT_DATA_DENTRY;
 	cad.u.dentry = dentry;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		goto audit;
-	if (!MED_MAGIC_VALID(&inode_security(dentry->d_inode)) &&
+	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		goto audit;
 
 	mad.med_subject = task_security(current)->med_subject;
 	mad.med_object = inode_security(dentry->d_inode)->med_object;
 
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
 	) {
 		retval = MED_NO;
 		mad.vsi = VSI_SW_N;
@@ -65,12 +65,12 @@ medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 
 #warning FIXME - add target directory checking
 	retval = MED_OK;
-	if (MEDUSA_MONITORED_ACCESS_O(rename_access, &inode_security(dentry->d_inode))) {
+	if (MEDUSA_MONITORED_ACCESS_O(rename_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_rename(dentry,newname);
 		mad.event = EVENT_MONITORED;
 	} else
 		mad.event = EVENT_MONITORED_N;
-	MED_MAGIC_INVALIDATE(&inode_security(dentry->d_inode));
+	med_magic_invalidate(&(inode_security(dentry->d_inode)->med_object));
 audit:
 #ifdef CONFIG_AUDIT
 	mad.function = __func__;

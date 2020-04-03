@@ -3,26 +3,25 @@
  * task-struct extension: this structure is appended to in-kernel data,
  * and we define it separately just to make l1 code shorter.
  *
- * for another data structure - kobject, describing task for upper layers - 
+ * for another data structure - kobject, describing task for upper layers -
  * see l2/kobject_process.[ch].
  */
 
 #ifndef _MEDUSA_L1_TASK_H
 #define _MEDUSA_L1_TASK_H
 
-//#include <linux/config.h>
 #include <linux/capability.h>
 #include <linux/cred.h>
 #include <linux/sched/task.h>
 #include <linux/kernel.h>
 #include <asm/syscall.h>
 #include <linux/sys.h>
-#include <linux/medusa/l3/model.h>
+#include <linux/medusa/l3/med_model.h>
 
 struct medusa_l1_task_s {
 	kuid_t luid;
-	MEDUSA_SUBJECT_VARS;
-	MEDUSA_OBJECT_VARS;
+	struct medusa_subject_s med_subject;
+	struct medusa_object_s med_object;
 	__u32 user;
         char cmdline[128];
 #ifdef CONFIG_MEDUSA_FORCE

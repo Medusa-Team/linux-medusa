@@ -6,8 +6,12 @@
 #include <linux/mm.h>
 #include <linux/types.h>
 #include <linux/medusa/l3/registry.h>
+<<<<<<< HEAD
 #include <linux/medusa/l3/model.h>
 #include <linux/medusa/l2/audit_medusa.h>
+=======
+#include <linux/medusa/l3/med_model.h>
+>>>>>>> master
 
 #include "kobject_process.h"
 #include "kobject_file.h"
@@ -57,10 +61,10 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 	cad.type = LSM_AUDIT_DATA_DENTRY;
 	cad.u.dentry = dentry;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		goto audit;
-	if (!MED_MAGIC_VALID(&inode_security(inode)) &&
+	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		goto audit;
 
@@ -68,11 +72,11 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 	mad.med_object = inode_security(dentry->d_inode)->med_object;
 
 	if (
-		!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(inode))) ||
+		!vs_intersects(VSS(task_security(current)),VS(inode_security(inode))) ||
 		( (mask & (S_IRUGO | S_IXUGO)) &&
-		  	!VS_INTERSECT(VSR(&task_security(current)),VS(&inode_security(inode))) ) ||
+		  	!vs_intersects(VSR(task_security(current)),VS(inode_security(inode))) ) ||
 		( (mask & S_IWUGO) &&
-		  	!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(inode))) )
+		  	!vs_intersects(VSW(task_security(current)),VS(inode_security(inode))) )
 	   ) {
 		retval = -EACCES;// ??? audit Q
 		mad.vsi = VSI_SRW_N;
@@ -80,7 +84,7 @@ medusa_answer_t medusa_permission(struct inode * inode, int mask)
 	} else
 		mad.vsi = VSI_SRW;
 
-	if (MEDUSA_MONITORED_ACCESS_O(permission_access, &inode_security(inode))) {
+	if (MEDUSA_MONITORED_ACCESS_O(permission_access, inode_security(inode)))
 		retval = medusa_do_permission(dentry, inode, mask);
 		mad.event = EVENT_MONITORED;
 	} else

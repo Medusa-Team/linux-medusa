@@ -32,11 +32,11 @@ medusa_answer_t medusa_fork(unsigned long clone_flags)
         memset(&access, '\0', sizeof(struct fork_access));
         /* process_kobject parent is zeroed by process_kern2kobj function */
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (MEDUSA_MONITORED_ACCESS_S(fork_access, &task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(fork_access, task_security(current))) {
 		access.clone_flags = clone_flags;
 		process_kern2kobj(&parent, current);
 		retval = MED_DECIDE(fork_access, &access, &parent, &parent);

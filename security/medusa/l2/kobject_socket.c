@@ -17,17 +17,15 @@ MED_ATTRS(socket_kobject) {
 
 int socket_kobj2kern(struct socket_kobject * sock_kobj, struct socket * sock)
 {
-	struct medusa_l1_socket_s *sk_sec = &sock_security(sock->sk);
-
-	COPY_MEDUSA_OBJECT_VARS(sock_kobj, sk_sec);
-
+	struct medusa_l1_socket_s *sk_sec = sock_security(sock->sk);
+	sock_kobj->med_object = sk_sec->med_object;
 	return 0;
 }
 
 int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
 {
 	struct inode *inode = SOCK_INODE(sock);
-	struct medusa_l1_socket_s *sk_sec = &sock_security(sock->sk);
+	struct medusa_l1_socket_s *sk_sec = sock_security(sock->sk);
 
 	sock_kobj->dev = inode->i_sb->s_dev;
 	sock_kobj->ino = inode->i_ino;
@@ -53,8 +51,7 @@ int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
 				break;
 		}
 	}
-	COPY_MEDUSA_OBJECT_VARS(sock_kobj, sk_sec);
-
+	sock_kobj->med_object = sk_sec->med_object;
 	return MED_YES;
 }
 

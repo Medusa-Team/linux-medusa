@@ -50,24 +50,24 @@ medusa_answer_t medusa_exec(struct dentry ** dentryp)
 
 	if (!*dentryp || IS_ERR(*dentryp) || !(*dentryp)->d_inode)
 		return MED_OK;
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (!MED_MAGIC_VALID(&inode_security((*dentryp)->d_inode)) &&
+	if (!is_med_magic_valid(&(inode_security((*dentryp)->d_inode)->med_object)) &&
 
 			file_kobj_validate_dentry(*dentryp,NULL) <= 0)
 		return MED_OK;
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security((*dentryp)->d_inode))) ||
-		!VS_INTERSECT(VSR(&task_security(current)),VS(&inode_security((*dentryp)->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)),VS(inode_security((*dentryp)->d_inode))) ||
+		!vs_intersects(VSR(task_security(current)),VS(inode_security((*dentryp)->d_inode)))
 	)
 		return MED_NO;
-	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, &task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current))) {
 		retval = medusa_do_pexec(*dentryp);
 		if (retval == MED_NO)
 			return retval;
 	}
-	if (MEDUSA_MONITORED_ACCESS_O(exec_faccess, &inode_security((*dentryp)->d_inode))) {
+	if (MEDUSA_MONITORED_ACCESS_O(exec_faccess, inode_security((*dentryp)->d_inode))) {
 		retval = medusa_do_fexec(*dentryp);
 		return retval;
 	}
@@ -115,14 +115,14 @@ static medusa_answer_t medusa_do_pexec(struct dentry *dentry)
 }
 int medusa_monitored_pexec(void)
 {
-	return MEDUSA_MONITORED_ACCESS_S(exec_paccess, &task_security(current));
+	return MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current));
 }
 
 void medusa_monitor_pexec(int flag)
 {
 	if (flag)
-		MEDUSA_MONITOR_ACCESS_S(exec_paccess, &task_security(current));
+		MEDUSA_MONITOR_ACCESS_S(exec_paccess, task_security(current));
 	else
-		MEDUSA_UNMONITOR_ACCESS_S(exec_paccess, &task_security(current));
+		MEDUSA_UNMONITOR_ACCESS_S(exec_paccess, task_security(current));
 }
 __initcall(exec_acctype_init);

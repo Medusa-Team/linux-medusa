@@ -44,18 +44,20 @@ medusa_answer_t medusa_link(struct dentry *dentry, const char * newname)
 	cad.type = LSM_AUDIT_DATA_DENTRY;
 	cad.u.dentry = dentry;
 
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		goto audit;
-	if (!MED_MAGIC_VALID(&inode_security(dentry->d_inode)) &&
-			file_kobj_validate_dentry(dentry,NULL) <= 0)
+
+	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
+			file_kobj_validate_dentry(dentry,NULL) <= 0) {
 		goto audit;
+	}
 
 	mad.med_subject = task_security(current)->med_subject;
 	mad.med_object = inode_security(dentry->d_inode)->med_object;
 
-	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(dentry->d_inode))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
 	) {
 		retval = MED_NO;
 		mad.vsi = VSI_SW_N;
@@ -74,7 +76,7 @@ audit:
 	cad.medusa_audit_data = &mad;
 	medusa_audit_log_callback(&cad);
 #endif	
-	return retval;	
+	return retval;
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */

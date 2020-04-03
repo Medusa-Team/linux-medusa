@@ -43,11 +43,11 @@ medusa_answer_t medusa_capable(int cap)
 #warning "finish me"
 		return MED_OK;
 	}
-	if (!MED_MAGIC_VALID(&task_security(current)) &&
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_OK;
 
-	if (MEDUSA_MONITORED_ACCESS_S(capable_access,&task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(capable_access,task_security(current))) {
 		access.cap = CAP_TO_MASK(cap);
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(capable_access, &access, &process, &process);

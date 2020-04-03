@@ -31,41 +31,51 @@ static void medusa_post(struct audit_buffer *ab, void *pcad){
 	
 	audit_log_format(ab, "{subj,obj}=");
 	if (mad->med_subject != NULL && mad->med_object != NULL) {
-		audit_log_format(ab,"valid ");
+		audit_log_format(ab,"valid vs_intersect={");
 	} else {
-		audit_log_format(ab, "invalid ");
+		audit_log_format(ab, "invalid vs_intersect{");
 	}
 
-	audit_log_format(ab, "vs_intersect=");
 	switch (mad->vsi)
 	case VSI_NONE:
-		audit_log_format(ab, "{none} ");
+		audit_log_format(ab, "none} ");
 		break;
 	case VSI_UNKNOWN:
-		audit_log_format(ab, "{unknown}");
+		audit_log_format(ab, "unknown} ");
+		break;
 	case VSI_SW:
-		audit_log_format(ab, "{seeable,writeable} ");
+		audit_log_format(ab, "seeable,writeable} ");
 		break;
 	case VSI_SW_N:
-		if (!VS_INTERSECT(mad->med_subject->vss , mad->med_object->vs)) {
-			audit_log_format(ab, "{~seeable,~writeable} ");
+		if (VS_INTERSECT(mad->med_subject->vss , mad->med_object->vs)) {
+			audit_log_format(ab, "seeable,");
+		} else {
+			audit_log_format(ab, "~seeable,");
+		}
+		if(VS_INTERSECT(mad->med_subject->vsr , mad->med_object->vs)) {
+			audit_log_format(ab,"writeable} ");
 			break;
 		} else {
-			audit_log_format(ab, "{seeable,~writeable} ");
+			audit_log_format(ab,"~writeable} ");
 			break;
 		}
 	case VSI_SRW:
-		audit_log_format(ab, "{seeable,readable,writeable} ");
+		audit_log_format(ab, "seeable,readable,writeable} ");
 		break;	
 	case VSI_SRW_N:
-		if (!VS_INTERSECT(mad->med_subject->vss , mad->med_object->vs)) {
-			audit_log_format(ab, "{~seeable,~readable,~writeable} ");
-			break;
-		} else if (!VS_INTERSECT(mad->med_subject->vsr , mad->med_object->vs)) {
-			audit_log_format(ab, "{seeable,~readable,~writeable} ");
+		if (VS_INTERSECT(mad->med_subject->vss , mad->med_object->vs))
+			audit_log_format(ab, "seeable,");
+		else
+			audit_log_format(ab, "~seeable,");
+		if (VS_INTERSECT(mad->med_subject->vsr , mad->med_object->vs))
+			audit_log_format(ab, "readable,");
+		else
+			audit_log_format(ab, "~readable,");
+		if (VS_INTERSECT(mad->med_subject->vsw , mad->med_object->vs)) {
+			audit_log_format(ab, "writeable} ");
 			break;
 		} else {
-			audit_log_format(ab, "{seeable,readable,~writeable} ");
+			audit_log_format(ab, "~writeable} ");
 			break;
 		}
 	
