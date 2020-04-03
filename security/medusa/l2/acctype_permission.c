@@ -6,12 +6,8 @@
 #include <linux/mm.h>
 #include <linux/types.h>
 #include <linux/medusa/l3/registry.h>
-<<<<<<< HEAD
-#include <linux/medusa/l3/model.h>
 #include <linux/medusa/l2/audit_medusa.h>
-=======
 #include <linux/medusa/l3/med_model.h>
->>>>>>> master
 
 #include "kobject_process.h"
 #include "kobject_file.h"

@@ -29,11 +29,10 @@ static void medusa_post(struct audit_buffer *ab, void *pcad){
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 	
-	audit_log_format(ab, "{subj,obj}=");
 	if (mad->med_subject != NULL && mad->med_object != NULL) {
-		audit_log_format(ab,"valid vs_intersect={");
+		audit_log_format(ab,"{subj,obj}=valid vs_intersect={");
 	} else {
-		audit_log_format(ab, "invalid vs_intersect{");
+		audit_log_format(ab, "{subj,obj}=invalid vs_intersect{");
 	}
 
 	switch (mad->vsi)
@@ -47,12 +46,12 @@ static void medusa_post(struct audit_buffer *ab, void *pcad){
 		audit_log_format(ab, "seeable,writeable} ");
 		break;
 	case VSI_SW_N:
-		if (VS_INTERSECT(mad->med_subject->vss , mad->med_object->vs)) {
+		if (vs_intersects(mad->med_subject->vss , mad->med_object->vs)) {
 			audit_log_format(ab, "seeable,");
 		} else {
 			audit_log_format(ab, "~seeable,");
 		}
-		if(VS_INTERSECT(mad->med_subject->vsr , mad->med_object->vs)) {
+		if(vs_intersects(mad->med_subject->vsr , mad->med_object->vs)) {
 			audit_log_format(ab,"writeable} ");
 			break;
 		} else {
@@ -63,15 +62,15 @@ static void medusa_post(struct audit_buffer *ab, void *pcad){
 		audit_log_format(ab, "seeable,readable,writeable} ");
 		break;	
 	case VSI_SRW_N:
-		if (VS_INTERSECT(mad->med_subject->vss , mad->med_object->vs))
+		if (vs_intersects(mad->med_subject->vss , mad->med_object->vs))
 			audit_log_format(ab, "seeable,");
 		else
 			audit_log_format(ab, "~seeable,");
-		if (VS_INTERSECT(mad->med_subject->vsr , mad->med_object->vs))
+		if (vs_intersects(mad->med_subject->vsr , mad->med_object->vs))
 			audit_log_format(ab, "readable,");
 		else
 			audit_log_format(ab, "~readable,");
-		if (VS_INTERSECT(mad->med_subject->vsw , mad->med_object->vs)) {
+		if (vs_intersects(mad->med_subject->vsw , mad->med_object->vs)) {
 			audit_log_format(ab, "writeable} ");
 			break;
 		} else {
