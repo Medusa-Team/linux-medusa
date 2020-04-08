@@ -10,7 +10,6 @@ struct ipc_msgsnd_access {
 	MEDUSA_ACCESS_HEADER;
 	long m_type;	/* message type;  see 'struct msg_msg' in include/linux/msg.h */
 	size_t m_ts;	/* msg text size; see 'struct msg_msg' in include/linux/msg.h */
-	/* TODO char m_text[???]; send also message text? */
 	int msgflg;	/* operational flags */
 	unsigned int ipc_class;
 };
@@ -73,8 +72,6 @@ medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 		access.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_msgsnd_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 out:
 	/* second argument true: returns with locked IPC object */

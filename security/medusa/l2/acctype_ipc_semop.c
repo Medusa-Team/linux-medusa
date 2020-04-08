@@ -81,8 +81,6 @@ medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops
 		access.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_semop_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 out:
 	/* second argument false: don't need to lock IPC object */

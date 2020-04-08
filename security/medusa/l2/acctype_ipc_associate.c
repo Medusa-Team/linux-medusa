@@ -69,7 +69,7 @@ medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 		retval = MED_DENY;
 		goto out;
 	}
-	
+
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_associate_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
@@ -81,8 +81,6 @@ medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 		access.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_associate_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 out:
 	/* second argument true: returns with locked IPC object */

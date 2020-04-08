@@ -51,8 +51,7 @@ medusa_answer_t medusa_capable(int cap)
 		access.cap = CAP_TO_MASK(cap);
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(capable_access, &access, &process, &process);
-		if (retval != MED_ERR)
-			return retval;
+		return retval;
 	}
 	return MED_ALLOW;
 }

@@ -61,7 +61,7 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	struct process_kobject process;
 	struct ipc_kobject object;
 	bool use_locking = false;
-	
+
 #ifdef CONFIG_SMP
 	/*
 	 * WORKAROUND!!!
@@ -138,8 +138,6 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 		access.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_perm_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 out:
 	/*

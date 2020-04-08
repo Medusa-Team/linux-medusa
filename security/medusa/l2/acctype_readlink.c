@@ -28,7 +28,6 @@ int __init readlink_acctype_init(void) {
 	return 0;
 }
 
-
 static medusa_answer_t medusa_do_readlink(struct dentry *dentry);
 medusa_answer_t medusa_readlink(struct dentry *dentry)
 {
@@ -36,15 +35,15 @@ medusa_answer_t medusa_readlink(struct dentry *dentry)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+			process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0) {
 		return MED_ALLOW;
 	}
 	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
-	)
+			!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
+	   )
 		return MED_DENY;
 	if (MEDUSA_MONITORED_ACCESS_O(readlink_access, inode_security(dentry->d_inode)))
 		return medusa_do_readlink(dentry);
@@ -59,22 +58,19 @@ static medusa_answer_t medusa_do_readlink(struct dentry *dentry)
 	struct file_kobject file;
 	medusa_answer_t retval;
 
-        memset(&access, '\0', sizeof(struct readlink_access));
-        /* process_kobject process is zeroed by process_kern2kobj function */
-        /* file_kobject file is zeroed by file_kern2kobj function */
-    
+	memset(&access, '\0', sizeof(struct readlink_access));
+	/* process_kobject process is zeroed by process_kern2kobj function */
+	/* file_kobject file is zeroed by file_kern2kobj function */
+
 	file_kobj_dentry2string(dentry, access.filename);
-	
-    process_kern2kobj(&process, current);
-	
-    file_kern2kobj(&file, dentry->d_inode);
-	
-    file_kobj_live_add(dentry->d_inode);
+
+	process_kern2kobj(&process, current);
+
+	file_kern2kobj(&file, dentry->d_inode);
+
+	file_kobj_live_add(dentry->d_inode);
 	retval = MED_DECIDE(readlink_access, &access, &process, &file);
 	file_kobj_live_remove(dentry->d_inode);
-	
-    if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return retval;
 }
 __initcall(readlink_acctype_init);
