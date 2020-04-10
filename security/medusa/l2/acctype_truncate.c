@@ -10,7 +10,9 @@
 
 /* let's define the 'truncate' access type, with subj=task and obj=inode */
 
-struct truncate_access { MEDUSA_ACCESS_HEADER; char filename[NAME_MAX+1];
+struct truncate_access {
+	MEDUSA_ACCESS_HEADER;
+	char filename[NAME_MAX+1];
 	loff_t length;
 };
 

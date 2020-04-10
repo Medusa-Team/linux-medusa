@@ -6,11 +6,19 @@
 #include "kobject_process.h"
 #include "kobject_ipc.h"
 
+/*
+ * struct @ipc_msgsnd_access is derived from 'struct msg_msg' in include/linux/msg.h
+ * and does NOT contain all attributes from original 'struct msg_msg'
+ * @m_type - message type
+ * @m_ts - message text size
+ * @msgflg - operation flags
+ * @ipc_class - type of System V ipc (shm, semaphor .. )
+ */
 struct ipc_msgsnd_access {
 	MEDUSA_ACCESS_HEADER;
-	long m_type;	/* message type;  see 'struct msg_msg' in include/linux/msg.h */
-	size_t m_ts;	/* msg text size; see 'struct msg_msg' in include/linux/msg.h */
-	int msgflg;	/* operational flags */
+	long m_type;
+	size_t m_ts;
+	int msgflg;
 	unsigned int ipc_class;
 };
 
