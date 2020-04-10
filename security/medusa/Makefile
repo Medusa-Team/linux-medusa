@@ -2,6 +2,7 @@
 # Makefile for building the BASC module as part of the kernel tree.
 #
 #KBUILD_CFLAGS += -g -Wall
+KBUILD_CFLAGS += -Werror=deprecated-declarations
 
 subdir-$(CONFIG_SECURITY_MEDUSA)	+= l0
 subdir-$(CONFIG_SECURITY_MEDUSA)	+= l1

@@ -37,7 +37,7 @@ static inline void init_med_object(struct medusa_object_s *med_object)
 {
 	int i;
 	for (i = 0; i < VSPACK_LENGTH; i++) {
-		med_object->vs.vspack[i] = 0xffffffff;
+		med_object->vs.vspack[i] = ALL_VS_ALLOWED;
 	}
 	med_object->act = 0xffffffff;
 	med_object->cinfo.data[0] = 0;

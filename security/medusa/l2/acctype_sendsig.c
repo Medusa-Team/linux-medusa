@@ -76,8 +76,7 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
 		process_kern2kobj(&sender, current);
 		process_kern2kobj(&receiver, p);
 		retval = MED_DECIDE(send_signal, &access, &sender, &receiver);
-		if (retval != MED_ERR)
-			return retval;
+		return retval;
 	}
 	return MED_ALLOW;
 }

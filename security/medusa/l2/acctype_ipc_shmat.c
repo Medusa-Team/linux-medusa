@@ -70,8 +70,6 @@ medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmadd
 		access.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_shmat_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 out:
 	/* second argument false: don't need to lock IPC object */

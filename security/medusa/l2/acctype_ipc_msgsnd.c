@@ -6,12 +6,19 @@
 #include "kobject_process.h"
 #include "kobject_ipc.h"
 
+/*
+ * struct @ipc_msgsnd_access is derived from 'struct msg_msg' in include/linux/msg.h
+ * and does NOT contain all attributes from original 'struct msg_msg'
+ * @m_type - message type
+ * @m_ts - message text size
+ * @msgflg - operation flags
+ * @ipc_class - type of System V ipc (shm, semaphor .. )
+ */
 struct ipc_msgsnd_access {
 	MEDUSA_ACCESS_HEADER;
-	long m_type;	/* message type;  see 'struct msg_msg' in include/linux/msg.h */
-	size_t m_ts;	/* msg text size; see 'struct msg_msg' in include/linux/msg.h */
-	/* TODO char m_text[???]; send also message text? */
-	int msgflg;	/* operational flags */
+	long m_type;
+	size_t m_ts;
+	int msgflg;
 	unsigned int ipc_class;
 };
 
@@ -73,8 +80,6 @@ medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 		access.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_msgsnd_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 out:
 	/* second argument true: returns with locked IPC object */

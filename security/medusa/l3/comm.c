@@ -6,7 +6,17 @@
 #include <linux/medusa/l3/server.h>
 #include "l3_internals.h"
 
-medusa_answer_t med_decide(struct medusa_evtype_s * evtype, void * event, void * o1, void * o2)
+inline int is_authserver_reached(medusa_answer_t answer)
+{
+	return (answer != MED_ERR);
+}
+
+inline int is_supported_medusa_answer(medusa_answer_t answer)
+{
+	return (answer == MED_ALLOW || answer == MED_DENY);
+}
+
+medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event, void *o1, void *o2)
 {
 	medusa_answer_t retval;
 	struct medusa_authserver_s * authserver;
@@ -33,8 +43,24 @@ medusa_answer_t med_decide(struct medusa_evtype_s * evtype, void * event, void *
 
 	((struct medusa_event_s *)event)->evtype_id = evtype;
 	retval = authserver->decide(event, o1, o2);
+	if (!is_authserver_reached(retval)) {
+		/* if L4 returned MED_ERR, it means that authserver could not
+		 * respond. We can convert this code into MED_ALLOW, because
+		 * the virtual spaces have to intersect otherwise med_decide
+		 * would not be called from L2 and therefore we know that
+		 * the operation was earlier allowed
+		 * */
+		retval = MED_ALLOW;
+	} else if (!is_supported_medusa_answer(retval)) {
+		/* if we received code which is not known or not supported, we
+		 * want to DENY the operation since according to protocol, the
+		 * authorization server should send Medusa only supported codes
+		 * and if it did not, this is suspicious
+		 * */
+		retval = MED_DENY;
+	}
 #ifdef CONFIG_MEDUSA_PROFILING
-	if (retval != MED_ERR) {
+	else {
 		MED_LOCK_W(registry_lock);
 		evtype->l4_to_l2++;
 		MED_UNLOCK_W(registry_lock);

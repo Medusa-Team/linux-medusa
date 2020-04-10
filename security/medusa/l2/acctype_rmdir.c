@@ -72,8 +72,6 @@ static medusa_answer_t medusa_do_rmdir(struct dentry *dentry)
 	file_kobj_live_add(dentry->d_inode);
 	retval = MED_DECIDE(rmdir_access, &access, &process, &file);
 	file_kobj_live_remove(dentry->d_inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return retval;
 }
 __initcall(rmdir_acctype_init);

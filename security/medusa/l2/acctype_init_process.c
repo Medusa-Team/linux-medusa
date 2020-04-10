@@ -39,8 +39,6 @@ medusa_answer_t medusa_init_process(struct task_struct *new)
 		process_kern2kobj(&process, new);
 		process_kern2kobj(&parent, current);
 		retval = MED_DECIDE(init_process, &access, &process, &parent);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 	return retval;
 }

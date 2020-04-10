@@ -64,7 +64,7 @@ medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 	struct ipc_msgrcv_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
-	
+
 	/* second argument true: returns with unlocked IPC object */
 	if (unlikely(ipc_getref(ipcp, true)))
 		/* for now, we don't support error codes */
@@ -90,8 +90,6 @@ medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 		access.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_msgrcv_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 out:
 	/* second argument true: returns with locked IPC object */

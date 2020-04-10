@@ -84,8 +84,6 @@ static medusa_answer_t medusa_do_mkdir(struct dentry * parent, struct dentry *de
 	file_kobj_live_add(parent->d_inode);
 	retval = MED_DECIDE(mkdir_access, &access, &process, &file);
 	file_kobj_live_remove(parent->d_inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return retval;
 }
 __initcall(mkdir_acctype_init);

@@ -45,8 +45,7 @@ medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(afterexec_access, &access,
 				&process, &process);
-		if (retval != MED_ERR)
-			return retval;
+		return retval;
 	}
 	return MED_ALLOW;
 }

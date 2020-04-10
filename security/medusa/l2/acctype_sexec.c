@@ -68,7 +68,7 @@ medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
 	return retval;
 }
 
-static medusa_answer_t medusa_do_sexec(struct linux_binprm * bprm)
+static medusa_answer_t medusa_do_sexec(struct linux_binprm *bprm)
 {
 	struct sexec_access access;
 	struct process_kobject process;
@@ -90,9 +90,7 @@ static medusa_answer_t medusa_do_sexec(struct linux_binprm * bprm)
 	file_kobj_live_add(DENTRY->d_inode);
 	retval = MED_DECIDE(sexec_access, &access, &process, &file);
 	file_kobj_live_remove(DENTRY->d_inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return retval;
 }
 #undef DENTRY
 

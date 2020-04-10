@@ -24,9 +24,9 @@
 #define MED_BE		MED_COMM_TYPE_BIG_ENDIAN	/* fixed endianness: big */
 
 /* string lengths in various structures */
-#define MEDUSA_ATTRNAME_MAX	 MEDUSA_COMM_ATTRNAME_MAX
-#define MEDUSA_KCLASSNAME_MAX	 MEDUSA_COMM_KCLASSNAME_MAX
-#define MEDUSA_EVNAME_MAX	 MEDUSA_COMM_EVNAME_MAX
+#define MEDUSA_ATTRNAME_MAX	MEDUSA_COMM_ATTRNAME_MAX
+#define MEDUSA_KCLASSNAME_MAX	MEDUSA_COMM_KCLASSNAME_MAX
+#define MEDUSA_EVNAME_MAX	MEDUSA_COMM_EVNAME_MAX
 #define MEDUSA_ACCNAME_MAX	MEDUSA_EVNAME_MAX
 #define MEDUSA_SERVERNAME_MAX	128
 
@@ -34,9 +34,9 @@
 
 typedef enum {
 	MED_ERR =		-1,	/* error */
-	MED_FORCE_ALLOW =	 0,	/* permit the operation */
+	MED_FORCE_ALLOW __attribute__ ((deprecated(not_supported))),	/* permit the operation */
 	MED_DENY =		 1,	/* forbid the operation */
-	MED_FAKE_ALLOW =	 2,	/* forbid the operation, but return success */
+	MED_FAKE_ALLOW __attribute__ ((deprecated(not_supported))),	/* forbid the operation, but return success */
 	MED_ALLOW =		 3	/* permit the operation, but proceed with
 				   standard system permission check if any */
 } medusa_answer_t;
