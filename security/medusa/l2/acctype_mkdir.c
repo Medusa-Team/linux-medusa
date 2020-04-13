@@ -28,7 +28,7 @@ int __init mkdir_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_mkdir(struct dentry *parent, struct dentry *dentry, int mode)
+static medusa_answer_t medusa_do_mkdir(struct dentry * dir, struct dentry *dentry, int mode)
 {
 	struct mkdir_access access;
 	struct process_kobject process;
@@ -38,14 +38,14 @@ static enum medusa_answer_t medusa_do_mkdir(struct dentry *parent, struct dentry
 	file_kobj_dentry2string(dentry, access.filename);
 	access.mode = mode;
 	process_kern2kobj(&process, current);
-	file_kern2kobj(&file, parent->d_inode);
-	file_kobj_live_add(parent->d_inode);
+	file_kern2kobj(&file, dir->d_inode);
+	file_kobj_live_add(dir->d_inode);
 	retval = MED_DECIDE(mkdir_access, &access, &process, &file);
-	file_kobj_live_remove(parent->d_inode);
+	file_kobj_live_remove(dir->d_inode);
 	return retval;
 }
 
-enum medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dentry, int mode)
+enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry, int mode)
 {
 	//struct path ndcurrent, ndupper, ndparent;
 	enum medusa_answer_t retval;
@@ -77,6 +77,21 @@ enum medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dent
 		retval = MED_ALLOW;
 	//medusa_put_upper_and_parent(&ndupper, &ndparent);
 	return retval;
+	/*if (!MED_MAGIC_VALID(&inode_security(dir->dentry->d_inode)) &&
+//	        file_kobj_validate_dentry_dir(&parent,dir->dentry) <= 0) {
+			file_kobj_validate_dentry(dir->dentry,dir->mnt, dir) <= 0) {
+		return MED_OK;
+	}*/
+/*	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(dir->dentry->d_inode))) ||
+		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(dir->dentry->d_inode)))
+	) {
+		return MED_NO;
+	}
+	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, &inode_security(dir->dentry->d_inode)))
+		retval = medusa_do_mkdir(dir->dentry, dentry, mode);
+	else
+		retval = MED_OK;
+	return retval;*/
 }
 
 device_initcall(mkdir_acctype_init);

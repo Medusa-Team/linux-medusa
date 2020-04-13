@@ -376,6 +376,12 @@ static int medusa_l1_path_mknod(const struct path *dir, struct dentry *dentry,
 static int medusa_l1_path_mkdir(const struct path *dir, struct dentry *dentry,
 				umode_t mode)
 {
+	char buf[128];
+	char *pos = d_absolute_path(dir, buf, 127);
+	if (!IS_ERR(pos))
+		med_pr_info("mkdir: %s", pos);
+	if (medusa_mkdir(dir, dentry, mode) == MED_NO)
+		return -EPERM;
 	return 0;
 }
 
@@ -392,6 +398,10 @@ static int medusa_l1_path_rmdir(const struct path *dir, struct dentry *dentry)
 
 static int medusa_l1_path_unlink(const struct path *dir, struct dentry *dentry)
 {
+	char buf[128];
+	char *pos = d_absolute_path(dir, buf, 127);
+	if (!IS_ERR(pos))
+		med_pr_info("unlink: %s", pos);
 	if (medusa_unlink(dir, dentry) == MED_NO)
 		return -EPERM;
 	return 0;
@@ -1473,28 +1483,28 @@ static struct security_hook_list medusa_l1_hooks[] = {
 #ifdef CONFIG_SECURITY_PATH
 	LSM_HOOK_INIT(path_unlink, medusa_l1_path_unlink),
 	//LSM_HOOK_INIT(path_mkdir, medusa_l1_path_mkdir),
-	LSM_HOOK_INIT(path_rmdir, medusa_l1_path_rmdir),
+	// LSM_HOOK_INIT(path_rmdir, medusa_l1_path_rmdir),
 	//LSM_HOOK_INIT(path_mknod, medusa_l1_path_mknod),
 	//LSM_HOOK_INIT(path_truncate, medusa_l1_path_truncate),
 	//LSM_HOOK_INIT(path_symlink, medusa_l1_path_symlink),
 	// mY LSM_HOOK_INIT(path_link, medusa_l1_path_link),
-	LSM_HOOK_INIT(path_rename, medusa_l1_path_rename),
+	// LSM_HOOK_INIT(path_rename, medusa_l1_path_rename),
 	// mY LSM_HOOK_INIT(path_chmod, medusa_l1_path_chmod),
 	// mY LSM_HOOK_INIT(path_chown, medusa_l1_path_chown),
 	//LSM_HOOK_INIT(path_chroot, medusa_l1_path_chroot),
 
 #endif /* CONFIG_SECURITY_PATH */
 	//LSM_HOOK_INIT(inode_init_security, medusa_l1_inode_init_security),
-	LSM_HOOK_INIT(inode_create, medusa_l1_inode_create),
-	LSM_HOOK_INIT(inode_link, medusa_l1_inode_link),
-	LSM_HOOK_INIT(inode_symlink, medusa_l1_inode_symlink),
-	//LSM_HOOK_INIT(inode_mkdir, medusa_l1_inode_mkdir),
+	// LSM_HOOK_INIT(inode_create, medusa_l1_inode_create),
+	// LSM_HOOK_INIT(inode_mkdir, medusa_l1_inode_mkdir),
+	// LSM_HOOK_INIT(inode_link, medusa_l1_inode_link),
+	// LSM_HOOK_INIT(inode_symlink, medusa_l1_inode_symlink),
 	// LSM_HOOK_INIT(inode_rmdir, medusa_l1_inode_rmdir),
-	LSM_HOOK_INIT(inode_mknod, medusa_l1_inode_mknod),
+	// LSM_HOOK_INIT(inode_mknod, medusa_l1_inode_mknod),
 	//LSM_HOOK_INIT(inode_rename, medusa_l1_inode_rename),
-	LSM_HOOK_INIT(inode_readlink, medusa_l1_inode_readlink),
+	// LSM_HOOK_INIT(inode_readlink, medusa_l1_inode_readlink),
 	//LSM_HOOK_INIT(inode_follow_link, medusa_l1_inode_follow_link),
-	LSM_HOOK_INIT(inode_permission, medusa_l1_inode_permission),
+	// LSM_HOOK_INIT(inode_permission, medusa_l1_inode_permission),
 	//LSM_HOOK_INIT(inode_setattr, medusa_l1_inode_setattr),
 	//LSM_HOOK_INIT(inode_getattr, medusa_l1_inode_getattr),
 	//LSM_HOOK_INIT(inode_setxattr, medusa_l1_inode_setxattr),
@@ -1521,7 +1531,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(file_set_fowner, medusa_l1_file_set_fowner),
 	//LSM_HOOK_INIT(file_send_sigiotask, medusa_l1_file_send_sigiotask),
 	//LSM_HOOK_INIT(file_receive, medusa_l1_file_receive),
-	LSM_HOOK_INIT(file_open, medusa_l1_file_open),
+	// LSM_HOOK_INIT(file_open, medusa_l1_file_open),
 
 	//LSM_HOOK_INIT(dentry_open, medusa_l1_dentry_open),
 
@@ -1551,30 +1561,30 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(task_prctl, medusa_l1_task_prctl),
 	//LSM_HOOK_INIT(task_to_inode, medusa_l1_task_to_inode),
 
-	LSM_HOOK_INIT(ipc_permission, medusa_l1_ipc_permission),
+	// LSM_HOOK_INIT(ipc_permission, medusa_l1_ipc_permission),
 	// LSM_HOOK_INIT(ipc_getsecid, medusa_l1_ipc_getsecid),
 
-	LSM_HOOK_INIT(msg_msg_alloc_security, medusa_l1_msg_msg_alloc_security),
-	LSM_HOOK_INIT(msg_msg_free_security, medusa_l1_msg_msg_free_security),
+	// LSM_HOOK_INIT(msg_msg_alloc_security, medusa_l1_msg_msg_alloc_security),
+	// LSM_HOOK_INIT(msg_msg_free_security, medusa_l1_msg_msg_free_security),
 
 	// msg_queue_alloc_security --> medusa_l1_msg_queue_alloc_security: transfered to medusa_l1_special
 	// msg_queue_free_security --> medusa_l1_msg_queue_free_security: transfered to medusa_l1_special
-	LSM_HOOK_INIT(msg_queue_associate, medusa_l1_msg_queue_associate),
-	LSM_HOOK_INIT(msg_queue_msgctl, medusa_l1_msg_queue_msgctl),
-	LSM_HOOK_INIT(msg_queue_msgsnd, medusa_l1_msg_queue_msgsnd),
-	LSM_HOOK_INIT(msg_queue_msgrcv, medusa_l1_msg_queue_msgrcv),
+	// LSM_HOOK_INIT(msg_queue_associate, medusa_l1_msg_queue_associate),
+	// LSM_HOOK_INIT(msg_queue_msgctl, medusa_l1_msg_queue_msgctl),
+	// LSM_HOOK_INIT(msg_queue_msgsnd, medusa_l1_msg_queue_msgsnd),
+	// LSM_HOOK_INIT(msg_queue_msgrcv, medusa_l1_msg_queue_msgrcv),
 
 	// shm_alloc_security --> medusa_l1_shm_alloc_security: transfered to medusa_l1_special
 	// shm_free_security --> medusa_l1_shm_free_security: transfered to medusa_l1_special
-	LSM_HOOK_INIT(shm_associate, medusa_l1_shm_associate),
-	LSM_HOOK_INIT(shm_shmctl, medusa_l1_shm_shmctl),
-	LSM_HOOK_INIT(shm_shmat, medusa_l1_shm_shmat),
+	// LSM_HOOK_INIT(shm_associate, medusa_l1_shm_associate),
+	// LSM_HOOK_INIT(shm_shmctl, medusa_l1_shm_shmctl),
+	// LSM_HOOK_INIT(shm_shmat, medusa_l1_shm_shmat),
 
 	// sem_alloc_security --> medusa_l1_sem_alloc_security: transfered to medusa_l1_special
 	// sem_free_security --> medusa_l1_sem_free_security: transfered to medusa_l1_special
-	LSM_HOOK_INIT(sem_associate, medusa_l1_sem_associate),
-	LSM_HOOK_INIT(sem_semctl, medusa_l1_sem_semctl),
-	LSM_HOOK_INIT(sem_semop, medusa_l1_sem_semop),
+	// LSM_HOOK_INIT(sem_associate, medusa_l1_sem_associate),
+	// LSM_HOOK_INIT(sem_semctl, medusa_l1_sem_semctl),
+	// LSM_HOOK_INIT(sem_semop, medusa_l1_sem_semop),
 
 	//LSM_HOOK_INIT(netlink_send, medusa_l1_netlink_send),
 

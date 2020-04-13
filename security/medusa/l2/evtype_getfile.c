@@ -247,7 +247,7 @@ struct path check(struct dentry* dentry, struct path* dir, struct path* c, struc
 			.dentry = ndparent.dentry->d_parent};
 }
 
-int file_kobj_validate_dentry_dir(struct dentry *dentry, const struct path* dir)
+int file_kobj_validate_dentry_dir(const struct path* dir, struct dentry *dentry)
 {
 	struct path ndcurrent;
 	struct path ndupper;
@@ -282,7 +282,7 @@ int file_kobj_validate_dentry_dir(struct dentry *dentry, const struct path* dir)
 		parent_dir = (struct path) {.mnt = ndparent.mnt,
 			                    .dentry = ndparent.dentry->d_parent};
 		if (!MED_MAGIC_VALID(&inode_security(ndparent.dentry->d_inode)) &&
-			file_kobj_validate_dentry_dir(ndparent.dentry, &parent_dir) <= 0) {
+			file_kobj_validate_dentry_dir(&parent_dir, ndparent.dentry) <= 0) {
 			path_put(&ndupper);
 			return 0;
 		}
@@ -348,7 +348,7 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 	//	info_mnt(real_mount(ndupper.mnt));
 	//if (ndparent.mnt)
 	//	info_mnt(real_mount(ndparent.mnt));
-	parent_dir = check(dentry, dir, &ndcurrent, &ndupper, &ndparent);
+	//parent_dir = check(dentry, dir, &ndcurrent, &ndupper, &ndparent);
 
 	if (ndparent.dentry->d_inode == NULL) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
@@ -397,6 +397,8 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 	struct file_kobject directory;
 	enum medusa_answer_t retval;
 
+	med_pr_info("nducurrent: %pd4", ndcurrent->dentry);
+	med_pr_info("ndparent: %pd4", ndparent->dentry);
 	file_kern2kobj(&file, ndcurrent->dentry->d_inode);
 	file_kobj_dentry2string_dir(ndparent, ndupper->dentry, event.filename);
 	file_kern2kobj(&directory, ndparent->dentry->d_inode);
