@@ -11,7 +11,7 @@
 					read_lock(&name);	\
 					barrier();		\
 					}
-					
+
 #define MED_LOCK_W(name)		{			\
 					barrier();		\
 					write_lock(&name);	\
@@ -30,25 +30,25 @@
 
 /* debug output */
 #ifdef CONFIG_MEDUSA_QUIET
-#define med_pr_emerg(fmt...) do { } while (0)
-#define med_pr_alert(fmt...) do { } while (0)
-#define med_pr_crit(fmt...) do { } while (0)
-#define med_pr_err(fmt...) do { } while (0)
-#define med_pr_warn(fmt...) do { } while (0)
-#define med_pr_notice(fmt...) do { } while (0)
-#define med_pr_info(fmt...) do { } while (0)
-#define med_pr_debug(fmt...) do { } while (0)
-#define med_pr_devel(fmt...) do { } while (0)
+#define med_pr_emerg(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
+#define med_pr_alert(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
+#define med_pr_crit(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
+#define med_pr_err(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
+#define med_pr_warn(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
+#define med_pr_notice(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
+#define med_pr_info(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
+#define med_pr_debug(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
+#define med_pr_devel(fmt, ...) no_printk(fmt, ##__VA_ARGS__)
 #else
-#define med_pr_emerg(fmt...) pr_emerg(KBUILD_MODNAME " | medusa: " fmt) 
-#define med_pr_alert(fmt...) pr_alert(KBUILD_MODNAME " | medusa: " fmt)
-#define med_pr_crit(fmt...) pr_crit(KBUILD_MODNAME " | medusa: " fmt)
-#define med_pr_err(fmt...) pr_err(KBUILD_MODNAME " | medusa: " fmt)
-#define med_pr_warn(fmt...) pr_warn(KBUILD_MODNAME " | medusa: " fmt)
-#define med_pr_notice(fmt...) pr_notice(KBUILD_MODNAME " | medusa: " fmt)
-#define med_pr_info(fmt...) pr_info(KBUILD_MODNAME " | medusa: " fmt)
-#define med_pr_debug(fmt...) pr_debug(KBUILD_MODNAME " | medusa: " fmt)
-#define med_pr_devel(fmt...) pr_devel(KBUILD_MODNAME " | medusa: " fmt)
+#define med_pr_emerg(fmt, ...) pr_emerg("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
+#define med_pr_alert(fmt, ...) pr_alert("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
+#define med_pr_crit(fmt, ...) pr_crit("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
+#define med_pr_err(fmt, ...) pr_err("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
+#define med_pr_warn(fmt, ...) pr_warn("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
+#define med_pr_notice(fmt, ...) pr_notice("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
+#define med_pr_info(fmt, ...) pr_info("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
+#define med_pr_debug(fmt, ...) pr_debug("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
+#define med_pr_devel(fmt, ...) pr_devel("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
 #endif
 
 /* u_intX_t */
