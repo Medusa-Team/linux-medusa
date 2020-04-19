@@ -17,9 +17,9 @@
 extern int authserver_magic; /* to be checked against magic in objects */
 
 /* interface to L2 */
-extern int med_register_kclass(struct medusa_kclass_s * ptr);
-extern int med_unlink_kclass(struct medusa_kclass_s * ptr);
-extern int med_unregister_kclass(struct medusa_kclass_s * ptr);
+extern int med_register_kclass(struct medusa_kclass_s *med_kclass);
+extern int med_unlink_kclass(struct medusa_kclass_s *med_kclass);
+extern int med_unregister_kclass(struct medusa_kclass_s *med_kclass);
 #define MED_REGISTER_KCLASS(structname) \
 		med_register_kclass(&MED_KCLASSOF(structname))
 #define MED_UNLINK_KCLASS(structname) \
@@ -27,8 +27,8 @@ extern int med_unregister_kclass(struct medusa_kclass_s * ptr);
 #define MED_UNREGISTER_KCLASS(structname) \
 		med_unregister_kclass(&MED_KCLASSOF(structname))
 
-extern int med_register_evtype(struct medusa_evtype_s * ptr, int flags);
-extern void med_unregister_evtype(struct medusa_evtype_s * ptr);
+extern int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags);
+extern void med_unregister_evtype(struct medusa_evtype_s *med_evtype);
 #define MED_REGISTER_EVTYPE(structname,flags) \
 		med_register_evtype(&MED_EVTYPEOF(structname),flags)
 #define MED_UNREGISTER_EVTYPE(structname) \
@@ -44,22 +44,20 @@ extern void med_unregister_evtype(struct medusa_evtype_s * ptr);
  *	MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT (the ... subject)
  */
 
-extern medusa_answer_t med_decide(struct medusa_evtype_s * acctype, void * access, void * o1, void * o2);
+extern medusa_answer_t med_decide(struct medusa_evtype_s *acctype, void * access, void *o1, void *o2);
 #define MED_DECIDE(structname,arg1,arg2,arg3) \
 		med_decide(&MED_EVTYPEOF(structname), arg1, arg2, arg3)
 
 /* interface to L2 and L4 */
-extern void med_get_kclass(struct medusa_kclass_s * ptr);
-extern void med_put_kclass(struct medusa_kclass_s * ptr);
-extern struct medusa_kclass_s * med_get_kclass_by_name(char * name);
-extern struct medusa_kclass_s * med_get_kclass_by_cinfo(cinfo_t cinfo);
-extern struct medusa_kclass_s * med_get_kclass_by_pointer(struct medusa_kclass_s * ptr);
-extern struct medusa_authserver_s * med_get_authserver(void);
-extern void med_put_authserver(struct medusa_authserver_s * ptr);
+extern void med_get_kclass(struct medusa_kclass_s *med_kclass);
+extern void med_put_kclass(struct medusa_kclass_s *med_kclass);
+extern struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s *med_kclass);
+extern struct medusa_authserver_s *med_get_authserver(void);
+extern void med_put_authserver(struct medusa_authserver_s *med_authserver);
 
 /* interface to L4 */
-extern int med_register_authserver(struct medusa_authserver_s * ptr);
-extern void med_unregister_authserver(struct medusa_authserver_s * ptr);
+extern int med_register_authserver(struct medusa_authserver_s *med_authserver);
+extern void med_unregister_authserver(struct medusa_authserver_s *med_authserver);
 #define MED_REGISTER_AUTHSERVER(structname) \
 		med_register_authserver(&structname)
 #define MED_UNREGISTER_AUTHSERVER(structname) \

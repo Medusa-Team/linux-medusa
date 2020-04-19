@@ -5,11 +5,13 @@
 /* nesting as follows: registry_lock is outer, usecount_lock is inner. */
 
 MED_LOCK_DATA(registry_lock); /* the linked list lock */
- static MED_LOCK_DATA(usecount_lock); /* the lock for modifying use-count */
-  struct medusa_kclass_s * kclasses = NULL;
-  struct medusa_evtype_s * evtypes = NULL;
-  struct medusa_authserver_s * authserver = NULL;
- int medusa_authserver_magic = 1; /* the 'version' of authserver */
+static MED_LOCK_DATA(usecount_lock); /* the lock for modifying use-count */
+
+struct medusa_kclass_s *kclasses = NULL;
+struct medusa_evtype_s *evtypes = NULL;
+struct medusa_authserver_s *authserver = NULL;
+
+int medusa_authserver_magic = 1; /* the 'version' of authserver */
 /* WARNING! medusa_authserver_magic is not locked, nor atomic type,
  * because we want to have as much portable (and easy and fast) code
  * as possible. thus we must change its value BEFORE modifying authserver,
@@ -17,115 +19,79 @@ MED_LOCK_DATA(registry_lock); /* the linked list lock */
  * hopefully contains some kind of such barrier ;).
  */
 
-static int mystrcmp(char * p1, char * p2)
-{
-	while (*p1) {
-		if (*p2 != *p1)
-			return *p1 - *p2;
-		p1++; p2++;
-	}
-	return -*p2;
-}
-
 /**
  * med_get_kclass - lock the kclass by incrementing its use-count.
- * @ptr: pointer to the kclass to lock
+ * @med_kclass: pointer to the kclass to lock
  *
  * This increments the use-count; works great even if you want to sleep.
  * when calling this function, the use-count must already be non-zero.
  */
-void med_get_kclass(struct medusa_kclass_s * ptr)
+void med_get_kclass(struct medusa_kclass_s *med_kclass)
 {
 	MED_LOCK_W(usecount_lock);
-	ptr->use_count++;
+	med_kclass->use_count++;
 	MED_UNLOCK_W(usecount_lock);
 }
 
 /**
  * med_put_kclass - unlock the kclass by decrementing its use-count.
- * @ptr: pointer to the kclass to unlock
+ * @med_kclass: pointer to the kclass to unlock
  *
  * This decrements the use-count. Note that it does nothing special when
  * the use-count goes to zero. Someone still may find the kclass in the
  * linked list and claim it by using med_get_kclass.
  */
-void med_put_kclass(struct medusa_kclass_s * ptr)
+void med_put_kclass(struct medusa_kclass_s *med_kclass)
 {
 	MED_LOCK_W(usecount_lock);
-	if (ptr->use_count) /* sanity check only */
-		ptr->use_count--;
+	if (med_kclass->use_count > 0) /* sanity check only */
+		med_kclass->use_count--;
 	MED_UNLOCK_W(usecount_lock);
 }
 
 /**
- * med_get_kclass_by_name - find a kclass and return get-kclassed refference.
- * @name: name of the kclass to find
- *
- * It may return NULL on failure; caller must verify this each time.
- */
-struct medusa_kclass_s * med_get_kclass_by_name(char * name)
-{
-	struct medusa_kclass_s * tmp;
-
-	MED_LOCK_R(registry_lock);
-	for (tmp = kclasses; tmp; tmp = tmp->next)
-		if (!mystrcmp(name, tmp->name)) {
-			MED_LOCK_W(usecount_lock);
-			tmp->use_count++;
-			MED_UNLOCK_W(usecount_lock);
-			break;
-		}
-	MED_UNLOCK_R(registry_lock);
-	return tmp;
-}
-
-/**
- * med_get_kclass_by_cinfo - find a kclass and return get-kclassed refference.
- * @cinfo: cinfo of the kclass to find
- *
- * It may return NULL on failure; caller must verify this each time.
- */
-struct medusa_kclass_s * med_get_kclass_by_cinfo(cinfo_t cinfo)
-{
-	struct medusa_kclass_s * tmp;
-
-	MED_LOCK_R(registry_lock);
-	for (tmp = kclasses; tmp; tmp = tmp->next)
-		if (cinfo == tmp->cinfo) {
-			MED_LOCK_W(usecount_lock);
-			tmp->use_count++;
-			MED_UNLOCK_W(usecount_lock);
-			break;
-		}
-	MED_UNLOCK_R(registry_lock);
-	return tmp;
-}
-
-/**
  * med_get_kclass_by_pointer - find a kclass and return get-kclassed refference.
- * @ptr: unsafe pointer to the kclass to find
+ * @med_kclass: unsafe pointer to the kclass to find
  *
  * It may return NULL on failure; caller must verify this each time.
  */
-struct medusa_kclass_s * med_get_kclass_by_pointer(struct medusa_kclass_s * ptr)
+struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s *med_kclass)
 {
 	struct medusa_kclass_s * tmp;
 
 	MED_LOCK_R(registry_lock);
 	for (tmp = kclasses; tmp; tmp = tmp->next)
-		if (ptr == tmp) {
-			MED_LOCK_W(usecount_lock);
-			tmp->use_count++;
-			MED_UNLOCK_W(usecount_lock);
+		if (med_kclass == tmp) {
+			med_get_kclass(med_kclass);
 			break;
 		}
 	MED_UNLOCK_R(registry_lock);
 	return tmp;
+}
+
+static inline int _med_unlink_kclass(struct medusa_kclass_s *med_kclass)
+{
+	struct medusa_kclass_s *pos, *prev;
+
+	if (med_kclass == kclasses) {
+		kclasses = med_kclass->next;
+		return 0;
+	}
+
+	for (prev = kclasses, pos = kclasses->next; pos != NULL; prev = pos, pos = pos->next) {
+		if (pos == med_kclass) {
+			prev->next = pos->next;
+			return 0;
+		}
+	}
+
+	med_pr_devel("Failed to unlink kclass '%s' - not found", med_kclass->name);
+	return -1;
 }
 
 /**
  * med_unlink_kclass - unlink the kclass from all L3 lists
- * @ptr: kclass to unlink
+ * @med_kclass: kclass to unlink
  *
  * This is called with use-count=0 to remove the kclass from L3
  * lists. It may be called with all kinds of locks held, and thus
@@ -146,27 +112,18 @@ struct medusa_kclass_s * med_get_kclass_by_pointer(struct medusa_kclass_s * ptr)
  * callers, who call med_unlink_kclass and get MED_ALLOW, should really call
  * med_unregister_kclass soon.
  */
-
-int med_unlink_kclass(struct medusa_kclass_s * ptr)
+int med_unlink_kclass(struct medusa_kclass_s *med_kclass)
 {
-	int retval = 0;
-	struct medusa_kclass_s * tmp;
+	int retval = -1;
 
 	MED_LOCK_W(registry_lock);
 	MED_LOCK_R(usecount_lock);
-	if (!ptr->use_count) {
-		if (ptr == kclasses)
-			kclasses = ptr->next;
-		else
-			for (tmp = kclasses; tmp; tmp = tmp->next)
-				if (tmp->next == ptr) {
-					tmp->next = tmp->next->next;
-					break;
-				}
-		/* TODO: verify whether we found it! */
-		ptr->next = NULL;
-	} else
-		retval = -1;
+	if (med_kclass->use_count == 0) {
+		retval = _med_unlink_kclass(med_kclass);
+		if (retval != -1)
+			med_kclass->next = NULL;
+	}
+
 	MED_UNLOCK_R(usecount_lock);
 	MED_UNLOCK_W(registry_lock);
 	return retval;
@@ -183,12 +140,12 @@ int med_unlink_kclass(struct medusa_kclass_s * ptr)
  *
  * The callbacks called from here may sleep.
  */
-int med_unregister_kclass(struct medusa_kclass_s * ptr)
+int med_unregister_kclass(struct medusa_kclass_s *med_kclass)
 {
-	med_pr_info("Unregistering kclass %s\n", ptr->name);
+	med_pr_info("Unregistering kclass %s\n", med_kclass->name);
 	MED_LOCK_R(registry_lock);
 	MED_LOCK_R(usecount_lock);
-	if (ptr->use_count || ptr->next) { /* useless sanity check */
+	if (med_kclass->use_count > 0 || med_kclass->next) { /* useless sanity check */
 		med_pr_crit("A fatal ERROR has occured; expect system crash. If you're removing a file-related kclass, press reset. Otherwise save now.\n");
 		MED_UNLOCK_R(usecount_lock);
 		MED_UNLOCK_R(registry_lock);
@@ -197,28 +154,28 @@ int med_unregister_kclass(struct medusa_kclass_s * ptr)
 	MED_UNLOCK_R(usecount_lock);
 	MED_UNLOCK_R(registry_lock);
 	if (authserver && authserver->del_kclass)
-		authserver->del_kclass(ptr);
+		authserver->del_kclass(med_kclass);
 	/* FIXME: this isn't safe. add use-count to authserver too... */
 	return 0;
 }
 
 /**
  * med_register_kclass - register a kclass of k-objects and notify the authserver
- * @ptr: pointer to the kclass to register
+ * @med_kclass: pointer to the kclass to register
  *
  * The authserver call must be in lock or a semaphore - we promised
  * that in authserver.h. :)
  */
-int med_register_kclass(struct medusa_kclass_s * ptr)
+int med_register_kclass(struct medusa_kclass_s *med_kclass)
 {
-	struct medusa_kclass_s * p;
+	struct medusa_kclass_s *p;
 
-	ptr->name[MEDUSA_KCLASSNAME_MAX-1] = '\0';
-	med_pr_info("Registering kclass %s\n", ptr->name);
+	med_kclass->name[MEDUSA_KCLASSNAME_MAX-1] = '\0';
+	med_pr_info("Registering kclass %s\n", med_kclass->name);
 	MED_LOCK_W(registry_lock);
-	for (p=kclasses; p; p=p->next)
-		if (ptr==p || !mystrcmp(p->name, ptr->name)) {
-			med_pr_err("Error: such kclass already exists.\n");
+	for (p = kclasses; p; p = p->next)
+		if (strcmp(p->name, med_kclass->name) == 0) {
+			med_pr_err("Error: '%s' kclass already exists.\n", med_kclass->name);
 			MED_UNLOCK_W(registry_lock);
 			return -1;
 		}
@@ -226,104 +183,108 @@ int med_register_kclass(struct medusa_kclass_s * ptr)
 	 * able to find the entry before it's in the linked list.
 	 * we set use-count to 1, and decrement it soon hereafter.
 	 */
-	ptr->use_count = 1;
-	ptr->next = kclasses;
-	kclasses = ptr;
+	med_kclass->use_count = 1;
+	med_kclass->next = kclasses;
+	kclasses = med_kclass;
 	MED_UNLOCK_W(registry_lock);
 	if (authserver && authserver->add_kclass)
-		authserver->add_kclass(ptr); /* TODO: some day, check the return value */
-	med_put_kclass(ptr);
+		authserver->add_kclass(med_kclass); /* TODO: some day, check the return value */
+	med_put_kclass(med_kclass);
 	return 0;
 }
 
 /**
  * med_register_evtype - register an event type and notify the authserver.
- * @ptr: pointer to the event type to register
+ * @med_evtype: pointer to the event type to register
  *
  * The event type must be prepared by l2 routines to contain pointers to
  * all related kclasses of k-objects.
  */
-int med_register_evtype(struct medusa_evtype_s * ptr, int flags)
+int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 {
-	struct medusa_evtype_s * p;
+	struct medusa_evtype_s *p;
 
-	ptr->name[MEDUSA_EVNAME_MAX-1] = '\0';
-	ptr->arg_name[0][MEDUSA_ATTRNAME_MAX-1] = '\0';
-	ptr->arg_name[1][MEDUSA_ATTRNAME_MAX-1] = '\0';
-	/* TODO: check whether kclasses are registered, maybe register automagically */
-	med_pr_info("Registering event type %s(%s:%s->%s:%s)\n", ptr->name,
-		ptr->arg_name[0],ptr->arg_kclass[0]->name,
-		ptr->arg_name[1],ptr->arg_kclass[1]->name
-	);
+	med_evtype->name[MEDUSA_EVNAME_MAX-1] = '\0';
+	med_evtype->arg_name[0][MEDUSA_ATTRNAME_MAX-1] = '\0';
+	med_evtype->arg_name[1][MEDUSA_ATTRNAME_MAX-1] = '\0';
+	/* TODO: check whether kclasses are registered, maybe register automatically */
+	med_pr_info("Registering event type %s(%s:%s->%s:%s)\n", med_evtype->name,
+		med_evtype->arg_name[0],med_evtype->arg_kclass[0]->name,
+		med_evtype->arg_name[1],med_evtype->arg_kclass[1]->name);
 	MED_LOCK_W(registry_lock);
-	for (p=evtypes; p; p=p->next)
-		if (!mystrcmp(p->name, ptr->name)) {
+	for (p = evtypes; p; p = p->next)
+		if (strcmp(p->name, med_evtype->name) == 0) {
 			MED_UNLOCK_W(registry_lock);
-			med_pr_err("Error: such event type already exists.\n");
+			med_pr_err("Error: '%s' event type already exists.\n", med_evtype->name);
 			return -1;
 		}
-	ptr->next = evtypes;
-	ptr->bitnr = flags;
+
+	med_evtype->next = evtypes;
+	med_evtype->bitnr = flags;
 
 #define MASK (~(MEDUSA_EVTYPE_TRIGGEREDATOBJECT | MEDUSA_EVTYPE_TRIGGEREDATSUBJECT))
 	if (flags != MEDUSA_EVTYPE_NOTTRIGGERED)
-		for (p=evtypes; p; p ? (p=p->next) : (p=evtypes))
+		for (p = evtypes; p; p ? (p = p->next) : (p = evtypes))
 			if (p->bitnr != MEDUSA_EVTYPE_NOTTRIGGERED &&
-				(p->bitnr & MASK) == (ptr->bitnr & MASK)) {
+				(p->bitnr & MASK) == (med_evtype->bitnr & MASK)) {
 
-				ptr->bitnr++; /* TODO: check for the upper limit! */
+				med_evtype->bitnr++; /* TODO: check for the upper limit! */
 				p = NULL;
 				continue;
 			}
 #undef MASK
-	evtypes = ptr;
+
+	evtypes = med_evtype;
 	if (authserver && authserver->add_evtype)
-		authserver->add_evtype(ptr); /* TODO: some day, check for response */
+		authserver->add_evtype(med_evtype); /* TODO: some day, check for response */
 	MED_UNLOCK_W(registry_lock);
 	return 0;
 }
 
 /**
  * med_unregister_evtype - unregister an event type and notify the authserver.
- * @ptr: pointer to the event type to unregister
- *
+ * @med_evtype: pointer to the event type to unregister
+ * FIXME - this is not used anywhere
  */
-void med_unregister_evtype(struct medusa_evtype_s * ptr)
+void med_unregister_evtype(struct medusa_evtype_s *med_evtype)
 {
-	struct medusa_evtype_s * tmp;
-	med_pr_info("Unregistering event type %s\n", ptr->name);
+	struct medusa_evtype_s *tmp;
+	med_pr_info("Unregistering event type %s\n", med_evtype->name);
 	MED_LOCK_W(registry_lock);
-	if (ptr == evtypes)
-		evtypes = ptr->next;
-	else
-		for (tmp = evtypes; tmp; tmp = tmp->next)
-			if (tmp->next == ptr) {
-				tmp->next = tmp->next->next;
-				if (authserver && authserver->del_evtype)
-					authserver->del_evtype(ptr);
-				break;
-			}
+	if (med_evtype == evtypes)
+		evtypes = med_evtype->next;
+		MED_UNLOCK_W(registry_lock);
+		return;
+
+	for (tmp = evtypes; tmp; tmp = tmp->next) {
+		if (tmp->next == med_evtype) {
+			tmp->next = tmp->next->next;
+			if (authserver && authserver->del_evtype)
+				authserver->del_evtype(med_evtype);
+			break;
+		}
+	}
 	/* TODO: verify whether we found it */
 	MED_UNLOCK_W(registry_lock);
 }
 
 /**
  * med_register_authserver - register the authorization server
- * @ptr: pointer to the filled medusa_authserver_s structure
+ * @med_authserver: pointer to the filled medusa_authserver_s structure
  *
  * This routine inserts the authorization server in the internal data
  * structures, sets the use-count to 1 (i.e. returns get-servered entry),
  * and announces all known classes to the server.
  */
-int med_register_authserver(struct medusa_authserver_s * ptr)
+int med_register_authserver(struct medusa_authserver_s *med_authserver)
 {
-	struct medusa_kclass_s * cp;
-	struct medusa_evtype_s * ap;
+	struct medusa_kclass_s *cp;
+	struct medusa_evtype_s *ap;
 
-	med_pr_info("Registering authentication server %s\n", ptr->name);
+	med_pr_info("Registering authorization server %s\n", med_authserver->name);
 	MED_LOCK_W(registry_lock);
 	if (authserver) {
-		med_pr_err("Registration of auth. server '%s' failed: '%s' already present!\n", ptr->name, authserver->name);
+		med_pr_err("Failed registration of auth. server '%s', reason: '%s' already present!\n", med_authserver->name, authserver->name);
 		MED_UNLOCK_W(registry_lock);
 		return -1;
 	}
@@ -331,19 +292,19 @@ int med_register_authserver(struct medusa_authserver_s * ptr)
 	 * able to find the entry before it's in the linked list.
 	 * we set use-count to 1, and somebody has to decrement it some day.
 	 */
-	ptr->use_count = 1;
+	med_authserver->use_count = 1;
 	medusa_authserver_magic++;
-	authserver = ptr;
+	authserver = med_authserver;
 
 	/* we must remain in write-lock here, to synchronize add_*
 	 * events across our code.
 	 */
-	if (ptr->add_kclass)
+	if (med_authserver->add_kclass)
 		for (cp = kclasses; cp; cp = cp->next)
-			ptr->add_kclass(cp); /* TODO: some day we might want to check the return value, to support specialized servers */
-	if (ptr->add_evtype)
+			med_authserver->add_kclass(cp); /* TODO: some day we might want to check the return value, to support specialized servers */
+	if (med_authserver->add_evtype)
 		for (ap = evtypes; ap; ap = ap->next)
-			ptr->add_evtype(ap); /* TODO: the same for this */
+			med_authserver->add_evtype(ap); /* TODO: the same for this */
 
 	MED_UNLOCK_W(registry_lock);
 	return 0;
@@ -351,28 +312,28 @@ int med_register_authserver(struct medusa_authserver_s * ptr)
 
 /**
  * med_unregister_authserver - unlink the auth. server from L3.
- * @ptr: pointer to the server to unlink.
+ * @med_authserver: pointer to the server to unlink.
  *
  * This function is called by L4 code to unregister the auth. server.
  * After it has returned, no new questions will be placed to the server.
  * Note that some old questions might be pending, and after calling this,
  * it is wise to wait for close() callback to proceed with uninstallation.
  */
-void med_unregister_authserver(struct medusa_authserver_s * ptr)
+void med_unregister_authserver(struct medusa_authserver_s *med_authserver)
 {
-	med_pr_info("Unregistering authserver %s\n", ptr->name);
+	med_pr_info("Unregistering authserver %s\n", med_authserver->name);
 	MED_LOCK_W(registry_lock);
 	/* the following code is a little bit useless, but we keep it here
 	 * to allow multiple different authentication servers some day
 	 */
-	if (ptr != authserver) {
+	if (med_authserver != authserver) {
 		MED_UNLOCK_W(registry_lock);
 		return;
 	}
 	medusa_authserver_magic++;
 	authserver = NULL;
 	MED_UNLOCK_W(registry_lock);
-	med_put_authserver(ptr);
+	med_put_authserver(med_authserver);
 }
 
 /**
@@ -381,7 +342,7 @@ void med_unregister_authserver(struct medusa_authserver_s * ptr)
  * This function gets one more refference to the authserver. Use it,
  * when you want to be sure the authserver won't vanish.
  */
-struct medusa_authserver_s * med_get_authserver(void)
+struct medusa_authserver_s *med_get_authserver(void)
 {
 	MED_LOCK_W(usecount_lock);
 	if (authserver) {
@@ -395,23 +356,23 @@ struct medusa_authserver_s * med_get_authserver(void)
 
 /**
  * med_put_authserver - release the authserver by decrementing its use-count
- * @ptr: a pointer to the authserver
+ * @med_authserver: a pointer to the authserver
  *
  * This is an opposite function to med_get_authserver. Please, try to call
  * this without any locks; the close() callback of L4 server, which may
  * eventually get called from here, may block. This might change, if
  * reasonable.
  */
-void med_put_authserver(struct medusa_authserver_s * ptr)
+void med_put_authserver(struct medusa_authserver_s *med_authserver)
 {
 	MED_LOCK_W(usecount_lock);
-	if (ptr->use_count) /* sanity check only */
-		ptr->use_count--;
-	if (ptr->use_count) { /* fast path */
+	if (med_authserver->use_count) /* sanity check only */
+		med_authserver->use_count--;
+	if (med_authserver->use_count) { /* fast path */
 		MED_UNLOCK_W(usecount_lock);
 		return;
 	}
 	MED_UNLOCK_W(usecount_lock);
-	if (ptr->close)
-		ptr->close();
+	if (med_authserver->close)
+		med_authserver->close();
 }
