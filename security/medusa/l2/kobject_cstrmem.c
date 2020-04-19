@@ -99,6 +99,7 @@ static struct medusa_kobject_s *cstrmem_fetch(struct medusa_kobject_s *key_obj)
 		ret = access_process_vm(p, (unsigned long)kobj->address, kobj->data, kobj->size, 0);
 
 		/* TODO: refactor to something more .. obvious
+		 * see https://www.kernel.org/doc/htmldocs/kernel-api/API-strnlen.html
 		 * TODO: here it should count characters until the first #0 found in (0,size) boundary */
 		for (i = 0; (i < kobj->size) && (((char*)kobj->data)[i]); i++);
 

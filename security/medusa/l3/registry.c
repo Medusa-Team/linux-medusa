@@ -6,9 +6,11 @@
 
 MED_LOCK_DATA(registry_lock); /* the linked list lock */
 static MED_LOCK_DATA(usecount_lock); /* the lock for modifying use-count */
+
 struct medusa_kclass_s *kclasses = NULL;
 struct medusa_evtype_s *evtypes = NULL;
 struct medusa_authserver_s *authserver = NULL;
+
 int medusa_authserver_magic = 1; /* the 'version' of authserver */
 /* WARNING! medusa_authserver_magic is not locked, nor atomic type,
  * because we want to have as much portable (and easy and fast) code
@@ -67,6 +69,26 @@ struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s *med_kc
 	return tmp;
 }
 
+static inline int _med_unlink_kclass(struct medusa_kclass_s *med_kclass)
+{
+	struct medusa_kclass_s *pos, *prev;
+
+	if (med_kclass == kclasses) {
+		kclasses = med_kclass->next;
+		return 0;
+	}
+
+	for (prev = kclasses, pos = kclasses->next; pos != NULL; prev = pos, pos = pos->next) {
+		if (pos == med_kclass) {
+			prev->next = pos->next;
+			return 0;
+		}
+	}
+
+	med_pr_devel("Failed to unlink kclass '%s' - not found", med_kclass->name);
+	return -1;
+}
+
 /**
  * med_unlink_kclass - unlink the kclass from all L3 lists
  * @med_kclass: kclass to unlink
@@ -90,42 +112,16 @@ struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s *med_kc
  * callers, who call med_unlink_kclass and get MED_ALLOW, should really call
  * med_unregister_kclass soon.
  */
-
-int _med_unlink_kclass(struct medusa_kclass_s *med_kclass)
-{
-	struct medusa_kclass_s *pos, *prev;
-
-	if (med_kclass == kclasses) {
-		kclasses = med_kclass->next;
-		return 0;
-	}
-
-	for (prev = kclasses, pos = kclasses->next; pos != NULL; prev = pos, pos = pos->next) {
-		if (pos == med_kclass) {
-			prev->next = pos->next;
-			return 0;
-		}
-	}
-
-	med_pr_warn("Failed to unlink kclass '%s' - not found", med_kclass->name);
-	return -1;
-}
-
 int med_unlink_kclass(struct medusa_kclass_s *med_kclass)
 {
-	int retval;
+	int retval = -1;
 
 	MED_LOCK_W(registry_lock);
 	MED_LOCK_R(usecount_lock);
 	if (med_kclass->use_count == 0) {
 		retval = _med_unlink_kclass(med_kclass);
-		if (retval != -1) {
+		if (retval != -1)
 			med_kclass->next = NULL;
-		}
-	} else {
-		med_pr_warn("Failed to unlink kclass '%s' because the use count is %d", med_kclass->name,
-										med_kclass->use_count);
-		retval = -1;
 	}
 
 	MED_UNLOCK_R(usecount_lock);
@@ -149,7 +145,7 @@ int med_unregister_kclass(struct medusa_kclass_s *med_kclass)
 	med_pr_info("Unregistering kclass %s\n", med_kclass->name);
 	MED_LOCK_R(registry_lock);
 	MED_LOCK_R(usecount_lock);
-	if (med_kclass->use_count != 0 || med_kclass->next) { /* useless sanity check */
+	if (med_kclass->use_count > 0 || med_kclass->next) { /* useless sanity check */
 		med_pr_crit("A fatal ERROR has occured; expect system crash. If you're removing a file-related kclass, press reset. Otherwise save now.\n");
 		MED_UNLOCK_R(usecount_lock);
 		MED_UNLOCK_R(registry_lock);
@@ -178,7 +174,7 @@ int med_register_kclass(struct medusa_kclass_s *med_kclass)
 	med_pr_info("Registering kclass %s\n", med_kclass->name);
 	MED_LOCK_W(registry_lock);
 	for (p = kclasses; p; p = p->next)
-		if (med_kclass == p) {
+		if (strcmp(p->name, med_kclass->name) == 0) {
 			med_pr_err("Error: '%s' kclass already exists.\n", med_kclass->name);
 			MED_UNLOCK_W(registry_lock);
 			return -1;
