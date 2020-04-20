@@ -39,6 +39,9 @@
 #include <linux/bitops.h>
 #include <linux/init_task.h>
 #include <linux/uaccess.h>
+#ifdef CONFIG_SECURITY_MEDUSA
+#include <linux/medusa/l1/file_handlers.h>
+#endif /* CONFIG_SECURITY_MEDUSA */
 
 #include "internal.h"
 #include "mount.h"
@@ -3976,6 +3979,26 @@ long do_unlinkat(int dfd, struct filename *name)
 	struct inode *inode = NULL;
 	struct inode *delegated_inode = NULL;
 	unsigned int lookup_flags = 0;
+#ifdef CONFIG_SECURITY_MEDUSA
+	int res;
+	char *path_to_redirect = NULL;
+
+	res = medusa_path_access("unlink", name->name, &path_to_redirect);
+	if ((res == MED_DENY) || unlikely(path_to_redirect) || unlikely(res == MED_FAKE_ALLOW)) {
+		putname(name);
+		if (res == MED_FAKE_ALLOW) {
+			kfree(path_to_redirect);
+			return 0;
+		} else if (res == MED_DENY) {
+			kfree(path_to_redirect);
+			return -EACCES;
+		}
+
+		dfd = 0; /* medusa requires absolute paths */
+		name = getname_kernel(path_to_redirect);
+		kfree(path_to_redirect);
+	}
+#endif /* CONFIG_SECURITY_MEDUSA */
 retry:
 	name = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
 	if (IS_ERR(name))

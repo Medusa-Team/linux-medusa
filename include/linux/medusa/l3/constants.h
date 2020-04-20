@@ -36,7 +36,7 @@ typedef enum {
 	MED_ERR =		-1,	/* error */
 	MED_FORCE_ALLOW __attribute__ ((deprecated(not_supported))),	/* permit the operation */
 	MED_DENY =		 1,	/* forbid the operation */
-	MED_FAKE_ALLOW __attribute__ ((deprecated(not_supported))),	/* forbid the operation, but return success */
+	MED_FAKE_ALLOW =	 2,	/* forbid the operation, but return success */
 	MED_ALLOW =		 3	/* permit the operation, but proceed with
 				   standard system permission check if any */
 } medusa_answer_t;
