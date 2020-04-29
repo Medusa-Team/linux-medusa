@@ -3983,27 +3983,40 @@ long do_unlinkat(int dfd, struct filename *name)
 	int res;
 	char *path_to_redirect = NULL;
 
-	res = medusa_path_access("unlink", name->name, &path_to_redirect);
+	name = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
+	if (IS_ERR(name))
+		return PTR_ERR(name);
+
+	path_to_redirect = medusa_get_path(&path, &last, type);
+	if (IS_ERR(path_to_redirect)) {
+		error = PTR_ERR(path_to_redirect);
+		goto exit1;
+	}
+	res = medusa_path_access("unlink", &path_to_redirect);
 	if ((res == MED_DENY) || unlikely(path_to_redirect) || unlikely(res == MED_FAKE_ALLOW)) {
-		putname(name);
 		if (res == MED_FAKE_ALLOW) {
-			kfree(path_to_redirect);
-			return 0;
+			error = 0;
+			goto exit1;
 		} else if (res == MED_DENY) {
-			kfree(path_to_redirect);
-			return -EACCES;
+			error = -EACCES;
+			goto exit1;
 		}
 
-		dfd = 0; /* medusa requires absolute paths */
+		path_put(&path);
+		putname(name);
 		name = getname_kernel(path_to_redirect);
-		kfree(path_to_redirect);
-	}
+		medusa_put_path(&path_to_redirect);
+	} else
+		goto medusa_allow;
 #endif /* CONFIG_SECURITY_MEDUSA */
 retry:
 	name = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
 	if (IS_ERR(name))
 		return PTR_ERR(name);
 
+#ifdef CONFIG_SECURITY_MEDUSA
+medusa_allow:
+#endif /* CONFIG_SECURITY_MEDUSA */
 	error = -EISDIR;
 	if (type != LAST_NORM)
 		goto exit1;
