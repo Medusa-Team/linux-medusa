@@ -26,10 +26,8 @@ extern medusa_answer_t medusa_symlink(struct dentry *dentry,
 extern medusa_answer_t medusa_unlink(struct dentry *dentry);
 extern medusa_answer_t medusa_link(struct dentry *dentry, const char * newname);
 extern medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname);
-
 extern medusa_answer_t medusa_readlink(struct dentry *dentry);
-
-extern medusa_answer_t medusa_path_access(const char *action, const char *path, char **path_to_redirect);
+extern medusa_answer_t medusa_path_access(const char *action, char **path_to_redirect);
 
 /* the following routines are a support for many of access types,
  * and they're used both in L1 and L2 code. They're defined in
@@ -44,6 +42,15 @@ extern medusa_answer_t medusa_notify_change(struct dentry *dentry, struct iattr 
 
 extern medusa_answer_t medusa_read(struct file * file);
 extern medusa_answer_t medusa_write(struct file * file);
+
+/*
+ * Following two functions are used by L1 code in case of acctype medusa_path_access().
+ * medusa_get_path() converts struct path * to absolute path stored in buffer, which
+ * may be released using medusa_put_path() function. Consult l2/acctype_path_access.c for
+ * details.
+ */
+ extern char *medusa_get_path(const struct path *path, const struct qstr *last, int lasttype);
+ extern void medusa_put_path(char **pathbuf);
 
 #endif /* _MEDUSA_L1_FILE_HANDLERS_H */
 
