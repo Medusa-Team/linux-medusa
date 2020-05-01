@@ -36,6 +36,7 @@ obj-y += acctype_ipc_semop.o acctype_ipc_shmat.o acctype_ipc_msgsnd.o acctype_ip
 obj-y += acctype_socket_create.o acctype_socket_bind.o acctype_socket_connect.o acctype_socket_listen.o acctype_socket_accept.o
 obj-y += acctype_socket_sendmsg.o acctype_socket_recvmsg.o
 obj-y += acctype_path_access.o
+CFLAGS_acctype_path_access.o := -DDEBUG
 # arch-dependent files
 obj-y += acctype_ptrace.o 
 #obj-$(CONFIG_MEDUSA_SYSCALL) += acctype_syscall.o

@@ -44,10 +44,10 @@ extern medusa_answer_t medusa_read(struct file * file);
 extern medusa_answer_t medusa_write(struct file * file);
 
 /*
- * Following two functions are used by L1 code in case of acctype medusa_path_access().
- * medusa_get_path() converts struct path * to absolute path stored in buffer, which
- * may be released using medusa_put_path() function. Consult l2/acctype_path_access.c for
- * details.
+ * Following two functions are used by L1 code in medusa_path_access().
+ * medusa_get_path() converts struct path * to absolute path stored in buffer,
+ * which may be released using medusa_put_path() function. Consult
+ * l2/acctype_path_access.c for details.
  */
  extern char *medusa_get_path(const struct path *path, const struct qstr *last, int lasttype);
  extern void medusa_put_path(char **pathbuf);
