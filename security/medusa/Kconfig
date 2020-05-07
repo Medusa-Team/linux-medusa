@@ -1,3 +1,5 @@
+source "security/medusa/testing/Kconfig"
+
 config SECURITY_MEDUSA
 	bool "MEDUSA Support"
 	depends on SECURITY
@@ -12,5 +14,9 @@ config SECURITY_MEDUSA_L4_CONSTABLE
         default y
         help
           Compiles l4 on medusa as module. Good for debug purposes.
-          
+
           If unsure do not touch.
+
+config SECURITY_MEDUSA_TESTING
+	bool "MEDUSA Test Support"
+	depends on SECURITY_MEDUSA && KUNIT

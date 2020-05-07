@@ -1,0 +1,4 @@
+#source "testing/l1/Kconfig"
+#source "testing/l2/Kconfig"
+source "security/medusa/testing/l3/Kconfig"
+#source "testing/l4/Kconfig"

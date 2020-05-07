@@ -1,5 +1,5 @@
 #include <kunit/test.h>
-#include <linux/medusa/l3/vsmodel.h>
+#include <linux/medusa/l3/vs_model.h>
 
 #if VSPACK_LENGTH > 1
 	#define MULTIPLE_VSPACKS
@@ -11,7 +11,7 @@ static void vs_intersects_empty(struct kunit *test)
 	a.vspack[0] = 0UL;
 	b.vspack[0] = 0UL;
 
-	KUNIT_EXPECT_FALSE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_FALSE(test, vs_intersects(a,b));
 }
 
 static void vs_intersects_one_bit_intersects(struct kunit *test)
@@ -20,7 +20,7 @@ static void vs_intersects_one_bit_intersects(struct kunit *test)
 	a.vspack[0] = 0xffff0000;
 	b.vspack[0] = 0x00100000;
 
-	KUNIT_EXPECT_TRUE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_TRUE(test, vs_intersects(a,b));
 }
 
 static void vs_intersects_partial_intersect(struct kunit *test)
@@ -29,7 +29,7 @@ static void vs_intersects_partial_intersect(struct kunit *test)
 	a.vspack[0] = 0x00ff0000;
 	b.vspack[0] = 0x000abaaa;
 
-	KUNIT_EXPECT_TRUE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_TRUE(test, vs_intersects(a,b));
 }
 
 static void vs_intersects_full_intersect(struct kunit *test)
@@ -38,7 +38,7 @@ static void vs_intersects_full_intersect(struct kunit *test)
 	a.vspack[0] = 0xffff0000;
 	b.vspack[0] = 0xffffff00;
 
-	KUNIT_EXPECT_TRUE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_TRUE(test, vs_intersects(a,b));
 }
 
 static void vs_intersects_disjoin_not_intersects(struct kunit *test)
@@ -47,7 +47,7 @@ static void vs_intersects_disjoin_not_intersects(struct kunit *test)
 	a.vspack[0] = 0xffff0000;
 	b.vspack[0] = ~a.vspack[0];
 
-	KUNIT_EXPECT_FALSE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_FALSE(test, vs_intersects(a,b));
 }
 
 #ifdef MULTIPLE_VSPACKS
@@ -59,7 +59,7 @@ static void vs_intersects_multiple_vspacks_empty(struct kunit *test)
 	a.vspack[1] = 0UL;
 	b.vspack[1] = 0UL;
 
-	KUNIT_EXPECT_FALSE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_FALSE(test, vs_intersects(a,b));
 }
 
 static void vs_intersects_multiple_vspacks_no_match(struct kunit *test)
@@ -70,7 +70,7 @@ static void vs_intersects_multiple_vspacks_no_match(struct kunit *test)
 	a.vspack[1] = 0xffffffff;
 	b.vspack[1] = 0UL;
 
-	KUNIT_EXPECT_FALSE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_FALSE(test, vs_intersects(a,b));
 }
 
 static void vs_intersects_multiple_vspacks_first_matches(struct kunit *test)
@@ -81,7 +81,7 @@ static void vs_intersects_multiple_vspacks_first_matches(struct kunit *test)
 	a.vspack[1] = 0x00500000;
 	b.vspack[1] = 0x01000000;
 
-	KUNIT_EXPECT_TRUE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_TRUE(test, vs_intersects(a,b));
 }
 
 static void vs_intersects_multiple_vspacks_second_matches(struct kunit *test)
@@ -92,7 +92,7 @@ static void vs_intersects_multiple_vspacks_second_matches(struct kunit *test)
 	a.vspack[1] = 0xff000000;
 	b.vspack[1] = 0x01000000;
 
-	KUNIT_EXPECT_TRUE(test, VS_INTERSECT(b,a));
+	KUNIT_EXPECT_TRUE(test, vs_intersects(b,a));
 }
 
 static void vs_intersects_multiple_vspacks_both_matches(struct kunit *test)
@@ -103,7 +103,7 @@ static void vs_intersects_multiple_vspacks_both_matches(struct kunit *test)
 	a.vspack[1] = 0x02000000;
 	b.vspack[1] = 0x04000000;
 
-	KUNIT_EXPECT_TRUE(test, VS_INTERSECT(a,b));
+	KUNIT_EXPECT_TRUE(test, vs_intersects(a,b));
 }
 #endif
 
