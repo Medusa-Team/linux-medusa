@@ -1,94 +1,89 @@
 #include <linux/audit.h>
 #include <linux/medusa/l2/audit_medusa.h>
 
-static void medusa_pre(struct audit_buffer *ab, void *pcad){
+/* array for auditing medusa answer */
+static const char *audit_answer[] = {
+	"ERROR",
+	"FORCE_ALLOW",
+	"DENY",
+	"FAKE_ALLOW",
+	"ALLOW"
+};
+/*
+ * medusa_pre - pre audit callback function to format audit record
+ * @ab: audit buffer for formatting audit record
+ * @pcad: passed common audit data for audit record
+ */
+static void medusa_pre(struct audit_buffer *ab, void *pcad);
+static void medusa_pre(struct audit_buffer *ab, void *pcad)
+{
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	audit_log_format(ab,"medusa {op=%s answer=",mad->function);
-	switch (mad->med_answer) {
-	case MED_ALLOW:
-		audit_log_format(ab,"MED_ALLOW ");
+	if (mad->function) {
+		audit_log_format(ab, "Medusa {op=%s", mad->function);
+	}
+
+	if (mad->med_answer) {
+		audit_log_format(ab, " ans=");
+		audit_log_string(ab, audit_answer[mad->med_answer+1]);
+	}
+
+	switch (mad->vsi) {
+	case VS_INTERSECT:
+		audit_log_format(ab, " vs={ intersect }");
 		break;
-	case MED_DENY:
-		audit_log_format(ab,"MED_DENY ");
+	case VS_SW_N:
+		if (vs_intersects((&(mad->vs.sw))->vss, (&(mad->vs.sw))->vst))
+			audit_log_format(ab, " vs={ S , ");
+		else
+			audit_log_format(ab, " vs={ ~S , ");
+		if (vs_intersects((&(mad->vs.sw))->vsw, (&(mad->vs.sw))->vst))
+			audit_log_format(ab, "W }");
+		else
+			audit_log_format(ab, "~W }");
 		break;
-	case MED_FAKE_ALLOW:
-		audit_log_format(ab,"MED_FAKE_ALLOW ");
+	case VS_SRW_N:
+		if (vs_intersects((&(mad->vs.srw))->vss, (&(mad->vs.srw))->vst))
+			audit_log_format(ab, " vs={ S , ");
+		else
+			audit_log_format(ab, " vs={ ~S , ");
+		if (vs_intersects((&(mad->vs.srw))->vsr, (&(mad->vs.srw))->vst))
+			audit_log_format(ab, "R , ");
+		else
+			audit_log_format(ab, "~R , ");
+		if (vs_intersects((&(mad->vs.srw))->vsw, (&(mad->vs.srw))->vst))
+			audit_log_format(ab, "W }");
+		else
+			audit_log_format(ab, "~W }");
 		break;
-	case MED_FORCE_ALLOW:
-		audit_log_format(ab,"MED_FORCE_ALLOW ");
+	default:
 		break;
-	case MED_ERR:
-		audit_log_format(ab,"MED_ERR ");
-		break;	
+	}
+
+	switch (mad->event) {
+	case EVENT_NONE:
+		audit_log_format(ab, " access=none");
+		break;
+	case EVENT_MONITORED:
+		audit_log_format(ab, " access=monitored");
+		break;
+	case EVENT_MONITORED_N:
+		audit_log_format(ab, " access=refused");
+		break;
 	}
 }
 
-static void medusa_post(struct audit_buffer *ab, void *pcad){
-	struct common_audit_data *cad = pcad;
-	struct medusa_audit_data *mad = cad->medusa_audit_data;
-	
-	if (mad->med_subject != NULL && mad->med_object != NULL) {
-		audit_log_format(ab,"{subj,obj}=valid vs_intersect={");
-	} else {
-		audit_log_format(ab, "{subj,obj}=invalid vs_intersect{");
-	}
-
-	switch (mad->vsi)
-	case VSI_NONE:
-		audit_log_format(ab, "none} ");
-		break;
-	case VSI_UNKNOWN:
-		audit_log_format(ab, "unknown} ");
-		break;
-	case VSI_SW:
-		audit_log_format(ab, "seeable,writeable} ");
-		break;
-	case VSI_SW_N:
-		if (vs_intersects(mad->med_subject->vss , mad->med_object->vs)) {
-			audit_log_format(ab, "seeable,");
-		} else {
-			audit_log_format(ab, "~seeable,");
-		}
-		if(vs_intersects(mad->med_subject->vsr , mad->med_object->vs)) {
-			audit_log_format(ab,"writeable} ");
-			break;
-		} else {
-			audit_log_format(ab,"~writeable} ");
-			break;
-		}
-	case VSI_SRW:
-		audit_log_format(ab, "seeable,readable,writeable} ");
-		break;	
-	case VSI_SRW_N:
-		if (vs_intersects(mad->med_subject->vss , mad->med_object->vs))
-			audit_log_format(ab, "seeable,");
-		else
-			audit_log_format(ab, "~seeable,");
-		if (vs_intersects(mad->med_subject->vsr , mad->med_object->vs))
-			audit_log_format(ab, "readable,");
-		else
-			audit_log_format(ab, "~readable,");
-		if (vs_intersects(mad->med_subject->vsw , mad->med_object->vs)) {
-			audit_log_format(ab, "writeable} ");
-			break;
-		} else {
-			audit_log_format(ab, "~writeable} ");
-			break;
-		}
-	
-
-	audit_log_format(ab, "access=");
-	if(mad->event == EVENT_MONITORED) {
-		audit_log_format(ab, "monitored");
-	} else if (mad->event == EVENT_MONITORED_N) {
-		audit_log_format(ab, "~monitored");
-	} else {
-		audit_log_format(ab, "unknown");
-	}
-}
-
-void medusa_audit_log_callback(struct common_audit_data *cad){
-	common_lsm_audit(cad, medusa_pre, medusa_post);	
+/*
+ * medusa_audit_log_callback - callback to log audit record
+ * @cad: common audit data to record
+ * @medusa_post: post audit callback, unique for type of access, may be NULL
+ */
+void medusa_audit_log_callback(struct common_audit_data *cad,
+		void (*medusa_post) (struct audit_buffer *, void *)) 
+{
+	if (medusa_post != NULL)
+		common_lsm_audit(cad, medusa_pre, medusa_post);
+	else
+		common_lsm_audit(cad, medusa_pre, NULL);
 }

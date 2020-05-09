@@ -3,6 +3,7 @@
 #include <linux/limits.h>
 #include <linux/init.h>
 #include <linux/mm.h>
+#include <linux/lsm_audit.h>
 #include <linux/medusa/l2/audit_medusa.h>
 
 #include "kobject_process.h"
@@ -31,51 +32,61 @@ int __init rmdir_acctype_init(void) {
 	return 0;
 }
 
+static void medusa_rmdir_pacb(struct audit_buffer *ab, void *pcad);
 static medusa_answer_t medusa_do_rmdir(struct dentry *dentry);
 medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 {
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
+	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SW_N };
 
 	if (!dentry || IS_ERR(dir->dentry) || dentry->d_inode == NULL)
 		return retval;
-
-	cad.type = LSM_AUDIT_DATA_DENTRY;
-	cad.u.dentry = dentry;
-
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		goto audit;
+		return retval;
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(dentry,NULL) <= 0)
-		goto audit;
-
-	mad.med_subject = task_security(current)->med_subject;
-	mad.med_object = inode_security(dentry->d_inode)->med_object;
-	
+		file_kobj_validate_dentry(dentry,NULL) <= 0)
+		return retval;
 	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
 		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
 	) {
+		mad.vs.sw.vst = VS(inode_security(dentry->d_inode));
+		mad.vs.sw.vss = VSS(task_security(current));
+		mad.vs.sw.vsw = VSW(task_security(current));
 		retval = MED_DENY;
-		mad.vsi = VSI_SW_N;
 		goto audit;
-	} else
-		mad.vsi = VSI_SW;
-
+	} else {
+		mad.vsi = VS_INTERSECT;
+	}
 	if (MEDUSA_MONITORED_ACCESS_O(rmdir_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_rmdir(dentry);
 		mad.event = EVENT_MONITORED;
-	} else
+	} else {
 		mad.event = EVENT_MONITORED_N;
+	}
 audit:
 #ifdef CONFIG_AUDIT
+	cad.type = LSM_AUDIT_DATA_PATH;
+	cad.u.path = *dir;
 	mad.function = __func__;
 	mad.med_answer = retval;
+	file_kobj_dentry2string(dentry, mad.pacb.filename);
 	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad);
+	medusa_audit_log_callback(&cad, medusa_rmdir_pacb);
 #endif
 	return retval;
+}
+
+static void medusa_rmdir_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	if (mad->pacb.filename) {
+		audit_log_format(ab," filename=");
+		audit_log_untrustedstring(ab,mad->pacb.filename);
+	}
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */

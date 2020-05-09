@@ -5,6 +5,7 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/types.h>
+#include <linux/lsm_audit.h>
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l3/med_model.h>
@@ -35,6 +36,7 @@ int __init permission_acctype_init(void) {
 	return 0;
 }
 
+static void medusa_permission_pacb(struct audit_buffer *ab, void *pcad);
 medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inode, int mask);
 /**
  * medusa_permission - L1-called code to create access of type 'permission'.
@@ -47,26 +49,18 @@ medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	medusa_answer_t retval = MED_ALLOW;
 	struct dentry * dentry;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VSI_UNKNOWN , .event = EVENT_UNKNOWN };
+	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SRW_N };
 
 	dentry = d_find_alias(inode);
 
 	if (!dentry || IS_ERR(dentry))
 		return retval;
-
-	cad.type = LSM_AUDIT_DATA_DENTRY;
-	cad.u.dentry = dentry;
-
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		goto audit;
+		return retval;
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
-		goto audit;
-
-	mad.med_subject = task_security(current)->med_subject;
-	mad.med_object = inode_security(dentry->d_inode)->med_object;
-
+		return retval;
 	if (
 		!vs_intersects(VSS(task_security(current)),VS(inode_security(inode))) ||
 		( (mask & (S_IRUGO | S_IXUGO)) &&
@@ -74,26 +68,43 @@ medusa_answer_t medusa_permission(struct inode *inode, int mask)
 		( (mask & S_IWUGO) &&
 		  	!vs_intersects(VSW(task_security(current)),VS(inode_security(inode))) )
 	   ) {
+		mad.vs.srw.vst = VS(inode_security(inode));
+		mad.vs.srw.vss = VSS(task_security(current));
+		mad.vs.srw.vsr = VSR(task_security(current));
+		mad.vs.srw.vsw = VSW(task_security(current));
 		retval = MED_DENY;
-		mad.vsi = VSI_SRW_N;
 		goto audit;
-	} else
-		mad.vsi = VSI_SRW;
-
-	if (MEDUSA_MONITORED_ACCESS_O(permission_access, inode_security(inode)))
+	} else {
+		mad.vsi = VS_INTERSECT;
+	}
+	if (MEDUSA_MONITORED_ACCESS_O(permission_access, inode_security(inode))) {
 		retval = medusa_do_permission(dentry, inode, mask);
 		mad.event = EVENT_MONITORED;
-	} else
+	} else {
 		mad.event = EVENT_MONITORED_N;
+	}
 audit:
 #ifdef CONFIG_AUDIT
+	cad.type = LSM_AUDIT_DATA_DENTRY;
+	cad.u.dentry = dentry;
 	mad.function = __func__;
 	mad.med_answer = retval;
+	mad.pacb.mode = mask;
 	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad);
+	medusa_audit_log_callback(&cad, medusa_permission_pacb);
 #endif
 	dput(dentry);
 	return retval;
+}
+
+static void medusa_permission_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	if (mad->pacb.mode) {
+		audit_log_format(ab," mask=%d",mad->pacb.mode);
+	}
 }
 
 medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inode, int mask)

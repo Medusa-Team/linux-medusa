@@ -2,6 +2,7 @@
 #include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
+#include <linux/lsm_audit.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include "kobject_process.h"
@@ -26,6 +27,7 @@ int __init ipc_acctype_ctl_init(void) {
 	return 0;
 }
 
+static void medusa_ipc_ctl_pacb(struct audit_buffer *ab, void *pcad);
 /*
  * Check permission when an IPC object (semaphore, message queue, shared memory)
  * operation specified by @cmd is to be performed on the IPC object for which
@@ -72,13 +74,11 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 {
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VSI_NONE , .event = EVENT_UNKNOWN };
+	struct medusa_audit_data mad = { .event = EVENT_MONITORED_N, .pacb.ipc.ipc_class = MED_IPC_UNDEFINED };
 	struct ipc_ctl_access access;
 	struct process_kobject process;
 	struct ipc_kobject object, *object_p = NULL;
 
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
 	/* 'ipcp' is NULL in case of 'cmd': IPC_INFO, MSG_INFO, SEM_INFO, SHM_INFO */
 	if (likely(ipcp)) {
 		/* second argument false: don't need to unlock IPC object */
@@ -94,8 +94,8 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
 
-	mad.med_object = ipc_security(ipcp)->med_object;
-	mad.med_subject = task_security(current)->med_subject;
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
 
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_ctl_access, task_security(current))) {
 		mad.event = EVENT_MONITORED;
@@ -107,16 +107,29 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 		if (likely(object_p)) {
 			/* 3-th argument is true: decrement IPC object's refcount in returned object */
 			if (ipc_kern2kobj(object_p, ipcp, true) <= 0)
-				goto out;
+				goto audit;
 			access.ipc_class = object_p->ipc_class;
+			mad.pacb.ipc.ipc_class = object_p->ipc_class;
 		}
 
 		/* in case of NULL 'ipcp', 'object_p' is NULL too */
 		retval = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
 		if (retval == MED_ERR)
 			retval = MED_ALLOW;
-	} else
-		mad.event = EVENT_MONITORED_N;
+	}
+audit:
+	if (likely(ipcp)) {
+		if (unlikely(ipc_putref(ipcp, false)))
+			retval = MED_DENY;
+	}
+#ifdef CONFIG_AUDIT
+	mad.function = __func__;
+	mad.med_answer = retval;
+	mad.pacb.ipc.flcm = cmd;
+	cad.medusa_audit_data = &mad;
+	medusa_audit_log_callback(&cad, medusa_ipc_ctl_pacb);
+#endif
+	return retval;
 out:
 	if (likely(ipcp)) {
 		/* second argument false: don't need to lock IPC object */
@@ -124,12 +137,19 @@ out:
 			/* for now, we don't support error codes */
 			retval = MED_DENY;
 	}
-#ifdef CONFIG_AUDIT
-	mad.function = __func__;
-	mad.med_answer = retval;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad);
-#endif
 	return retval;
+}
+
+static void medusa_ipc_ctl_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	if ((&(mad->pacb.ipc))->flcm) {
+		audit_log_format(ab," cmd=%d",((&(mad->pacb.ipc))->flcm));
+	}
+	if ((&(mad->pacb.ipc))->ipc_class) {
+		audit_log_format(ab," ipc_class=%u",((&(mad->pacb.ipc))->ipc_class));
+	}
 }
 __initcall(ipc_acctype_ctl_init);
