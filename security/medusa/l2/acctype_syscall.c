@@ -57,9 +57,10 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
         /* process_kobject proc is zeroed by process_kern2kobj function */
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(syscall_access);
 		return MED_ALLOW;
-
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(syscall_access, task_security(current))) {
 		access.sysnr = eax;
 		access.arg1 = p1; access.arg2 = p2;
@@ -70,10 +71,13 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
 		retval = MED_DECIDE(syscall_access, &access, &proc, &proc);
 	}
 	/* this needs more optimization some day */
-	if (retval == MED_DENY)
+	if (retval == MED_DENY) {
+			MEDUSAFS_RAISE_DENIED(syscall_access);
 			return 0; /* deny */
-	if (retval != MED_FAKE_ALLOW)
+	if (retval != MED_FAKE_ALLOW) {
+		MEDUSAFS_RAISE_ALLOWED(syscall_access);
 		return 1; /* allow */
+	}
 	return 2; /* skip trace code */
 }
 

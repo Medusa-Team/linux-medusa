@@ -195,6 +195,10 @@ struct medusa_evtype_s {
 	char arg_name[2][MEDUSA_ATTRNAME_MAX];	/* names of arguments */
 	unsigned int event_size;		/* sizeof(event) */
 	struct medusa_attribute_s * attr;	/* attributes */
+	
+	uint32_t allowed;                       /* counter for allowed evtypes */
+	uint32_t denied;			/* counter for denied evtypes */
+	bool audit;				/* to be or not to be audited */
 };
 
 #ifdef CONFIG_MEDUSA_PROFILING
@@ -210,7 +214,10 @@ struct medusa_evtype_s {
 	0 /* cinfo */
 #endif
 #define MEDUSA_DEFAULT_ACCTYPE_HEADER MEDUSA_DEFAULT_EVTYPE_HEADER
-
+#define MEDUSA_DEFAULT_EVTYPE_SECURITYFS \
+	0 /* allowed */, \
+	0 /* denied */,  \
+	true /* audit */					
 #define MED_EVTYPE(structname,evtypename,s1name,arg1name,s2name,arg2name) \
 	struct medusa_evtype_s (MED_EVTYPEOF(structname)) = { 		\
 		MEDUSA_DEFAULT_ACCTYPE_HEADER,				\
@@ -218,7 +225,8 @@ struct medusa_evtype_s {
 		{ &MED_KCLASSOF(s1name), &MED_KCLASSOF(s2name) },	\
 		{ (arg1name), (arg2name) },				\
 		sizeof(struct structname),				\
-		MED_ATTRSOF(structname)					\
+		MED_ATTRSOF(structname),				\
+		MEDUSA_DEFAULT_EVTYPE_SECURITYFS			\
 	}
 #define MED_ACCTYPE(structname,acctypename,s1name,arg1name,s2name,arg2name) \
 		MED_EVTYPE(structname,acctypename,s1name,arg1name,s2name,arg2name)
