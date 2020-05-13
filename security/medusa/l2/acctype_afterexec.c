@@ -38,15 +38,21 @@ medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
         /* process_kobject process is zeroed by process_kern2kobj function */
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(afterexec_access);
 		return MED_ALLOW;
-
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(afterexec_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(afterexec_access, &access,
 				&process, &process);
+		if (retval==MED_ALLOW)
+			MEDUSAFS_RAISE_ALLOWED(afterexec_access);
+		if (retval==MED_DENY)
+			MEDUSAFS_RAISE_DENIED(afterexec_access);
 		return retval;
 	}
+	MEDUSAFS_RAISE_ALLOWED(afterexec_access);
 	return MED_ALLOW;
 }
 int medusa_monitored_afterexec(void)

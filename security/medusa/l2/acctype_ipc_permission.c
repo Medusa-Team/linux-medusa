@@ -118,10 +118,11 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	 *   true - returns with unlocked IPC object
 	 *   false - don't need to unlock IPC object
 	 */
-	if (unlikely(ipc_getref(ipcp, use_locking)))
+	if (unlikely(ipc_getref(ipcp, use_locking))) {
 		/* for now, we don't support error codes */
+		MEDUSAFS_RAISE_DENIED(ipc_perm_access);		
 		return MED_DENY;
-
+	}
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
@@ -148,6 +149,10 @@ out:
 	if (unlikely(ipc_putref(ipcp, use_locking)))
 		/* for now, we don't support error codes */
 		retval = MED_DENY;
+	if (retval==MED_ALLOW)
+		MEDUSAFS_RAISE_ALLOWED(ipc_perm_access);
+	if (retval==MED_DENY)
+		MEDUSAFS_RAISE_DENIED(ipc_perm_access);
 	return retval;
 }
 __initcall(ipc_acctype_init);

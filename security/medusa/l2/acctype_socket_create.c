@@ -27,10 +27,12 @@ medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 {
 	struct socket_create_access access;
 	struct process_kobject process;
+	medusa_answer_t retval;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(socket_create_access);
 		return MED_ALLOW;
-
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(socket_create_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 
@@ -38,9 +40,14 @@ medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 		access.family = family;
 		access.type = type;
 		access.protocol = protocol;
-		return MED_DECIDE(socket_create_access, &access, &process, &process);
+		retval = MED_DECIDE(socket_create_access, &access, &process, &process);
+		if (retval==MED_ALLOW)
+			MEDUSAFS_RAISE_ALLOWED(socket_create_access);
+		if (retval==MED_DENY)
+			MEDUSAFS_RAISE_DENIED(socket_create_access);
+		return retval;
 	}
-
+	MEDUSAFS_RAISE_ALLOWED(socket_create_access);
 	return MED_ALLOW;
 }
 

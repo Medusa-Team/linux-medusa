@@ -43,11 +43,15 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
         /* process_kobject sender is zeroed by process_kern2kobj function */
         /* process_kobject receiver is zeroed by process_kern2kobj function */
 
-	if (in_interrupt())
+	if (in_interrupt()) {
+		MEDUSAFS_RAISE_ALLOWED(send_signal);
 		return MED_ALLOW;
+	}
 	/* always allow signals coming from kernel - see kernel/signal.c:send_signalnal() */
-	if (info == SEND_SIG_PRIV)
+	if (info == SEND_SIG_PRIV) {
+		MEDUSAFS_RAISE_ALLOWED(send_signal);
 		return MED_ALLOW;
+	}
 	/*
 	if (info) switch (info->si_code) {
 		case CLD_TRAPPED:
@@ -56,28 +60,37 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
 		case CLD_KILLED:
 		case CLD_EXITED:
 		case SI_KERNEL:
+			MEDUSAFS_RAISE_ALLOWED(send_signal);
 			return MED_ALLOW;
 	}
 	*/
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(send_signal);
 		return MED_ALLOW;
-
+	}
 	if (!is_med_magic_valid(&(task_security(p)->med_object)) &&
-		process_kobj_validate_task(p) <= 0)
+		process_kobj_validate_task(p) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(send_signal);
 		return MED_ALLOW;
-
+	}
 	if (!vs_intersects(VSS(task_security(current)), VS(task_security(p))) ||
-			!vs_intersects(VSW(task_security(current)), VS(task_security(p))))
+			!vs_intersects(VSW(task_security(current)), VS(task_security(p)))) {
+		MEDUSAFS_RAISE_DENIED(send_signal);
 		return MED_DENY;
-
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(send_signal, task_security(current))) {
 		access.signal_number = sig;
 		process_kern2kobj(&sender, current);
 		process_kern2kobj(&receiver, p);
 		retval = MED_DECIDE(send_signal, &access, &sender, &receiver);
+		if (retval==MED_ALLOW)
+			MEDUSAFS_RAISE_ALLOWED(send_signal);
+		if (retval==MED_DENY)
+			MEDUSAFS_RAISE_DENIED(send_signal);
 		return retval;
 	}
+	MEDUSAFS_RAISE_ALLOWED(send_signal);
 	return MED_ALLOW;
 }
 

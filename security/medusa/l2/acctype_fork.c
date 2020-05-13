@@ -33,14 +33,20 @@ medusa_answer_t medusa_fork(unsigned long clone_flags)
         /* process_kobject parent is zeroed by process_kern2kobj function */
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(fork_access);
 		return MED_ALLOW;
+	}
 
 	if (MEDUSA_MONITORED_ACCESS_S(fork_access, task_security(current))) {
 		access.clone_flags = clone_flags;
 		process_kern2kobj(&parent, current);
 		retval = MED_DECIDE(fork_access, &access, &parent, &parent);
 	}
+	if (retval==MED_ALLOW)
+		MEDUSAFS_RAISE_ALLOWED(fork_access);
+	if (retval==MED_DENY)
+		MEDUSAFS_RAISE_DENIED(fork_access);
 	return retval;
 }
 __initcall(fork_acctype_init);

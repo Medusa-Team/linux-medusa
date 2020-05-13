@@ -58,10 +58,11 @@ medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 	struct ipc_kobject object;
 
 	/* second argument true: returns with unlocked IPC object */
-	if (unlikely(ipc_getref(ipcp, true)))
+	if (unlikely(ipc_getref(ipcp, true))) {
 		/* for now, we don't support error codes */
+		MEDUSAFS_RAISE_DENIED(ipc_msgsnd_access);
 		return MED_DENY;
-
+	}
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
@@ -86,6 +87,10 @@ out:
 	if (unlikely(ipc_putref(ipcp, true)))
 		/* for now, we don't support error codes */
 		retval = MED_DENY;
+	if (retval==MED_ALLOW)
+		MEDUSAFS_RAISE_ALLOWED(ipc_msgsnd_access);
+	if (retval==MED_DENY)
+		MEDUSAFS_RAISE_DENIED(ipc_msgsnd_access);
 	return retval;
 }
 __initcall(ipc_acctype_msgsnd_init);

@@ -49,10 +49,11 @@ medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmadd
 	struct ipc_kobject object;
 
 	/* second argument false: don't need to unlock IPC object */
-	if (unlikely(ipc_getref(ipcp, false)))
+	if (unlikely(ipc_getref(ipcp, false))) {
 		/* for now, we don't support error codes */
+		MEDUSAFS_RAISE_DENIED(ipc_shmat_access);
 		return MED_DENY;
-
+	}
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
@@ -76,6 +77,10 @@ out:
 	if (unlikely(ipc_putref(ipcp, false)))
 		/* for now, we don't support error codes */
 		retval = MED_DENY;
+	if (retval==MED_ALLOW)
+		MEDUSAFS_RAISE_ALLOWED(ipc_shmat_access);
+	if (retval==MED_DENY)
+		MEDUSAFS_RAISE_DENIED(ipc_shmat_access);
 	return retval;
 }
 __initcall(ipc_acctype_shmat_init);

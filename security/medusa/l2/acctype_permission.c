@@ -47,12 +47,18 @@ medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	struct dentry *dentry;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(permission_access);
 		return MED_ALLOW;
-
+	}
 	dentry = d_find_alias(inode);
-	if (!dentry || IS_ERR(dentry))
+	if (!dentry || IS_ERR(dentry)) {
+		if (retval==MED_ALLOW)
+			MEDUSAFS_RAISE_ALLOWED(permission_access);
+		if (retval==MED_DENY)
+			MEDUSAFS_RAISE_DENIED(permission_access);
 		return retval;
+	}
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
 			file_kobj_validate_dentry(dentry,NULL) <= 0)
 		goto out_dput;
@@ -71,6 +77,10 @@ medusa_answer_t medusa_permission(struct inode *inode, int mask)
 		retval = medusa_do_permission(dentry, inode, mask);
 out_dput:
 	dput(dentry);
+	if (retval==MED_ALLOW)
+		MEDUSAFS_RAISE_ALLOWED(permission_access);
+	if (retval==MED_DENY)
+		MEDUSAFS_RAISE_DENIED(permission_access);
 	return retval;
 }
 

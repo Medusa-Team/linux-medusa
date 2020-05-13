@@ -39,9 +39,10 @@ medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
         /* process_kobject process is zeroed by process_kern2kobj function */
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(setresuid);
 		return MED_ALLOW;
-
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(setresuid, task_security(current))) {
 		access.ruid = ruid;
 		access.euid = euid;
@@ -49,7 +50,10 @@ medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(setresuid, &access, &process, &process);
 	}
-
+	if (retval==MED_ALLOW)
+		MEDUSAFS_RAISE_ALLOWED(setresuid);
+	if (retval==MED_DENY)
+		MEDUSAFS_RAISE_DENIED(setresuid);
 	return retval;
 }
 __initcall(setresuid_acctype_init);

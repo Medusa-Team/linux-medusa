@@ -38,12 +38,16 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	struct path ndcurrent, ndupper, ndparent;
 	medusa_answer_t retval;
 
-	if (!dentry || IS_ERR(dentry))
+	if (!dentry || IS_ERR(dentry)) {
+		MEDUSAFS_RAISE_ALLOWED(mknod_access);
 		return MED_ALLOW;
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
-		return MED_ALLOW;
+	}
 
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(mknod_access);
+		return MED_ALLOW;
+	}
 	ndcurrent.dentry = dentry;
 	ndcurrent.mnt = NULL;
 	medusa_get_upper_and_parent(&ndcurrent,&ndupper,&ndparent);
@@ -51,12 +55,14 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
 			file_kobj_validate_dentry(ndparent.dentry,ndparent.mnt) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
+		MEDUSAFS_RAISE_ALLOWED(mknod_access);
 		return MED_ALLOW;
 	}
 	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(ndparent.dentry->d_inode))) ||
 		!vs_intersects(VSW(task_security(current)),VS(inode_security(ndparent.dentry->d_inode)))
 	) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
+		MEDUSAFS_RAISE_DENIED(mknod_access);
 		return MED_DENY;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(mknod_access, inode_security(ndparent.dentry->d_inode)))
@@ -64,6 +70,10 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	else
 		retval = MED_ALLOW;
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
+	if (retval==MED_ALLOW)
+		MEDUSAFS_RAISE_ALLOWED(mknod_access);
+	if (retval==MED_DENY)
+		MEDUSAFS_RAISE_DENIED(mknod_access);
 	return retval;
 }
 

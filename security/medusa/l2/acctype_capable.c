@@ -41,18 +41,25 @@ medusa_answer_t medusa_capable(int cap)
 	if (in_interrupt()) {
 		med_pr_warn("CAPABLE IN INTERRUPT\n");
 #warning "finish me"
+		MEDUSAFS_RAISE_ALLOWED(capable_access);
 		return MED_ALLOW;
 	}
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(capable_access);
 		return MED_ALLOW;
-
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(capable_access,task_security(current))) {
 		access.cap = CAP_TO_MASK(cap);
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(capable_access, &access, &process, &process);
+		if (retval==MED_ALLOW)
+			MEDUSAFS_RAISE_ALLOWED(capable_access);
+		if (retval==MED_DENY)
+			MEDUSAFS_RAISE_DENIED(capable_access);
 		return retval;
 	}
+	MEDUSAFS_RAISE_ALLOWED(capable_access);
 	return MED_ALLOW;
 }
 __initcall(capable_acctype_init);

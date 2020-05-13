@@ -77,10 +77,11 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 	/* 'ipcp' is NULL in case of 'cmd': IPC_INFO, MSG_INFO, SEM_INFO, SHM_INFO */
 	if (likely(ipcp)) {
 		/* second argument false: don't need to unlock IPC object */
-		if (unlikely(ipc_getref(ipcp, false)))
+		if (unlikely(ipc_getref(ipcp, false))) {
 			/* for now, we don't support error codes */
+			MEDUSAFS_RAISE_DENIED(ipc_ctl_access);
 			return MED_DENY;
-
+		}
 		object_p = &object;
 		if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 			goto out;
@@ -114,6 +115,10 @@ out:
 			/* for now, we don't support error codes */
 			retval = MED_DENY;
 	}
+	if (retval==MED_ALLOW)
+		MEDUSAFS_RAISE_ALLOWED(ipc_ctl_access);
+	if (retval==MED_DENY)
+		MEDUSAFS_RAISE_DENIED(ipc_ctl_access);
 	return retval;
 }
 __initcall(ipc_acctype_ctl_init);

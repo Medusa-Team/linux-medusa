@@ -23,22 +23,32 @@ medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *newsock
 	struct socket_accept_access access;
 	struct process_kobject process;
 	struct socket_kobject sock_kobj;
+	medusa_answer_t retval;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(socket_accept_access);
 		return MED_ALLOW;
-	if (!is_med_magic_valid(&(sock_security(sock->sk)->med_object)) && socket_kobj_validate(sock) <= 0)
+	}
+	if (!is_med_magic_valid(&(sock_security(sock->sk)->med_object)) && socket_kobj_validate(sock) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(socket_accept_access);
 		return MED_ALLOW;
-
+	}
 	if (!vs_intersects(VSS(task_security(current)),VS(sock_security(sock->sk))) ||
-		!vs_intersects(VSW(task_security(current)),VS(sock_security(sock->sk))))
+		!vs_intersects(VSW(task_security(current)),VS(sock_security(sock->sk)))) {
+		MEDUSAFS_RAISE_DENIED(socket_accept_access);
 		return MED_DENY;
-
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(socket_accept_access, task_security(current))) {
 		socket_kern2kobj(&sock_kobj, sock);
 		process_kern2kobj(&process, current);
-
-		return MED_DECIDE(socket_accept_access, &access, &process, &sock_kobj);
+		retval = MED_DECIDE(socket_accept_access, &access, &process, &sock_kobj);
+		if (retval==MED_ALLOW)
+			MEDUSAFS_RAISE_ALLOWED(socket_accept_access);
+		if (retval==MED_DENY)
+			MEDUSAFS_RAISE_DENIED(socket_accept_access);
+		return retval;
 	}
+	MEDUSAFS_RAISE_ALLOWED(socket_accept_access);
 	return MED_ALLOW;
 }
 

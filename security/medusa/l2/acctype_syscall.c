@@ -72,8 +72,8 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
 	}
 	/* this needs more optimization some day */
 	if (retval == MED_DENY) {
-			MEDUSAFS_RAISE_DENIED(syscall_access);
-			return 0; /* deny */
+		MEDUSAFS_RAISE_DENIED(syscall_access);
+		return 0; /* deny */
 	if (retval != MED_FAKE_ALLOW) {
 		MEDUSAFS_RAISE_ALLOWED(syscall_access);
 		return 1; /* allow */
