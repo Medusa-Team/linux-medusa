@@ -36,7 +36,7 @@ static ssize_t medusa_read_version(struct file *filp, char __user *buf,
 }
 
 
-static ssize_t medusa_read_evtypes(struct file *filp, char __user *buf,
+static ssize_t medusa_read_acctypes(struct file *filp, char __user *buf,
 				   size_t count, loff_t *ppos)
 {
 	char tmpbuf[TMPBUFLEN];
@@ -98,26 +98,32 @@ const struct file_operations medusa_version_ops =
 	.llseek		= generic_file_llseek,
 };
 
-const struct file_operations medusa_evtypes_ops = 
+const struct file_operations medusa_acctypes_ops = 
 {
-	.read		= medusa_read_evtypes,
+	.read		= medusa_read_acctypes,
 	.llseek		= generic_file_llseek,
 };
 
 const struct file_operations medusa_audit_ops = 
 {
-	.read		= medusa_read_evtypes,
+	.read		= medusa_read_acctypes,
 	.write 		= medusa_write_audit,
 	.llseek		= generic_file_llseek,
 };
 
 void medusafs_register_evtype(char *name)
 {
-	struct dentry *evtype_dir;
-	evtype_dir = securityfs_create_dir(name, acctypes_dir);
-	securityfs_create_file("allowed", 0444, evtype_dir, NULL, &medusa_evtypes_ops);
-	securityfs_create_file("denied", 0444, evtype_dir, NULL, &medusa_evtypes_ops);
-	securityfs_create_file("audit", 0666, evtype_dir, NULL, &medusa_audit_ops);
+	struct dentry *acctype_dir;
+
+	if(strcmp(name, "fuck") == 0 || strcmp(name, "getipc") == 0 || strcmp(name, "getfile") == 0 || 
+	   strcmp(name, "getprocess") == 0 || strcmp(name, "get_socket") == 0)
+		return;
+
+	
+	acctype_dir = securityfs_create_dir(name, acctypes_dir);
+	securityfs_create_file("allowed", 0444, acctype_dir, NULL, &medusa_acctypes_ops);
+	securityfs_create_file("denied", 0444, acctype_dir, NULL, &medusa_acctypes_ops);
+	securityfs_create_file("audit", 0666, acctype_dir, NULL, &medusa_audit_ops);
 }
 
 /*
