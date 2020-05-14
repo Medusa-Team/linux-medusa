@@ -12,9 +12,6 @@ struct medusa_kclass_s *kclasses = NULL;
 struct medusa_evtype_s *evtypes = NULL;
 struct medusa_authserver_s *authserver = NULL;
 
-struct medusa_evtype_s *medusafs_evtypes = NULL;
-
-
 int medusa_authserver_magic = 1; /* the 'version' of authserver */
 /* WARNING! medusa_authserver_magic is not locked, nor atomic type,
  * because we want to have as much portable (and easy and fast) code
@@ -228,7 +225,6 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 	med_evtype->bitnr = flags;
 
 	medusafs_register_evtype(med_evtype->name);
-	printk("\nregistered %s\n",med_evtype->name);
 	
 
 #define MASK (~(MEDUSA_EVTYPE_TRIGGEREDATOBJECT | MEDUSA_EVTYPE_TRIGGEREDATSUBJECT))
@@ -244,7 +240,6 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 #undef MASK
 
 	evtypes = med_evtype;
-	medusafs_evtypes = evtypes;
 
 	if (authserver && authserver->add_evtype)
 		authserver->add_evtype(med_evtype); /* TODO: some day, check for response */

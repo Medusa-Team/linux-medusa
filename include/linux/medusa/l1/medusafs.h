@@ -9,11 +9,8 @@
 
 #define MEDUSA_VERSION_NUMBER "1.0.0"
 
-
 extern struct dentry *medusafs_root_dir;
-
-extern struct medusa_evtype_s *medusafs_evtypes;
-
+extern struct medusa_evtype_s *evtypes;
 extern void medusafs_register_evtype(char *name);
 
 

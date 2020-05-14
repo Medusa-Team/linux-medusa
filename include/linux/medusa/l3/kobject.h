@@ -196,8 +196,8 @@ struct medusa_evtype_s {
 	unsigned int event_size;		/* sizeof(event) */
 	struct medusa_attribute_s * attr;	/* attributes */
 	
-	uint32_t allowed;                       /* counter for allowed evtypes */
-	uint32_t denied;			/* counter for denied evtypes */
+	uint64_t allowed;                       /* counter for allowed evtypes */
+	uint64_t denied;			/* counter for denied evtypes */
 	bool audit;				/* to be or not to be audited */
 };
 
