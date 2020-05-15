@@ -130,10 +130,12 @@ static int medusa_l1_sb_remount(struct super_block *sb, void *data)
 static int medusa_l1_sb_kern_mount(struct super_block *sb)
 {
 	struct inode *inode = sb->s_root->d_inode;
+
 	if (inode->i_security == NULL) {
 		med_pr_warn("WARNING: l1_sb_kern_mount_inode->i_security is NULL");
 		return medusa_l1_inode_alloc_security(inode);
 	}
+
 	return 0;
 }
 */
@@ -201,6 +203,7 @@ static int medusa_l1_dentry_init_security(struct dentry *dentry, int mode,
 			med_pr_warn("WARNING l1_dentry_init_security dentry->d_inode->i_security is NULL");
 			return medusa_l1_inode_alloc_security(dentry->d_inode);
 		}
+
 	}
 	// TODO: why return -EOPNOTSUPP ?
 	return -EOPNOTSUPP;
@@ -909,8 +912,10 @@ static int medusa_l1_socket_create(int family, int type, int protocol, int kern)
 {
 	if (kern)
 		return 0;
+
 	if (medusa_socket_create(family, type, protocol) == MED_DENY)
 		return -EACCES;
+
 	return 0;
 }
 */
@@ -920,10 +925,12 @@ static int medusa_l1_socket_post_create(struct socket *sock, int family, int typ
 				int protocol, int kern)
 {
 	struct medusa_l1_socket_s *sk_sec;
+
 	if (sock->sk) {
 		sk_sec = sock_security(sock->sk);
 		sk_sec->addrlen = 0;
 	}
+
 	return 0;
 }
 */
@@ -935,8 +942,10 @@ static int medusa_l1_socket_bind(struct socket *sock, struct sockaddr *address,
 	if (!sock->sk) {
 		return 0;
 	}
+
 	if (medusa_socket_bind(sock, address, addrlen) == MED_DENY)
 		return -EACCES;
+
 	return 0;
 }
 */
@@ -948,8 +957,10 @@ static int medusa_l1_socket_connect(struct socket *sock, struct sockaddr *addres
 	if (!sock->sk) {
 		return 0;
 	}
+
 	if (medusa_socket_connect(sock, address, addrlen) == MED_DENY)
 		return -EACCES;
+
 	return 0;
 }
 */
@@ -960,8 +971,10 @@ static int medusa_l1_socket_listen(struct socket *sock, int backlog)
 	if (!sock->sk) {
 		return 0;
 	}
+
 	if (medusa_socket_listen(sock, backlog) == MED_DENY)
 		return -EACCES;
+
 	return 0;
 }
 */
@@ -972,8 +985,10 @@ static int medusa_l1_socket_accept(struct socket *sock, struct socket *newsock)
 	if (!sock->sk) {
 		return 0;
 	}
+
 	if (medusa_socket_accept(sock, newsock) == MED_DENY)
 		return -EACCES;
+
 	return 0;
 }
 */
@@ -984,8 +999,10 @@ static int medusa_l1_socket_sendmsg(struct socket *sock, struct msghdr *msg, int
 	if (!sock->sk) {
 		return 0;
 	}
+
 	if (medusa_socket_sendmsg(sock, msg, size) == MED_DENY)
 		return -EACCES;
+
 	return 0;
 }
 */
@@ -997,8 +1014,10 @@ static int medusa_l1_socket_recvmsg(struct socket *sock, struct msghdr *msg,
 	if (!sock->sk) {
 		return 0;
 	}
+
 	if (medusa_socket_recvmsg(sock, msg, size, flags) == MED_DENY)
 		return -EACCES;
+
 	return 0;
 }
 */
@@ -1066,9 +1085,11 @@ static int medusa_l1_socket_getpeersec_dgram(struct socket *sock,
 static int medusa_l1_sk_alloc_security(struct sock *sk, int family, gfp_t priority)
 {
 	sk->sk_security = (struct medusa_l1_socket_s*) kmalloc(sizeof(struct medusa_l1_socket_s), GFP_KERNEL);
+
 	if (!sk->sk_security) {
 		return -1;
 	}
+
 	return 0;
 }
 */
@@ -1077,6 +1098,7 @@ static int medusa_l1_sk_alloc_security(struct sock *sk, int family, gfp_t priori
 static void medusa_l1_sk_free_security(struct sock *sk)
 {
 	struct medusa_l1_socket_s *med;
+
 	if (sk->sk_security != NULL) {
 		med = sk->sk_security;
 		sk->sk_security = NULL;
@@ -1090,6 +1112,7 @@ static void medusa_l1_sk_clone_security(const struct sock *sk, struct sock *news
 {
 	struct medusa_l1_socket_s *sk_sec = sk->sk_security;
 	struct medusa_l1_socket_s *newsk_sec = newsk->sk_security;
+
 	newsk_sec = (struct medusa_l1_socket_s*) kmalloc(sizeof(struct medusa_l1_socket_s), GFP_KERNEL);
 	newsk_sec->addrlen = 0;
 	newsk_sec->med_object = sk_sec->med_object;
@@ -1204,6 +1227,7 @@ static int medusa_l1_tun_dev_open(void *security)
 static int medusa_l1_xfrm_policy_alloc(struct xfrm_sec_ctx **ctxp,
 										struct xfrm_user_sec_ctx *sec_ctx,
 										gfp_t gfp)
+
 {
 	return 0;
 }
@@ -1606,6 +1630,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	/*
 	LSM_HOOK_INIT(unix_stream_connect, medusa_l1_unix_stream_connect),
 	LSM_HOOK_INIT(unix_may_send, medusa_l1_unix_may_send),
+
 	LSM_HOOK_INIT(socket_create, medusa_l1_socket_create),
 	LSM_HOOK_INIT(socket_post_create, medusa_l1_socket_post_create),
 	LSM_HOOK_INIT(socket_bind, medusa_l1_socket_bind),
@@ -1721,6 +1746,7 @@ static int __init medusa_l1_init(void)
 	struct inode_list *tmp_inode;
 	struct task_list *tmp_task;
 	struct kern_ipc_perm_list *tmp_ipcp;
+
 	// holding l0_mutex cannot be executed no l0 hook
 	mutex_lock(&l0_mutex);
 	
@@ -1731,6 +1757,7 @@ static int __init medusa_l1_init(void)
 		list_del(pos);
 		kfree(tmp_inode);
 	}
+
 	list_for_each_safe(pos, q, &l0_task_list.list) {
 		tmp_task = list_entry(pos, struct task_list, list);
 		ret = medusa_l1_task_alloc(tmp_task->task, tmp_task->clone_flags);
@@ -1738,6 +1765,7 @@ static int __init medusa_l1_init(void)
 		list_del(pos);
 		kfree(tmp_task);
 	}
+
 	list_for_each_safe(pos, q, &l0_kern_ipc_perm_list.list) {
 		tmp_ipcp = list_entry(pos, struct kern_ipc_perm_list, list);
 		ret = tmp_ipcp->medusa_l1_ipc_alloc_security(tmp_ipcp->ipcp);

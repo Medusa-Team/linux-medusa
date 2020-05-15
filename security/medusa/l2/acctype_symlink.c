@@ -70,10 +70,7 @@ medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 	else
 		retval = MED_ALLOW;
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(symlink_access);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(symlink_access);
+	MEDUSAFS_RAISE_COUNTER(structname);
 	return retval;
 }
 
