@@ -111,11 +111,13 @@ const struct file_operations medusa_audit_ops =
 	.llseek		= generic_file_llseek,
 };
 
+/* create folder with files for acctype registered by med_register_evtype in registry.c in l3*/
 void medusafs_register_evtype(char *name)
 {
 	struct dentry *acctype_dir;
 
-	if (strcmp(name, "fuck") == 0 || strcmp(name, "getipc") == 0 || strcmp(name, "getfile") == 0 || strcmp(name, "getprocess") == 0 || strcmp(name, "get_socket") == 0)
+	if (strcmp(name, "fuck") == 0 || strcmp(name, "getipc") == 0 || strcmp(name, "getfile") == 0
+	    || strcmp(name, "getprocess") == 0 || strcmp(name, "get_socket") == 0)
 		return;
 
 	acctype_dir = securityfs_create_dir(name, acctypes_dir);

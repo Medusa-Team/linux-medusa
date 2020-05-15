@@ -216,7 +216,6 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 	for (p = evtypes; p; p = p->next)
 		if (strcmp(p->name, med_evtype->name) == 0) {
 			MED_UNLOCK_W(registry_lock);
-			printk("\n%s already exists\n",med_evtype->name);
 			med_pr_err("Error: '%s' event type already exists.\n", med_evtype->name);
 			return -1;
 		}
