@@ -2,7 +2,6 @@
 #include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
-#include <linux/lsm_audit.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include "kobject_process.h"
@@ -87,8 +86,6 @@ medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops
 		mad.pacb.ipc_semop.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_semop_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 audit:
 	if (unlikely(ipc_putref(ipcp, false)))

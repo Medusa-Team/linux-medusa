@@ -3,7 +3,6 @@
 #include <linux/limits.h>
 #include <linux/init.h>
 #include <linux/mm.h>
-#include <linux/lsm_audit.h>
 #include <linux/medusa/l2/audit_medusa.h>
 
 #include "kobject_process.h"
@@ -113,8 +112,6 @@ static medusa_answer_t medusa_do_link(struct dentry *dentry, const char * newnam
 	file_kobj_live_add(dentry->d_inode);
 	retval = MED_DECIDE(link_access, &access, &process, &file);
 	file_kobj_live_remove(dentry->d_inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return retval;
 }
 __initcall(link_acctype_init);

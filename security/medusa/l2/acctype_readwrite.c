@@ -19,9 +19,9 @@
  * @file: file to read
  *
  */
-medusa_answer_t medusa_read(struct file * file)
+medusa_answer_t medusa_read(struct file *file)
 {
-	struct dentry * dentry;
+	struct dentry *dentry;
 
 	dentry = file->f_path.dentry;
 	if (!dentry || IS_ERR(dentry))
@@ -48,9 +48,9 @@ medusa_answer_t medusa_read(struct file * file)
  * @file: file to write
  *
  */
-medusa_answer_t medusa_write(struct file * file)
+medusa_answer_t medusa_write(struct file *file)
 {
-	struct dentry * dentry;
+	struct dentry *dentry;
 
 	dentry = file->f_path.dentry;
 	if (!dentry || IS_ERR(dentry))

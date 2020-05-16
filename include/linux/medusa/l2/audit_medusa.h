@@ -1,7 +1,7 @@
 #include <linux/types.h>
 #include <linux/lsm_audit.h>
 #include <linux/medusa/l3/constants.h>
-#include <linux/medusa/l3/vsmodel.h>
+#include <linux/medusa/l3/vs_model.h>
 /* @vsi: virtual spaces intersection flags */
 #define VS_INTERSECT 1 /* Virtual spaces are intersected */
 #define VS_SW_N 2 /* Virtual spaces see and write are not intersected */

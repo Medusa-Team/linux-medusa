@@ -29,6 +29,7 @@ function parse_argv {
         INSTALL=1
         USE_RSYNC=1
         RSYNC_ONLY=0
+        RUN_KUNIT=0
 
         for arg in "$@"; do
                 if [[ "$arg" == '--delete' || "$arg" == '-delete' ]]; then
@@ -47,15 +48,17 @@ function parse_argv {
                         INSTALL=0
                         GRUB=0
                         REBOOT=0
-                elif [[ "$arg" == '--norsync' ]]; then
+                elif [[ "$arg" == '--norsync' || "$arg" == '-norsync' ]]; then
                         USE_RSYNC=0
-                elif [[ "$arg" == '--rsync-only' ]]; then
+                elif [[ "$arg" == '--rsync-only' || "$arg" == '-rsync-only' ]]; then
                         RSYNC_ONLY=1
+                elif [[ "$arg" == '--run-kunit' || "$arg" == '-run-kunit' ]]; then
+                        RUN_KUNIT=1
                 elif [[ "$arg" == '-h' || "$arg" == '--help' || "$arg" == '-help' ]]; then
                         help
                 else
                         echo "Error unknown parameter '$arg'"
-                        help 
+                        help
                 fi
         done
 
@@ -64,7 +67,7 @@ function parse_argv {
 
 function help {
         echo "$PROGNAME [--help] [--delete] [--clean] [--nogrub] [--nogdb] [--noreboot]";
-        echo "    [--medusa-only] [--norsync] [--rsync-only]"
+        echo "    [--medusa-only] [--norsync] [--rsync-only] [--run-kunit]"
         echo "    --help           - Prints this help"
         echo "    --delete         - Deletes the medusa object files (handy when changing"
         echo "                       header files or makefiles)"
@@ -77,6 +80,8 @@ function help {
         echo "    --norsync        - Don't synchronize the sources on the debugging machine"
         echo "    --rsync-only     - Synchronizes the sources on the debugging machine, doesn't"
         echo "                       compile"
+        echo "    --run-kunit      - Run available KUnit Medusa tests (this option overrides all"
+        echo "                       other specified options and therefore are ignored)"
         exit 0
 }
 
@@ -92,6 +97,13 @@ function medusa_only {
 
         make -j `expr $PROCESSORS + 1` bzImage
         [ $? -ne 0 ] && do_exit 1 "make bzImage failed"
+}
+
+function run_kunit {
+	cp .config .tmpconfig
+	./tools/testing/kunit/kunit.py run
+	cp .tmpconfig .config
+	rm .tmpconfig
 }
 
 function install_module {
@@ -110,7 +122,7 @@ function install_module {
 
 function create_package {
         sudo rm -rf ../linux-image-*.deb
- 
+
         export CONCURRENCY_LEVEL=`expr $PROCESSORS + 1`
         make deb-pkg
 
@@ -118,7 +130,7 @@ function create_package {
 }
 
 function rsync_repo {
-        rsync -avz --exclude 'Documentation' --exclude '*.o' --exclude '.*' --exclude '*.cmd' --exclude '.git' --exclude '*.xz' --exclude '*ctags' -e ssh . $DEST 
+        rsync -avz --exclude 'Documentation' --exclude '*.o' --exclude '.*' --exclude '*.cmd' --exclude '.git' --exclude '*.xz' --exclude '*ctags' -e ssh . $DEST
 }
 
 function install_package {
@@ -148,9 +160,14 @@ function update_grub {
 
 parse_argv $@
 
+if [ $RUN_KUNIT -eq 1 ]; then
+	run_kunit
+	exit 0
+fi
+
 if [ $RSYNC_ONLY -eq 1 ]; then
-    rsync_repo
-    exit 0
+	rsync_repo
+	exit 0
 fi
 
 [ -f vmlinux ] && sudo rm -f vmlinux 2> /dev/null

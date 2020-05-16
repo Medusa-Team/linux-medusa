@@ -70,8 +70,6 @@ static medusa_answer_t medusa_do_truncate(struct dentry *dentry, unsigned long l
 	file_kobj_live_add(dentry->d_inode);
 	retval = MED_DECIDE(truncate_access, &access, &process, &file);
 	file_kobj_live_remove(dentry->d_inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return retval;
 }
 __initcall(truncate_acctype_init);

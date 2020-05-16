@@ -40,8 +40,6 @@ medusa_answer_t medusa_fork(unsigned long clone_flags)
 		access.clone_flags = clone_flags;
 		process_kern2kobj(&parent, current);
 		retval = MED_DECIDE(fork_access, &access, &parent, &parent);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 	return retval;
 }

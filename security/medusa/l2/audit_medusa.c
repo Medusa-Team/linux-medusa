@@ -1,4 +1,3 @@
-#include <linux/audit.h>
 #include <linux/medusa/l2/audit_medusa.h>
 
 /* array for auditing med_answer,
@@ -40,32 +39,32 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 		audit_log_format(ab, " vs={ intersect }");
 		break;
 	case VS_SW_N:
-		if (vs_intersects(mad->vs.sw.vss, mad->vs.sw.vst)
+		if (vs_intersects(mad->vs.sw.vss, mad->vs.sw.vst))
 			audit_log_format(ab, " vs={ see_i , ");
 		else
 			audit_log_format(ab, " vs={ see_n , ");
-		if (vs_intersects(mad->vs.sw.vsw, mad->vs.sw.vst)
+		if (vs_intersects(mad->vs.sw.vsw, mad->vs.sw.vst))
 			audit_log_format(ab, "write_i }");
 		else
 			audit_log_format(ab, "write_n }");
 		break;
 	case VS_SRW_N:
-		if (vs_intersects(mad->vs.srw.vss, mad->vs.srw.vst)
+		if (vs_intersects(mad->vs.srw.vss, mad->vs.srw.vst))
 			audit_log_format(ab, " vs={ see_i , ");
 		else
 			audit_log_format(ab, " vs={ see_n , ");
-		if (vs_intersects(mad->vs.srw.vsr, mad->vs.srw.vst)
+		if (vs_intersects(mad->vs.srw.vsr, mad->vs.srw.vst))
 			audit_log_format(ab, "read_i , ");
 		else
 			audit_log_format(ab, "read_n , ");
-		if (vs_intersects(mad->vs.srw.vsw, mad->vs.srw.vst)
+		if (vs_intersects(mad->vs.srw.vsw, mad->vs.srw.vst))
 			audit_log_format(ab, "write_i }");
 		else
 			audit_log_format(ab, "write_n }");
 		break;
 	}
 
-	if (mad->event == EVENT_MONITORED) {
+	if (mad->event == EVENT_MONITORED)
 		audit_log_format(ab, " access=monitored");
 	else if (mad->event == EVENT_MONITORED_N)
 		audit_log_format(ab, " access=refused");

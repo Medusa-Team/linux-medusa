@@ -3,7 +3,6 @@
 #include <linux/limits.h>
 #include <linux/init.h>
 #include <linux/mm.h>
-#include <linux/lsm_audit.h>
 #include <linux/medusa/l2/audit_medusa.h>
 
 #include "kobject_process.h"
@@ -41,7 +40,7 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	struct path ndcurrent, ndupper, ndparent;
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!dentry || IS_ERR(dentry))
 		return retval;
@@ -122,8 +121,6 @@ static medusa_answer_t medusa_do_mknod(struct dentry *parent, struct dentry *den
 	file_kobj_live_add(parent->d_inode);
 	retval = MED_DECIDE(mknod_access, &access, &process, &file);
 	file_kobj_live_remove(parent->d_inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return retval;
 }
 __initcall(mknod_acctype_init);

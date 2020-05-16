@@ -48,8 +48,6 @@ medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 		access.suid = suid;
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(setresuid, &access, &process, &process);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 
 	return retval;

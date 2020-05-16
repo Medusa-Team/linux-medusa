@@ -92,8 +92,6 @@ static medusa_answer_t medusa_do_notify_change(struct dentry * dentry, struct ia
 	file_kobj_live_add(dentry->d_inode);
 	retval = MED_DECIDE(notify_change_access, &access, &process, &file);
 	file_kobj_live_remove(dentry->d_inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return retval;
 }
 __initcall(notify_change_acctype_init);

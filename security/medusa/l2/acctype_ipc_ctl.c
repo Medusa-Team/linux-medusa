@@ -2,7 +2,6 @@
 #include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
-#include <linux/lsm_audit.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include "kobject_process.h"

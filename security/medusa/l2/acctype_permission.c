@@ -5,7 +5,6 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/types.h>
-#include <linux/lsm_audit.h>
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l3/med_model.h>

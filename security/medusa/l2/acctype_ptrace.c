@@ -50,8 +50,7 @@ medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * 
 		process_kern2kobj(&tracer_p, tracer);
 		process_kern2kobj(&tracee_p, tracee);
 		retval = MED_DECIDE(ptrace_access, &access, &tracer_p, &tracee_p);
-		if (retval != MED_ERR)
-			return retval;
+		return retval;
 	}
 	return MED_ALLOW;
 }

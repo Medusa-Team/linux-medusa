@@ -7,7 +7,6 @@
 #include <linux/medusa/l3/registry.h>
 
 struct printk_kobject {
-	/* int loglevel; */ /* TODO: add loglevels some day */
 	char message[512];
 };
 
@@ -16,11 +15,11 @@ MED_ATTRS(printk_kobject) {
 	MED_ATTR_END
 };
 
-static struct medusa_kobject_s * printk_fetch(struct medusa_kobject_s * key_obj)
+static struct medusa_kobject_s *printk_fetch(struct medusa_kobject_s *key_obj)
 {
 	return NULL;
 }
-static medusa_answer_t printk_update(struct medusa_kobject_s * kobj)
+static medusa_answer_t printk_update(struct medusa_kobject_s *kobj)
 {
 	((struct printk_kobject *) kobj)->message[sizeof(((struct printk_kobject *) kobj)->message)-1] = '\0';
 	med_pr_debug("%s",((struct printk_kobject *) kobj)->message);
@@ -54,14 +53,14 @@ int __init printk_kobject_init(void) {
 /* After this is called, and returns 0, printk_kobject_rmmod should be. */
 static int __exit printk_kobject_unload_check(void)
 {
-	if (med_unlink_kclass(&MED_KCLASSOF(printk_kobject)) != MED_ALLOW)
+	if (MED_UNLINK_KCLASS(printk_kobject) != 0)
 		return -EBUSY;
 	return 0;
 }
 
 void __exit printk_kobject_rmmod(void)
 {
-	med_unregister_kclass(&MED_KCLASSOF(printk_kobject));
+	MED_UNREGISTER_KCLASS(printk_kobject);
 }
 
 module_init(printk_kobject_init);

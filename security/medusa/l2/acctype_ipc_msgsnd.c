@@ -2,18 +2,24 @@
 #include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
-#include <linux/lsm_audit.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include "kobject_process.h"
 #include "kobject_ipc.h"
 
+/*
+ * struct @ipc_msgsnd_access is derived from 'struct msg_msg' in include/linux/msg.h
+ * and does NOT contain all attributes from original 'struct msg_msg'
+ * @m_type - message type
+ * @m_ts - message text size
+ * @msgflg - operation flags
+ * @ipc_class - type of System V ipc (shm, semaphor .. )
+ */
 struct ipc_msgsnd_access {
 	MEDUSA_ACCESS_HEADER;
-	long m_type;	/* message type;  see 'struct msg_msg' in include/linux/msg.h */
-	size_t m_ts;	/* msg text size; see 'struct msg_msg' in include/linux/msg.h */
-	/* TODO char m_text[???]; send also message text? */
-	int msgflg;	/* operational flags */
+	long m_type;
+	size_t m_ts;
+	int msgflg;
 	unsigned int ipc_class;
 };
 
@@ -79,8 +85,6 @@ medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 		mad.pacb.ipc_msg.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_msgsnd_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 audit:
 	if (unlikely(ipc_putref(ipcp, true)))
@@ -111,7 +115,7 @@ static void medusa_ipc_msgsnd_pacb(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	if (mad->pacb.ipc_msg.flag)
-		audit_log_format(ab," flag=%d", mad->pacb.ipc_msg.flg);
+		audit_log_format(ab," flag=%d", mad->pacb.ipc_msg.flag);
 	if (mad->pacb.ipc_msg.m_type)
 		audit_log_format(ab," msg_type=%ld", mad->pacb.ipc_msg.m_type);
 	if (mad->pacb.ipc_msg.m_ts)

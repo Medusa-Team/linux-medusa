@@ -5,7 +5,6 @@
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
-#include <linux/lsm_audit.h>
 #include <linux/medusa/l2/audit_medusa.h>
 
 #include "kobject_process.h"

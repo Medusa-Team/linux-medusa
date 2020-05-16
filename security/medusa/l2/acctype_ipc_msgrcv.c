@@ -2,7 +2,6 @@
 #include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
-#include <linux/lsm_audit.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include "kobject_process.h"
@@ -96,8 +95,6 @@ medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 		mad.pacb.ipc_msg.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_msgrcv_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	}
 audit:
 	if (unlikely(ipc_putref(ipcp, true)))
@@ -109,7 +106,7 @@ audit:
 	mad.med_answer = retval;
 	mad.pacb.ipc_msg.m_type = msg->m_type;
 	mad.pacb.ipc_msg.m_ts = msg->m_ts;
-	mad.pacb.ipc_msg.flg = mode;
+	mad.pacb.ipc_msg.flag = mode;
 	mad.pacb.ipc_msg.type = type;
 	mad.pacb.ipc_msg.target = target->pid;
 	cad.medusa_audit_data = &mad;

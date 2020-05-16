@@ -2,7 +2,6 @@
 #include <linux/medusa/l2/audit_medusa.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
-#include <linux/lsm_audit.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include "kobject_process.h"
@@ -77,6 +76,7 @@ medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 	} else {
 		mad.vsi = VS_INTERSECT;
 	}
+
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_associate_access, task_security(current))) {
 		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
@@ -90,8 +90,6 @@ medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 		mad.pacb.ipc.ipc_class = object.ipc_class;
 
 		retval = MED_DECIDE(ipc_associate_access, &access, &process, &object);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
 	} else {
 		mad.event = EVENT_MONITORED_N;
 	}
