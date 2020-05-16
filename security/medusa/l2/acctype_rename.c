@@ -34,11 +34,11 @@ int __init rename_acctype_init(void) {
 
 static void medusa_rename_pacb(struct audit_buffer *ab, void *pcad);
 static medusa_answer_t medusa_do_rename(struct dentry *dentry, const char * newname);
-medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
+medusa_answer_t medusa_rename(const struct path *path, struct dentry *dentry, const char * newname)
 {
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
 		return retval;
@@ -69,11 +69,12 @@ medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 	med_magic_invalidate(&(inode_security(dentry->d_inode)->med_object));
 audit:
 #ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_DENTRY;
-	cad.u.dentry = dentry;
+	cad.type = LSM_AUDIT_DATA_PATH;
+	cad.u.path = *path;
 	mad.function = __func__;
 	mad.med_answer = retval;
-	mad.pacb.filename = newname;
+	mad.pacb.mv.oldname = dentry->d_name.name;
+	mad.pacb.mv.newname = newname;
 	cad.medusa_audit_data = &mad;
 	medusa_audit_log_callback(&cad, medusa_rename_pacb);
 #endif
@@ -85,9 +86,13 @@ static void medusa_rename_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.filename) {
+	if (mad->pacb.mv.oldname) {
+		audit_log_format(ab," oldname=");
+		audit_log_untrustedstring(ab, mad->pacb.mv.oldname);
+	}
+	if (mad->pacb.mv.newname) {
 		audit_log_format(ab," newname=");
-		audit_log_untrustedstring(ab,mad->pacb.filename);
+		audit_log_untrustedstring(ab, mad->pacb.mv.newname);
 	}
 }
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */

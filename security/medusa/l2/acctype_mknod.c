@@ -96,12 +96,10 @@ static void medusa_mknod_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if ((&(mad->pacb.mknod))->mode) {
-		audit_log_format(ab," mode=%d",(&(mad->pacb.mknod))->mode);
-	}
-	if ((&(mad->pacb.mknod))->dev) {
-		audit_log_format(ab," dev_num=%u",(&(mad->pacb.mknod))->dev);
-	}
+	if (mad->pacb.mknod.mode)
+		audit_log_format(ab," mode=%d", mad->pacb.mknod.mode);
+	if (mad->pacb.mknod.dev)
+		audit_log_format(ab," dev_num=%u", mad->pacb.mknod.dev);
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */

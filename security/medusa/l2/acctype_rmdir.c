@@ -38,7 +38,7 @@ medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 {
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!dentry || IS_ERR(dir->dentry) || dentry->d_inode == NULL)
 		return retval;
@@ -71,7 +71,7 @@ audit:
 	cad.u.path = *dir;
 	mad.function = __func__;
 	mad.med_answer = retval;
-	file_kobj_dentry2string(dentry, mad.pacb.filename);
+	mad.pacb.name = dentry->d_name.name;
 	cad.medusa_audit_data = &mad;
 	medusa_audit_log_callback(&cad, medusa_rmdir_pacb);
 #endif
@@ -83,9 +83,9 @@ static void medusa_rmdir_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.filename) {
-		audit_log_format(ab," filename=");
-		audit_log_untrustedstring(ab,mad->pacb.filename);
+	if (mad->pacb.name) {
+		audit_log_format(ab," name=");
+		audit_log_untrustedstring(ab, mad->pacb.name);
 	}
 }
 

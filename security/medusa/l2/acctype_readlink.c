@@ -35,7 +35,7 @@ medusa_answer_t medusa_readlink(struct dentry *dentry)
 {
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
 		return retval;

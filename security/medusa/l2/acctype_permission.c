@@ -49,7 +49,7 @@ medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	medusa_answer_t retval = MED_ALLOW;
 	struct dentry * dentry;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SRW_N };
+	struct medusa_audit_data mad = { .vsi = VS_SRW_N };
 
 	dentry = d_find_alias(inode);
 
@@ -102,9 +102,8 @@ static void medusa_permission_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.mode) {
-		audit_log_format(ab," mask=%d",mad->pacb.mode);
-	}
+	if (mad->pacb.mode)
+		audit_log_format(ab," mask=%d", mad->pacb.mode);
 }
 
 medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inode, int mask)

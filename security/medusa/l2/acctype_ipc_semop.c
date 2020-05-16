@@ -70,9 +70,6 @@ medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_semop_access, task_security(current))) {
 		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
@@ -97,6 +94,8 @@ audit:
 	if (unlikely(ipc_putref(ipcp, false)))
 		retval = MED_DENY;
 #ifdef CONFIG_AUDIT
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
 	mad.function = __func__;
 	mad.med_answer = retval;
 	mad.pacb.ipc_semop.sem_num = sops->sem_num;
@@ -121,23 +120,17 @@ static void medusa_ipc_semop_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if ((&(mad->pacb.ipc_semop))->sem_flg) {
-		audit_log_format(ab," flag=%d",((&(mad->pacb.ipc_semop))->sem_flg));
-	}
-	if ((&(mad->pacb.ipc_semop))->sem_num) {
-		audit_log_format(ab," sem_num=%u",((&(mad->pacb.ipc_semop))->sem_num));
-	}
-	if ((&(mad->pacb.ipc_semop))->sem_op) {
-		audit_log_format(ab," sem_op=%d",((&(mad->pacb.ipc_semop))->sem_op));
-	}
-	if ((&(mad->pacb.ipc_semop))->nsops) {
-		audit_log_format(ab," nsops=%u",((&(mad->pacb.ipc_semop))->nsops));
-	}
-	if ((&(mad->pacb.ipc_semop))->alter) {
-		audit_log_format(ab," alter=%d",((&(mad->pacb.ipc_semop))->alter));
-	}
-	if ((&(mad->pacb.ipc_semop))->ipc_class) {
-		audit_log_format(ab," ipc_class=%u",((&(mad->pacb.ipc_semop))->ipc_class));
-	}
+	if (mad->pacb.ipc_semop.sem_flg)
+		audit_log_format(ab," flag=%d", mad->pacb.ipc_semop.sem_flg);
+	if (mad->pacb.ipc_semop.sem_num)
+		audit_log_format(ab," sem_num=%u", mad->pacb.ipc_semop.sem_num);
+	if (mad->pacb.ipc_semop.sem_op)
+		audit_log_format(ab," sem_op=%d", mad->pacb.ipc_semop.sem_op);
+	if (mad->pacb.ipc_semop.nsops)
+		audit_log_format(ab," nsops=%u", mad->pacb.ipc_semop.nsops);
+	if (mad->pacb.ipc_semop.alter)
+		audit_log_format(ab," alter=%d", mad->pacb.ipc_semop.alter);
+	if (mad->pacb.ipc_semop.ipc_class)
+		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_semop.ipc_class);
 }
 __initcall(ipc_acctype_semop_init);

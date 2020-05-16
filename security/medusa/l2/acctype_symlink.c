@@ -39,7 +39,7 @@ medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 	struct path ndcurrent, ndupper, ndparent;
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!dentry || IS_ERR(dentry))
 		return retval;	
@@ -83,7 +83,7 @@ audit:
 	cad.u.dentry = dentry;
 	mad.function = __func__;
 	mad.med_answer = retval;
-	mad.pacb.filename = oldname;
+	mad.pacb.name = oldname;
 	cad.medusa_audit_data = &mad;
 	medusa_audit_log_callback(&cad, medusa_symlink_pacb);
 #endif
@@ -95,9 +95,9 @@ static void medusa_symlink_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.filename) {
+	if (mad->pacb.name) {
 		audit_log_format(ab," path=");
-		audit_log_untrustedstring(ab,mad->pacb.filename);
+		audit_log_untrustedstring(ab, mad->pacb.name);
 	}
 }
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */

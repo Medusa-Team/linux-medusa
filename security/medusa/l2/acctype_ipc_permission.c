@@ -131,9 +131,6 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_perm_access, task_security(current))) {
 		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
@@ -152,12 +149,13 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	}
 audit:
 	if (unlikely(ipc_putref(ipcp, use_locking)))
-		/* for now, we don't support error codes */
 		retval = MED_DENY;
 #ifdef CONFIG_AUDIT
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
 	mad.function = __func__;
 	mad.med_answer = retval;
-	mad.pacb.ipc_perm.r_perm = perms;
+	mad.pacb.ipc_perm.perms = perms;
 	cad.medusa_audit_data = &mad;
 	medusa_audit_log_callback(&cad, medusa_ipc_perm_pacb);
 #endif
@@ -179,11 +177,9 @@ static void medusa_ipc_perm_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if ((&(mad->pacb.ipc_perm))->r_perm) {
-		audit_log_format(ab," perm=%u",((&(mad->pacb.ipc_perm))->r_perm));
-	}
-	if ((&(mad->pacb.ipc_perm))->ipc_class) {
-		audit_log_format(ab," ipc_class=%u",((&(mad->pacb.ipc_perm))->ipc_class));
-	}
+	if (mad->pacb.ipc_perm.perms)
+		audit_log_format(ab," perms=%u", mad->pacb.ipc_perm.perms);
+	if (mad->pacb.ipc_perm.ipc_class)
+		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_perm.ipc_class);
 }
 __initcall(ipc_acctype_init);

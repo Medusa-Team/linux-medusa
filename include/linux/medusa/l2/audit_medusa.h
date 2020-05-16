@@ -1,15 +1,14 @@
 #include <linux/types.h>
 #include <linux/lsm_audit.h>
-#include <linux/medusa/l3/kobject.h>
+#include <linux/medusa/l3/constants.h>
 #include <linux/medusa/l3/vsmodel.h>
 /* @vsi: virtual spaces intersection flags */
 #define VS_INTERSECT 1 /* Virtual spaces are intersected */
 #define VS_SW_N 2 /* Virtual spaces see and write are not intersected */
 #define VS_SRW_N 3 /* Virtual spaces see, read and write are not intersected */
 /* @event: event flags */
-#define EVENT_NONE 1
-#define EVENT_MONITORED 2
-#define EVENT_MONITORED_N 3
+#define EVENT_MONITORED 1
+#define EVENT_MONITORED_N 2
 
 struct swvs {
 	vs_t vst;
@@ -39,20 +38,24 @@ struct medusa_audit_data {
 	} vs;
 	/* union of post audit callback data for audit log */
 	union {
-		char *filename;
+		const char *name;
 		int mode;
+		struct {
+			const char *oldname;
+			const char *newname;
+		} mv;
 		struct {
 			dev_t dev;
 			int mode;
 		} mknod;
 		struct {
 			unsigned int ipc_class;
-			u32 r_perm;
+			u32 perms;
 		} ipc_perm;
 		struct {
 			long m_type;
 			size_t m_ts;
-			int flg;
+			int flag;
 			unsigned int ipc_class;
 			long type;
 			pid_t target;

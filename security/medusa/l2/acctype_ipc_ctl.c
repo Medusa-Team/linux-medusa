@@ -94,9 +94,6 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		goto out;
 
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_ctl_access, task_security(current))) {
 		mad.event = EVENT_MONITORED;
 		memset(&access, '\0', sizeof(struct ipc_ctl_access));
@@ -123,6 +120,8 @@ audit:
 			retval = MED_DENY;
 	}
 #ifdef CONFIG_AUDIT
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
 	mad.function = __func__;
 	mad.med_answer = retval;
 	mad.pacb.ipc.flcm = cmd;
@@ -145,11 +144,9 @@ static void medusa_ipc_ctl_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if ((&(mad->pacb.ipc))->flcm) {
-		audit_log_format(ab," cmd=%d",((&(mad->pacb.ipc))->flcm));
-	}
-	if ((&(mad->pacb.ipc))->ipc_class) {
-		audit_log_format(ab," ipc_class=%u",((&(mad->pacb.ipc))->ipc_class));
-	}
+	if (mad->pacb.ipc.flcm)
+		audit_log_format(ab," cmd=%d", mad->pacb.ipc.flcm);
+	if (mad->pacb.ipc.ipc_class)
+		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc.ipc_class);
 }
 __initcall(ipc_acctype_ctl_init);

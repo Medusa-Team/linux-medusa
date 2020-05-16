@@ -53,7 +53,7 @@ medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 {
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VS_SW_N, .event = EVENT_NONE , .pacb.ipc.ipc_class = MED_IPC_UNDEFINED };
+	struct medusa_audit_data mad = { .vsi = VS_SW_N, .pacb.ipc.ipc_class = MED_IPC_UNDEFINED };
 	struct ipc_associate_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
@@ -66,10 +66,6 @@ medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 		goto out;
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
-
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-
 	if (!vs_intersects(VSS(task_security(current)),VS(ipc_security(ipcp))) ||
 		!vs_intersects(VSW(task_security(current)),VS(ipc_security(ipcp)))
 	) {
@@ -103,6 +99,8 @@ audit:
 	if (unlikely(ipc_putref(ipcp, true)))
 		retval = MED_DENY;
 #ifdef CONFIG_AUDIT
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
 	mad.function = __func__;
 	mad.med_answer = retval;
 	mad.pacb.ipc.flcm = flag;
@@ -123,11 +121,9 @@ static void medusa_ipc_associate_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if ((&(mad->pacb.ipc))->flcm) {
-		audit_log_format(ab," flag=%d",((&(mad->pacb.ipc))->flcm));
-	}
-	if ((&(mad->pacb.ipc))->ipc_class) {
-		audit_log_format(ab," ipc_class=%u",((&(mad->pacb.ipc))->ipc_class));
-	}
+	if (mad->pacb.ipc.flcm)
+		audit_log_format(ab," flag=%d", mad->pacb.ipc.flcm);
+	if (mad->pacb.ipc.ipc_class)
+		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc.ipc_class);
 }
 __initcall(ipc_acctype_associate_init);

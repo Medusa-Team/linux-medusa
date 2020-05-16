@@ -457,7 +457,7 @@ static int medusa_l1_path_link(struct dentry *old_dentry, const struct path *new
 static int medusa_l1_path_rename(const struct path *old_path, struct dentry *old_dentry,
 			const struct path *new_path, struct dentry *new_dentry)
 {
-	if (medusa_rename(old_dentry, new_dentry->d_name.name) == MED_DENY)
+	if (medusa_rename(old_path, old_dentry, new_dentry->d_name.name) == MED_DENY)
 	        return -EACCES;
 	return 0;
 }

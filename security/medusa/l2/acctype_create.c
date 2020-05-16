@@ -41,7 +41,7 @@ medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	struct path ndcurrent, ndupper, ndparent;
 	medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_NONE, .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!dentry || IS_ERR(dentry))
 		return retval;
@@ -95,9 +95,8 @@ static void medusa_create_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.mode) {
-		audit_log_format(ab," mode=%d",mad->pacb.mode);
-	}
+	if (mad->pacb.mode)
+		audit_log_format(ab," mode=%d", mad->pacb.mode);
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */

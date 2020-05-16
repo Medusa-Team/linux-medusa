@@ -79,9 +79,6 @@ medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *ms
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-
 	if (MEDUSA_MONITORED_ACCESS_S(ipc_msgrcv_access, task_security(current))) {
 		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
@@ -106,6 +103,8 @@ audit:
 	if (unlikely(ipc_putref(ipcp, true)))
 		retval = MED_DENY;
 #ifdef CONFIG_AUDIT
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
 	mad.function = __func__;
 	mad.med_answer = retval;
 	mad.pacb.ipc_msg.m_type = msg->m_type;
@@ -130,23 +129,17 @@ static void medusa_ipc_msgrcv_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if ((&(mad->pacb.ipc_msg))->flg) {
-		audit_log_format(ab," flag=%d",((&(mad->pacb.ipc_msg))->flg));
-	}
-	if ((&(mad->pacb.ipc_msg))->m_type) {
-		audit_log_format(ab," msg_type=%ld",((&(mad->pacb.ipc_msg))->m_type));
-	}
-	if ((&(mad->pacb.ipc_msg))->m_ts) {
-		audit_log_format(ab," msg_txt_size=%lu",((&(mad->pacb.ipc_msg))->m_ts));
-	}
-	if ((&(mad->pacb.ipc_msg))->type) {
-		audit_log_format(ab," req_msg_type=%ld",((&(mad->pacb.ipc_msg))->type));
-	}
-	if ((&(mad->pacb.ipc_msg))->target) {
-		audit_log_format(ab," target_pid=%d",((&(mad->pacb.ipc_msg))->target));
-	}
-	if ((&(mad->pacb.ipc_msg))->ipc_class) {
-		audit_log_format(ab," ipc_class=%u",((&(mad->pacb.ipc_msg))->ipc_class));
-	}
+	if (mad->pacb.ipc_msg.flag)
+		audit_log_format(ab," flag=%d", mad->pacb.ipc_msg.flag);
+	if (mad->pacb.ipc_msg.m_type)
+		audit_log_format(ab," msg_type=%ld", mad->pacb.ipc_msg.m_type);
+	if (mad->pacb.ipc_msg.m_ts)
+		audit_log_format(ab," msg_txt_size=%lu", mad->pacb.ipc_msg.m_ts);
+	if (mad->pacb.ipc_msg.type)
+		audit_log_format(ab," req_msg_type=%ld", mad->pacb.ipc_msg.type);
+	if (mad->pacb.ipc_msg.target)
+		audit_log_format(ab," target_pid=%d", mad->pacb.ipc_msg.target);
+	if (mad->pacb.ipc_msg.ipc_class)
+		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_msg.ipc_class);
 }
 __initcall(ipc_acctype_msgrcv_init);
