@@ -129,13 +129,13 @@ static void medusa_ipc_msgrcv_pacb(struct audit_buffer *ab, void *pcad)
 	if (mad->pacb.ipc_msg.flag)
 		audit_log_format(ab," flag=%d", mad->pacb.ipc_msg.flag);
 	if (mad->pacb.ipc_msg.m_type)
-		audit_log_format(ab," msg_type=%ld", mad->pacb.ipc_msg.m_type);
+		audit_log_format(ab," m_type=%ld", mad->pacb.ipc_msg.m_type);
 	if (mad->pacb.ipc_msg.m_ts)
-		audit_log_format(ab," msg_txt_size=%lu", mad->pacb.ipc_msg.m_ts);
+		audit_log_format(ab," m_ts=%lu", mad->pacb.ipc_msg.m_ts);
 	if (mad->pacb.ipc_msg.type)
-		audit_log_format(ab," req_msg_type=%ld", mad->pacb.ipc_msg.type);
+		audit_log_format(ab," rm_type=%ld", mad->pacb.ipc_msg.type);
 	if (mad->pacb.ipc_msg.target)
-		audit_log_format(ab," target_pid=%d", mad->pacb.ipc_msg.target);
+		audit_log_format(ab," opid=%d", mad->pacb.ipc_msg.target);
 	if (mad->pacb.ipc_msg.ipc_class)
 		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_msg.ipc_class);
 }

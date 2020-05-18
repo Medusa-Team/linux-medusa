@@ -83,7 +83,7 @@ static void medusa_link_pacb(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	if (mad->pacb.name) {
-		audit_log_format(ab," newname=");
+		audit_log_format(ab," rname=");
 		audit_log_untrustedstring(ab, mad->pacb.name);
 	}
 }

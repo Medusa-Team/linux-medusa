@@ -106,7 +106,7 @@ static void medusa_ipc_shmat_pacb(struct audit_buffer *ab, void *pcad)
 	if (mad->pacb.ipc_shmat.shmflg)
 		audit_log_format(ab," flag=%d", mad->pacb.ipc_shmat.shmflg);
 	if (mad->pacb.ipc_shmat.shmaddr)
-		audit_log_format(ab," shmaddr=%s", mad->pacb.ipc_shmat.shmaddr);
+		audit_log_format(ab," shmaddr=%p", mad->pacb.ipc_shmat.shmaddr);
 	if (mad->pacb.ipc_shmat.ipc_class)
 		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_shmat.ipc_class);
 }

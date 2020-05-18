@@ -3,6 +3,7 @@
 #include <linux/limits.h>
 #include <linux/init.h>
 #include <linux/mm.h>
+#include <linux/kdev_t.h>
 #include <linux/medusa/l2/audit_medusa.h>
 
 #include "kobject_process.h"
@@ -82,6 +83,9 @@ audit:
 	cad.u.dentry = dentry;
 	mad.function = __func__;
 	mad.med_answer = retval;
+	/* if hook is changed from inode to path this needs to be changed by calling
+	 * new_decode_dev(dev)
+	 */
 	mad.pacb.mknod.dev = dev;
 	mad.pacb.mknod.mode = mode;
 	cad.medusa_audit_data = &mad;
@@ -98,7 +102,8 @@ static void medusa_mknod_pacb(struct audit_buffer *ab, void *pcad)
 	if (mad->pacb.mknod.mode)
 		audit_log_format(ab," mode=%d", mad->pacb.mknod.mode);
 	if (mad->pacb.mknod.dev)
-		audit_log_format(ab," dev_num=%u", mad->pacb.mknod.dev);
+		audit_log_format(ab," dev=%02x:%02x", MAJOR(mad->pacb.mknod.dev),
+				MINOR(mad->pacb.mknod.dev));
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */

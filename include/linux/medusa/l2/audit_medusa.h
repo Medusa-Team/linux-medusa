@@ -24,10 +24,10 @@ struct srwvs {
 };
 
 struct medusa_audit_data {
-	const char *function;
-	medusa_answer_t med_answer;
-	char event;
-	char vsi;
+	const char *function;//medusa access type name
+	medusa_answer_t med_answer;//medusa answer
+	char event;//access type event flags information
+	char vsi;//virtual spaces intersection flags
 	/* union of virtual spaces used in access
 	 * @sw: vs of target, see and write
 	 * @srw: vs of target, see, read and write
@@ -36,13 +36,16 @@ struct medusa_audit_data {
 		struct swvs sw;
 		struct srwvs srw;
 	} vs;
-	/* union of post audit callback data for audit log */
+	/* union of post audit callback data for audit log, some of the basic data are
+	 * reused as other record type with same size and type of primitives,
+	 * because it makes union smaller.
+	 */
 	union {
 		const char *name;
 		int mode;
 		struct {
-			const char *oldname;
-			const char *newname;
+			const char *name;//file name in avcs
+			const char *rname;//requested file name
 		} mv;
 		struct {
 			dev_t dev;

@@ -72,26 +72,26 @@ audit:
 	cad.u.path = *path;
 	mad.function = __func__;
 	mad.med_answer = retval;
-	mad.pacb.mv.oldname = dentry->d_name.name;
-	mad.pacb.mv.newname = newname;
+	mad.pacb.mv.name = dentry->d_name.name;
+	mad.pacb.mv.rname = newname;
 	cad.medusa_audit_data = &mad;
 	medusa_audit_log_callback(&cad, medusa_rename_pacb);
 #endif
 	return retval;
 }
-/* We dont need oldname cause dump_common_audit_data will log it for us. */
+
 static void medusa_rename_pacb(struct audit_buffer *ab, void *pcad)
 {
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.mv.oldname) {
-		audit_log_format(ab," oldname=");
-		audit_log_untrustedstring(ab, mad->pacb.mv.oldname);
+	if (mad->pacb.mv.name) {
+		audit_log_format(ab," name=");
+		audit_log_untrustedstring(ab, mad->pacb.mv.name);
 	}
-	if (mad->pacb.mv.newname) {
-		audit_log_format(ab," newname=");
-		audit_log_untrustedstring(ab, mad->pacb.mv.newname);
+	if (mad->pacb.mv.rname) {
+		audit_log_format(ab," rname=");
+		audit_log_untrustedstring(ab, mad->pacb.mv.rname);
 	}
 }
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
