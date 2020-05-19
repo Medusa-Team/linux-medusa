@@ -56,10 +56,7 @@ medusa_answer_t medusa_unlink(struct dentry *dentry)
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(unlink_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_unlink(dentry);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(unlink_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(unlink_access);
+		MEDUSAFS_RAISE_COUNTER(unlink_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(unlink_access);

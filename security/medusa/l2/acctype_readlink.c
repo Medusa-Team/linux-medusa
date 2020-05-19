@@ -55,10 +55,7 @@ medusa_answer_t medusa_readlink(struct dentry *dentry)
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(readlink_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_readlink(dentry);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(readlink_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(readlink_access);
+		MEDUSAFS_RAISE_COUNTER(readlink_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(readlink_access);

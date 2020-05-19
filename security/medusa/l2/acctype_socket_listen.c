@@ -44,10 +44,7 @@ medusa_answer_t medusa_socket_listen(struct socket *sock, int backlog)
 		socket_kern2kobj(&sock_kobj, sock);
 		access.backlog = backlog;
 		retval = MED_DECIDE(socket_listen_access, &access, &process, &sock_kobj);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(socket_listen_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(socket_listen_access);
+		MEDUSAFS_RAISE_COUNTER(socket_listen_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(socket_listen_access);

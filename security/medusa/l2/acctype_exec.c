@@ -48,29 +48,46 @@ medusa_answer_t medusa_exec(struct dentry ** dentryp)
 {
 	medusa_answer_t retval;
 
-	if (!*dentryp || IS_ERR(*dentryp) || !(*dentryp)->d_inode)
+	if (!*dentryp || IS_ERR(*dentryp) || !(*dentryp)->d_inode){
+		MEDUSAFS_RAISE_ALLOWED(exec_faccess);
+		MEDUSAFS_RAISE_ALLOWED(exec_paccess);
 		return MED_ALLOW;
+	}
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+		process_kobj_validate_task(current) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(exec_faccess);
+		MEDUSAFS_RAISE_ALLOWED(exec_paccess);
 		return MED_ALLOW;
-
+	}
 	if (!is_med_magic_valid(&(inode_security((*dentryp)->d_inode)->med_object)) &&
 
-			file_kobj_validate_dentry(*dentryp,NULL) <= 0)
+			file_kobj_validate_dentry(*dentryp,NULL) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(exec_faccess);
+		MEDUSAFS_RAISE_ALLOWED(exec_paccess);
 		return MED_ALLOW;
+	}
 	if (!vs_intersects(VSS(task_security(current)),VS(inode_security((*dentryp)->d_inode))) ||
 		!vs_intersects(VSR(task_security(current)),VS(inode_security((*dentryp)->d_inode)))
-	)
+	) {
+		MEDUSAFS_RAISE_DENIED(exec_faccess);
+		MEDUSAFS_RAISE_DENIED(exec_paccess);
 		return MED_DENY;
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current))) {
 		retval = medusa_do_pexec(*dentryp);
-		if (retval == MED_DENY)
+		if (retval == MED_DENY) {
+			MEDUSAFS_RAISE_DENIED(exec_paccess);
 			return retval;
+		}
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(exec_faccess, inode_security((*dentryp)->d_inode))) {
 		retval = medusa_do_fexec(*dentryp);
+		MEDUSAFS_RAISE_COUNTER(exec_faccess);
 		return retval;
 	}
+	/* can't tell which type of exec it is */
+	MEDUSAFS_RAISE_ALLOWED(exec_faccess);
+	MEDUSAFS_RAISE_ALLOWED(exec_paccess);
 	return MED_ALLOW;
 }
 

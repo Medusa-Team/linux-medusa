@@ -43,10 +43,7 @@ medusa_answer_t medusa_fork(unsigned long clone_flags)
 		process_kern2kobj(&parent, current);
 		retval = MED_DECIDE(fork_access, &access, &parent, &parent);
 	}
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(fork_access);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(fork_access);
+	MEDUSAFS_RAISE_COUNTER(fork_access);
 	return retval;
 }
 __initcall(fork_acctype_init);

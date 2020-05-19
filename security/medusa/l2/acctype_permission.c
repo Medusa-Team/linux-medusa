@@ -53,10 +53,7 @@ medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	}
 	dentry = d_find_alias(inode);
 	if (!dentry || IS_ERR(dentry)) {
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(permission_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(permission_access);
+		MEDUSAFS_RAISE_COUNTER(permission_access);
 		return retval;
 	}
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
@@ -77,10 +74,7 @@ medusa_answer_t medusa_permission(struct inode *inode, int mask)
 		retval = medusa_do_permission(dentry, inode, mask);
 out_dput:
 	dput(dentry);
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(permission_access);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(permission_access);
+	MEDUSAFS_RAISE_COUNTER(permission_access);
 	return retval;
 }
 

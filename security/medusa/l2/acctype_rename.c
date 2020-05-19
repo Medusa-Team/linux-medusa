@@ -33,7 +33,7 @@ int __init rename_acctype_init(void) {
 static medusa_answer_t medusa_do_rename(struct dentry *dentry, const char * newname);
 medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 {
-	medusa_answer_t r;
+	medusa_answer_t retval;
 
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL) {
 		MEDUSAFS_RAISE_ALLOWED(rename_access);
@@ -56,15 +56,12 @@ medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname)
 		return MED_DENY;
 	}
 #warning FIXME - add target directory checking
-	r = MED_ALLOW;
+	retval = MED_ALLOW;
 	if (MEDUSA_MONITORED_ACCESS_O(rename_access, inode_security(dentry->d_inode)))
-		r=medusa_do_rename(dentry,newname);
+		retval=medusa_do_rename(dentry,newname);
 	med_magic_invalidate(&(inode_security(dentry->d_inode)->med_object));
-	if (r==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(rename_access);
-	if (r==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(rename_access);
-	return r;
+	MEDUSAFS_RAISE_COUNTER(rename_access);
+	return retval;
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */

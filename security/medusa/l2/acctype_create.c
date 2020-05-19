@@ -69,10 +69,7 @@ medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	else
 		retval = MED_ALLOW;
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(create_access);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(create_access);
+	MEDUSAFS_RAISE_COUNTER(create_access);
 	return retval;
 }
 

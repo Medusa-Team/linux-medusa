@@ -57,10 +57,7 @@ medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry)
 
 	if (MEDUSA_MONITORED_ACCESS_O(lookup_access, inode_security((*dentry)->d_inode))) {
 		retval = medusa_do_lookup(*dentry);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(lookup_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(lookup_access);
+		MEDUSAFS_RAISE_COUNTER(lookup_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(lookup_access);	

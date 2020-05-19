@@ -69,10 +69,7 @@ medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dentry, i
 	else
 		retval = MED_ALLOW;
 	//medusa_put_upper_and_parent(&ndupper, &ndparent);
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(mkdir_access);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(mkdir_access);
+	MEDUSAFS_RAISE_COUNTER(mkdir_access);
 	return retval;
 }
 

@@ -42,10 +42,7 @@ medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *newsock
 		socket_kern2kobj(&sock_kobj, sock);
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(socket_accept_access, &access, &process, &sock_kobj);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(socket_accept_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(socket_accept_access);
+		MEDUSAFS_RAISE_COUNTER(socket_accept_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(socket_accept_access);

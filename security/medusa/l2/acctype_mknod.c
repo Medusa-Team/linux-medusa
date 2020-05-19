@@ -70,10 +70,7 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 	else
 		retval = MED_ALLOW;
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(mknod_access);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(mknod_access);
+	MEDUSAFS_RAISE_COUNTER(mknod_access);
 	return retval;
 }
 

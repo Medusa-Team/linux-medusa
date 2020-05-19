@@ -41,10 +41,7 @@ medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 		access.type = type;
 		access.protocol = protocol;
 		retval = MED_DECIDE(socket_create_access, &access, &process, &process);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(socket_create_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(socket_create_access);
+		MEDUSAFS_RAISE_COUNTER(socket_create_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(socket_create_access);

@@ -31,15 +31,17 @@ medusa_answer_t medusa_init_process(struct task_struct *new)
         /* process_kobject parent is zeroed by process_kern2kobj function */
 
 	if (!is_med_magic_valid(&(task_security(new)->med_object)) &&
-		process_kobj_validate_task(new) <= 0)
+		process_kobj_validate_task(new) <= 0) {
+		MEDUSAFS_RAISE_ALLOWED(init_process);
 		return MED_ALLOW;
-
+	}
 	/* inherit from parent if the action isn't monitored? */
 	if (MEDUSA_MONITORED_ACCESS_S(init_process, task_security(new))) {
 		process_kern2kobj(&process, new);
 		process_kern2kobj(&parent, current);
 		retval = MED_DECIDE(init_process, &access, &process, &parent);
 	}
+	MEDUSAFS_RAISE_COUNTER(init_process);
 	return retval;
 }
 

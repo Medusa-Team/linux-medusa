@@ -71,10 +71,7 @@ medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *addr
 				return MED_ALLOW;
 		}
 		retval = MED_DECIDE(socket_connect_access, &access, &process, &sock_kobj);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(socket_connect_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(socket_connect_access);
+		MEDUSAFS_RAISE_COUNTER(socket_connect_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(socket_connect_access);

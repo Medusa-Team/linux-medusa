@@ -71,10 +71,7 @@ medusa_answer_t medusa_notify_change(struct dentry *dentry, struct iattr * attr)
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(notify_change_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_notify_change(dentry, attr);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(notify_change_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(notify_change_access);
+		MEDUSAFS_RAISE_COUNTER(notify_change_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(notify_change_access);

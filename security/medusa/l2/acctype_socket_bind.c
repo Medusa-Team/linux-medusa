@@ -67,10 +67,7 @@ medusa_answer_t medusa_socket_bind_security(struct socket *sock, struct socket_b
 			}
 			sk_sec->addrlen = access->addrlen;
 		}
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(socket_bind_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(socket_bind_access);
+		MEDUSAFS_RAISE_COUNTER(socket_bind_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(socket_bind_access);

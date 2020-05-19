@@ -56,9 +56,9 @@ extern void medusafs_raise_denied(struct medusa_evtype_s *evtype);
 		medusafs_raise_denied(&MED_EVTYPEOF(structname))
 #define MEDUSAFS_RAISE_COUNTER(structname) ({			\
 		if (retval==MED_ALLOW)				\
-			MEDUSAFS_RAISE_ALLOWED(symlink_access); \
+			MEDUSAFS_RAISE_ALLOWED(structname); \
 		if (retval==MED_DENY)				\
-			MEDUSAFS_RAISE_DENIED(symlink_access);	\
+			MEDUSAFS_RAISE_DENIED(structname);	\
 		})
 /* interface to L2 and L4 */
 extern void med_get_kclass(struct medusa_kclass_s *med_kclass);

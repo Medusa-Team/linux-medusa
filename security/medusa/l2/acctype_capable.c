@@ -53,10 +53,7 @@ medusa_answer_t medusa_capable(int cap)
 		access.cap = CAP_TO_MASK(cap);
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(capable_access, &access, &process, &process);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(capable_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(capable_access);
+		MEDUSAFS_RAISE_COUNTER(capable_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(capable_access);

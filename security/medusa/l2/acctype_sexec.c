@@ -70,10 +70,7 @@ medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
 	/* no sense in checking VS here */
 	if (MEDUSA_MONITORED_ACCESS_S(sexec_access, task_security(current)))
 		retval = medusa_do_sexec(bprm);
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(sexec_access);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(sexec_access);
+	MEDUSAFS_RAISE_COUNTER(sexec_access);
 	return retval;
 }
 

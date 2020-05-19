@@ -61,12 +61,10 @@ medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 
 	if (MEDUSA_MONITORED_ACCESS_O(rmdir_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_rmdir(dentry);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(rmdir_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(rmdir_access);
+		MEDUSAFS_RAISE_COUNTER(rmdir_access);
 		return retval;
 	}
+	MEDUSAFS_RAISE_ALLOWED(rmdir_access);
 	return MED_ALLOW;
 }
 

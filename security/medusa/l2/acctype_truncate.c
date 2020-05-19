@@ -58,10 +58,7 @@ medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length)
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(truncate_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_truncate(dentry, length);
-		if (retval==MED_ALLOW)
-			MEDUSAFS_RAISE_ALLOWED(truncate_access);
-		if (retval==MED_DENY)
-			MEDUSAFS_RAISE_DENIED(truncate_access);
+		MEDUSAFS_RAISE_COUNTER(truncate_access);
 		return retval;
 	}
 	MEDUSAFS_RAISE_ALLOWED(truncate_access);

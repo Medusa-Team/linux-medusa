@@ -50,10 +50,7 @@ medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(setresuid, &access, &process, &process);
 	}
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(setresuid);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(setresuid);
+	MEDUSAFS_RAISE_COUNTER(setresuid);
 	return retval;
 }
 __initcall(setresuid_acctype_init);

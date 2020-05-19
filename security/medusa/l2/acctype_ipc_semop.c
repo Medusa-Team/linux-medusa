@@ -88,10 +88,7 @@ out:
 	if (unlikely(ipc_putref(ipcp, false)))
 		/* for now, we don't support error codes */
 		retval = MED_DENY;
-	if (retval==MED_ALLOW)
-		MEDUSAFS_RAISE_ALLOWED(ipc_semop_access);
-	if (retval==MED_DENY)
-		MEDUSAFS_RAISE_DENIED(ipc_semop_access);
+	MEDUSAFS_RAISE_COUNTER(ipc_semop_access);
 	return retval;
 }
 __initcall(ipc_acctype_semop_init);
