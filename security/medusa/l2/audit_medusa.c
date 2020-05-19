@@ -67,7 +67,7 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 	if (mad->event == EVENT_MONITORED)
 		audit_log_format(ab, " access=MONITORED");
 	else if (mad->event == EVENT_MONITORED_N)
-		audit_log_format(ab, " access=REFUSED");
+		audit_log_format(ab, " access=UNMONITORED");
 	else
 		audit_log_format(ab, " access=UNDEFINED");
 }
