@@ -41,7 +41,7 @@ medusa_answer_t medusa_symlink(struct dentry *dentry, const char * oldname)
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!dentry || IS_ERR(dentry))
-		return retval;	
+		return retval;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return retval;

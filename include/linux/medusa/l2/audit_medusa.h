@@ -65,7 +65,7 @@ struct medusa_audit_data {
 		} ipc_msg;
 		struct {
 			unsigned int ipc_class;
-			char __user *shmaddr; 
+			char __user *shmaddr;
 			int shmflg;
 		} ipc_shmat;
 		struct {
@@ -74,7 +74,7 @@ struct medusa_audit_data {
 			int sem_op;
 			int sem_flg;
 			unsigned int nsops;
-		   	int alter;
+			int alter;
 		} ipc_semop;
 		struct {
 			unsigned int ipc_class;

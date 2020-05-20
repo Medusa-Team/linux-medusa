@@ -99,7 +99,7 @@ audit:
 	mad.pacb.ipc_msg.flag = msgflg;
 	cad.medusa_audit_data = &mad;
 	medusa_audit_log_callback(&cad, medusa_ipc_msgsnd_pacb);
-#endif	
+#endif
 	return retval;
 out:
 	/* second argument true: returns with locked IPC object */

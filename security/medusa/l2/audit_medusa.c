@@ -78,7 +78,7 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
  * @medusa_post: post audit callback, unique for type of access, may be NULL
  */
 void medusa_audit_log_callback(struct common_audit_data *cad,
-		void (*medusa_post) (struct audit_buffer *, void *)) 
+		void (*medusa_post) (struct audit_buffer *, void *))
 {
 	common_lsm_audit(cad, medusa_pre, medusa_post);
 }

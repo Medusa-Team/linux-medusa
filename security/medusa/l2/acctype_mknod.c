@@ -12,7 +12,7 @@
 
 /* let's define the 'mknod' access type, with subj=task and obj=inode */
 
-struct mknod_access {	
+struct mknod_access {
 	MEDUSA_ACCESS_HEADER;
 	char filename[NAME_MAX+1];
 	dev_t dev;
