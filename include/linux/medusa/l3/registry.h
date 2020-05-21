@@ -48,10 +48,20 @@ extern medusa_answer_t med_decide(struct medusa_evtype_s *acctype, void * access
 #define MED_DECIDE(structname,arg1,arg2,arg3) \
 		med_decide(&MED_EVTYPEOF(structname), arg1, arg2, arg3)
 /* for purposes of medusafs */
-extern void medusafs_raise_allowed(struct medusa_evtype_s *evtype);
+static inline void medusafs_raise_allowed(struct medusa_evtype_s *evtype)
+{
+	if (evtype) {
+		evtype->allowed++;
+	}
+}
 #define MEDUSAFS_RAISE_ALLOWED(structname)	\
 		medusafs_raise_allowed(&MED_EVTYPEOF(structname))
-extern void medusafs_raise_denied(struct medusa_evtype_s *evtype);
+static inline void medusafs_raise_denied(struct medusa_evtype_s *evtype)
+{
+	if (evtype) {
+		evtype->denied++;
+	}
+}
 #define MEDUSAFS_RAISE_DENIED(structname)	\
 		medusafs_raise_denied(&MED_EVTYPEOF(structname))
 #define MEDUSAFS_RAISE_COUNTER(structname) ({			\
