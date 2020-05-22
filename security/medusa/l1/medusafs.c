@@ -6,12 +6,15 @@
 #include <linux/path.h>
 #include <linux/namei.h>
 #include <linux/limits.h>
+#include <linux/bitmap.h>
 #include <linux/medusa/l1/medusafs.h>
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l3/med_model.h>
+#include <linux/medusa/l3/vs_model.h>
 #include "../l2/kobject_file.h"
 
 #define TMPBUFLEN 20
+#define TMPBUFLEN_VS VS_TOTAL_BITS*3
 
 struct dentry *medusafs_root_dir;
 struct dentry *acctypes_dir;
@@ -87,10 +90,14 @@ static ssize_t medusa_read_get_vs(struct file *filp, char __user *buf,
 				   size_t count, loff_t *ppos)
 {
 	char *tmpbuf, *path, *tmpbuf_path;
+	char tmpbuf_vs[TMPBUFLEN_VS];
 	ssize_t length, output;
 	struct inode *inode;
+	int pos_index = 0, offset = 0, range_start = -1, range_end = -1;
+	bool is_first = true;
 	
-	tmpbuf = kmalloc(PATH_MAX + TMPBUFLEN, GFP_KERNEL);
+	
+	tmpbuf = kmalloc(PATH_MAX + TMPBUFLEN_VS, GFP_KERNEL);
 	tmpbuf_path = kmalloc(PATH_MAX, GFP_KERNEL);
 
 	if (get_vs_input == NULL) {
@@ -103,7 +110,31 @@ static ssize_t medusa_read_get_vs(struct file *filp, char __user *buf,
 		length = scnprintf(tmpbuf, PATH_MAX + TMPBUFLEN, "%s has no security struct\n", path);
 		goto out;
 	}
-	length = scnprintf(tmpbuf, PATH_MAX + TMPBUFLEN, "%s - %u\n", path, inode_security(inode)->med_object.vs.vspack[0]);
+
+	while (pos_index < VS_TOTAL_BITS) {
+		if (!test_bit(pos_index, (uintptr_t *)inode_security(inode)->med_object.vs.vspack)) {
+			pos_index++;
+			continue;
+		}
+		else {
+			range_start = pos_index;
+			pos_index++;
+		}
+		while (test_bit(pos_index, (uintptr_t *)inode_security(inode)->med_object.vs.vspack)) {
+			range_end = pos_index;
+			pos_index++;
+		}
+		if (!is_first)
+			offset += scnprintf(tmpbuf_vs + offset, TMPBUFLEN_VS - offset, ",");
+		if (range_end == -1)
+			offset += scnprintf(tmpbuf_vs + offset, TMPBUFLEN_VS - offset, "%d", range_start);
+		else 
+			offset += scnprintf(tmpbuf_vs + offset, TMPBUFLEN_VS - offset, "%d-%d", range_start, range_end);
+		range_end = -1;
+		is_first = false;
+	}
+
+	length = scnprintf(tmpbuf, PATH_MAX + TMPBUFLEN_VS, "%s - %s\n", path, tmpbuf_vs);
 out:
 	output = simple_read_from_buffer(buf, count, ppos, tmpbuf, length);
 	kfree(tmpbuf);
