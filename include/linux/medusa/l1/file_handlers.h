@@ -49,8 +49,72 @@ extern medusa_answer_t medusa_write(struct file * file);
  * which may be released using medusa_put_path() function. Consult
  * l2/acctype_path_access.c for details.
  */
- extern char *medusa_get_path(const struct path *path, const struct qstr *last, int lasttype);
- extern void medusa_put_path(char **pathbuf);
+extern char *medusa_get_path(const struct path *path, const struct qstr *last, int lasttype);
+extern void medusa_put_path(char **pathbuf);
+
+// user_path_at() deals with __user char * pointer;
+// path access on redirection (for simplicity and reusability of code) cannot be repeated
+// with LOOKUP_REVAL flag, so this flag should be set immediately for the first
+// attempt of path access
+#define MEDUSA_PATH_ACCESS_PATHAT_FINI(path)					\
+	how |= LOOKUP_REVAL;							\
+	error = kern_path(path_to_redirect, LOOKUP_REVAL, &path)
+
+// filename_parentat() uses struct filename @name; on redirection should be updated
+#define MEDUSA_PATH_ACCESS_PARENTAT_FINI(name)					\
+	putname(name);								\
+	name = getname_kernel(path_to_redirect);				\
+	medusa_redirected = 1
+
+// filename_parentat() uses struct filename @name; on redirection should be updated
+#define MEDUSA_PATH_ACCESS_CREATE_FINI(name)					\
+	putname(name);								\
+	name = getname_kernel(path_to_redirect)
+
+/*
+ * MEDUSA_PATH_ACCESS - L1 medusa path access code repeated in all use cases
+ *
+ * @acctype - path access description ("link", "rmdir", ...)
+ * @path_ptr - pointer to path structure related to path in question
+ * @last_ptr - pointer to qstr holding last element of path in question
+ *	set only by filename_parentat() path loop call
+ * @type - type of last element of path in question set only by filename_parentat()
+ *	path loop call
+ * @out - label of code branch to continue on error
+ * @FINI - code to do on finish; it varies based on type of path loop:
+ *	MEDUSA_PATH_ACCESS_PARENTAT_FINI - if filename_parentat() path loop is used
+ *	MEDUSA_PATH_ACCESS_PATHAT_FINI - in case of user_path_at() path loop
+ *
+ * Notes: following variables are used in macro and therefore should be defined:
+ *	- int @error for holding error code
+ *	- medusa_allow code label to continue if no redirection is made
+ *	- struct filename @name if MEDUSA_PATH_ACCESS_PARENTAT_FINI is used
+ *	- flag int @medusa_redirected if MEDUSA_PATH_ACCESS_PARENTAT_FINI is used
+ *	- flags int @how if MEDUSA_PATH_ACCESS_PATHAT_FINI is used
+ */
+#define MEDUSA_PATH_ACCESS(acctype, path_ptr, last_ptr, type, out, FINI)	\
+{										\
+		int res;							\
+		char *path_to_redirect = NULL;					\
+		path_to_redirect = medusa_get_path(path_ptr, last_ptr, type);	\
+										\
+		if (IS_ERR(path_to_redirect)) {					\
+			error = PTR_ERR(path_to_redirect);			\
+			goto out;						\
+		}								\
+		res = medusa_path_access(acctype, &path_to_redirect);		\
+										\
+		if (res == MED_DENY) {						\
+			error = -EACCES;					\
+			goto out;						\
+		} else if (unlikely(res == MED_FAKE_ALLOW)) {			\
+			error = 0;						\
+			goto out;						\
+		} else if (unlikely(path_to_redirect)) {			\
+			path_put(path_ptr);					\
+			FINI;							\
+			medusa_put_path(&path_to_redirect);			\
+		}								\
+}
 
 #endif /* _MEDUSA_L1_FILE_HANDLERS_H */
-

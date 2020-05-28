@@ -4111,43 +4111,22 @@ long do_unlinkat(int dfd, struct filename *name)
 	struct inode *delegated_inode = NULL;
 	unsigned int lookup_flags = 0;
 #ifdef CONFIG_SECURITY_MEDUSA
-	int res;
-	char *path_to_redirect = NULL;
-
-	name = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
-	if (IS_ERR(name))
-		return PTR_ERR(name);
-
-	path_to_redirect = medusa_get_path(&path, &last, type);
-	if (IS_ERR(path_to_redirect)) {
-		error = PTR_ERR(path_to_redirect);
-		goto exit1;
-	}
-	res = medusa_path_access("unlink", &path_to_redirect);
-	if ((res == MED_DENY) || unlikely(path_to_redirect) || unlikely(res == MED_FAKE_ALLOW)) {
-		if (res == MED_FAKE_ALLOW) {
-			error = 0;
-			goto exit1;
-		} else if (res == MED_DENY) {
-			error = -EACCES;
-			goto exit1;
-		}
-
-		path_put(&path);
-		putname(name);
-		name = getname_kernel(path_to_redirect);
-		medusa_put_path(&path_to_redirect);
-	} else
-		goto medusa_allow;
+	int medusa_redirected = 0;
 #endif /* CONFIG_SECURITY_MEDUSA */
+
 retry:
 	name = filename_parentat(dfd, name, lookup_flags, &path, &last, &type);
 	if (IS_ERR(name))
 		return PTR_ERR(name);
-
 #ifdef CONFIG_SECURITY_MEDUSA
-medusa_allow:
+	/* medusa hook is called only at first attempt of unlink, not at retry */
+	if (!(lookup_flags & LOOKUP_REVAL) && !medusa_redirected) {
+		MEDUSA_PATH_ACCESS("unlink", &path, &last, type, exit1, MEDUSA_PATH_ACCESS_PARENTAT_FINI(name));
+		if (medusa_redirected)
+			goto retry;
+	}
 #endif /* CONFIG_SECURITY_MEDUSA */
+
 	error = -EISDIR;
 	if (type != LAST_NORM)
 		goto exit1;
@@ -4253,6 +4232,22 @@ long do_symlinkat(const char __user *oldname, int newdfd,
 	from = getname(oldname);
 	if (IS_ERR(from))
 		return PTR_ERR(from);
+#ifdef CONFIG_SECURITY_MEDUSA
+	// prerobit - ciel pri vytvarani linky nemusi jestvovat!
+	// pouzi filename_parentat()
+
+	/* filename_lookup() drops it, keep a reference */
+	from->refcnt++;
+	error = filename_lookup(AT_FDCWD, from, 0, &path, NULL);
+	if (error) {
+		struct filename *to = getname(newname);
+		pr_err("do_symlinkat: filename_lookup returned %d '%s' <-- '%s'\n", error, from->name, to->name);
+		putname(to);
+		goto retry;
+	}
+	MEDUSA_PATH_ACCESS("symlink", &path, NULL, 0, out_putname, MEDUSA_PATH_ACCESS_CREATE_FINI(from));
+	path_put(&path);
+#endif /* CONFIG_SECURITY_MEDUSA */
 retry:
 	dentry = user_path_create(newdfd, newname, &path, lookup_flags);
 	error = PTR_ERR(dentry);
@@ -4396,10 +4391,14 @@ int do_linkat(int olddfd, const char __user *oldname, int newdfd,
 
 	if (flags & AT_SYMLINK_FOLLOW)
 		how |= LOOKUP_FOLLOW;
+
 retry:
 	error = user_path_at(olddfd, oldname, how, &old_path);
 	if (error)
 		return error;
+#ifdef CONFIG_SECURITY_MEDUSA
+	//MEDUSA_PATH_ACCESS("link", &old_path, NULL, 0, out, MEDUSA_PATH_ACCESS_PATHAT_FINI(old_path));
+#endif /* CONFIG_SECURITY_MEDUSA */
 
 	new_dentry = user_path_create(newdfd, newname, &new_path,
 					(how & LOOKUP_REVAL));
