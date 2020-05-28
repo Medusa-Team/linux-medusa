@@ -118,7 +118,7 @@ char *medusa_get_path(const struct path *path, const struct qstr *last,
 	 * always want to obtain all paths in the same normalized form.
 	 * If type of @last is '.' or '..', do not append anything to the path.
 	 */
-	if (lasttype == LAST_NORM) {
+	if (last && (lasttype == LAST_NORM)) {
 		lastlen = READ_ONCE(last->len);
 		lastname = smp_load_acquire(&last->name);
 
@@ -138,12 +138,12 @@ char *medusa_get_path(const struct path *path, const struct qstr *last,
 		return pathbuf;
 	}
 
-	if (lasttype == LAST_NORM) {
+	if (last && (lasttype == LAST_NORM)) {
 		buflen = strlen(pathbuf);
 		pathbuf[buflen] = '/';
 		memcpy(pathbuf+buflen+1, lastname, lastlen);
 		buf[PATH_MAX-1] = '\0';
-	} else if (lasttype == LAST_DOTDOT) {
+	} else if (last && (lasttype == LAST_DOTDOT)) {
 		int diff = 0;
 		char *slash = strrchr(pathbuf, '/');
 		if (slash) {
@@ -228,6 +228,7 @@ out:
 		return retval;
 	}
 	*/
+	medusa_put_path(path_to_redirect);
 	return MED_ALLOW;
 }
 
