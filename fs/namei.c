@@ -4228,24 +4228,30 @@ long do_symlinkat(const char __user *oldname, int newdfd,
 	struct dentry *dentry;
 	struct path path;
 	unsigned int lookup_flags = 0;
+#ifdef CONFIG_SECURITY_MEDUSA
+	struct qstr last;
+	int type;
+#endif /* CONFIG_SECURITY_MEDUSA */
 
 	from = getname(oldname);
 	if (IS_ERR(from))
 		return PTR_ERR(from);
 #ifdef CONFIG_SECURITY_MEDUSA
-	// prerobit - ciel pri vytvarani linky nemusi jestvovat!
-	// pouzi filename_parentat()
-
-	/* filename_lookup() drops it, keep a reference */
-	from->refcnt++;
-	error = filename_lookup(AT_FDCWD, from, 0, &path, NULL);
-	if (error) {
-		struct filename *to = getname(newname);
-		pr_err("do_symlinkat: filename_lookup returned %d '%s' <-- '%s'\n", error, from->name, to->name);
+	/* on symlink creation target doesn't have exist, we can't use filename_lookup() */
+	from = filename_parentat(AT_FDCWD, from, lookup_flags, &path, &last, &type);
+	if (IS_ERR(from)) {
+		struct filename *to;
+		error = PTR_ERR(from);
+		from = getname(oldname);
+		if (IS_ERR(from))
+			return PTR_ERR(from);
+		to = getname(newname);
+		pr_err("do_symlinkat: filename_parentat returned %d '%s' <-- '%s'\n", error, from->name, to->name);
 		putname(to);
 		goto retry;
+		//return PTR_ERR(name);
 	}
-	MEDUSA_PATH_ACCESS("symlink", &path, NULL, 0, out_putname, MEDUSA_PATH_ACCESS_CREATE_FINI(from));
+	MEDUSA_PATH_ACCESS("symlink", &path, &last, type, out_putname, MEDUSA_PATH_ACCESS_CREATE_FINI(from));
 	path_put(&path);
 #endif /* CONFIG_SECURITY_MEDUSA */
 retry:
