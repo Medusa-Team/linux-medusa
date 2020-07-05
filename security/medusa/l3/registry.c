@@ -1,6 +1,7 @@
 #include <linux/medusa/l3/arch.h>
 #include <linux/medusa/l3/registry.h>
 #include "l3_internals.h"
+#include "../l4-constable/med_cache.h"
 
 /* nesting as follows: registry_lock is outer, usecount_lock is inner. */
 
@@ -172,6 +173,10 @@ int med_register_kclass(struct medusa_kclass_s *med_kclass)
 
 	med_kclass->name[MEDUSA_KCLASSNAME_MAX-1] = '\0';
 	med_pr_info("Registering kclass %s\n", med_kclass->name);
+
+	/* Register kmem cache for L4. */
+	med_cache_register(med_kclass->kobject_size);
+
 	MED_LOCK_W(registry_lock);
 	for (p = kclasses; p; p = p->next)
 		if (strcmp(p->name, med_kclass->name) == 0) {
