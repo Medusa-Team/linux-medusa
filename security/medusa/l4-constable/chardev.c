@@ -52,7 +52,6 @@
 
 #define MEDUSA_MAJOR 111
 #define MODULENAME "chardev/linux"
-#define CURRENTPTR current
 
 static int user_release(struct inode *inode, struct file *file);
 
@@ -910,7 +909,7 @@ static int user_open(struct inode *inode, struct file *file)
 		goto out;
 	}
 
-	constable = CURRENTPTR;
+	constable = current;
 	if (strstr(current->parent->comm, "gdb"))
 		gdb = current->parent;
 
@@ -943,7 +942,6 @@ static int user_open(struct inode *inode, struct file *file)
 out:
 	if (tele_mem_open)
 		med_cache_free(tele_mem_open);
-	med_cache_destroy();
 good_out:
 	up(&constable_openclose);
 	return retval;
@@ -1046,8 +1044,6 @@ static int user_release(struct inode *inode, struct file *file)
 	}
 	INIT_LIST_HEAD(&answer_waitlist);
 	up(&waitlist_sem);
-
-	free_med_cache_array();
 
 	up(&constable_openclose);
 	// wake up waiting processes, this has to be outside of constable_openclose
