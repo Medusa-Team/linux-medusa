@@ -41,7 +41,6 @@
 #include <linux/jiffies.h>
 #include <linux/sched/task.h>
 #include <linux/uaccess.h>
-#include <linux/slab.h>
 
 #include <linux/medusa/l3/arch.h>
 #include <linux/medusa/l3/registry.h>
@@ -49,12 +48,10 @@
 #include <linux/medusa/l4/comm.h>
 
 #include "teleport.h"
+#include "med_cache.h"
 
 #define MEDUSA_MAJOR 111
 #define MODULENAME "chardev/linux"
-#define CURRENTPTR current
-#define FAT_PTR_OFFSET_TYPE uint32_t
-#define FAT_PTR_OFFSET sizeof(FAT_PTR_OFFSET_TYPE)
 
 static int user_release(struct inode *inode, struct file *file);
 
@@ -111,10 +108,6 @@ struct tele_item {
 	void (*post)(void*);
 };
 
-// Array for memory caches
-int cache_array_size = 0;
-static struct kmem_cache **med_cache_array;
-
 // Next three variables are used by user_open. They are here because we have to
 // free the underlying data structures and clear them in user_close.
 static size_t left_in_teleport = 0;
@@ -162,143 +155,6 @@ static struct medusa_authserver_s chardev_medusa = {
 	NULL,			/* del_evtype */
 	l4_decide		/* decide */
 };
-
-/*******************************************************************************
- * memory cache interface
- */ 
-
-/**
- * Computes binary logarithm rounded up
- */
-static inline int get_log_index(int in) {
-	int ret = 1;
-	in--;
-	while (in >>= 1)
-		ret++;
-	return ret;
-}
-
-/**
- * Creates a memory cache on a given index.
- * If there is not enough space in the array, it will reallocate it.
- * If a cache already exists, it does nothing.
- */
-static struct kmem_cache* med_cache_create(size_t index) {
-	if (index >= cache_array_size)
-		return NULL;
-	if (med_cache_array[index])
-		return med_cache_array[index];
-	med_cache_array[index] = kmem_cache_create("med_cache",
-			1 << index,
-			0,
-			SLAB_HWCACHE_ALIGN,
-			NULL);
-	return med_cache_array[index];
-}
-
-/**
- * Allocates an array for memory caches and initializes it with nulls.
- */
-static struct kmem_cache** alloc_med_cache_array(size_t size) {
-	int i;
-	if (med_cache_array)
-		return med_cache_array;
-	med_cache_array = (struct kmem_cache**)
-		kmalloc(sizeof(struct kmem_cache*) * size, GFP_KERNEL);
-	if (med_cache_array) {
-		for (i = 0; i < size; i++)
-			med_cache_array[i] = NULL;
-		cache_array_size = size;
-	}
-	return med_cache_array;
-}
-
-/**
- * Reallocates the memory cache array for a given size.
- * If the size is smaller or the same as the existing array, it does nothing.
- */
-static struct kmem_cache** realloc_med_cache_array(size_t size) {
-	int i;
-	struct kmem_cache** new_cache_array;
-	if (size <= cache_array_size)
-		return med_cache_array;
-	new_cache_array = (struct kmem_cache**)
-		krealloc(med_cache_array, sizeof(struct kmem_cache*) * size, GFP_KERNEL);
-	if (new_cache_array) {
-		for (i = cache_array_size; i < size; i++)
-			med_cache_array[i] = NULL;
-		cache_array_size = size;
-	}
-	return new_cache_array;
-}
-
-/**
- * Creates a memory cache for a given size if it doesn't exist
- */
-static int med_cache_register(size_t size) {
-	int log;
-	size += FAT_PTR_OFFSET;
-	log = get_log_index(size);
-	if (log >= cache_array_size)
-		if (!realloc_med_cache_array(log))
-			return -ENOMEM;
-	if (!med_cache_array[log])
-		if (!med_cache_create(log))
-			return -ENOMEM;
-	return 0;
-}
-
-/**
- * Allocates memory from a memory pool chosen by the index argument
- * Warning - selected index has to take fat pointer offset into account
- */
-static void* med_cache_alloc_index(size_t index) {
-	void* ret;
-	ret = kmem_cache_alloc(med_cache_array[index], GFP_KERNEL);
-	*((FAT_PTR_OFFSET_TYPE*)ret) = index;
-	ret = ((FAT_PTR_OFFSET_TYPE*)ret) + 1;
-	return ret;
-}
-
-/**
- * Allocates memory from a memory pool chosen by the size argument
- */
-static void* med_cache_alloc_size(size_t size) {
-	int log;
-	size += FAT_PTR_OFFSET;
-	log = get_log_index(size);
-	return med_cache_alloc_index(log);
-}
-
-/**
- * Frees previously allocated memory
- */
-static void med_cache_free(void* mem) {
-	int log;
-	mem = ((FAT_PTR_OFFSET_TYPE*)mem) - 1;
-	log = *((FAT_PTR_OFFSET_TYPE*)mem);
-	kmem_cache_free(med_cache_array[log], mem);
-}
-
-/**
- * Destroys all memory caches in the array
- */
-static void med_cache_destroy(void) {
-	int i;
-	for(i = 0; i < cache_array_size; i++) {
-		if (med_cache_array[i])
-			kmem_cache_destroy(med_cache_array[i]);
-	}
-}
-
-/**
- * Frees the array of memory caches.
- */
-static void free_med_cache_array(void) {
-	med_cache_destroy();
-	kfree(med_cache_array);
-	med_cache_array = NULL;
-}
 
 /*
  * Used to clean up data structures after fetch or update.
@@ -348,8 +204,6 @@ static int l4_add_kclass(struct medusa_kclass_s * cl)
 	}
 
 	med_get_kclass(cl); // put is in user_release
-
-	med_cache_register(cl->kobject_size);
 
 	MED_LOCK_W(registration_lock);
 	barrier();
@@ -1024,10 +878,6 @@ static int user_open(struct inode *inode, struct file *file)
 	if (atomic_read(&constable_present))
 		goto good_out;
 
-	if (!alloc_med_cache_array(15)) {
-		retval = -ENOMEM;
-		goto out;
-	}
 	if (med_cache_register(sizeof(struct tele_item))) {
 		retval = -ENOMEM;
 		goto out;
@@ -1059,7 +909,7 @@ static int user_open(struct inode *inode, struct file *file)
 		goto out;
 	}
 
-	constable = CURRENTPTR;
+	constable = current;
 	if (strstr(current->parent->comm, "gdb"))
 		gdb = current->parent;
 
@@ -1092,7 +942,6 @@ static int user_open(struct inode *inode, struct file *file)
 out:
 	if (tele_mem_open)
 		med_cache_free(tele_mem_open);
-	med_cache_destroy();
 good_out:
 	up(&constable_openclose);
 	return retval;
@@ -1196,8 +1045,6 @@ static int user_release(struct inode *inode, struct file *file)
 	INIT_LIST_HEAD(&answer_waitlist);
 	up(&waitlist_sem);
 
-	free_med_cache_array();
-
 	up(&constable_openclose);
 	// wake up waiting processes, this has to be outside of constable_openclose
 	// lock because wake_up_all causes context switch (locking and unlocking
@@ -1253,4 +1100,3 @@ static void chardev_constable_exit(void)
 module_init(chardev_constable_init);
 module_exit(chardev_constable_exit);
 MODULE_LICENSE("GPL");
-

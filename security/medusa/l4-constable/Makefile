@@ -5,6 +5,6 @@
 
 export-objs :=  teleport_cycle teleport_reset
 
-l4-constable-y:= teleport.o chardev.o
+l4-constable-y:= teleport.o chardev.o med_cache.o
 obj-$(CONFIG_SECURITY_MEDUSA_L4_CONSTABLE) := l4-constable.o
 
