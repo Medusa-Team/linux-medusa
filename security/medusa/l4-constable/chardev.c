@@ -414,8 +414,8 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 	down(&waitlist_sem);
 	list_add_tail(&local_waitlist_item.list, &answer_waitlist);
 	up(&waitlist_sem);
-	set_current_state(TASK_UNINTERRUPTIBLE);
 	ls_unlock(&lightswitch, &ls_switch);
+	set_current_state(TASK_UNINTERRUPTIBLE);
 	schedule();
 	put_task_struct(current);
 
