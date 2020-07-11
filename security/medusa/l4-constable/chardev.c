@@ -581,6 +581,7 @@ static ssize_t user_read(struct file * filp, char __user * buf,
 	if (!left_in_teleport) {
 		// Get a new item only if the previous teleport has been fully transported
 		if (teleport_pop(0) == -EPIPE) {
+			up(&user_read_lock);
 			ls_unlock(&lightswitch, &ls_switch);
 			return -EPIPE;
 		}
@@ -617,6 +618,7 @@ static ssize_t user_read(struct file * filp, char __user * buf,
 				teleport_put();
 				// Get new teleport
 				if (teleport_pop(0) == -EPIPE) {
+					up(&user_read_lock);
 					ls_unlock(&lightswitch, &ls_switch);
 					return -EPIPE;
 				}
