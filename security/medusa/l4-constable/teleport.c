@@ -188,8 +188,7 @@ ssize_t teleport_cycle(teleport_t * teleport, size_t userlimit)
 static inline ssize_t place_to_user(teleport_t * teleport,
 		size_t * userlimit)
 {
-	ssize_t len = *userlimit < teleport->remaining ?
-		*userlimit : teleport->remaining;
+	ssize_t len = min(*userlimit, teleport->remaining);
 
 	if (!len)
 		return 0;
