@@ -499,12 +499,6 @@ static void decrement_counters(teleport_insn_t* tele) {
 	}
 }
 
-#define DOWN(m) do {  \
-	if (down_trylock(m)) { \
-		med_pr_crit("Strasny vypis: %d\n", __LINE__); \
-	} \
-} while(0)
-
 /*
  * trylock - if true, don't block
  * returns 1 if queue is empty, otherwise 0
@@ -525,7 +519,7 @@ static inline int teleport_pop(int trylock) {
 		}
 		ls_lock(&lightswitch, &ls_switch);
 	}
-	DOWN(&queue_lock);
+	down(&queue_lock);
 	local_list_item = list_first_entry(&tele_queue, struct tele_item, list);
 	processed_teleport = local_list_item->tele;
 	left_in_teleport = local_list_item->size;
@@ -575,7 +569,7 @@ static ssize_t user_read(struct file * filp, char __user * buf,
 	}
 
 	// Lock it before someone can change the userspace_buf
-	DOWN(&user_read_lock);
+	down(&user_read_lock);
 	userspace_buf = buf;
 	// Get an item from the queue
 	if (!left_in_teleport) {
