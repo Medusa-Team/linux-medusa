@@ -327,7 +327,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 		struct medusa_kobject_s * o1, struct medusa_kobject_s * o2)
 {
 	medusa_answer_t retval;
-	teleport_insn_t tele_mem_decide[6];
+	teleport_insn_t *tele_mem_decide;
 	struct tele_item *local_tele_item;
 	struct waitlist_item local_waitlist_item;
 
@@ -348,6 +348,10 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 		return MED_ALLOW;
 	}
 #endif
+	tele_mem_decide = (teleport_insn_t *)
+		med_cache_alloc_size(sizeof(teleport_insn_t)*6);
+	if (!tele_mem_decide)
+		return MED_ERR;
 
 	local_tele_item = (struct tele_item*)
 		med_cache_alloc_size(sizeof(struct tele_item));
@@ -355,7 +359,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 		return MED_ERR;
 	local_tele_item->tele = tele_mem_decide;
 	local_tele_item->size = 0;
-	local_tele_item->post = NULL;
+	local_tele_item->post = med_cache_free;
 
 #define decision_evtype (event->evtype_id)
 	tele_mem_decide[0].opcode = tp_PUTPtr;
@@ -389,6 +393,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 
 	if (!atomic_read(&constable_present)) {
 		med_cache_free(local_tele_item);
+		med_cache_free(tele_mem_decide);
 		ls_unlock(&lightswitch, &ls_switch);
 		return MED_ERR;
 	}
