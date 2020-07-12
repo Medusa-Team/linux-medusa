@@ -60,19 +60,19 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 	//ndcurrent.mnt = NULL;
 	//medusa_get_upper_and_parent(&ndcurrent,&ndupper,&ndparent);
 
-	if (!is_med_magic_valid(&(inode_security(parent->dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(parent->dentry, parent->mnt) <= 0) {
+	if (!is_med_magic_valid(&(inode_security(dir->dentry->d_inode)->med_object)) &&
+		file_kobj_validate_dentry(dir->dentry, dir->mnt, NULL) <= 0) {
 		// medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_ALLOW;
 	}
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(parent->dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(parent->dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dir->dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(dir->dentry->d_inode)))
 	) {
 		//medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_DENY;
 	}
-	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, inode_security(parent->dentry->d_inode)))
-		retval = medusa_do_mkdir(parent->dentry, dentry, mode);
+	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, inode_security(dir->dentry->d_inode)))
+		retval = medusa_do_mkdir(dir->dentry, dentry, mode);
 	else
 		retval = MED_ALLOW;
 	//medusa_put_upper_and_parent(&ndupper, &ndparent);

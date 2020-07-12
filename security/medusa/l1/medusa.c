@@ -380,8 +380,8 @@ static int medusa_l1_path_mkdir(const struct path *dir, struct dentry *dentry,
 	char *pos = d_absolute_path(dir, buf, 127);
 	if (!IS_ERR(pos))
 		med_pr_info("mkdir: %s", pos);
-	if (medusa_mkdir(dir, dentry, mode) == MED_NO)
-		return -EPERM;
+	if (medusa_mkdir(dir, dentry, mode) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -402,7 +402,7 @@ static int medusa_l1_path_unlink(const struct path *dir, struct dentry *dentry)
 	char *pos = d_absolute_path(dir, buf, 127);
 	if (!IS_ERR(pos))
 		med_pr_info("unlink: %s", pos);
-	if (medusa_unlink(dir, dentry) == MED_NO)
+	if (medusa_unlink(dir, dentry) == MED_DENY)
 		return -EPERM;
 	return 0;
 }

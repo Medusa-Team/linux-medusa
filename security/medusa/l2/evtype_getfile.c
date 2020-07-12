@@ -127,6 +127,7 @@ void inline info_mnt(struct mount *mnt)
 void medusa_get_upper_and_parent(struct path *ndsource,
 		struct path *ndupperp, struct path *ndparentp)
 {
+	pr_info("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry);
 	*ndupperp = *ndsource;
 	dget(ndupperp->dentry);
 	if (ndupperp->mnt) {
@@ -146,6 +147,7 @@ void medusa_get_upper_and_parent(struct path *ndsource,
 		if (real_mount(ndupperp->mnt)->mnt_parent == real_mount(ndupperp->mnt)->mnt_parent->mnt_parent) {
 			/* Cyklus skonci, ked rodic mountpointu uz nema dalsieho
 			 * rodica, resp. su totozne. */
+			pr_info("medusa_get_upper_and_parent: at root: %pd4, source: %pd4\n", real_mount(ndupperp->mnt)->mnt_parent->mnt_mountpoint, ndsource->dentry);
 			break;
 		}
 		/* Prechod na vyssi mountpoint, najprv dentry pre mountpoint */
