@@ -1777,7 +1777,6 @@ static int __init medusa_l1_init(void)
 
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");
-	security_add_hooks(medusa_l1_hooks_special, ARRAY_SIZE(medusa_l1_hooks_special), "medusa");
 	//security_replace_hooks(medusa_l0_hooks, medusa_l1_hooks_special, ARRAY_SIZE(medusa_l1_hooks_special));
 
 	//l1_initialized = true;
