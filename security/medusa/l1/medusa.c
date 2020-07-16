@@ -67,7 +67,6 @@
 #include "../l2/kobject_file.h"
 #include "../l2/kobject_fuck.h"
 #include "../l2/kobject_socket.h"
-#include "../l0/init_medusa.h"
 #include "../../../ipc/util.h"
 #include <linux/medusa/l3/arch.h>
 
@@ -1722,67 +1721,13 @@ struct security_hook_list medusa_l1_hooks_special[] = {
 
 void __init medusa_init(void);
 
-// Number and order of hooks has to be the same
-/*
-static inline void security_replace_hooks(struct security_hook_list *old_hooks, struct security_hook_list *new_hooks, int count)
-{
-	int i;
-	for (i = 0; i < count; i++)
-		hlist_replace_rcu(&old_hooks[i].list, &new_hooks[i].list);
-}
-*/
-
 static int __init medusa_l1_init(void)
 {
 	int ret = 0;
 
-	/*
-	extern bool l1_initialized;
-	extern struct task_list l0_task_list;
-	extern struct inode_list l0_inode_list;
-	extern struct mutex l0_mutex;
-	
-	struct list_head *pos, *q;
-	struct inode_list *tmp_inode;
-	struct task_list *tmp_task;
-	struct kern_ipc_perm_list *tmp_ipcp;
-
-	// holding l0_mutex cannot be executed no l0 hook
-	mutex_lock(&l0_mutex);
-	
-	list_for_each_safe(pos, q, &l0_inode_list.list) {
-		tmp_inode = list_entry(pos, struct inode_list, list);
-		ret = medusa_l1_inode_alloc_security(tmp_inode->inode);
-		// TODO: error checking of ret
-		list_del(pos);
-		kfree(tmp_inode);
-	}
-
-	list_for_each_safe(pos, q, &l0_task_list.list) {
-		tmp_task = list_entry(pos, struct task_list, list);
-		ret = medusa_l1_task_alloc(tmp_task->task, tmp_task->clone_flags);
-		// TODO: error checking of ret
-		list_del(pos);
-		kfree(tmp_task);
-	}
-
-	list_for_each_safe(pos, q, &l0_kern_ipc_perm_list.list) {
-		tmp_ipcp = list_entry(pos, struct kern_ipc_perm_list, list);
-		ret = tmp_ipcp->medusa_l1_ipc_alloc_security(tmp_ipcp->ipcp);
-		// TODO: error checking of ret
-		list_del(pos);
-		kfree(tmp_ipcp);
-	}
-	*/
-
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");
-	//security_replace_hooks(medusa_l0_hooks, medusa_l1_hooks_special, ARRAY_SIZE(medusa_l1_hooks_special));
-
-	//l1_initialized = true;
 	med_pr_info("l1 registered with the kernel\n");
-	//mutex_unlock(&l0_mutex);
-
 	medusa_init();
 
 	/*
@@ -1806,7 +1751,6 @@ static void __exit medusa_l1_exit (void)
 	return;
 }
 
-//module_init(medusa_l1_init);
 MODULE_LICENSE("GPL");
 
 /*
