@@ -20,7 +20,7 @@ struct ipc_msgrcv_access {
 	MEDUSA_ACCESS_HEADER;
 	long m_type;	/* message type; see 'struct msg_msg' in include/linux/msg.h */
 	size_t m_ts;	/* msg text size; see 'struct msg_msg' in include/linux/msg.h */
-	/* char m_text[???]; message text is not send, for now */
+	/* char m_text[???]; message text is not sent, for now */
 	pid_t target;	/* TODO: namespaces implementation */
 	long type;	/* type of requested message */
 	int mode;	/* operational flags */
