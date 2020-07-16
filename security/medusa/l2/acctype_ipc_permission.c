@@ -73,7 +73,6 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	struct ipc_kobject object;
 	bool use_locking = false;
 
-#ifdef CONFIG_SMP
 	/*
 	 * WORKAROUND!!!
 	 *
@@ -90,39 +89,37 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	 * Note: On UP spins doesn't exist, lucky us ;)
 	 *       Medusa on UP always can make a decision without a carry on spinlocks...
 	 */
-
-	if (spin_is_locked(&(ipcp->lock))) {
-#ifdef CONFIG_DEBUG_SPINLOCK
-		/*
-		 * If current process is holding the spinlock, we need to unlock it;
-		 * otherwise another process is holding the spinlock, we don't touch it.
-		 *
-		 * It is not necessary to check rlock.owner_cpu == raw_smp_processor_id(),
-		 * because if current process is holding the spinlock, that spinlock
-		 * was taken in currently running RCU, so there is no possibility to
-		 * reschedule.
-		 */
-		if (ipcp->lock.rlock.owner == current)
-			use_locking = true;
-#else /* !CONFIG_DEBUG_SPINLOCK */
-		/*
-		 * If CONFIG_DEBUG_SPINLOCK is off and a spinlock is held, there is no
-		 * possibility to determine the owner of this spinlock. So we cannot
-		 * determine, whether the spinlock can be or not (un)locked.
-		 *
-		 * We should return MED_ERR, because Medusa subsystem can't make a decision,
-		 * but this value has to be converted to MED_ALLOW, so function directly
-		 * returns MED_ALLOW.
-		 *
-		 * Note:
-		 * Yes, due to nondeterministic behaviour of IPC object's spinlock
-		 * in this function this way we lose do_msgsnd() and ipc_check_perms()
-		 * controls...
-		 */
-		return retval;
-#endif /* CONFIG_DEBUG_SPINLOCK */
+	if (IS_ENABLED(CONFIG_SMP) && spin_is_locked(&(ipcp->lock))) {
+		if (IS_ENABLED(CONFIG_DEBUG_SPINLOCK)) {
+			/*
+			 * If current process is holding the spinlock, we need to unlock it;
+			 * otherwise another process is holding the spinlock, we don't touch it.
+			 *
+			 * It is not necessary to check rlock.owner_cpu == raw_smp_processor_id(),
+			 * because if current process is holding the spinlock, that spinlock
+			 * was taken in currently running RCU, so there is no possibility to
+			 * reschedule.
+			 */
+			if (ipcp->lock.rlock.owner == current)
+				use_locking = true;
+		} else {
+			/*
+			 * If CONFIG_DEBUG_SPINLOCK is off and a spinlock is held, there is no
+			 * possibility to determine the owner of this spinlock. So we cannot
+			 * determine, whether the spinlock can be or not (un)locked.
+			 *
+			 * We should return MED_ERR, because Medusa subsystem can't make a decision,
+			 * but this value has to be converted to MED_ALLOW, so function directly
+			 * returns MED_ALLOW.
+			 *
+			 * Note:
+			 * Yes, due to nondeterministic behaviour of IPC object's spinlock
+			 * in this function this way we lose do_msgsnd() and ipc_check_perms()
+			 * controls...
+			 */
+			return MED_ALLOW;
+		}
 	}
-#endif /* CONFIG_SMP */
 
 	/*
 	 * Increase references to the IPC object; second argument:
