@@ -1,3 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * security/medusa/l2/acctype_ipc_semop.c
+ *
+ * IPC semop access type implementation.
+ *
+ * Copyright (C) 2017-2018 Viliam Mihalik
+ * Copyright (C) 2018-2020 Matus Jokay
+ */
+
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
@@ -9,7 +19,8 @@
 struct ipc_semop_access {
 	MEDUSA_ACCESS_HEADER;
 	/* sem_num, sem_op and sem_flg are from sembuf struct definition;
-	   see include/uapi/linux/sem.h */
+	 * see include/uapi/linux/sem.h
+	 */
 	unsigned int sem_num;	/* semaphore index in array */
 	int sem_op;		/* semaphore operation */
 	int sem_flg;		/* operation flags */
@@ -19,19 +30,20 @@ struct ipc_semop_access {
 };
 
 MED_ATTRS(ipc_semop_access) {
-	MED_ATTR_RO (ipc_semop_access, sem_num, "sem_num", MED_UNSIGNED),
-	MED_ATTR_RO (ipc_semop_access, sem_op, "sem_op", MED_SIGNED),
-	MED_ATTR_RO (ipc_semop_access, sem_flg, "sem_flg", MED_SIGNED),
-	MED_ATTR_RO (ipc_semop_access, nsops, "nsops", MED_UNSIGNED),
-	MED_ATTR_RO (ipc_semop_access, alter, "alter", MED_SIGNED),
-	MED_ATTR_RO (ipc_semop_access, ipc_class, "ipc_class", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_semop_access, sem_num, "sem_num", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_semop_access, sem_op, "sem_op", MED_SIGNED),
+	MED_ATTR_RO(ipc_semop_access, sem_flg, "sem_flg", MED_SIGNED),
+	MED_ATTR_RO(ipc_semop_access, nsops, "nsops", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_semop_access, alter, "alter", MED_SIGNED),
+	MED_ATTR_RO(ipc_semop_access, ipc_class, "ipc_class", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(ipc_semop_access, "ipc_semop", process_kobject, "process", ipc_kobject, "object");
 
-int __init ipc_acctype_semop_init(void) {
-	MED_REGISTER_ACCTYPE(ipc_semop_access,MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
+int __init ipc_acctype_semop_init(void)
+{
+	MED_REGISTER_ACCTYPE(ipc_semop_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
 }
 
@@ -49,7 +61,9 @@ int __init ipc_acctype_semop_init(void) {
  *  |
  *  |<-- do_semtimedop()
  */
-medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops, unsigned nsops, int alter)
+medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp,
+				 struct sembuf *sops, unsigned int nsops,
+				 int alter)
 {
 	medusa_answer_t retval = MED_ALLOW;
 	struct ipc_semop_access access;
@@ -61,9 +75,11 @@ medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops
 		/* for now, we don't support error codes */
 		return MED_DENY;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object))
+	    && process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
+	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_semop_access, ipc_security(ipcp))) {
@@ -89,4 +105,5 @@ out:
 		retval = MED_DENY;
 	return retval;
 }
-__initcall(ipc_acctype_semop_init);
+
+device_initcall(ipc_acctype_semop_init);
