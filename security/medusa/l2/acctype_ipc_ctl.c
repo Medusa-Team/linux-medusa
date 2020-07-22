@@ -1,3 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * security/medusa/l2/acctype_ipc_ctl.c
+ *
+ * IPC ctl access type implementation.
+ *
+ * Copyright (C) 2017-2018 Viliam Mihalik
+ * Copyright (C) 2018-2020 Matus Jokay
+ */
+
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
@@ -8,20 +18,21 @@
 
 struct ipc_ctl_access {
 	MEDUSA_ACCESS_HEADER;
+	int cmd;		/* operation to be performed */
 	unsigned int ipc_class;
-	int cmd;	/* operation to be performed */
 };
 
 MED_ATTRS(ipc_ctl_access) {
-	MED_ATTR_RO (ipc_ctl_access, cmd, "cmd", MED_SIGNED),
-	MED_ATTR_RO (ipc_ctl_access, ipc_class, "ipc_class", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_ctl_access, cmd, "cmd", MED_SIGNED),
+	MED_ATTR_RO(ipc_ctl_access, ipc_class, "ipc_class", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(ipc_ctl_access, "ipc_ctl", process_kobject, "process", ipc_kobject, "object");
 
-int __init ipc_acctype_ctl_init(void) {
-	MED_REGISTER_ACCTYPE(ipc_ctl_access,MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
+int __init ipc_acctype_ctl_init(void)
+{
+	MED_REGISTER_ACCTYPE(ipc_ctl_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
 }
 
@@ -82,11 +93,13 @@ medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 			return MED_DENY;
 
 		object_p = &object;
-		if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
+		if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
+		    && ipc_kobj_validate_ipcp(ipcp) <= 0)
 			goto out;
 	}
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object))
+	    && process_kobj_validate_task(current) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_ctl_access, ipc_security(ipcp))) {
@@ -116,4 +129,5 @@ out:
 	}
 	return retval;
 }
-__initcall(ipc_acctype_ctl_init);
+
+device_initcall(ipc_acctype_ctl_init);

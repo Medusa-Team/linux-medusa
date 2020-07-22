@@ -1,3 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * security/medusa/l2/acctype_ipc_permission.c
+ *
+ * IPC permission access type implementation.
+ *
+ * Copyright (C) 2017-2018 Viliam Mihalik
+ * Copyright (C) 2018-2020 Matus Jokay
+ */
+
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/ipc.h>
@@ -9,19 +19,20 @@
 struct ipc_perm_access {
 	MEDUSA_ACCESS_HEADER;
 	unsigned int ipc_class;
-	u32 perms;	/* desired (requested) permission set */
+	u32 perms;		/* desired (requested) permission set */
 };
 
 MED_ATTRS(ipc_perm_access) {
-	MED_ATTR_RO (ipc_perm_access, perms, "perms", MED_UNSIGNED),
-	MED_ATTR_RO (ipc_perm_access, ipc_class, "ipc_class", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_perm_access, perms, "perms", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_perm_access, ipc_class, "ipc_class", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(ipc_perm_access, "ipc_perm", process_kobject, "process", ipc_kobject, "object");
 
-int __init ipc_acctype_init(void) {
-	MED_REGISTER_ACCTYPE(ipc_perm_access,MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
+int __init ipc_acctype_perm_init(void)
+{
+	MED_REGISTER_ACCTYPE(ipc_perm_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
 }
 
@@ -62,7 +73,6 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	struct ipc_kobject object;
 	bool use_locking = false;
 
-#ifdef CONFIG_SMP
 	/*
 	 * WORKAROUND!!!
 	 *
@@ -79,39 +89,37 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	 * Note: On UP spins doesn't exist, lucky us ;)
 	 *       Medusa on UP always can make a decision without a carry on spinlocks...
 	 */
-
-	if (spin_is_locked(&(ipcp->lock))) {
-#ifdef CONFIG_DEBUG_SPINLOCK
-		/*
-		 * If current process is holding the spinlock, we need to unlock it;
-		 * otherwise another process is holding the spinlock, we don't touch it.
-		 *
-		 * It is not necessary to check rlock.owner_cpu == raw_smp_processor_id(),
-		 * because if current process is holding the spinlock, that spinlock
-		 * was taken in currently running RCU, so there is no possibility to
-		 * reschedule.
-		 */
-		if (ipcp->lock.rlock.owner == current)
-			use_locking = true;
-#else /* !CONFIG_DEBUG_SPINLOCK */
-		/*
-		 * If CONFIG_DEBUG_SPINLOCK is off and a spinlock is held, there is no
-		 * possibility to determine the owner of this spinlock. So we cannot
-		 * determine, whether the spinlock can be or not (un)locked.
-		 *
-		 * We should return MED_ERR, because Medusa subsystem can't make a decision,
-		 * but this value has to be converted to MED_ALLOW, so function directly
-		 * returns MED_ALLOW.
-		 *
-		 * Note:
-		 * Yes, due to nondeterministic behaviour of IPC object's spinlock
-		 * in this function this way we lose do_msgsnd() and ipc_check_perms()
-		 * controls...
-		 */
-		return retval;
-#endif /* CONFIG_DEBUG_SPINLOCK */
+	if (IS_ENABLED(CONFIG_SMP) && spin_is_locked(&(ipcp->lock))) {
+		if (IS_ENABLED(CONFIG_DEBUG_SPINLOCK)) {
+			/*
+			 * If current process is holding the spinlock, we need to unlock it;
+			 * otherwise another process is holding the spinlock, we don't touch it.
+			 *
+			 * It is not necessary to check rlock.owner_cpu == raw_smp_processor_id(),
+			 * because if current process is holding the spinlock, that spinlock
+			 * was taken in currently running RCU, so there is no possibility to
+			 * reschedule.
+			 */
+			if (ipcp->lock.rlock.owner == current)
+				use_locking = true;
+		} else {
+			/*
+			 * If CONFIG_DEBUG_SPINLOCK is off and a spinlock is held, there is no
+			 * possibility to determine the owner of this spinlock. So we cannot
+			 * determine, whether the spinlock can be or not (un)locked.
+			 *
+			 * We should return MED_ERR, because Medusa subsystem can't make a decision,
+			 * but this value has to be converted to MED_ALLOW, so function directly
+			 * returns MED_ALLOW.
+			 *
+			 * Note:
+			 * Yes, due to nondeterministic behaviour of IPC object's spinlock
+			 * in this function this way we lose do_msgsnd() and ipc_check_perms()
+			 * controls...
+			 */
+			return MED_ALLOW;
+		}
 	}
-#endif /* CONFIG_SMP */
 
 	/*
 	 * Increase references to the IPC object; second argument:
@@ -122,9 +130,11 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 		/* for now, we don't support error codes */
 		return MED_DENY;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object))
+	    && process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
+	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_perm_access, ipc_security(ipcp))) {
@@ -150,4 +160,5 @@ out:
 		retval = MED_DENY;
 	return retval;
 }
-__initcall(ipc_acctype_init);
+
+device_initcall(ipc_acctype_perm_init);
