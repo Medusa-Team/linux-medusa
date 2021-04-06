@@ -160,7 +160,7 @@ static medusa_answer_t fuck_update(struct medusa_kobject_s * kobj)
 	struct fuck_path *fuck_path;
 	int hash;
 
-	sb = user_get_super((dev_t)fkobj->dev);
+	sb = user_get_super((dev_t)fkobj->dev, false);
 	if (!sb)
 		return MED_ERR;
 	fuck_inode = ilookup(sb, fkobj->ino);

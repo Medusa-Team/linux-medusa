@@ -65,7 +65,7 @@ struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 	struct socket_kobject *s_kobj = (struct socket_kobject*) kobj;
 
 	if(s_kobj)
-		sb = user_get_super(s_kobj->dev);
+		sb = user_get_super(s_kobj->dev, false);
 	if(sb) {
 		inode = ilookup(sb, s_kobj->ino);
 		drop_super(sb);
@@ -88,7 +88,7 @@ medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
 	struct socket_kobject *s_kobj = (struct socket_kobject*) kobj;
 
 	if(s_kobj)
-		sb = user_get_super(s_kobj->dev);
+		sb = user_get_super(s_kobj->dev, false);
 	if(sb) {
 		inode = ilookup(sb, s_kobj->ino);
 		drop_super(sb);
