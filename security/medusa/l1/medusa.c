@@ -1463,9 +1463,10 @@ static int medusa_l1_inode_setxattr(struct dentry *dentry, const char *name,
 } 
 
 
-static int medusa_l1_inode_removexattr(struct dentry *dentry, const char *name)
+static int medusa_l1_inode_removexattr(struct user_namespace *mnt_userns,
+					struct dentry *dentry, const char *name)
 {
-	return cap_inode_removexattr(dentry, name);
+	return cap_inode_removexattr(mnt_userns, dentry, name);
 } 
 
 static struct security_hook_list medusa_l1_hooks[] = {
