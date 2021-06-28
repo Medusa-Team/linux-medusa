@@ -119,6 +119,11 @@ struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
 static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 		struct path *ndupper, struct path *ndparent);
 
+void medusa_clean_inode(struct inode *inode)
+{
+	init_med_object(&inode_security(inode)->med_object);
+}
+
 void inline info_mnt(struct mount *mnt)
 {
 	pr_cont("mountpoint: %pd, vfs mnt root: %pd\n", mnt->mnt_mountpoint, mnt->mnt.mnt_root);
@@ -255,12 +260,14 @@ int file_kobj_validate_dentry_dir(const struct path* dir, struct dentry *dentry)
 	struct path ndupper;
 	struct path ndparent;
 	struct path parent_dir;
+	struct medusa_l1_inode_s *ndcurrent_inode;
+	struct medusa_l1_inode_s *ndparent_inode;
 
-	INIT_MEDUSA_OBJECT_VARS(&inode_security(dentry->d_inode));
+	medusa_clean_inode(dentry->d_inode);
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
-	cap_clear(inode_security(dentry->d_inode).pcap);
-	inode_security(dentry->d_inode).icap = CAP_FULL_SET;
-	inode_security(dentry->d_inode).ecap = CAP_FULL_SET;
+	cap_clear(inode_security(dentry->d_inode)->pcap);
+	inode_security(dentry->d_inode)->icap = CAP_FULL_SET;
+	inode_security(dentry->d_inode)->ecap = CAP_FULL_SET;
 #endif
 	ndcurrent.dentry = dentry;
 	ndcurrent.mnt = dir->mnt;
@@ -283,22 +290,22 @@ int file_kobj_validate_dentry_dir(const struct path* dir, struct dentry *dentry)
 	if (ndcurrent.dentry != ndparent.dentry) {
 		parent_dir = (struct path) {.mnt = ndparent.mnt,
 			                    .dentry = ndparent.dentry->d_parent};
-		if (!MED_MAGIC_VALID(&inode_security(ndparent.dentry->d_inode)) &&
+		if (!is_med_magic_valid(&inode_security(ndparent.dentry->d_inode)->med_object) &&
 			file_kobj_validate_dentry_dir(&parent_dir, ndparent.dentry) <= 0) {
 			path_put(&ndupper);
 			return 0;
 		}
 
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
-					&inode_security(ndparent.dentry->d_inode))) {
-
-			COPY_MEDUSA_OBJECT_VARS(&inode_security(ndcurrent.dentry->d_inode),
-					&inode_security(ndparent.dentry->d_inode));
-			inode_security(ndcurrent.dentry->d_inode).user = inode_security(ndparent.dentry->d_inode).user;
-#ifdef CONFIG_MEDUSA_FILE_CAPABILITIES                                                
-			inode_security(ndcurrent.dentry->d_inode).icap = inode_security(ndparent.dentry->d_inode).icap;
-			inode_security(ndcurrent.dentry->d_inode).pcap = inode_security(ndparent.dentry->d_inode).pcap;
-			inode_security(ndcurrent.dentry->d_inode).ecap = inode_security(ndparent.dentry->d_inode).ecap;
+					inode_security(ndparent.dentry->d_inode))) {
+			ndcurrent_inode = inode_security(ndcurrent.dentry->d_inode);
+			ndparent_inode = inode_security(ndparent.dentry->d_inode);
+			ndcurrent_inode->med_object = ndparent_inode->med_object;
+			inode_security(ndcurrent.dentry->d_inode)->user = inode_security(ndparent.dentry->d_inode)->user;
+#ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
+			inode_security(ndcurrent.dentry->d_inode)->icap = inode_security(ndparent.dentry->d_inode)->icap;
+			inode_security(ndcurrent.dentry->d_inode)->pcap = inode_security(ndparent.dentry->d_inode)->pcap;
+			inode_security(ndcurrent.dentry->d_inode)->ecap = inode_security(ndparent.dentry->d_inode)->ecap;
 #endif
 			path_put(&ndupper);
 			return 1;
@@ -310,7 +317,7 @@ int file_kobj_validate_dentry_dir(const struct path* dir, struct dentry *dentry)
 	if (do_file_kobj_validate_dentry(&ndcurrent, &ndupper, &ndparent)
 			!= MED_ERR) {
 		path_put(&ndupper);
-		return MED_MAGIC_VALID(&inode_security(ndcurrent.dentry->d_inode));
+		return is_med_magic_valid(&inode_security(ndcurrent.dentry->d_inode)->med_object);
 	}
 	path_put(&ndupper);
 	return -1;
