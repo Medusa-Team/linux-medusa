@@ -26,7 +26,6 @@ function parse_argv {
         REBOOT=1
         MEDUSA_ONLY=0
         DELETE=0
-        INSTALL=1
         USE_RSYNC=1
         RSYNC_ONLY=0
         RUN_KUNIT=0
@@ -36,7 +35,6 @@ function parse_argv {
                         DELETE=1
                 elif [[ "$arg" == '--clean' || "$arg" == '-clean' ]]; then
                         sudo make clean
-                        sudo rm -rf debian
                 elif [[ "$arg" == '--nogdb' || "$arg" == '-nogdb' || "$arg" == '--nogrub' || "$arg" == '-nogrub' ]]; then
                         GRUB=0
                 elif [[ "$arg" == '--noreboot' || "$arg" == '-noreboot' ]]; then
@@ -45,7 +43,6 @@ function parse_argv {
                         MEDUSA_ONLY=1
                         GRUB=0
                 elif [[ "$arg" == '--build-only' || "$arg" == '-build-only' ]]; then
-                        INSTALL=0
                         GRUB=0
                         REBOOT=0
                 elif [[ "$arg" == '--norsync' || "$arg" == '-norsync' ]]; then
@@ -78,6 +75,7 @@ function help {
         echo "    --medusa-only    - Rebuilds just medusa not the whole kernel"
         echo "    --build-only     - Just rebuid the kernel(modue) no reboot no installation"
         echo "    --norsync        - Don't synchronize the sources on the debugging machine"
+	echo ""
         echo "    --rsync-only     - Synchronizes the sources on the debugging machine, doesn't"
         echo "                       compile"
         echo "    --run-kunit      - Run available KUnit Medusa tests (this option overrides all"
@@ -120,26 +118,21 @@ function install_module {
         [ $? -ne 0 ] && do_exit 1 "Update-initramfs failed"
 }
 
-function create_package {
-        sudo rm -rf ../linux-image-*.deb
+function make_kernel {
+	make -j `expr $PROCESSORS + 1`
+        [ $? -ne 0 ] && do_exit 1 "make kernel failed"
+}
 
-        export CONCURRENCY_LEVEL=`expr $PROCESSORS + 1`
-        make deb-pkg
+function install_kernel {
+	sudo make modules_install -j `expr $PROCESSORS + 1`
+        [ $? -ne 0 ] && do_exit 1 "make modules_install failed"
 
-        [ $? -ne 0 ] && do_exit 1 "Make-kpkg failed"
+	sudo make install
+        [ $? -ne 0 ] && do_exit 1 "make install failed"
 }
 
 function rsync_repo {
-        rsync -avz --exclude 'Documentation' --exclude '*.o' --exclude '.*' --exclude '*.cmd' --exclude '.git' --exclude '*.xz' --exclude '*ctags' -e ssh . $DEST
-}
-
-function install_package {
-        CONTINUE=1
-        while [ $CONTINUE -ne 0 ]; do
-                sudo dpkg --force-all -i ../linux-image-*.deb
-                CONTINUE=$?
-                [ $CONTINUE -ne 0 ] && sleep 5;
-        done
+        rsync -avz --exclude 'Documentation' --exclude '*.o' --exclude '.*' --exclude '*.cmd' --exclude '.git' --exclude '*.xz' --exclude '*tags' -e ssh . $DEST
 }
 
 function update_grub {
@@ -177,18 +170,14 @@ fi
 if [ $MEDUSA_ONLY -eq 1 ]; then
         medusa_only
 else
-        create_package
+        make_kernel
+	install_kernel
 fi
 
 [ $USE_RSYNC -eq 1 ] && [ "$DEST" != "NONE" ] && rsync_repo
 
 echo $(($major + 1)) > .major
 echo 0 > .minor
-
-if [ $INSTALL -eq 1 ]; then
-        [ $MEDUSA_ONLY -eq 0 ] && install_package
-        [ $MEDUSA_ONLY -ne 0 ] && install_module
-fi
 
 echo $major.$minor >> myversioning
 
