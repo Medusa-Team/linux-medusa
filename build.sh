@@ -22,7 +22,7 @@ function do_exit {
 }
 
 function parse_argv {
-        GRUB=1
+        GRUB=0
         REBOOT=1
         MEDUSA_ONLY=0
         DELETE=0
@@ -35,15 +35,13 @@ function parse_argv {
                         DELETE=1
                 elif [[ "$arg" == '--clean' || "$arg" == '-clean' ]]; then
                         sudo make clean
-                elif [[ "$arg" == '--nogdb' || "$arg" == '-nogdb' || "$arg" == '--nogrub' || "$arg" == '-nogrub' ]]; then
-                        GRUB=0
+                elif [[ "$arg" == '--patch-grub' ]]; then
+                        GRUB=1
                 elif [[ "$arg" == '--noreboot' || "$arg" == '-noreboot' ]]; then
                         REBOOT=0
                 elif [[ "$arg" == '--medusa-only' || "$arg" == '-medusa-only' ]]; then
                         MEDUSA_ONLY=1
-                        GRUB=0
                 elif [[ "$arg" == '--build-only' || "$arg" == '-build-only' ]]; then
-                        GRUB=0
                         REBOOT=0
                 elif [[ "$arg" == '--norsync' || "$arg" == '-norsync' ]]; then
                         USE_RSYNC=0
@@ -63,14 +61,16 @@ function parse_argv {
 }
 
 function help {
-        echo "$PROGNAME [--help] [--delete] [--clean] [--nogrub] [--nogdb] [--noreboot]";
-        echo "    [--medusa-only] [--norsync] [--rsync-only] [--run-kunit]"
+        echo "$PROGNAME [--help] [--delete] [--clean] [--noreboot] [--medusa-only]";
+        echo "           [--norsync]"
+        echo "$PROGNAME --rsync-only";
+        echo "$PROGNAME --run-kunit";
+        echo "$PROGNAME --patch-grub";
         echo "    --help           - Prints this help"
         echo "    --delete         - Deletes the medusa object files (handy when changing"
         echo "                       header files or makefiles)"
         echo "    --clean          - Does make clean before the compilation (handy when"
         echo "                       changing kernel release)"
-        echo "    --nogrub/--nogdb - Turns off the waiting for GDB connection during booting"
         echo "    --noreboot       - Does not reboot at the end"
         echo "    --medusa-only    - Rebuilds just medusa not the whole kernel"
         echo "    --build-only     - Just rebuid the kernel(modue) no reboot no installation"
@@ -80,6 +80,8 @@ function help {
         echo "                       compile"
         echo "    --run-kunit      - Run available KUnit Medusa tests (this option overrides all"
         echo "                       other specified options and therefore are ignored)"
+        echo "    --patch-grub     - Patch grub config files so that new boot item is automatically"
+        echo "                       created for debugging the kernel (with kgdbwait option)."
         exit 0
 }
 
@@ -135,20 +137,16 @@ function rsync_repo {
         rsync -avz --exclude 'Documentation' --exclude '*.o' --exclude '.*' --exclude '*.cmd' --exclude '.git' --exclude '*.xz' --exclude '*tags' -e ssh . $DEST
 }
 
-function update_grub {
-        temp=`mktemp XXXXXX`
+function patch_grub {
+	if ! grep -q "### medusa simple section ###" /etc/grub.d/10_linux; then
+		sudo patch /etc/grub.d/10_linux < scripts/medusa/10_linux_patch
+		[ $? -ne 0 ] && do_exit 1 "can't patch /etc/grub.d/10_linux"
+	fi
+	sudo scripts/medusa/update_grub_alternatives.py
+	[ $? -ne 0 ] && do_exit 1 "update_grub_alternatives.py failed"
 
-        sudo cat /boot/grub/grub.cfg | while read line; do
-                if [[ "$line" = */boot/vmlinuz-*medusa* ]]; then
-                        echo "$line" | sed -e 's/quiet/kgdboc=ttyS0,115200 kgdbwait/' >> $temp
-                else
-                        echo "$line" >> $temp
-                fi
-        done
-
-        sudo mv $temp /boot/grub/grub.cfg
-
-        rm $temp 2> /dev/null
+	echo "Grub successfully patched. You may now compile the kernel or, if \
+the kernel is already compiled, run sudo update-grub."
 }
 
 parse_argv $@
@@ -160,6 +158,11 @@ fi
 
 if [ $RSYNC_ONLY -eq 1 ]; then
 	rsync_repo
+	exit 0
+fi
+
+if [ $GRUB -eq 1 ]; then
+	patch_grub
 	exit 0
 fi
 
@@ -180,8 +183,6 @@ echo $(($major + 1)) > .major
 echo 0 > .minor
 
 echo $major.$minor >> myversioning
-
-[ $GRUB -eq 1 ] && update_grub
 
 [ $REBOOT -eq 1 ] && sudo reboot
 
