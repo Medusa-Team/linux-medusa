@@ -25,7 +25,7 @@ int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 	kuid_t tsuid;
 
 	tsuid = task_uid(ts);
-	if (uid_eq(tsuid, tk->uid)) { /* copied from sys.c:set_user() */
+	if (!uid_eq(tsuid, tk->uid)) { /* copied from sys.c:set_user() */
 		struct user_struct *old_user, *new_user;
 
 		new_user = alloc_uid(tk->uid);
