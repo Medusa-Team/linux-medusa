@@ -5,6 +5,7 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/mm.h>
+#include <linux/user_namespace.h>
 
 #include <linux/medusa/l3/registry.h>
 
@@ -30,14 +31,14 @@ int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 		new_user = alloc_uid(tk->uid);
 		if (!new_user)
 			return -1;
-		old_user = find_user(tsuid);
-		atomic_dec(&old_user->processes);
-		atomic_inc(&new_user->processes);
+		//old_user = find_user(tsuid);
+		dec_rlimit_ucounts(ts->cred->ucounts, UCOUNT_RLIMIT_NPROC, 1);	//atomic_dec(&old_user->processes);
+		inc_rlimit_ucounts(new->ucounts, UCOUNT_RLIMIT_NPROC, 1);	//atomic_inc(&new_user->processes);
 		if (!uid_valid(ts_security->luid))
 			ts_security->luid = (! uid_valid(tk->uid) ? KUIDT_INIT(-2) : tk->uid);
 		new->uid = tk->uid;
 		new->user =  new_user;
-		free_uid(old_user);
+		//free_uid(old_user);
 	}
 
 	new->euid = tk->euid;
