@@ -18,6 +18,14 @@
 
 #include "kobject_process.h"
 
+#warning FIXME - permit a task to alter credentials of an another task
+/*
+ * FIXME
+ * `process_kobj2kern()` should not be used in this form!
+ * A task may only alter its *own* credentials; it is no longer permitted for
+ * a task to alter another's credentials! There is no mechanism for doing it
+ * in the kernel.
+ */
 int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 {
 	struct cred* new = (struct cred*)ts->cred;
@@ -153,6 +161,7 @@ out_err:
 	rcu_read_unlock();
 	return NULL;
 }
+
 static medusa_answer_t process_update(struct medusa_kobject_s * kobj)
 {
 	struct task_struct * p;
@@ -193,7 +202,7 @@ MED_KCLASS(process_kobject) {
 	NULL,
 	NULL,
 	process_fetch,
-	process_update,
+	NULL, //process_update,
 	process_unmonitor,
 };
 
