@@ -26,14 +26,14 @@ int __init unlink_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_unlink(struct dentry *dentry)
+static medusa_answer_t medusa_do_unlink(const struct path *dir, struct dentry *dentry)
 {
 	struct unlink_access access;
 	struct process_kobject process;
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	file_kobj_dentry2string(dentry, access.filename);
+	file_kobj_dentry2string_mnt(dir, dentry, access.filename);
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, dentry->d_inode);
 	file_kobj_live_add(dentry->d_inode);
@@ -42,7 +42,8 @@ static enum medusa_answer_t medusa_do_unlink(struct dentry *dentry)
 	return retval;
 }
 
-medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry)
+static medusa_answer_t medusa_do_unlink(const struct path *dir, struct dentry *dentry);
+enum medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry)
 {
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
 		return MED_ALLOW;
@@ -60,7 +61,7 @@ medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry)
 	)
 		return MED_DENY;
 	if (MEDUSA_MONITORED_ACCESS_O(unlink_access, inode_security(dentry->d_inode)))
-		return medusa_do_unlink(dentry);
+		return medusa_do_unlink(dir, dentry);
 	return MED_ALLOW;
 }
 

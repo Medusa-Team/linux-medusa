@@ -59,6 +59,7 @@ void file_kobj_live_remove(struct inode *ino);
 
 /* conversion beteween filename (stored in dentry) and static buffer */
 void file_kobj_dentry2string(struct dentry *dentry, char *buf);
+void file_kobj_dentry2string_mnt(struct path *dir, struct dentry *dentry, char *buf);
 void file_kobj_dentry2string_dir(struct path *dir, struct dentry *dentry, char *buf);
 
 #endif

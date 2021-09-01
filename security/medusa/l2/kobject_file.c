@@ -131,6 +131,8 @@ void file_kobj_live_remove(struct inode *ino)
 out:
 	write_unlock(&live_lock);
 }
+
+/* Uses follow_up */
 void file_kobj_dentry2string_dir(struct path *dir, struct dentry *dentry, char *buf)
 {
 	int len;
@@ -145,6 +147,36 @@ void file_kobj_dentry2string_dir(struct path *dir, struct dentry *dentry, char *
 		follow_up(&ndcurrent);
 		dentry=dget(ndcurrent.dentry);
 		path_put(&ndcurrent);
+	}
+	else
+		dget(dentry);
+
+	if (!dentry || IS_ERR(dentry) || !dentry->d_name.name) {
+		buf[0] = '\0';
+		dput(dentry);
+		return;
+	}
+	len = dentry->d_name.len < NAME_MAX ?
+		dentry->d_name.len : NAME_MAX;
+	memcpy(buf, dentry->d_name.name, len);
+	buf[len] = '\0';
+	dput(dentry);
+}
+
+/* Uses mnt from dir and then gets ndupper as original file_kobj_dentry2string() */
+void file_kobj_dentry2string_mnt(struct path *dir, struct dentry * dentry, char * buf)
+{
+	int len;
+
+	if( IS_ROOT(dentry) )
+	{
+		struct path ndcurrent, ndupper;
+
+		ndcurrent.dentry = dentry;
+		ndcurrent.mnt = dir->mnt;
+		medusa_get_upper_and_parent(&ndcurrent,&ndupper,NULL);
+		dentry=dget(ndupper.dentry);
+		medusa_put_upper_and_parent(&ndupper, NULL);
 	}
 	else
 		dget(dentry);

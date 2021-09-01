@@ -28,20 +28,20 @@ int __init mkdir_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_mkdir(struct dentry * dir, struct dentry *dentry, int mode)
+static medusa_answer_t medusa_do_mkdir(const struct path * dir, struct dentry *dentry, int mode)
 {
 	struct mkdir_access access;
 	struct process_kobject process;
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	file_kobj_dentry2string(dentry, access.filename);
+	file_kobj_dentry2string_mnt(dir, dentry, access.filename);
 	access.mode = mode;
 	process_kern2kobj(&process, current);
-	file_kern2kobj(&file, dir->d_inode);
-	file_kobj_live_add(dir->d_inode);
+	file_kern2kobj(&file, dir->dentry->d_inode);
+	file_kobj_live_add(dir->dentry->d_inode);
 	retval = MED_DECIDE(mkdir_access, &access, &process, &file);
-	file_kobj_live_remove(dir->d_inode);
+	file_kobj_live_remove(dir->dentry->d_inode);
 	return retval;
 }
 
@@ -56,26 +56,28 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
-	//ndcurrent.dentry = dentry;
-	//ndcurrent.mnt = NULL;
-	//medusa_get_upper_and_parent(&ndcurrent,&ndupper,&ndparent);
+	ndcurrent = *dir;
+	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
 
-	if (!is_med_magic_valid(&(inode_security(dir->dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry(dir->dentry, dir->mnt, NULL) <= 0) {
-		// medusa_put_upper_and_parent(&ndupper, &ndparent);
+	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
+		file_kobj_validate_dentry_dir(&ndparent, ndparent.dentry) <= 0) {
+		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_ALLOW;
 	}
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dir->dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(dir->dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndparent.dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndparent.dentry->d_inode)))
 	) {
-		//medusa_put_upper_and_parent(&ndupper, &ndparent);
+		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_DENY;
 	}
-	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, inode_security(dir->dentry->d_inode)))
-		retval = medusa_do_mkdir(dir->dentry, dentry, mode);
-	else
+	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, inode_security(ndparent.dentry->d_inode))) {
+		med_pr_info("mkdir: access was monitored\n");
+		retval = medusa_do_mkdir(&ndparent, ndupper.dentry, mode);
+	} else {
+		med_pr_info("mkdir: access was not monitored\n");
 		retval = MED_ALLOW;
-	//medusa_put_upper_and_parent(&ndupper, &ndparent);
+	}
+	medusa_put_upper_and_parent(&ndupper, &ndparent);
 	return retval;
 	/*if (!MED_MAGIC_VALID(&inode_security(dir->dentry->d_inode)) &&
 //	        file_kobj_validate_dentry_dir(&parent,dir->dentry) <= 0) {
