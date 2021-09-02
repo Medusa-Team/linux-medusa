@@ -23,24 +23,24 @@
 #include "kobject_process.h"
 
 /**
- * uid_differs - Check equality of original and new (proposed) UID.
- * @newid: New (proposed) UID from authorization server.
- * @old: Original (actual) UID of the task's credentials.
- * @type: Description of UID type; one of "real", "effective", "saved",
- *        "filesystem", "login".
- * @cmd: Task's command line.
- * @pid: Task's pid.
+ * uid_differs() - Check equality of original and new (proposed) UID.
+ * @newid:         New (proposed) UID from authorization server.
+ * @old:           Original (actual) UID of the task's credentials.
+ * @type:          Description of UID type; one of "real", "effective",
+ *                 "saved", "filesystem", "login".
+ * @cmd:           Task's command line.
+ * @pid:           Task's pid.
  * @print_warning: If set to True, warning message in some scenario can
- *                 be printer (see below).
+ *                 be printed (see below).
  *
  * Compare value of actual task's credentials @old with value @newid from
  * authorization server. If they are equal, return true. Otherwise return
  * false.
  *
- * Input variable @newid is an integer, so it has to be converted to kuid_t
- * type. For this is used mapping to a global kernel uid. If a result of
- * this mapping is a non valid uid and @print_warning is set to True,
- * a warning message is printed.
+ * Input variable @newid is an integer, so it has to be converted to &typedef
+ * kuid_t type. Value is converted into a global kernel uid namespace (i.e. init
+ * namespace) instead of a process one. If a result of this mapping is an
+ * invalid uid and @print_warning is set to True, a warning message is printed.
  */
 static inline bool uid_differs(int newid, kuid_t old,
 			       char *type, char *cmd, pid_t pid,
@@ -57,24 +57,23 @@ static inline bool uid_differs(int newid, kuid_t old,
 }
 
 /**
- * gid_differs - Check equality of original and new (proposed) GID.
- * @newid: New (proposed) GID from authorization server.
- * @old: Original (actual) GID of the task's credentials.
- * @type: Description of GID type; one of "real", "effective", "saved",
- *        "filesystem".
- * @cmd: Task's command line.
- * @pid: Task's pid.
- * @print_warning: If set to True, warning message in some scenario can
- *                 be printer (see below).
+ * gid_differs() - Check equality of original and new (proposed) GID.
+ * @newid:         New (proposed) GID from authorization server.
+ * @old:           Original (actual) GID of the task's credentials.
+ * @type:          Description of GID type; one of "real", "effective",
+ *                 "saved", "filesystem".
+ * @cmd:           Task's command line.
+ * @pid:           Task's pid.
+ * @print_warning: If set to True, warning message in some scenario can be
+ *                 printed (see below).
  *
  * Compare value of actual task's credentials @old with value @newid from
- * authorization server. If they are equal, return true. Otherwise return
- * false.
+ * authorization server. If they are equal, return true. Otherwise return false.
  *
- * Input variable @newid is an integer, so it has to be converted to kgid_t
- * type. For this is used mapping to a global kernel gid. If a result of
- * this mapping is a non valid gid and @print_warning is set to True,
- * a warning message is printed.
+ * Input variable @newid is an integer, so it has to be converted to &typedef
+ * kgid_t type. Value is converted into a global kernel gid namespace (i.e. init
+ * namespace) instead of a process one. If a result of this mapping is an
+ * invalid gid and @print_warning is set to True, a warning message is printed.
  */
 static inline bool gid_differs(int newid, kgid_t old,
 			       char *type, char *cmd, pid_t pid,
@@ -91,23 +90,23 @@ static inline bool gid_differs(int newid, kgid_t old,
 }
 
 /**
- * process_kobj2kern - Make conversion from a kobject to a kernel struct.
+ * process_kobj2kern() - Make conversion from a kobject to a kernel struct.
  * @tk: Input kobject of a process.
  * @ts: Output task_struct of a process.
  *
- * Make change(s) on process's task_struct @ts based on information
- * obtained from authorization server in kobject @tk. It's called
- * only from *update* operation of the authorization server.
+ * Make change(s) on process's &struct task_struct @ts based on information
+ * obtained from authorization server in kobject @tk. It's called only from
+ * *update* operation of the authorization server.
  *
- * Note: A task may only alter its *own* credentials; it is never permitted
- *       for a task to alter another's credentials. So the program code
- *       manipulating with task's credentials is never reached. It is
- *       ready as an example of the intention (POC). As a consequence,
- *       function never fails (return -ENOMEM is never reached).
+ * Note: A task may only alter its *own* credentials; it is never permitted for
+ *       a task to alter another's credentials. So the program code manipulating
+ *       with task's credentials is never reached. It is ready as an example of
+ *       the intention (POC). As a consequence, function never fails (return
+ *       -ENOMEM is never reached).
  *
- * This routine expects an existing task_struct security context.
+ * This routine expects an existing &struct task_struct security context.
  *
- * Return 0 on success, -ENOMEM on failure (see Note above).
+ * Return: 0 on success, -ENOMEM on failure (see Note above).
  */
 static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 {
@@ -217,23 +216,23 @@ out:
 }
 
 /**
- * process_kern2kobj - Make conversion from a kernel struct to a kobject.
+ * process_kern2kobj() - Make conversion from a kernel struct to a kobject.
  * @tk: Input kobject of a process.
  * @ts: Output task_struct of a process.
  *
- * Copy information about process (stored in task_struct @ts) for
- * authorization server (kobject @tk). This function is called
- * from *fetch* operation of the authorization server and from
- * process_kobj_validate_task(), too.
+ * Copy information about process (stored in &struct task_struct @ts) for
+ * authorization server (kobject @tk). This function is called from *fetch*
+ * operation of the authorization server and from process_kobj_validate_task(),
+ * too.
  *
- * This routine expects an existing task_struct security context.
+ * This routine expects an existing &struct task_struct security context.
  *
- * Note: The kernel api permits secure access only to objective
- *       context of another task. Almost always there is the objective
- *       and subjective context the same. So, for now, the function
- *       gets information about the objective context of a given task.
+ * Note: The kernel api permits secure access only to objective context of
+ *       another task. Almost always the objective and subjective contexts are
+ *       the same. So for now, the function gets information about the objective
+ *       context of a given task.
  *
- * Always return 0.
+ * Return: always 0.
  */
 int process_kern2kobj(struct process_kobject * tk, struct task_struct * ts)
 {
@@ -336,14 +335,14 @@ MED_ATTRS(process_kobject) {
 };
 
 /**
- * process_fetch - Fetch operation of the authorization server on the process.
+ * process_fetch() - Fetch operation of the authorization server on the process.
  * @kobj: Output process information storage.
  *
- * Routine gets information about a process and stores them info @kobj.
- * It is called from an authorization server as a remote procedure, so
- * the information about a process are send to the server back.
+ * Routine gets information about a process and stores them info @kobj. It is
+ * called from an authorization server as a remote procedure, so the information
+ * about a process are sent back to the server.
  *
- * On error return NULL, address of output storage otherwise.
+ * Return: NULL on error, address of output storage otherwise.
  */
 static struct medusa_kobject_s * process_fetch(struct medusa_kobject_s * kobj)
 {
@@ -363,15 +362,14 @@ out_err:
 }
 
 /**
- * process_update - Modify a kernel object based on info from auth server.
+ * process_update() - Modify a kernel object based on info from auth server.
  * @kobj: Input process information storage to read from.
  *
- * Routine based on information stored in @kobj modify state of the
- * appropriate process. It is called from an authorization server as
- * a remote procedure to modify/update state of a process (which PID
- * is stored in @kobj).
+ * Routine modifies state of the appropriate process @kobj. It is called from an
+ * authorization server as a remote procedure to modify/update state of a
+ * process (which PID is stored in @kobj).
  *
- * On error return value < 0, zero otherwise.
+ * Return: value < 0 on error, zero otherwise.
  */
 static medusa_answer_t process_update(struct medusa_kobject_s * kobj)
 {
@@ -391,7 +389,7 @@ static medusa_answer_t process_update(struct medusa_kobject_s * kobj)
 }
 
 /**
- * process_unmonitor - take a process away from the security policy
+ * process_unmonitor() - take a process away from the security policy.
  * @kobj: Input process information storage to read PID from it.
  *
  * Routine removes a process from monitoring by authorization server.
@@ -412,7 +410,7 @@ static void process_unmonitor(struct medusa_kobject_s * kobj)
 	return;
 }
 
-/**
+/*
  * Follows definition of process_kobject kclass for purpose of l3.
  */
 MED_KCLASS(process_kobject) {
@@ -426,7 +424,7 @@ MED_KCLASS(process_kobject) {
 };
 
 /**
- * process_kobject_init - Init function of the module.
+ * process_kobject_init() - Init function of the module.
  */
 int __init process_kobject_init(void) {
 	MED_REGISTER_KCLASS(process_kobject);
