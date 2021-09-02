@@ -22,19 +22,18 @@ struct medusa_l1_task_s {
 	kuid_t luid;
 	struct medusa_subject_s med_subject;
 	struct medusa_object_s med_object;
-	__u32 user;
         char cmdline[128];
 #ifdef CONFIG_MEDUSA_FORCE
 	void *force_code;       /* code to force or NULL, kfree */
 	int force_len;          /* force code length */
 #endif /* CONFIG_MEDUSA_FORCE */
-#ifdef CONFIG_MEDUSA_SYSCALL
+#if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
 	/* FIXME: we only watch linux syscalls. Not only that's not good,
-	 * but I am not sure whether NR_syscalls is enough on non-i386 archs.
+	 * but I am not sure whether NR_syscalls is enough on non-x86 archs.
 	 * If you know how to write this correctly, mail to www@terminus.sk,
 	 * thanks :).
 	 */
-		/* bitmap of syscalls, which are reported */
+	/* bitmap of syscalls, which are reported */
 	unsigned char med_syscall[NR_syscalls / (sizeof(unsigned char) * 8)];
 #endif
 };

@@ -17,39 +17,27 @@
 #include <linux/medusa/l1/process_handlers.h>
 
 #define task_security(task) ((struct medusa_l1_task_s*)(task->security))
-#define task_suid(task) (task_cred_xxx((task), suid))
-#define task_fsuid(task) (task_cred_xxx((task), fsuid))
-#define task_gid(task) (task_cred_xxx((task), gid))
-#define task_egid(task) (task_cred_xxx((task), egid))
-#define task_sgid(task) (task_cred_xxx((task), sgid))
-#define task_fsgid(task) (task_cred_xxx((task), fsgid))
-#define task_cap_inheritable(task) (task_cred_xxx((task), cap_inheritable))
-#define task_cap_effective(task) (task_cred_xxx((task), cap_effective))
-#define task_cap_permitted(task) (task_cred_xxx((task), cap_permitted))
 
-struct process_kobject { /* was: m_proc_inf */
-
-	pid_t pid, parent_pid, child_pid, sibling_pid;
-	struct pid* pgrp;
-	kuid_t uid, euid, suid, fsuid;
-	kgid_t gid, egid, sgid, fsgid;
+struct process_kobject {
+	int pid, pgrp, tgid, session;
+	int parent_pid, child_pid, sibling_pid;
+	unsigned int uid, euid, suid, fsuid;
+	unsigned int gid, egid, sgid, fsgid;
+#ifdef CONFIG_AUDIT
+	unsigned int luid;
+#endif
         char cmdline[128];
 
-	kuid_t luid;
-	kernel_cap_t ecap, icap, pcap;
+	kernel_cap_t ecap, icap, pcap, acap, bcap;
 	struct medusa_object_s med_object;
 	struct medusa_subject_s med_subject;
-	__u32 user;
-#ifdef CONFIG_MEDUSA_SYSCALL
-	/* FIXME: this is wrong on non-i386 architectures */
-
-		/* bitmap of syscalls, which are reported */
+#if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
+	/* bitmap of syscalls, which are reported; only on x86 arch */
 	unsigned char med_syscall[NR_syscalls / (sizeof(unsigned char) * 8)];
 #endif
 };
 extern MED_DECLARE_KCLASSOF(process_kobject);
 
-int process_kobj2kern(struct process_kobject * tk, struct task_struct * ts);
 int process_kern2kobj(struct process_kobject * tk, struct task_struct * ts);
 
 #endif
