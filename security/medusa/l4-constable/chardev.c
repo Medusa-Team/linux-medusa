@@ -875,6 +875,7 @@ static int user_open(struct inode *inode, struct file *file)
 	int retval = -EPERM;
 	teleport_insn_t *tele_mem_open;
 	struct tele_item *local_tele_item;
+	struct task_struct *parent;
 
 	//MOD_INC_USE_COUNT; Not needed anymore JK
 
@@ -914,8 +915,13 @@ static int user_open(struct inode *inode, struct file *file)
 	}
 
 	constable = current;
+	rcu_read_lock();
+	parent = rcu_dereference(current->parent);
+	task_lock(parent);
 	if (strstr(current->parent->comm, "gdb"))
 		gdb = current->parent;
+	task_unlock(parent);
+	rcu_read_unlock();
 
 	teleport.cycle = tpc_HALT;
 	// Reset semaphores
