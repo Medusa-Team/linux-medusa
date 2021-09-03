@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /* process_kobject.h, (C) 2002 Milan Pikula */
 
 #ifndef _TASK_KOBJECT_H
@@ -16,7 +17,7 @@
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/process_handlers.h>
 
-#define task_security(task) ((struct medusa_l1_task_s*)(task->security))
+#define task_security(task) ((struct medusa_l1_task_s *)(task->security))
 
 struct process_kobject {
 	int pid, pgrp, tgid, session;
@@ -26,7 +27,7 @@ struct process_kobject {
 #ifdef CONFIG_AUDIT
 	unsigned int luid;
 #endif
-        char cmdline[128];
+	char cmdline[128];
 
 	kernel_cap_t ecap, icap, pcap, acap, bcap;
 	struct medusa_object_s med_object;
@@ -38,6 +39,6 @@ struct process_kobject {
 };
 extern MED_DECLARE_KCLASSOF(process_kobject);
 
-int process_kern2kobj(struct process_kobject * tk, struct task_struct * ts);
+int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts);
 
 #endif

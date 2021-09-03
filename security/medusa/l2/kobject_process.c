@@ -8,6 +8,8 @@
  * Matus Jokay : - rewrite kobj2kern and kern2kobj functionality
  *               - add code documentation
  *               matus.jokay@gmail.com
+ * Roderik Ploszek: - formatting and minor touch-ups
+ *                  roderik.ploszek@gmail.com
  */
 
 #include <linux/sched.h>
@@ -47,9 +49,10 @@ static inline bool uid_differs(int newid, kuid_t old,
 			       bool print_warning)
 {
 	kuid_t new = make_kuid(&init_user_ns, newid);
+
 	if (!uid_eq(new, old)) {
 		if (!uid_valid(new) && print_warning)
-			med_pr_warn("Invalid %s UID %d for task '%s' (PID %u)\n", \
+			med_pr_warn("Invalid %s UID %d for task '%s' (PID %u)\n",
 					type, newid, cmd, pid);
 		return true;
 	}
@@ -80,9 +83,10 @@ static inline bool gid_differs(int newid, kgid_t old,
 			       bool print_warning)
 {
 	kgid_t new = make_kgid(&init_user_ns, newid);
+
 	if (!gid_eq(new, old)) {
 		if (!gid_valid(new) && print_warning)
-			med_pr_warn("Invalid %s GID %d for task '%s' (PID %u)\n", \
+			med_pr_warn("Invalid %s GID %d for task '%s' (PID %u)\n",
 					type, newid, cmd, pid);
 		return true;
 	}
@@ -110,7 +114,7 @@ static inline bool gid_differs(int newid, kgid_t old,
  */
 static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 {
-	struct cred* new;
+	struct cred *new;
 	const struct cred *old;
 	struct medusa_l1_task_s *ts_security = task_security(ts);
 	bool change_cred = false;
@@ -157,7 +161,7 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 		 * a task to alter another's credentials! There is no mechanism for doing it
 		 * in the kernel.
 		 */
-		med_pr_warn("An attempt of task '%s' %u to alter credentials of the task '%s' %u\n", \
+		med_pr_warn("An attempt of task '%s' %u to alter credentials of the task '%s' %u\n",
 				current->comm, current->pid, ts->comm, ts->pid);
 
 		/* As we can't change another task's credentials, there is nothing to do anymore */
@@ -165,7 +169,7 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 	}
 
 	/* With Constable never reached until not fixed modification of task's credentials */
-	med_pr_warn("Task '%s' %u modifies credentials of itself\n", \
+	med_pr_warn("Task '%s' %u modifies credentials of itself\n",
 			current->comm, current->pid);
 
 	/* Make a working copy of *current* task's objective credentials */
@@ -203,7 +207,7 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 	new->cap_effective = tk->ecap;
 	new->cap_inheritable = tk->icap;
 	new->cap_permitted = tk->pcap;
-	new->cap_bset= tk->bcap;
+	new->cap_bset = tk->bcap;
 	new->cap_ambient = tk->acap;
 
 	/* Replace both subjective and objective current task's credentials */
@@ -234,13 +238,13 @@ out:
  *
  * Return: always 0.
  */
-int process_kern2kobj(struct process_kobject * tk, struct task_struct * ts)
+int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
 {
 	struct medusa_l1_task_s *ts_security = task_security(ts);
 	const struct cred *cred;
 	struct task_struct *task;
 
-        memset(tk, '\0', sizeof(struct process_kobject));
+	memset(tk, '\0', sizeof(struct process_kobject));
 
 	rcu_read_lock();
 
@@ -344,16 +348,16 @@ MED_ATTRS(process_kobject) {
  *
  * Return: NULL on error, address of output storage otherwise.
  */
-static struct medusa_kobject_s * process_fetch(struct medusa_kobject_s * kobj)
+static struct medusa_kobject_s * process_fetch(struct medusa_kobject_s *kobj)
 {
-	struct task_struct * p;
+	struct task_struct *p;
 
 	rcu_read_lock();
 	/* Find task_struct based on pid in global (i.e. init) namespace */
 	p = find_task_by_pid_ns(((struct process_kobject *)kobj)->pid, &init_pid_ns);
 	if (!p)
 		goto out_err;
-	process_kern2kobj((struct process_kobject*)kobj, p);
+	process_kern2kobj((struct process_kobject *)kobj, p);
 	rcu_read_unlock();
 	return (struct medusa_kobject_s *)kobj;
 out_err:
@@ -371,9 +375,9 @@ out_err:
  *
  * Return: value < 0 on error, zero otherwise.
  */
-static medusa_answer_t process_update(struct medusa_kobject_s * kobj)
+static medusa_answer_t process_update(struct medusa_kobject_s *kobj)
 {
-	struct task_struct * p;
+	struct task_struct *p;
 	medusa_answer_t retval;
 
 	rcu_read_lock();
@@ -394,9 +398,9 @@ static medusa_answer_t process_update(struct medusa_kobject_s * kobj)
  *
  * Routine removes a process from monitoring by authorization server.
  */
-static void process_unmonitor(struct medusa_kobject_s * kobj)
+static void process_unmonitor(struct medusa_kobject_s *kobj)
 {
-	struct task_struct * p;
+	struct task_struct *p;
 
 	rcu_read_lock();
 	/* Find task_struct based on pid in global (i.e. init) namespace */
@@ -407,7 +411,6 @@ static void process_unmonitor(struct medusa_kobject_s * kobj)
 		med_magic_validate(&(task_security(p)->med_object));
 	}
 	rcu_read_unlock();
-	return;
 }
 
 /*
@@ -426,7 +429,8 @@ MED_KCLASS(process_kobject) {
 /**
  * process_kobject_init() - Init function of the module.
  */
-int __init process_kobject_init(void) {
+int __init process_kobject_init(void)
+{
 	MED_REGISTER_KCLASS(process_kobject);
 	return 0;
 }
