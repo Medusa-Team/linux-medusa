@@ -337,7 +337,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s *event,
 
 	if (in_interrupt()) {
 		/* houston, we have a problem! */
-		med_pr_err("decide called from interrupt context :(\n");
+		med_pr_err("%s called from interrupt context :(\n", __func__);
 		return MED_ERR;
 	}
 	if (am_i_constable() || current == gdb)
@@ -398,7 +398,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s *event,
 		ls_unlock(&lightswitch, &ls_switch);
 		return MED_ERR;
 	}
-	pr_debug("medusa: new question %px\n", current);
+	med_pr_debug("new question %px\n", current);
 	// prepare for next decision
 #undef decision_evtype
 	// insert teleport structure to the queue
@@ -428,10 +428,10 @@ static medusa_answer_t l4_decide(struct medusa_event_s *event,
 		up(&waitlist_sem);
 		atomic_dec(&questions_waiting);
 		retval = user_answer;
-		pr_info("medusa: question %p answered %i\n", current, retval);
+		med_pr_info("question %p answered %i\n", current, retval);
 	} else {
 		retval = MED_ERR;
-		pr_err("medusa: question %p not answered, authserver disconnected\n",
+		med_pr_err("question %p not answered, authorization server disconnected\n",
 			current);
 	}
 	up(&take_answer);
@@ -661,23 +661,23 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 
 	if (!atomic_read(&constable_present)) {
 		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: constable not present\n");
+		med_pr_err("write: constable not present\n");
 		return -EPIPE;
 	}
 
 	if (!am_i_constable()) {
 		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: not called by constable\n");
+		med_pr_err("write: not called by authorization server\n");
 		return -EPERM;
 	}
 	if (*ppos != filp->f_pos) {
 		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: uncorrect file position\n");
+		med_pr_err("write: incorrect file position\n");
 		return -ESPIPE;
 	}
 	if (!access_ok(buf, count)) {
 		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: cant read buffer\n");
+		med_pr_err("write: can't read buffer\n");
 		return -EFAULT;
 	}
 
@@ -687,7 +687,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	if (__copy_from_user(((char *)&recv_type), buf,
 				sizeof(MCPptr_t))) {
 		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: cant copy buffer\n");
+		med_pr_err("write: can't copy buffer\n");
 		return -EFAULT;
 	}
 	buf += sizeof(MCPptr_t);
@@ -701,7 +701,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			up(&take_answer);
 			ls_unlock(&lightswitch, &ls_switch);
 			atomic_set(&currently_receiving, 0);
-			pr_err("write: cant copy buffer\n");
+			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
 		buf += sizeof(int16_t) + sizeof(MCPptr_t);
@@ -709,19 +709,19 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 
 		user_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
 		answered_task = *(struct task_struct **)(recv_buf);
-		pr_info("medusa: answer received for %px\n", answered_task);
+		med_pr_info("answer received for %px\n", answered_task);
 		// wake up correct process
 		atomic_set(&currently_receiving, 0);
 		while (!wake_up_process(answered_task))
 			;
-		pr_debug("medusa: woken up\n");
+		med_pr_debug("woken up\n");
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 		up(&take_answer);
 		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t)*2)) {
 			ls_unlock(&lightswitch, &ls_switch);
 			atomic_set(&currently_receiving, 0);
-			pr_err("write: cant copy buffer\n");
+			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
 		buf += sizeof(MCPptr_t)*2;
@@ -731,7 +731,8 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 				*(struct medusa_kclass_s **)(recv_buf) // posibility to decrypt JK march 2015
 				);
 		if (!cl) {
-			med_pr_err("Protocol error at write(): unknown kclass 0x%p!\n", (void *)(*(MCPptr_t *)(recv_buf)));
+			med_pr_err("Protocol error at write(): unknown kclass 0x%p!\n",
+				(void *)(*(MCPptr_t *)(recv_buf)));
 			atomic_set(&currently_receiving, 0);
 #ifdef ERRORS_CAUSE_SEGFAULT
 			ls_unlock(&lightswitch, &ls_switch);
@@ -745,7 +746,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			med_cache_free(kclass_buf);
 			atomic_set(&currently_receiving, 0);
 			ls_unlock(&lightswitch, &ls_switch);
-			pr_err("write: cant copy buffer\n");
+			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
 		buf += cl->kobject_size;
@@ -806,7 +807,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		local_tele_item->size += sizeof(MCPptr_t);
 		if (recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 			atomic_inc(&update_requests);
-			pr_debug("medusa: answering update %llu\n", answ_seq);
+			med_pr_debug("answering update %llu\n", answ_seq);
 			tele_mem_write[4].opcode = tp_PUT32;
 			tele_mem_write[4].args.put32.what = answ_result;
 			local_tele_item->size += sizeof(uint32_t);
@@ -830,7 +831,8 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		wake_up(&userspace_chardev);
 	} else {
 		up(&take_answer);
-		med_pr_err("Protocol error at write(): unknown command %llx!\n", (MCPptr_t)recv_type);
+		med_pr_err("Protocol error at write(): unknown command %llx!\n",
+			(MCPptr_t)recv_type);
 		atomic_set(&currently_receiving, 0);
 #ifdef ERRORS_CAUSE_SEGFAULT
 		ls_unlock(&lightswitch, &ls_switch);
