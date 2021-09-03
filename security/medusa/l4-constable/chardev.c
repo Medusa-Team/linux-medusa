@@ -428,7 +428,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s *event,
 		up(&waitlist_sem);
 		atomic_dec(&questions_waiting);
 		retval = user_answer;
-		med_pr_info("question %p answered %i\n", current, retval);
+		med_pr_debug("question %p answered %i\n", current, retval);
 	} else {
 		retval = MED_ERR;
 		med_pr_err("question %p not answered, authorization server disconnected\n",
