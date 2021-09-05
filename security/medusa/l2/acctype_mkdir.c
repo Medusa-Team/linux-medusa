@@ -47,7 +47,7 @@ static medusa_answer_t medusa_do_mkdir(const struct path * dir, struct dentry *d
 
 enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry, int mode)
 {
-	//struct path ndcurrent, ndupper, ndparent;
+	struct path ndcurrent, ndupper;
 	enum medusa_answer_t retval;
 
 	if (!dentry || IS_ERR(dentry))
@@ -57,43 +57,25 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 		return MED_ALLOW;
 
 	ndcurrent = *dir;
-	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
+	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 
-	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(&ndparent, ndparent.dentry) <= 0) {
-		medusa_put_upper_and_parent(&ndupper, &ndparent);
+	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
+		file_kobj_validate_dentry_dir(&ndupper, ndupper.dentry) <= 0) {
+		medusa_put_upper_and_parent(&ndupper, NULL);
 		return MED_ALLOW;
 	}
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndparent.dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndparent.dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndupper.dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndupper.dentry->d_inode)))
 	) {
-		medusa_put_upper_and_parent(&ndupper, &ndparent);
+		medusa_put_upper_and_parent(&ndupper, NULL);
 		return MED_DENY;
 	}
-	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, inode_security(ndparent.dentry->d_inode))) {
-		med_pr_info("mkdir: access was monitored\n");
-		retval = medusa_do_mkdir(&ndparent, ndupper.dentry, mode);
-	} else {
-		med_pr_info("mkdir: access was not monitored\n");
-		retval = MED_ALLOW;
-	}
-	medusa_put_upper_and_parent(&ndupper, &ndparent);
-	return retval;
-	/*if (!MED_MAGIC_VALID(&inode_security(dir->dentry->d_inode)) &&
-//	        file_kobj_validate_dentry_dir(&parent,dir->dentry) <= 0) {
-			file_kobj_validate_dentry(dir->dentry,dir->mnt, dir) <= 0) {
-		return MED_OK;
-	}*/
-/*	if (!VS_INTERSECT(VSS(&task_security(current)),VS(&inode_security(dir->dentry->d_inode))) ||
-		!VS_INTERSECT(VSW(&task_security(current)),VS(&inode_security(dir->dentry->d_inode)))
-	) {
-		return MED_NO;
-	}
-	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, &inode_security(dir->dentry->d_inode)))
-		retval = medusa_do_mkdir(dir->dentry, dentry, mode);
+	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, inode_security(ndupper.dentry->d_inode)))
+		retval = medusa_do_mkdir(&ndupper, dentry, mode);
 	else
-		retval = MED_OK;
-	return retval;*/
+		retval = MED_ALLOW;
+	medusa_put_upper_and_parent(&ndupper, NULL);
+	return retval;
 }
 
 device_initcall(mkdir_acctype_init);

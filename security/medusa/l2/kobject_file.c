@@ -164,7 +164,7 @@ void file_kobj_dentry2string_dir(struct path *dir, struct dentry *dentry, char *
 }
 
 /* Uses mnt from dir and then gets ndupper as original file_kobj_dentry2string() */
-void file_kobj_dentry2string_mnt(struct path *dir, struct dentry * dentry, char * buf)
+void file_kobj_dentry2string_mnt(const struct path *dir, struct dentry *dentry, char *buf)
 {
 	int len;
 
