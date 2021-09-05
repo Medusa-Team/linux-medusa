@@ -709,7 +709,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 
 		user_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
 		answered_task = *(struct task_struct **)(recv_buf);
-		med_pr_info("answer received for %px\n", answered_task);
+		med_pr_debug("answer received for %px\n", answered_task);
 		// wake up correct process
 		atomic_set(&currently_receiving, 0);
 		while (!wake_up_process(answered_task))
