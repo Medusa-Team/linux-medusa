@@ -28,7 +28,7 @@ int __init mkdir_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_mkdir(const struct path * dir, struct dentry *dentry, int mode)
+static enum medusa_answer_t medusa_do_mkdir(const struct path *dir, struct dentry *dentry, int mode)
 {
 	struct mkdir_access access;
 	struct process_kobject process;
