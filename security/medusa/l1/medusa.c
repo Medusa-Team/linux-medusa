@@ -1753,6 +1753,7 @@ struct lsm_blob_sizes medusa_blob_sizes __lsm_ro_after_init = {
 	.lbs_cred = 0,
 	.lbs_file = 0,
 	.lbs_inode = sizeof(struct medusa_l1_inode_s),
+	.lbs_superblock = 0,
 	.lbs_ipc = sizeof(struct medusa_l1_ipc_s),
 	.lbs_msg_msg = 0,
 	.lbs_task = sizeof(struct medusa_l1_task_s),

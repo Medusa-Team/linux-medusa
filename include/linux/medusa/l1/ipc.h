@@ -12,6 +12,7 @@
 
 #include <linux/mutex.h>
 #include <linux/msg.h>
+#include <linux/lsm_hooks.h>
 #include <linux/medusa/l3/med_model.h>
 #include <linux/medusa/l3/constants.h>
 
@@ -22,6 +23,12 @@
 #define MED_IPC_MSG 1	/* Message */
 #define MED_IPC_SHM 2	/* Shared memory */
 #define MED_IPC_UNDEFINED 3
+
+/**
+ * access to IPC Medusa security context
+ */
+extern struct lsm_blob_sizes medusa_blob_sizes;
+#define ipc_security(ipc) ((struct medusa_l1_ipc_s*)(ipc->security + medusa_blob_sizes.lbs_ipc))
 
 /**
  * struct medusa_l1_ipc_s - security struct for System V IPC objects (sem, msg, shm)

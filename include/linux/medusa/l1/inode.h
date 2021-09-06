@@ -14,7 +14,11 @@
 #include <linux/limits.h>
 #include <linux/capability.h>
 #include <linux/hashtable.h>
+#include <linux/lsm_hooks.h>
 #include <linux/medusa/l3/med_model.h>
+
+extern struct lsm_blob_sizes medusa_blob_sizes;
+#define inode_security(inode) ((struct medusa_l1_inode_s*)(inode->i_security + medusa_blob_sizes.lbs_inode))
 
 struct medusa_l1_inode_s {
 	struct medusa_object_s med_object;
