@@ -1483,7 +1483,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 #ifdef CONFIG_SECURITY_PATH
 	LSM_HOOK_INIT(path_unlink, medusa_l1_path_unlink),
 	LSM_HOOK_INIT(path_mkdir, medusa_l1_path_mkdir),
-	// LSM_HOOK_INIT(path_rmdir, medusa_l1_path_rmdir),
+	LSM_HOOK_INIT(path_rmdir, medusa_l1_path_rmdir),
 	//LSM_HOOK_INIT(path_mknod, medusa_l1_path_mknod),
 	//LSM_HOOK_INIT(path_truncate, medusa_l1_path_truncate),
 	//LSM_HOOK_INIT(path_symlink, medusa_l1_path_symlink),

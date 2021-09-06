@@ -33,7 +33,7 @@ static enum medusa_answer_t medusa_do_rmdir(const struct path *dir, struct dentr
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	file_kobj_dentry2string_dir(dir, dentry, access.filename);
+	file_kobj_dentry2string_mnt(dir, dentry, access.filename);
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, dentry->d_inode);
 	file_kobj_live_add(dentry->d_inode);
