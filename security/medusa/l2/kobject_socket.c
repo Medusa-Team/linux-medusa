@@ -55,8 +55,6 @@ int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
 	return 0;
 }
 
-static struct socket_kobject storage;
-
 struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 {
 	struct socket *sock;
@@ -72,9 +70,9 @@ struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 	}
 	if(inode) {
 		sock = SOCKET_I(inode);
-		socket_kern2kobj(&storage, sock);
+		socket_kern2kobj(s_kobj, sock);
 		iput(inode);
-		return (struct medusa_kobject_s *)&storage;
+		return (struct medusa_kobject_s *)kobj;
 	}
 
 	return NULL;
