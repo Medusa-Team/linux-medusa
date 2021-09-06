@@ -59,9 +59,9 @@ static struct socket_kobject storage;
 
 struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 {
-	struct socket * sock;
-	struct inode *inode;
-	struct super_block *sb;
+	struct socket *sock;
+	struct inode *inode = NULL;
+	struct super_block *sb = NULL;
 	struct socket_kobject *s_kobj = (struct socket_kobject*) kobj;
 
 	if(s_kobj)
@@ -82,9 +82,9 @@ struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 
 medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
 {
-	struct socket * sock;
-	struct inode *inode;
-	struct super_block *sb;
+	struct socket *sock;
+	struct inode *inode = NULL;
+	struct super_block *sb = NULL;
 	struct socket_kobject *s_kobj = (struct socket_kobject*) kobj;
 
 	if(s_kobj)
