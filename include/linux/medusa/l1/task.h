@@ -16,7 +16,11 @@
 #include <linux/kernel.h>
 #include <asm/syscall.h>
 #include <linux/sys.h>
+#include <linux/lsm_hooks.h>
 #include <linux/medusa/l3/med_model.h>
+
+extern struct lsm_blob_sizes medusa_blob_sizes;
+#define task_security(task) ((struct medusa_l1_task_s *)(task->security + medusa_blob_sizes.lbs_task))
 
 struct medusa_l1_task_s {
 	kuid_t luid;

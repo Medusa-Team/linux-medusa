@@ -567,32 +567,22 @@ static int medusa_l1_file_open(struct file *file)
 */
 int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 {
-	struct medusa_l1_task_s* med;
+	struct medusa_l1_task_s* med = task_security(task);
 
 	// can @current do fork/clone?
 	//if(medusa_fork(clone_flags) == MED_DENY)
 	//	return -EACCES;
 
-	// alloc security struct for new task
-	med = (struct medusa_l1_task_s*) kzalloc(sizeof(struct medusa_l1_task_s), GFP_KERNEL);
-	if (med == NULL)
-		return -ENOMEM;
-
+	memset(med, '\0', sizeof(struct medusa_l1_task_s));
 	init_med_object(&(med->med_object));
 	init_med_subject(&(med->med_subject));
         get_cmdline(task, med->cmdline, sizeof(med->cmdline));
-	task->security = med;
-
-	process_kobj_validate_task(task);
 
 	return 0;
 }
 
 void medusa_l1_task_free(struct task_struct *task)
 {
-	if (task->security)
-		kfree(task->security);
-	task->security = NULL;
 }
 
 /*
@@ -1556,7 +1546,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 
 	//LSM_HOOK_INIT(dentry_open, medusa_l1_dentry_open),
 
-	// task_alloc --> medusa_l1_task_alloc: transfered to medusa_l1_special
+	LSM_HOOK_INIT(task_alloc, medusa_l1_task_alloc),
 	// task_free --> medusa_l1_task_free: transfered to medusa_l1_special
 	//LSM_HOOK_INIT(cred_alloc_blank, medusa_l1_cred_alloc_blank),
 	//LSM_HOOK_INIT(cred_free, medusa_l1_cred_free),
@@ -1704,8 +1694,8 @@ static struct security_hook_list medusa_l1_hooks[] = {
 };
 
 struct security_hook_list medusa_l1_hooks_special[] = {
-	LSM_HOOK_INIT(task_alloc, medusa_l1_task_alloc),
-	LSM_HOOK_INIT(task_free, medusa_l1_task_free),
+	//LSM_HOOK_INIT(task_alloc, medusa_l1_task_alloc),
+	//LSM_HOOK_INIT(task_free, medusa_l1_task_free),
 
 	LSM_HOOK_INIT(inode_alloc_security, medusa_l1_inode_alloc_security),
 	LSM_HOOK_INIT(inode_free_security, medusa_l1_inode_free_security),

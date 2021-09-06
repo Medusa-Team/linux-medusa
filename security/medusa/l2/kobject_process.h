@@ -17,8 +17,6 @@
 #include <linux/medusa/l1/task.h>
 #include <linux/medusa/l1/process_handlers.h>
 
-#define task_security(task) ((struct medusa_l1_task_s *)(task->security))
-
 struct process_kobject {
 	int pid, pgrp, tgid, session;
 	int parent_pid, child_pid, sibling_pid;
