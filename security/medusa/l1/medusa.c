@@ -256,8 +256,8 @@ static int medusa_l1_inode_rmdir(struct inode *inode, struct dentry *dentry)
 static int medusa_l1_inode_mknod(struct inode *inode, struct dentry *dentry,
 				 umode_t mode, dev_t dev)
 {
-	if (medusa_mknod(dentry, dev, mode) == MED_DENY)
-		return -EACCES;
+	/* if (medusa_mknod(dentry, dev, mode) == MED_DENY) */
+		/* return -EACCES; */
 	return 0;
 }
 
@@ -370,6 +370,8 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 static int medusa_l1_path_mknod(const struct path *dir, struct dentry *dentry,
 				umode_t mode, unsigned int dev)
 {
+	if(medusa_mknod(dir, dentry, mode, dev) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -1484,7 +1486,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	LSM_HOOK_INIT(path_unlink, medusa_l1_path_unlink),
 	LSM_HOOK_INIT(path_mkdir, medusa_l1_path_mkdir),
 	LSM_HOOK_INIT(path_rmdir, medusa_l1_path_rmdir),
-	//LSM_HOOK_INIT(path_mknod, medusa_l1_path_mknod),
+	LSM_HOOK_INIT(path_mknod, medusa_l1_path_mknod),
 	//LSM_HOOK_INIT(path_truncate, medusa_l1_path_truncate),
 	//LSM_HOOK_INIT(path_symlink, medusa_l1_path_symlink),
 	// mY LSM_HOOK_INIT(path_link, medusa_l1_path_link),
