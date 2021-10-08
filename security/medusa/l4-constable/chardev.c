@@ -465,6 +465,7 @@ static const struct file_operations fops = {
 	 * be used over the network.
 	 */
 };
+/* TODO: userspace_buf is GLOBAL variable */
 static char __user *userspace_buf;
 
 static ssize_t to_user(void *from, size_t len)
@@ -552,6 +553,8 @@ static ssize_t user_read(struct file *filp, char __user *buf,
 	ssize_t retval;
 	size_t retval_sum = 0;
 
+	// Lightswitch
+	// has to be there: so close can't occur during read
 	ls_lock(&lightswitch, &ls_switch);
 
 	if (!atomic_read(&constable_present)) {
@@ -573,11 +576,13 @@ static ssize_t user_read(struct file *filp, char __user *buf,
 	}
 
 	// Lock it before someone can change the userspace_buf
+	// Only one reader can use it
 	down(&user_read_lock);
 	userspace_buf = buf;
 	// Get an item from the queue
+	// Get a new item only if the previous teleport has been fully transported
 	if (!left_in_teleport) {
-		// Get a new item only if the previous teleport has been fully transported
+		// Interruptible waiting; -EPIPE if auth server was disconnected
 		if (teleport_pop(0) == -EPIPE) {
 			up(&user_read_lock);
 			ls_unlock(&lightswitch, &ls_switch);
@@ -681,6 +686,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		return -EFAULT;
 	}
 
+	// TODO: currently receiving is not used anymore
 	if (!atomic_read(&currently_receiving))
 		atomic_set(&currently_receiving, 1);
 
