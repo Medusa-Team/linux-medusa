@@ -91,9 +91,6 @@ struct waitlist_item {
 	struct list_head list;
 };
 
-/* is the user-space currently sending us something? */
-static atomic_t currently_receiving = ATOMIC_INIT(0);
-
 static DECLARE_WAIT_QUEUE_HEAD(close_wait);
 
 static DECLARE_WAIT_QUEUE_HEAD(userspace_chardev);
@@ -686,10 +683,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		return -EFAULT;
 	}
 
-	// TODO: currently receiving is not used anymore
-	if (!atomic_read(&currently_receiving))
-		atomic_set(&currently_receiving, 1);
-
 	if (__copy_from_user(((char *)&recv_type), buf,
 				sizeof(MCPptr_t))) {
 		ls_unlock(&lightswitch, &ls_switch);
@@ -706,7 +699,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		if (__copy_from_user(recv_buf, buf, sizeof(int16_t) + sizeof(MCPptr_t))) {
 			up(&take_answer);
 			ls_unlock(&lightswitch, &ls_switch);
-			atomic_set(&currently_receiving, 0);
 			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
@@ -717,7 +709,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		answered_task = *(struct task_struct **)(recv_buf);
 		med_pr_debug("answer received for %px\n", answered_task);
 		// wake up correct process
-		atomic_set(&currently_receiving, 0);
 		while (!wake_up_process(answered_task))
 			;
 		med_pr_debug("woken up\n");
@@ -726,7 +717,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		up(&take_answer);
 		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t)*2)) {
 			ls_unlock(&lightswitch, &ls_switch);
-			atomic_set(&currently_receiving, 0);
 			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
@@ -739,7 +729,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		if (!cl) {
 			med_pr_err("Protocol error at write(): unknown kclass 0x%p!\n",
 				(void *)(*(MCPptr_t *)(recv_buf)));
-			atomic_set(&currently_receiving, 0);
 #ifdef ERRORS_CAUSE_SEGFAULT
 			ls_unlock(&lightswitch, &ls_switch);
 			return -EFAULT;
@@ -750,7 +739,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		kclass_buf = (char *) med_cache_alloc_size(cl->kobject_size);
 		if (__copy_from_user(kclass_buf, buf, cl->kobject_size)) {
 			med_cache_free(kclass_buf);
-			atomic_set(&currently_receiving, 0);
 			ls_unlock(&lightswitch, &ls_switch);
 			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
@@ -832,14 +820,12 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		down(&queue_lock);
 		list_add(&(local_tele_item->list), &tele_queue);
 		up(&queue_lock);
-		atomic_set(&currently_receiving, 0);
 		up(&queue_items);
 		wake_up(&userspace_chardev);
 	} else {
 		up(&take_answer);
 		med_pr_err("Protocol error at write(): unknown command %llx!\n",
 			(MCPptr_t)recv_type);
-		atomic_set(&currently_receiving, 0);
 #ifdef ERRORS_CAUSE_SEGFAULT
 		ls_unlock(&lightswitch, &ls_switch);
 		return -EFAULT;
@@ -936,7 +922,6 @@ static int user_open(struct inode *inode, struct file *file)
 	sema_init(&queue_items, 0);
 	sema_init(&queue_lock, 1);
 
-	atomic_set(&currently_receiving, 0);
 	tele_mem_open[0].opcode = tp_PUTPtr;
 	tele_mem_open[0].args.putPtr.what = (MCPptr_t)MEDUSA_COMM_GREETING;
 	local_tele_item->size = sizeof(MCPptr_t);
@@ -1042,7 +1027,6 @@ static int user_release(struct inode *inode, struct file *file)
 	atomic_set(&questions, 0);
 	atomic_set(&questions_waiting, 0);
 	atomic_set(&announce_ready, 0);
-	atomic_set(&currently_receiving, 0);
 
 	// Clear the teleport queue
 	left_in_teleport = 0;
