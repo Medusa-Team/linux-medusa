@@ -57,6 +57,11 @@ medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event, void *o1
 		 * authorization server should send Medusa only supported codes
 		 * and if it did not, this is suspicious
 		 * */
+		med_pr_err("ERROR: authserver returned not supported answer %d "
+		    "for event %s(%s:%s->%s:%s)\n",
+		    retval, evtype->name,
+		    evtype->arg_name[0], evtype->arg_kclass[0]->name,
+		    evtype->arg_name[1], evtype->arg_kclass[1]->name);
 		retval = MED_DENY;
 	}
 #ifdef CONFIG_MEDUSA_PROFILING
