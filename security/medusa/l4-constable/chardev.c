@@ -895,7 +895,7 @@ static int user_open(struct inode *inode, struct file *file)
 		retval = -ENOMEM;
 		goto out;
 	}
-	tele_mem_open = (teleport_insn_t *) med_cache_alloc_size(sizeof(teleport_insn_t)*2);
+	tele_mem_open = (teleport_insn_t *) med_cache_alloc_size(sizeof(teleport_insn_t)*3);
 	if (!tele_mem_open) {
 		retval = -ENOMEM;
 		goto out;
@@ -924,8 +924,10 @@ static int user_open(struct inode *inode, struct file *file)
 
 	tele_mem_open[0].opcode = tp_PUTPtr;
 	tele_mem_open[0].args.putPtr.what = (MCPptr_t)MEDUSA_COMM_GREETING;
-	local_tele_item->size = sizeof(MCPptr_t);
-	tele_mem_open[1].opcode = tp_HALT;
+	tele_mem_open[1].opcode = tp_PUTPtr;
+	tele_mem_open[1].args.putPtr.what = (MCPptr_t)MEDUSA_COMM_VERSION;
+	local_tele_item->size = sizeof(MCPptr_t)*2;
+	tele_mem_open[2].opcode = tp_HALT;
 	local_tele_item->tele = tele_mem_open;
 	local_tele_item->post = med_cache_free;
 	down(&queue_lock);
