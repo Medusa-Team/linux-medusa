@@ -35,44 +35,40 @@ struct medusa_subject_s {
 
 static inline void init_med_object(struct medusa_object_s *med_object)
 {
-	int i;
-	for (i = 0; i < VSPACK_LENGTH; i++) {
-		med_object->vs.vspack[i] = ALL_VS_ALLOWED;
-	}
-	med_object->act = 0xffffffff;
+	// Allow all VSs
+	vs_set(med_object->vs);
+	// Set monitoring of all acctypes
+	med_object->act = ALL_VS_ALLOWED;
 	med_object->cinfo.data[0] = 0;
 	med_object->magic = 0;
 }
 
 static inline void unmonitor_med_object(struct medusa_object_s *med_object)
 {
-	int i;
-	for (i = 0; i < VSPACK_LENGTH; i++) {
-		med_object->vs.vspack[i] = ALL_VS_ALLOWED;
-	}
+	// Allow all VSs
+	vs_set(med_object->vs);
+	// Clear monitoring of all acctypes
 	med_object->act = 0;
 }
 
 static inline void init_med_subject(struct medusa_subject_s *med_subject)
 {
-	int i;
-	for (i = 0; i < VSPACK_LENGTH; i++) {
-		med_subject->vss.vspack[i] = ALL_VS_ALLOWED;
-		med_subject->vsr.vspack[i] = ALL_VS_ALLOWED;
-		med_subject->vsw.vspack[i] = ALL_VS_ALLOWED;
-	}
-	med_subject->act = 0xffffffff;
+	// Allow abilities to all VSs
+	vs_set(med_subject->vss);
+	vs_set(med_subject->vsr);
+	vs_set(med_subject->vsw);
+	// Set monitoring of all acctypes
+	med_subject->act = ALL_VS_ALLOWED;
 	med_subject->cinfo.data[0] = 0;
 }
 
 static inline void unmonitor_med_subject(struct medusa_subject_s *med_subject)
 {
-	int i;
-	for(i = 0; i < VSPACK_LENGTH; i++) {
-		med_subject->vss.vspack[i] = ALL_VS_ALLOWED;
-		med_subject->vsr.vspack[i] = ALL_VS_ALLOWED;
-		med_subject->vsw.vspack[i] = ALL_VS_ALLOWED;
-	}
+	// Allow abilities to all VSs
+	vs_set(med_subject->vss);
+	vs_set(med_subject->vsr);
+	vs_set(med_subject->vsw);
+	// Clear monitoring of all acctypes
 	med_subject->act = 0;
 }
 

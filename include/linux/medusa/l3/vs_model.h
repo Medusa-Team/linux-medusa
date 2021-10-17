@@ -14,20 +14,21 @@
 #define VSW(X) _VSW(&((X)->med_subject))
 #define VSS(X) _VSS(&((X)->med_subject))
 
-#if CONFIG_MEDUSA_VS <= 32
-	#define VSPACK_LENGTH 1
-#else
-	#define VSPACK_LENGTH (1 + (CONFIG_MEDUSA_VS-1)/32)
-#endif
+typedef struct { DECLARE_BITMAP(vspack, CONFIG_MEDUSA_VS); } vs_t;
+//typedef struct { DECLARE_BITMAP(vspack, CONFIG_MEDUSA_ACT); } act_t;
 
-#define VS_TOTAL_BITS (VSPACK_LENGTH*32)
+#define vs_intersects(X, Y) \
+	bitmap_intersects(X.vspack, Y.vspack, CONFIG_MEDUSA_VS)
+#define vs_set(X) \
+	bitmap_set(X.vspack, 0, CONFIG_MEDUSA_VS)
+#define vs_setbit(X, NR) \
+	bitmap_set(X.vspack, NR, 1)
+#define vs_clear(X) \
+	bitmap_clear(X.vspack, 0, CONFIG_MEDUSA_VS)
+#define vs_clearbit(X, NR) \
+	bitmap_clear(X.vspack, NR, 1)
+#define vs_complement(DST, SRC) \
+	bitmap_complement(DST.vspack, SRC.vspack, CONFIG_MEDUSA_VS)
 
-typedef struct { u_int32_t vspack[VSPACK_LENGTH]; } vs_t;
-
-static inline int vs_intersects(vs_t X, vs_t Y)
-{
-	return bitmap_intersects((uintptr_t*)X.vspack,
-				(uintptr_t*)Y.vspack, VS_TOTAL_BITS);
-}
 
 #endif /* VSMODEL_H */
