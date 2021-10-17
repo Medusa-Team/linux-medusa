@@ -127,7 +127,10 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	 *   false - don't need to unlock IPC object
 	 */
 	if (unlikely(ipc_getref(ipcp, use_locking)))
-		/* for now, we don't support error codes */
+		/*
+		 * ipc_getref() returns -EIDRM if IPC object is marked to deletion,
+		 * so deny any operation on it.
+		 */
 		return MED_DENY;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object))
@@ -156,7 +159,10 @@ out:
 	 *   false - don't need to lock IPC object
 	 */
 	if (unlikely(ipc_putref(ipcp, use_locking)))
-		/* for now, we don't support error codes */
+		/*
+		 * ipc_putref() returns -EIDRM if IPC object is marked to deletion,
+		 * so deny any operation on it.
+		 */
 		retval = MED_DENY;
 	return retval;
 }
