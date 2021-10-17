@@ -101,7 +101,11 @@ function medusa_only {
 
 function run_kunit {
 	cp .config .tmpconfig
-	./tools/testing/kunit/kunit.py run
+	make ARCH=um mrproper
+	./tools/testing/kunit/kunit.py config --kunitconfig=.kunitconfig --arch=um
+	./tools/testing/kunit/kunit.py build --kunitconfig=.kunitconfig --arch=um
+	./tools/testing/kunit/kunit.py run --kunitconfig=.kunitconfig --arch=um
+	make ARCH=x86 mrproper
 	cp .tmpconfig .config
 	rm .tmpconfig
 }
