@@ -67,17 +67,17 @@ struct medusa_attribute_s {
 /*
  * Following four MED_ATTR* macros can take 4 or 5 arguments in this order:
  *	structname, structmember, (structmembersize,) attrname, medtype
- * The `structmembersize` allows specify the real size of `structmember`,
+ * The `structmembersize` allows to specify the real size of `structmember`
  * if its size differs from memory size of implementing type. For example,
- * kernel bitmaps are formed on x64 architecture by array of uin64 elements,
- * but the real number of used bits is up to programmer. This is the case of
- * Medusa's virtual spaces or subject's (object's) bitarray of events, that
- * may be triggered.
+ * kernel bitmaps are formed on x64 architecture using an array of uin64
+ * elements, but the real number of bits used is up to the programmer. This is
+ * the case of Medusa's virtual spaces or subject's (object's) bitarray of
+ * events, that may be triggered.
  *
- * If `structmembersize` argument is not given, size of `structmember`'s
- * memory representation is used. This is the most common case, so for
- * simplicity, readability and backward compatibility of l2 code remains also
- * version of macros with four arguments.
+ * If `structmembersize` argument is not given, size of `structmember`'s memory
+ * representation is used. This is the most common case, so for simplicity,
+ * readability and backward compatibility of l2 code, versions of macros with
+ * four arguments also remain.
  */
 #define MED_ATTR(...) _MED_ATTR(__VA_ARGS__, _MED_ATTR_5, _MED_ATTR_4)(__VA_ARGS__)
 #define MED_ATTR_RO(...) _MED_ATTR(__VA_ARGS__, _MED_ATTR_RO_5, _MED_ATTR_RO_4)(__VA_ARGS__)
