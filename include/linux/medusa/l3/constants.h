@@ -15,7 +15,7 @@
 #define MED_UNSIGNED	MED_COMM_TYPE_UNSIGNED	/* unsigned integer attr */
 #define MED_SIGNED	MED_COMM_TYPE_SIGNED	/* signed integer attr */
 #define MED_STRING	MED_COMM_TYPE_STRING	/* string attr */
-#define	MED_BITMAP	MED_COMM_TYPE_BITMAP	/* bitmap attr, bitmap formed from dwords */
+#define	MED_BITMAP	MED_COMM_TYPE_BITMAP	/* bitmap attr, bitmap formed from bytes */
 #define	MED_BYTES	MED_COMM_TYPE_BYTES	/* sequence of bytes */
 
 #define MED_KEY		MED_COMM_TYPE_PRIMARY_KEY	/* attribute is used to lookup kobject */

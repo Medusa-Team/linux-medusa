@@ -46,32 +46,54 @@ struct medusa_attribute_s {
 /* macros for l2 to simplify attribute definitions */
 #define MED_ATTRS(structname) struct medusa_attribute_s (MED_ATTRSOF(structname))[] =
 
-#define MED_ATTR(structname,structmember,attrname,type) { \
+#define MED_ATTR_ORIG(structname, structmember, structmembersize, attrname, medtype) { \
 		(attrname), \
-		(type), \
-		/*(uintptr_t)(&(((struct structname *)0)->structmember)), */\
+		(medtype), \
 		(Mptr_t)(&(((struct structname *)0)->structmember)), \
-		sizeof (((struct structname *)0)->structmember) \
+		structmembersize, \
 	}
 #define MED_ATTR_END {"", MED_END, 0, 0}
 
-#define MED_ATTR_RO(sn,sm,an,ty) MED_ATTR(sn,sm,an,(ty)|MED_RO)
-#define MED_ATTR_KEY(sn,sm,an,ty) MED_ATTR(sn,sm,an,(ty)|MED_KEY)
-#define MED_ATTR_KEY_RO(sn,sm,an,ty) MED_ATTR(sn,sm,an,(ty)|MED_KEY|MED_RO)
-#define __MED_ATTR_SUBJ(sn,mn) /* internal macro copying medusa/l3/model.h */ \
-	MED_ATTR(sn,mn.vsr, "vsr", MED_BITMAP),		/* model.h, type vs_t */ \
-	MED_ATTR(sn,mn.vsw, "vsw", MED_BITMAP),		/* model.h, type vs_t */ \
-	MED_ATTR(sn,mn.vss, "vss", MED_BITMAP),		/* model.h, type vs_t */ \
-	MED_ATTR(sn,mn.act, "med_sact", MED_BITMAP),	/* model.h, type act_t */ \
-	MED_ATTR(sn,mn.cinfo, "s_cinfo", MED_BITMAP	/* model.h, type s_cinfo_t */ )
-#define MED_ATTR_SUBJECT(sn) __MED_ATTR_SUBJ(sn,med_subject)
-#define MED_SUBATTR_SUBJECT(sn,mn) __MED_ATTR_SUBJ(sn,mn.med_subject)
-#define __MED_ATTR_OBJ(sn,mn) /* internal macro copying medusa/l3/model.h */ \
-	MED_ATTR(sn,mn.vs, "vs", MED_BITMAP),		/* model.h, type vs_t */ \
-	MED_ATTR(sn,mn.act, "med_oact", MED_BITMAP),	/* model.h, type act_t */ \
-	MED_ATTR(sn,mn.cinfo, "o_cinfo", MED_BITMAP	/* model.h, type o_cinfo_t */ )
-#define MED_ATTR_OBJECT(sn) __MED_ATTR_OBJ(sn,med_object)
-#define MED_SUBATTR_OBJECT(sn,mn) __MED_ATTR_OBJ(sn,mn.med_object)
+#define _MED_ATTR_5(sn, sm, sz, an, ty) MED_ATTR_ORIG(sn, sm, sz, an, ty)
+#define _MED_ATTR_RO_5(sn, sm, sz, an, ty) MED_ATTR_ORIG(sn, sm, sz, an, (ty) | MED_RO)
+#define _MED_ATTR_KEY_5(sn, sm, sz, an, ty) MED_ATTR_ORIG(sn, sm, sz, an, (ty) | MED_KEY)
+#define _MED_ATTR_KEY_RO_5(sn, sm, sz, an, ty) MED_ATTR_ORIG(sn, sm, sz, an, (ty) | MED_KEY | MED_RO)
+#define _MED_ATTR_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn*)0)->sm), an, ty)
+#define _MED_ATTR_RO_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn*)0)->sm), an, (ty) | MED_RO)
+#define _MED_ATTR_KEY_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn*)0)->sm), an, (ty) | MED_KEY)
+#define _MED_ATTR_KEY_RO_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn*)0)->sm), an, (ty) | MED_KEY | MED_RO)
+#define _MED_ATTR(_1, _2, _3, _4, _5, __MED_ATTR, ...) __MED_ATTR
+
+/*
+ * Following four MED_ATTR* macros can take 4 or 5 arguments in this order:
+ *	structname, structmember, (structmembersize,) attrname, medtype
+ * The `structmembersize` allows specify the real size of `structmember`,
+ * if its size differs from memory size of implementing type. For example,
+ * kernel bitmaps are formed on x64 architecture by array of uin64 elements,
+ * but the real number of used bits is up to programmer. This is the case of
+ * Medusa's virtual spaces or subject's (object's) bitarray of events, that
+ * may be triggered.
+ *
+ * If `structmembersize` argument is not given, size of `structmember`'s
+ * memory representation is used. This is the most common case, so for
+ * simplicity, readability and backward compatibility of l2 code remains also
+ * version of macros with four arguments.
+ */
+#define MED_ATTR(...) _MED_ATTR(__VA_ARGS__, _MED_ATTR_5, _MED_ATTR_4)(__VA_ARGS__)
+#define MED_ATTR_RO(...) _MED_ATTR(__VA_ARGS__, _MED_ATTR_RO_5, _MED_ATTR_RO_4)(__VA_ARGS__)
+#define MED_ATTR_KEY(...) _MED_ATTR(__VA_ARGS__, _MED_ATTR_KEY_5, _MED_ATTR_KEY_4)(__VA_ARGS__)
+#define MED_ATTR_KEY_RO(...) _MED_ATTR(__VA_ARGS__, _MED_ATTR_KEY_RO_5, _MED_ATTR_KEY_RO_4)(__VA_ARGS__)
+
+#define MED_ATTR_SUBJECT(sn) /* internal macro copying medusa/l3/model.h */ \
+	MED_ATTR(sn, med_subject.vsr, CONFIG_MEDUSA_VS >> 3, "vsr", MED_BITMAP),	/* type vs_t */ \
+	MED_ATTR(sn, med_subject.vsw, CONFIG_MEDUSA_VS >> 3, "vsw", MED_BITMAP),	/* type vs_t */ \
+	MED_ATTR(sn, med_subject.vss, CONFIG_MEDUSA_VS >> 3, "vss", MED_BITMAP),	/* type vs_t */ \
+	MED_ATTR(sn, med_subject.act, CONFIG_MEDUSA_ACT >> 3, "med_sact", MED_BITMAP),	/* type act_t */ \
+	MED_ATTR(sn, med_subject.cinfo, sizeof(s_cinfo_t), "s_cinfo", MED_BITMAP)	/* type s_cinfo_t */
+#define MED_ATTR_OBJECT(sn) /* internal macro copying medusa/l3/model.h */ \
+	MED_ATTR(sn, med_object.vs, CONFIG_MEDUSA_VS >> 3, "vs", MED_BITMAP),		/* type vs_t */ \
+	MED_ATTR(sn, med_object.act, CONFIG_MEDUSA_ACT >> 3, "med_oact", MED_BITMAP),	/* type act_t */ \
+	MED_ATTR(sn, med_object.cinfo, sizeof(s_cinfo_t), "o_cinfo", MED_BITMAP)	/* type o_cinfo_t */
 
 /**/
 /**/
