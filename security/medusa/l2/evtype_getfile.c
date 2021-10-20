@@ -262,7 +262,8 @@ static medusa_answer_t do_file_kobj_validate_dentry(struct path* ndcurrent,
 int __init getfile_evtype_init(void) {
 	MED_REGISTER_EVTYPE(getfile_event,
 			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
-			MEDUSA_EVTYPE_TRIGGEREDBYOBJECTTBIT);
+			MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT |
+			MEDUSA_EVTYPE_NOTTRIGGERED);
 	return 0;
 }
 __initcall(getfile_evtype_init);

@@ -126,6 +126,29 @@ struct medusa_kobject_s {
 	unsigned char data[0];
 };
 
+/* `bitnr` (see below) is defined as 16-bit unsigned integer. It holds
+ * the position of bit which triggers monitoring of a given evtype.
+ * But the two MSB of `bitnr` are used to determine:
+ *   1) if set the first MSB (0x8000), the event is triggered at object;
+ *      if it is not set, the event is triggered at subject
+ *   2) the second MSB (0x4000) is used to determine, in which struct
+ *      (object or subject) is used monitoring bitfield `act`:
+ *      if set to 1, it is used `med_object.act`, otherwise `med_subject.act`.
+ *
+ * There can be max CONFIG_MEDUSA_ACT registered evtypes triggered at object,
+ * and the same count of evtypes triggered at subject. Checks are done in
+ * `med_register_evtype()` at l3/registry.c file. As `bitnr` has 16 bits,
+ * from which two MSB are reserved, 14 bits are sufficient to identify
+ * 2^14-1 different evtypes. Minus one for the special value of `bitnr` field
+ * 0xffff. This value is used for evtypes, which triggering cannot be turned off,
+ * i.e. all evtypes used to initialize VS model of an object (subject) in the
+ * kernel.
+ *
+ * When changed the count of `bitnr` bits, see also include/l3/config.h for
+ * CONFIG_MEDUSA_ACT constraints.
+ */
+#define MASK_BITNR 0x3fff
+
 #define MED_EVTYPEOF(structname) (structname##_evtype)
 struct medusa_evtype_s {
 	/* l3-defined data */
@@ -134,38 +157,38 @@ struct medusa_evtype_s {
 				 * monitoring of this evtype. The value is
 				 * OR'd with these flags: */
 	/* if you change/swap them, check the usage anywhere (l3/registry.c) */
-#define MEDUSA_EVTYPE_NOTTRIGGERED		0xffff
+#define MEDUSA_EVTYPE_NOTTRIGGERED		MASK_BITNR
 #define MEDUSA_EVTYPE_TRIGGEREDATSUBJECT	0x0000	/* for the beauty of L2 */
 #define MEDUSA_EVTYPE_TRIGGEREDATOBJECT		0x8000
 
 #define MEDUSA_EVTYPE_TRIGGEREDBYSUBJECTBIT	0x0000	/* for the beauty of L2 */
-#define MEDUSA_EVTYPE_TRIGGEREDBYOBJECTTBIT	0x4000
+#define MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT	0x4000
 
 #define MEDUSA_ACCTYPE_NOTTRIGGERED		MEDUSA_EVTYPE_NOTTRIGGERED
 #define MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT (MEDUSA_EVTYPE_TRIGGEREDATSUBJECT | \
 				MEDUSA_EVTYPE_TRIGGEREDBYSUBJECTBIT)
 #define MEDUSA_ACCTYPE_TRIGGEREDATOBJECT (MEDUSA_EVTYPE_TRIGGEREDATOBJECT | \
-				MEDUSA_EVTYPE_TRIGGEREDBYOBJECTTBIT)
+				MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT)
 
 /* internal macro */
 #define ___MEDUSA_EVENTOP(evname,kobjptr,OP,WHAT,WHERE) \
-		OP(MED_EVTYPEOF(evname).WHAT, &((kobjptr)->med_ ## WHERE.act))
+		OP(MED_EVTYPEOF(evname).WHAT, (kobjptr)->med_ ## WHERE.act)
 
 /* is the event monitored (at object) ? */
 #define MEDUSA_MONITORED_EVENT_O(evname,kobjptr) \
-	___MEDUSA_EVENTOP(evname,kobjptr,MED_TST_BIT,bitnr & 0x3fff, object)
+	___MEDUSA_EVENTOP(evname,kobjptr,MED_TST_BIT,bitnr & MASK_BITNR, object)
 /* is the event monitored (at subject) ? */
 #define MEDUSA_MONITORED_EVENT_S(evname,kobjptr) \
 	___MEDUSA_EVENTOP(evname,kobjptr,MED_TST_BIT,bitnr, subject)
 /* set the event monitoring at object */
 #define MEDUSA_MONITOR_EVENT_O(evname,kobjptr) \
-	___MEDUSA_EVENTOP(evname,kobjptr,MED_SET_BIT,bitnr & 0x3fff, object)
+	___MEDUSA_EVENTOP(evname,kobjptr,MED_SET_BIT,bitnr & MASK_BITNR, object)
 /* set the event monitoring at subject */
 #define MEDUSA_MONITOR_EVENT_S(evname,kobjptr) \
 	___MEDUSA_EVENTOP(evname,kobjptr,MED_SET_BIT,bitnr, subject)
 /* unset the event monitoring at object */
 #define MEDUSA_UNMONITOR_EVENT_O(evname,kobjptr) \
-	___MEDUSA_EVENTOP(evname,kobjptr,MED_CLR_BIT,bitnr & 0x3fff, object)
+	___MEDUSA_EVENTOP(evname,kobjptr,MED_CLR_BIT,bitnr & MASK_BITNR, object)
 /* unset the event monitoring at subject */
 #define MEDUSA_UNMONITOR_EVENT_S(evname,kobjptr) \
 	___MEDUSA_EVENTOP(evname,kobjptr,MED_CLR_BIT,bitnr, subject)

@@ -6,8 +6,6 @@
 
 extern int medusa_authserver_magic;
 
-#define ALL_VS_ALLOWED 0xffffffff
-
 typedef struct {
 	u_int64_t data[1];
 } s_cinfo_t, o_cinfo_t;
@@ -15,8 +13,6 @@ typedef struct {
 /* cinfo_t is at kclass and events at l4
    must be able to hold pointer for linked lists of registered kclass and events */
 typedef void* cinfo_t;
-
-typedef u_int32_t act_t;
 
 struct medusa_object_s {
 	vs_t vs;	/* virt. spaces of this object */
@@ -38,7 +34,7 @@ static inline void init_med_object(struct medusa_object_s *med_object)
 	// Allow all VSs
 	vs_set(med_object->vs);
 	// Set monitoring of all acctypes
-	med_object->act = ALL_VS_ALLOWED;
+	act_set(med_object->act);
 	med_object->cinfo.data[0] = 0;
 	med_object->magic = 0;
 }
@@ -48,7 +44,7 @@ static inline void unmonitor_med_object(struct medusa_object_s *med_object)
 	// Allow all VSs
 	vs_set(med_object->vs);
 	// Clear monitoring of all acctypes
-	med_object->act = 0;
+	act_clear(med_object->act);
 }
 
 static inline void init_med_subject(struct medusa_subject_s *med_subject)
@@ -58,7 +54,7 @@ static inline void init_med_subject(struct medusa_subject_s *med_subject)
 	vs_set(med_subject->vsr);
 	vs_set(med_subject->vsw);
 	// Set monitoring of all acctypes
-	med_subject->act = ALL_VS_ALLOWED;
+	act_set(med_subject->act);
 	med_subject->cinfo.data[0] = 0;
 }
 
@@ -69,7 +65,7 @@ static inline void unmonitor_med_subject(struct medusa_subject_s *med_subject)
 	vs_set(med_subject->vsr);
 	vs_set(med_subject->vsw);
 	// Clear monitoring of all acctypes
-	med_subject->act = 0;
+	act_clear(med_subject->act);
 }
 
 static inline int _is_med_magic_valid(struct medusa_object_s *med_object, int expected_magic)

@@ -9,10 +9,13 @@ MED_ATTRS(socket_event) {
 	MED_ATTR_END
 };
 
-MED_EVTYPE(socket_event, "get_socket", socket_kobject, "socket", socket_kobject, "socket");
+MED_EVTYPE(socket_event, "getsocket", socket_kobject, "socket", socket_kobject, "socket");
 
 int __init socket_evtype_init(void) {
-	MED_REGISTER_EVTYPE(socket_event, MEDUSA_EVTYPE_NOTTRIGGERED);
+	MED_REGISTER_EVTYPE(socket_event,
+			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
+			MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT |
+			MEDUSA_EVTYPE_NOTTRIGGERED);
 	return 0;
 }
 

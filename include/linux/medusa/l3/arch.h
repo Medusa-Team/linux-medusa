@@ -56,11 +56,11 @@
 
 /* memcpy */
 
-/* non-atomic bit set/test operations */
-#include <asm/bitops.h>
-#define MED_SET_BIT(bit,ptr) __set_bit((bit),(void *)(ptr))
-#define MED_CLR_BIT(bit,ptr) clear_bit((bit),(void *)(ptr))
-#define MED_TST_BIT(bit,ptr) test_bit((bit),(void *)(ptr))
+/* non-atomic bit set/clear/test operations */
+#include <linux/bitmap.h>
+#define MED_SET_BIT(bitnr, ptr) set_bit((bitnr), (ptr).pack)
+#define MED_CLR_BIT(bitnr, ptr) clear_bit((bitnr), (ptr).pack)
+#define MED_TST_BIT(bitnr, ptr) test_bit((bitnr), (ptr).pack)
 
 /* sanity checks for decision */
 #include <linux/sched.h>

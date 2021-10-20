@@ -228,16 +228,24 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 	med_evtype->bitnr = flags;
 
 #define MASK (~(MEDUSA_EVTYPE_TRIGGEREDATOBJECT | MEDUSA_EVTYPE_TRIGGEREDATSUBJECT))
-	if (flags != MEDUSA_EVTYPE_NOTTRIGGERED)
-		for (p = evtypes; p; p ? (p = p->next) : (p = evtypes))
+	if ((flags & MASK_BITNR) != MEDUSA_EVTYPE_NOTTRIGGERED) {
+		for (p = evtypes; p; p ? (p = p->next) : (p = evtypes)) {
 			if (p->bitnr != MEDUSA_EVTYPE_NOTTRIGGERED &&
 				(p->bitnr & MASK) == (med_evtype->bitnr & MASK)) {
 
-				med_evtype->bitnr++; /* TODO: check for the upper limit! */
+				med_evtype->bitnr++;
 				p = NULL;
 				continue;
 			}
+		}
 #undef MASK
+		if ((med_evtype->bitnr & MASK_BITNR) >= CONFIG_MEDUSA_ACT) {
+			MED_UNLOCK_W(registry_lock);
+			med_pr_err("med_register_evtype(%s): bitnr %u >= %u (CONFIG_MEDUSA_ACT)",
+				    med_evtype->name, med_evtype->bitnr & MASK_BITNR, CONFIG_MEDUSA_ACT);
+			return -2;
+		}
+	}
 
 	evtypes = med_evtype;
 	if (authserver && authserver->add_evtype)

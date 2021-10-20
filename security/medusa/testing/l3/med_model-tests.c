@@ -9,7 +9,10 @@ static void fake_med_object_init(struct medusa_object_s *med_object)
 	vs_clearbit(med_object->vs, CONFIG_MEDUSA_VS - 2);
 	vs_clearbit(med_object->vs, CONFIG_MEDUSA_VS - 3);
 	vs_clearbit(med_object->vs, CONFIG_MEDUSA_VS - 4);
-	med_object->act = 0x000000ff;
+
+	act_clear(med_object->act);
+	bitmap_set(med_object->act.pack, 0, CONFIG_MEDUSA_ACT - 4);
+
 	med_object->magic = 1;
 }
 
@@ -33,7 +36,8 @@ static void fake_med_subject_init(struct medusa_subject_s *med_subject)
 	vs_clearbit(med_subject->vss, CONFIG_MEDUSA_VS - 3);
 	vs_clearbit(med_subject->vss, CONFIG_MEDUSA_VS - 4);
 
-	med_subject->act = 0x000000ff;
+	act_clear(med_subject->act);
+	bitmap_set(med_subject->act.pack, 0, CONFIG_MEDUSA_ACT - 4);
 }
 
 static void is_med_magic_valid_not_changed(struct kunit *test)
@@ -85,11 +89,12 @@ static void init_med_object_success(struct kunit *test)
 	struct medusa_l1_task_s task;
 
 	init_med_object(&task.med_object);
-
 	med_object = &task.med_object;
+
 	KUNIT_EXPECT_TRUE(test,
-	    bitmap_full(med_object->vs.vspack, CONFIG_MEDUSA_VS));
-	KUNIT_EXPECT_EQ(test, ALL_VS_ALLOWED, med_object->act);
+	    bitmap_full(med_object->vs.pack, CONFIG_MEDUSA_VS));
+	KUNIT_EXPECT_TRUE(test,
+	    bitmap_full(med_object->act.pack, CONFIG_MEDUSA_ACT));
 	KUNIT_EXPECT_EQ(test, (u_int64_t)0, med_object->cinfo.data[0]);
 	KUNIT_EXPECT_EQ(test, 0, med_object->magic);
 }
@@ -101,18 +106,21 @@ static void unmonitor_med_object_success(struct kunit *test)
 	struct medusa_l1_task_s task;
 
 	fake_med_object_init(&task.med_object);
-	old_med_object.vs = task.med_object.vs;
-	old_med_object.act = task.med_object.act;
+	bitmap_copy(old_med_object.vs.pack, task.med_object.vs.pack, CONFIG_MEDUSA_VS);
+	bitmap_copy(old_med_object.act.pack, task.med_object.act.pack, CONFIG_MEDUSA_ACT);
 
 	unmonitor_med_object(&task.med_object);
-
 	med_object = &task.med_object;
-	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_object.vs.vspack,
-	      med_object->vs.vspack, CONFIG_MEDUSA_VS));
+
+	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_object.vs.pack,
+	      med_object->vs.pack, CONFIG_MEDUSA_VS));
 	KUNIT_EXPECT_TRUE(test,
-	    bitmap_full(med_object->vs.vspack, CONFIG_MEDUSA_VS));
-	KUNIT_EXPECT_NE(test, old_med_object.act, med_object->act);
-	KUNIT_EXPECT_EQ(test, 0U, med_object->act);
+	    bitmap_full(med_object->vs.pack, CONFIG_MEDUSA_VS));
+
+	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_object.act.pack,
+	      med_object->act.pack, CONFIG_MEDUSA_ACT));
+	KUNIT_EXPECT_TRUE(test,
+	    bitmap_empty(med_object->act.pack, CONFIG_MEDUSA_ACT));
 }
 
 static void init_med_subject_success(struct kunit *test)
@@ -121,15 +129,18 @@ static void init_med_subject_success(struct kunit *test)
 	struct medusa_l1_task_s task;
 
 	init_med_subject(&task.med_subject);
-
 	med_subject = &task.med_subject;
+
 	KUNIT_EXPECT_TRUE(test,
-	    bitmap_full(med_subject->vsr.vspack, CONFIG_MEDUSA_VS));
+	    bitmap_full(med_subject->vsr.pack, CONFIG_MEDUSA_VS));
 	KUNIT_EXPECT_TRUE(test,
-	    bitmap_full(med_subject->vsw.vspack, CONFIG_MEDUSA_VS));
+	    bitmap_full(med_subject->vsw.pack, CONFIG_MEDUSA_VS));
 	KUNIT_EXPECT_TRUE(test,
-	    bitmap_full(med_subject->vss.vspack, CONFIG_MEDUSA_VS));
-	KUNIT_EXPECT_EQ(test, ALL_VS_ALLOWED, med_subject->act);
+	    bitmap_full(med_subject->vss.pack, CONFIG_MEDUSA_VS));
+
+	KUNIT_EXPECT_TRUE(test,
+	    bitmap_full(med_subject->act.pack, CONFIG_MEDUSA_ACT));
+
 	KUNIT_EXPECT_EQ(test, (u_int64_t)0, med_subject->cinfo.data[0]);
 }
 
@@ -140,28 +151,31 @@ static void unmonitor_med_subject_success(struct kunit *test)
 	struct medusa_l1_task_s task;
 
 	fake_med_subject_init(&task.med_subject);
-	old_med_subject.vss = task.med_subject.vss;
-	old_med_subject.vsr = task.med_subject.vsr;
-	old_med_subject.vsw = task.med_subject.vsw;
-	old_med_subject.act = task.med_subject.act;
+	bitmap_copy(old_med_subject.vss.pack, task.med_subject.vss.pack, CONFIG_MEDUSA_VS);
+	bitmap_copy(old_med_subject.vsr.pack, task.med_subject.vsr.pack, CONFIG_MEDUSA_VS);
+	bitmap_copy(old_med_subject.vsw.pack, task.med_subject.vsw.pack, CONFIG_MEDUSA_VS);
+	bitmap_copy(old_med_subject.act.pack, task.med_subject.act.pack, CONFIG_MEDUSA_ACT);
 
 	unmonitor_med_subject(&task.med_subject);
-
 	med_subject = &task.med_subject;
-	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_subject.vsr.vspack,
-	      med_subject->vsr.vspack, CONFIG_MEDUSA_VS));
-	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_subject.vsw.vspack,
-	      med_subject->vsw.vspack, CONFIG_MEDUSA_VS));
-	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_subject.vss.vspack,
-	      med_subject->vss.vspack, CONFIG_MEDUSA_VS));
+
+	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_subject.vsr.pack,
+	      med_subject->vsr.pack, CONFIG_MEDUSA_VS));
+	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_subject.vsw.pack,
+	      med_subject->vsw.pack, CONFIG_MEDUSA_VS));
+	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_subject.vss.pack,
+	      med_subject->vss.pack, CONFIG_MEDUSA_VS));
 	KUNIT_EXPECT_TRUE(test,
-	    bitmap_full(med_subject->vsr.vspack, CONFIG_MEDUSA_VS));
+	    bitmap_full(med_subject->vsr.pack, CONFIG_MEDUSA_VS));
 	KUNIT_EXPECT_TRUE(test,
-	    bitmap_full(med_subject->vsw.vspack, CONFIG_MEDUSA_VS));
+	    bitmap_full(med_subject->vsw.pack, CONFIG_MEDUSA_VS));
 	KUNIT_EXPECT_TRUE(test,
-	    bitmap_full(med_subject->vss.vspack, CONFIG_MEDUSA_VS));
-	KUNIT_EXPECT_NE(test, old_med_subject.act, med_subject->act);
-	KUNIT_EXPECT_EQ(test, 0U, med_subject->act);
+	    bitmap_full(med_subject->vss.pack, CONFIG_MEDUSA_VS));
+
+	KUNIT_EXPECT_FALSE(test, bitmap_equal(old_med_subject.act.pack,
+	      med_subject->act.pack, CONFIG_MEDUSA_ACT));
+	KUNIT_EXPECT_TRUE(test,
+	    bitmap_empty(med_subject->act.pack, CONFIG_MEDUSA_ACT));
 }
 
 static struct kunit_case add_base_tc[] = {
