@@ -140,7 +140,7 @@ struct medusa_kobject_s {
  * and the same count of evtypes triggered at subject. Checks are done in
  * `med_register_evtype()` at l3/registry.c file. As `bitnr` has 16 bits,
  * from which two MSBs are reserved, 14 bits are sufficient to identify
- * 2^14-1 different evtypes. Special value 0xffff is reserved for evtypes, where
+ * 2^14-1 different evtypes. Special value 0x3fff is reserved for evtypes, where
  * the triggering cannot be turned off, i.e. all evtypes used to initialize VS
  * model of an object (subject) in the kernel.
  *
