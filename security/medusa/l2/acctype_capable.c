@@ -12,7 +12,7 @@
 
 struct capable_access {
 	MEDUSA_ACCESS_HEADER;
-	int cap;
+	__u32 cap;
 };
 
 MED_ATTRS(capable_access) {
