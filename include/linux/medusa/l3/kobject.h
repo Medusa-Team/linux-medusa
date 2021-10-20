@@ -127,8 +127,9 @@ struct medusa_kobject_s {
 };
 
 /*
- * `bitnr` (see below) is defined as a 16-bit unsigned integer. It holds
- * the position of a bit which triggers monitoring of a given evtype.
+ * In the `medusa_evtype_s` struct (see below) the `bitnr` member is defined
+ * as a 16-bit unsigned short integer. It holds the position of a bit which
+ * triggers monitoring of a given evtype.
  * The two MSBs of `bitnr` are used to determine:
  *   1) If the first MSB is set (0x8000), the event is triggered at object;
  *      if it is not set, the event is triggered at subject.
@@ -147,8 +148,6 @@ struct medusa_kobject_s {
  * If you change the number of `bitnr` bits, see also include/l3/config.h for
  * CONFIG_MEDUSA_ACT constraints.
  */
-#define MASK_BITNR 0x3fff
-
 #define MED_EVTYPEOF(structname) (structname##_evtype)
 struct medusa_evtype_s {
 	/* l3-defined data */
@@ -157,6 +156,7 @@ struct medusa_evtype_s {
 				 * monitoring of this evtype. The value is
 				 * OR'd with these flags: */
 	/* if you change/swap them, check the usage anywhere (l3/registry.c) */
+#define MASK_BITNR				0x3fff
 #define MEDUSA_EVTYPE_NOTTRIGGERED		MASK_BITNR
 #define MEDUSA_EVTYPE_TRIGGEREDATSUBJECT	0x0000	/* for the beauty of L2 */
 #define MEDUSA_EVTYPE_TRIGGEREDATOBJECT		0x8000

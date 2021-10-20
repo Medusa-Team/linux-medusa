@@ -16,7 +16,9 @@ config SECURITY_MEDUSA_VS
         range 32 512
         depends on SECURITY_MEDUSA
         help
-	  This must be a multiple of 8.
+	  Medusa Communication Protocol transfers size of attributes in Bytes.
+	  To prevent a mistake and errornous interpretation of bits out of
+	  bitarray, the array size SEURITY_MEDUSA_VS must be a multiple of 8.
 
 config SECURITY_MEDUSA_ACT
         int "Number of bits representing triggered security hooks"
@@ -24,7 +26,9 @@ config SECURITY_MEDUSA_ACT
         range 32 512
         depends on SECURITY_MEDUSA
         help
-	  This must be a multiple of 8.
+	  Medusa Communication Protocol transfers size of attributes in Bytes.
+	  To prevent a mistake and errornous interpretation of bits out of
+	  bitarray, the array size SEURITY_MEDUSA_ACT must be a multiple of 8.
 
 config SECURITY_MEDUSA_L4_CONSTABLE
         tristate "MEDUSA L4 as MODULE"
