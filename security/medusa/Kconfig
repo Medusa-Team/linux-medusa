@@ -16,8 +16,7 @@ config SECURITY_MEDUSA_VS
         range 32 512
         depends on SECURITY_MEDUSA
         help
-          There are no constraints for the number of VS, but for better
-          effectivity it should be multiply of 8.
+	  This must be a multiple of 8.
 
 config SECURITY_MEDUSA_ACT
         int "Number of bits representing triggered security hooks"
@@ -25,8 +24,7 @@ config SECURITY_MEDUSA_ACT
         range 32 512
         depends on SECURITY_MEDUSA
         help
-          There are no constraints for the number of access types, but for
-          better effectivity it should be multiply of 8.
+	  This must be a multiple of 8.
 
 config SECURITY_MEDUSA_L4_CONSTABLE
         tristate "MEDUSA L4 as MODULE"

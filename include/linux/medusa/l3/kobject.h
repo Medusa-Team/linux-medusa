@@ -126,25 +126,25 @@ struct medusa_kobject_s {
 	unsigned char data[0];
 };
 
-/* `bitnr` (see below) is defined as 16-bit unsigned integer. It holds
- * the position of bit which triggers monitoring of a given evtype.
- * But the two MSB of `bitnr` are used to determine:
- *   1) if set the first MSB (0x8000), the event is triggered at object;
- *      if it is not set, the event is triggered at subject
- *   2) the second MSB (0x4000) is used to determine, in which struct
- *      (object or subject) is used monitoring bitfield `act`:
- *      if set to 1, it is used `med_object.act`, otherwise `med_subject.act`.
+/*
+ * `bitnr` (see below) is defined as a 16-bit unsigned integer. It holds
+ * the position of a bit which triggers monitoring of a given evtype.
+ * The two MSBs of `bitnr` are used to determine:
+ *   1) If the first MSB is set (0x8000), the event is triggered at object;
+ *      if it is not set, the event is triggered at subject.
+ *   2) The second MSB (0x4000) is used to determine, which struct
+ *      (object or subject) is used to get the monitoring bitfield `act`:
+ *      if set to 1, `med_object.act` is used, otherwise `med_subject.act`.
  *
  * There can be max CONFIG_MEDUSA_ACT registered evtypes triggered at object,
  * and the same count of evtypes triggered at subject. Checks are done in
  * `med_register_evtype()` at l3/registry.c file. As `bitnr` has 16 bits,
- * from which two MSB are reserved, 14 bits are sufficient to identify
- * 2^14-1 different evtypes. Minus one for the special value of `bitnr` field
- * 0xffff. This value is used for evtypes, which triggering cannot be turned off,
- * i.e. all evtypes used to initialize VS model of an object (subject) in the
- * kernel.
+ * from which two MSBs are reserved, 14 bits are sufficient to identify
+ * 2^14-1 different evtypes. Special value 0xffff is reserved for evtypes, where
+ * the triggering cannot be turned off, i.e. all evtypes used to initialize VS
+ * model of an object (subject) in the kernel.
  *
- * When changed the count of `bitnr` bits, see also include/l3/config.h for
+ * If you change the number of `bitnr` bits, see also include/l3/config.h for
  * CONFIG_MEDUSA_ACT constraints.
  */
 #define MASK_BITNR 0x3fff

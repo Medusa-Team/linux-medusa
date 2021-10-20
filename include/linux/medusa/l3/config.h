@@ -11,8 +11,8 @@
 
 /*
  * Medusa Communication Protocol transfers size of attributes in Bytes.
- * To prevent a mistake and errornous interpreting of bits out of
- * bitarray, the array size CONFIG_MEDUSA_VS should be multiple of 8.
+ * To prevent a mistake and errornous interpretation of bits out of
+ * bitarray, the array size CONFIG_MEDUSA_VS must be a multiple of 8.
  */
 #if (CONFIG_MEDUSA_VS/8) * 8 != CONFIG_MEDUSA_VS
 #error "CONFIG_MEDUSA_VS is not a multiple of 8"
@@ -26,13 +26,13 @@
 
 /*
  * Medusa Communication Protocol transfers size of attributes in Bytes.
- * To prevent a mistake and errornous interpreting of bits out of
- * bitarray, the array size CONFIG_MEDUSA_ACT should be multiple of 8.
+ * To prevent a mistake and errornous interpretation of bits out of
+ * bitarray, the array size CONFIG_MEDUSA_ACT must be a multiple of 8.
  *
  * Id of an event type is stored in event's `bitnr` struct member and
- * that id is 14 bit long, but one value is used for special purpose,
+ * that id is 14 bits long, but one value is used for special purpose,
  * so there are 2^14-1 usable values (see include/l3/kobject.h). If
- * CONFIG_MEDUSA_ACT exceedes this value, a compilation error is emitted.
+ * CONFIG_MEDUSA_ACT exceedes this value, a compilation error is raised.
  */
 #if (CONFIG_MEDUSA_ACT/8) * 8 != CONFIG_MEDUSA_ACT
 #error "CONFIG_MEDUSA_ACT is not a multiple of 8"
