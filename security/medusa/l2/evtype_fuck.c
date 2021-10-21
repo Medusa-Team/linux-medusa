@@ -1,6 +1,7 @@
 /* (C) 2002 Milan Pikula */
-#include <linux/medusa/l3/registry.h>
-#include "kobject_fuck.h"
+
+#include "l3/registry.h"
+#include "l2/kobject_fuck.h"
 
 struct getfuck_event {
         MEDUSA_ACCESS_HEADER;

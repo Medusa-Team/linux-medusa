@@ -10,14 +10,34 @@
 #ifndef _MEDUSA_L1_TASK_H
 #define _MEDUSA_L1_TASK_H
 
-#include <linux/capability.h>
-#include <linux/cred.h>
-#include <linux/sched/task.h>
-#include <linux/kernel.h>
-#include <asm/syscall.h>
-#include <linux/sys.h>
 #include <linux/lsm_hooks.h>
-#include <linux/medusa/l3/med_model.h>
+#include "l3/med_model.h"
+#include "l3/constants.h"
+
+/* prototypes of L2 process related handlers called from L1 hooks */
+
+extern medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid);
+extern medusa_answer_t medusa_capable(int cap);
+extern medusa_answer_t medusa_fork(unsigned long clone_flags);
+extern medusa_answer_t medusa_init_process(struct task_struct *new);
+extern medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info,
+		struct task_struct *p);
+extern medusa_answer_t medusa_afterexec(char *filename, char **argv,
+		char **envp);
+extern int medusa_monitored_pexec(void);
+extern void medusa_monitor_pexec(int flag);
+extern int medusa_monitored_afterexec(void);
+extern void medusa_monitor_afterexec(int flag);
+extern medusa_answer_t medusa_sexec(struct linux_binprm * bprm);
+extern medusa_answer_t medusa_ptrace(struct task_struct * tracer,
+		struct task_struct * tracee);
+extern void medusa_kernel_thread(int (*fn) (void *));
+
+extern int process_kobj_validate_task(struct task_struct * ts);
+
+/* Struct task extension: this structure is appended to in-kernel data,
+ * and we define it separately just to make l1 code shorter.
+ */
 
 extern struct lsm_blob_sizes medusa_blob_sizes;
 #define task_security(task) ((struct medusa_l1_task_s *)(task->security + medusa_blob_sizes.lbs_task))

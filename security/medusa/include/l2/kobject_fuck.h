@@ -1,19 +1,8 @@
 /* kobject_fuck.c, (C) 2002 Milan Pikula */
 
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/namei.h>
-#include <linux/fs.h>
-#include <linux/path.h>
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/inode.h>
-#include "kobject_file.h"
-
-int validate_fuck_link(struct dentry *old_dentry);
-int validate_fuck(const struct path *fuck_path);
-int fuck_free(struct medusa_l1_inode_s* med);
+#include "l3/kobject.h"
+#include "l1/inode.h"
+#include "l1/fuck.h"
 
 struct fuck_kobject {
 	char path[PATH_MAX];    /* primary key in 'fetch' operation */

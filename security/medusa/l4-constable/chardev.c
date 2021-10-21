@@ -27,28 +27,18 @@
 #define GDB_HACK
 
 /* TODO: Check the calls to l3; they can't be called from a lock. */
-
-#include <linux/module.h>
-#include <linux/types.h>
-#include <linux/reboot.h>
-#include <linux/sched.h>
-#include <linux/sched/signal.h> /* task_tgid() */
-#include <linux/device.h>
-#include <linux/fs.h>
-#include <linux/wait.h>
-#include <linux/poll.h>
 #include <linux/semaphore.h>
-#include <linux/jiffies.h>
-#include <linux/sched/task.h>
-#include <linux/uaccess.h>
+#include <linux/sched/signal.h>
+#include <linux/device.h>
+#include <linux/poll.h>
 
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/server.h>
-#include <linux/medusa/l4/comm.h>
+#include "l3/arch.h"
+#include "l3/registry.h"
+#include "l3/server.h"
+#include "l4/comm.h"
 
-#include "teleport.h"
-#include "med_cache.h"
+#include "l4/teleport.h"
+#include "l4/med_cache.h"
 
 #define MEDUSA_MAJOR 111
 #define MODULENAME "chardev/linux"

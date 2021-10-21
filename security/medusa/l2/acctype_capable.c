@@ -3,12 +3,8 @@
  * This file defines the 'capable' call.
  */
 
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/init.h>
-#include <linux/mm.h>
-
-#include "kobject_process.h"
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 struct capable_access {
 	MEDUSA_ACCESS_HEADER;

@@ -55,20 +55,15 @@
 #include <linux/mutex.h>
 #include <linux/posix-timers.h>
 #include <linux/cred.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/inode.h>
-#include <linux/medusa/l1/ipc.h>
-#include <linux/medusa/l4/comm.h>
-#include <linux/medusa/l1/file_handlers.h>
-#include <linux/medusa/l1/task.h>
-#include <linux/medusa/l1/process_handlers.h>
-#include <linux/medusa/l1/socket.h>
-#include "../l2/kobject_process.h"
-#include "../l2/kobject_file.h"
-#include "../l2/kobject_fuck.h"
-#include "../l2/kobject_socket.h"
-#include "../../../ipc/util.h"
-#include <linux/medusa/l3/arch.h>
+
+#include "l4/comm.h"
+#include "l3/registry.h"
+#include "l3/arch.h"
+#include "l1/inode.h"
+#include "l1/task.h"
+#include "l1/ipc.h"
+#include "l1/socket.h"
+#include "l1/fuck.h"
 
 int medusa_l1_inode_alloc_security(struct inode *inode);
 

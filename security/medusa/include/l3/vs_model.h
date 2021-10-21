@@ -1,8 +1,8 @@
 #ifndef _VSMODEL_H
 #define _VSMODEL_H
 
-#include <linux/medusa/l3/config.h>
 #include <linux/bitmap.h>
+#include "l3/config.h"
 
 #define _VS(X)	((X)->vs)
 #define _VSR(X)	((X)->vsr)

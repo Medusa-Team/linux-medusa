@@ -1,16 +1,11 @@
 /* (C) 2002 Milan Pikula */
 
-#include <linux/medusa/l3/registry.h>
-#include <linux/dcache.h>
 #include <linux/fs_struct.h>
-#include <linux/init.h>
-#include <linux/mount.h>
-#include <linux/mm.h>
-#include "../../../fs/mount.h"
+#include "../../../fs/mount.h" /* real_mount() */
 
-#include "kobject_process.h"
-#include "kobject_file.h"
-#include <linux/medusa/l1/file_handlers.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_file.h"
 
 /* the getfile event types (yes, there are more of them) are a bit special:
  * 1) they are called from the beginning of various access types to get the

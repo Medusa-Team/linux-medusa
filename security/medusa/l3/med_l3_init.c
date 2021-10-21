@@ -23,8 +23,8 @@
  * module.
  */
 
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l3/registry.h>
+#include "l3/arch.h"
+#include "l3/registry.h"
 
 EXPORT_SYMBOL(med_register_kclass);
 EXPORT_SYMBOL(med_unregister_kclass);

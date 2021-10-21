@@ -14,11 +14,11 @@
 #ifndef _INODE_KOBJECT_H
 #define _INODE_KOBJECT_H
 
-#include <linux/fs.h>
-#include <linux/medusa/l3/kobject.h>
+#include <linux/capability.h>
+#include "l3/kobject.h"
+#include "l1/inode.h"
 
 struct file_kobject { /* was: m_inode_inf */
-	MEDUSA_KOBJECT_HEADER;
 /*
  * As a preparation for the total deletion of device numbers,
  * we introduce a type unsigned long to hold them. No information about
@@ -31,15 +31,15 @@ struct file_kobject { /* was: m_inode_inf */
 
 	umode_t mode;
 	nlink_t nlink;
-	uid_t uid;
-	gid_t gid;
+	kuid_t uid;
+	kgid_t gid;
 	unsigned long rdev;
 
 	struct medusa_object_s med_object;
 
 	__u32 user;
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
-	kernel_cap_t icap;
+	kernel_cap_t icap;	/* support for Linux capabilities */
 	kernel_cap_t pcap;
 	kernel_cap_t ecap;
 #endif /* CONFIG_MEDUSA_FILE_CAPABILITIES */

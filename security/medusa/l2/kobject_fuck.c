@@ -1,18 +1,12 @@
 /* kobject_fuck.c, (C) 2002 Milan Pikula */
 
-#include <linux/module.h>
-#include <linux/init.h>
 #include <linux/namei.h>
-#include <linux/fs.h>
 #include <linux/path.h>
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/slab.h>
-#include <linux/hashtable.h>
 #include <linux/crc32.h>
-#include <linux/medusa/l3/registry.h>
-#include "kobject_fuck.h"
-#include "../../fs/internal.h" /* we need internal fs function 'user_get_super' */
+/* we need internal fs function 'user_get_super' */
+#include "../../fs/internal.h"
+#include "l3/registry.h"
+#include "l2/kobject_fuck.h"
 
 MED_ATTRS(fuck_kobject) {
 	MED_ATTR		(fuck_kobject, path, "path", MED_STRING),

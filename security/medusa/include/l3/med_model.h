@@ -1,8 +1,8 @@
 #ifndef _MEDUSA_MODEL_H
 #define _MEDUSA_MODEL_H
 
-#include <linux/medusa/l3/config.h>
-#include <linux/medusa/l3/vs_model.h>
+#include "l3/config.h"
+#include "l3/vs_model.h"
 
 extern int medusa_authserver_magic;
 

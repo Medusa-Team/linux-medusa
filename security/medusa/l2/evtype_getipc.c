@@ -1,8 +1,5 @@
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/ipc.h>
-#include <linux/init.h>
-#include <linux/mm.h>
-#include "kobject_ipc.h"
+#include "l3/registry.h"
+#include "l2/kobject_ipc.h"
 
 struct ipc_event {
 	MEDUSA_ACCESS_HEADER;

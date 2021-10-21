@@ -10,9 +10,9 @@
 #ifndef _MEDUSA_REGISTRY_H
 #define _MEDUSA_REGISTRY_H
 
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l3/kobject.h>
-#include <linux/medusa/l3/server.h>
+#include "l3/arch.h"
+#include "l3/kobject.h"
+#include "l3/server.h"
 
 extern int authserver_magic; /* to be checked against magic in objects */
 

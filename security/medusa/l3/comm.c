@@ -1,10 +1,12 @@
 /* comm.c, (C) 2002 Milan Pikula <www@terminus.sk>
  *
  */
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/server.h>
-#include "l3_internals.h"
+
+#include "l3/arch.h"
+#include "l3/registry.h"
+#include "l3/server.h"
+
+MED_DECLARE_LOCK_DATA(registry_lock);
 
 inline int is_authserver_reached(medusa_answer_t answer)
 {

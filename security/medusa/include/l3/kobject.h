@@ -20,10 +20,10 @@
  * While you are not looking, this source is in Pascal.
  */
 
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l3/constants.h>
-#include <linux/medusa/l3/med_model.h>
 #include <linux/types.h>
+#include "l3/arch.h"
+#include "l3/constants.h"
+#include "l3/med_model.h"
 
 struct medusa_attribute_s;
 struct medusa_kclass_s;

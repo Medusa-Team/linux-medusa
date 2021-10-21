@@ -1,9 +1,5 @@
-#include <linux/medusa/l3/registry.h>
-#include <linux/dcache.h>
-#include <linux/init.h>
-#include <linux/mm.h>
-
-#include "kobject_process.h"
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 /* let's define the 'exec' access type, with subj=task and obj=inode */
 

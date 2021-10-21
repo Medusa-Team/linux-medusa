@@ -1,7 +1,7 @@
 #ifndef _MEDUSA_COMM_H
 #define _MEDUSA_COMM_H
 
-#include <linux/medusa/l3/arch_types.h>
+#include "l3/arch_types.h"
 
 /*
  * the following constants and structures cover the standard

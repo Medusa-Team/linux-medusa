@@ -9,13 +9,12 @@
  *
  * The structure contains some data from ordinary task_struct
  * (such as pid etc.), and some data from medusa_l1_task_s, which is
- * defined in medusa/l1/task.h.
+ * defined in medusa/include/l1/task.h.
  */
 
-#include <linux/sched.h>	/* contains all includes we need ;) */
-#include <linux/medusa/l3/kobject.h>
-#include <linux/medusa/l1/task.h>
-#include <linux/medusa/l1/process_handlers.h>
+#include <linux/capability.h>
+#include "l3/kobject.h"
+#include "l1/task.h"
 
 struct process_kobject {
 	int pid, pgrp, tgid, session;

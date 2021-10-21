@@ -8,13 +8,10 @@
  * Copyright (C) 2018-2020 Matus Jokay
  */
 
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/task.h>
-#include <linux/medusa/l1/ipc.h>
-#include <linux/init.h>
-#include <linux/mm.h>
-#include "kobject_process.h"
-#include "kobject_ipc.h"
+#include <linux/msg.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_ipc.h"
 
 /*
  * struct @ipc_msgsnd_access is derived from 'struct msg_msg' in include/linux/msg.h

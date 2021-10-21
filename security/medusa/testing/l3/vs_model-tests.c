@@ -1,5 +1,5 @@
 #include <kunit/test.h>
-#include <linux/medusa/l3/vs_model.h>
+#include "l3/vs_model.h"
 
 static void vs_intersects_empty(struct kunit *test)
 {

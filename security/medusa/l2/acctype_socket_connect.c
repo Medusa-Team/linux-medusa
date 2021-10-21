@@ -1,14 +1,12 @@
-#include <net/ipv6.h>
-#include <uapi/linux/un.h>
-#include "kobject_process.h"
-#include "kobject_socket.h"
-#include "kobject_file.h"
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_socket.h"
 
 struct socket_connect_access {
 	MEDUSA_ACCESS_HEADER;
 	sa_family_t family;
 	int addrlen;
-	MED_ADDRESS address;
+	union MED_ADDRESS address;
 };
 
 MED_ATTRS(socket_connect_access) {

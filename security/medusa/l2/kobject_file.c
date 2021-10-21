@@ -1,13 +1,7 @@
 /* file_kobject.c, (C) 2002 Milan Pikula */
 
-#include <linux/fs.h>
-#include <linux/init.h>
-#include <linux/spinlock.h>
-#include <linux/mm.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/inode.h>
-
-#include "kobject_file.h"
+#include "l2/kobject_file.h"
+#include "l3/registry.h"
 
 int file_kobj2kern(struct file_kobject * fk, struct inode * inode)
 {

@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
+
+#include <linux/ipc_namespace.h>
 #include <linux/msg.h>
-#include "../../../ipc/util.h" //TODO
-#include "kobject_ipc.h"
+#include "../../../ipc/util.h" // TODO
+#include "l3/registry.h"
+#include "l2/kobject_ipc.h"
 
 /* from ipc/shm.c, ipc/sem.c, ipc/msg.c */
 #define shm_ids(ns)	((ns)->ids[IPC_SHM_IDS])

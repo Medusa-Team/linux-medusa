@@ -1,13 +1,5 @@
-#include <linux/sched.h>
-#include <linux/sched/signal.h> /* SEND_SIG_PRIV */
-#include <linux/signal.h>
-#include <linux/interrupt.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/med_model.h>
-#include "kobject_process.h"
-#include <linux/medusa/l1/task.h>
-#include <linux/init.h>
-#include <linux/mm.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 /* let's define the 'kill' access type, with object=task and subject=task. */
 

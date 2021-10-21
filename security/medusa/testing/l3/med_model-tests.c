@@ -1,6 +1,6 @@
 #include <kunit/test.h>
-#include <linux/medusa/l3/med_model.h>
-#include <linux/medusa/l1/task.h>
+#include "l3/med_model.h"
+#include "l1/task.h"
 
 static void fake_med_object_init(struct medusa_object_s *med_object)
 {

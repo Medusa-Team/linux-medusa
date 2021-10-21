@@ -1,7 +1,7 @@
 #ifndef _MEDUSA_TELEPORT_H
 #define _MEDUSA_TELEPORT_H
 
-#include <linux/medusa/l4/comm.h>
+#include "l4/comm.h"
 
 typedef enum {
 	tp_NOP,		/* do nothing */

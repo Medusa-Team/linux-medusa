@@ -21,8 +21,8 @@
  * but now it just exports some symbols.
  */
 
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l1/process_handlers.h>
+#include "l3/arch.h"
+#include "l1/task.h"
 
 EXPORT_SYMBOL(medusa_capable);
 

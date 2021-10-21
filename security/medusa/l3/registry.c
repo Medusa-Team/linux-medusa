@@ -1,7 +1,6 @@
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l3/registry.h>
-#include "l3_internals.h"
-#include "../l4-constable/med_cache.h"
+#include "l3/arch.h"
+#include "l3/registry.h"
+#include "l4/med_cache.h"
 
 /* nesting as follows: registry_lock is outer, usecount_lock is inner. */
 

@@ -2,11 +2,8 @@
  *
  * This file defines the 'setresuid' access type, with object=subject=process.
  */
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/task.h>
-#include "kobject_process.h"
-#include <linux/init.h>
-#include <linux/mm.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 struct setresuid {
 	MEDUSA_ACCESS_HEADER;

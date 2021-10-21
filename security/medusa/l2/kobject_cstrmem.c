@@ -11,14 +11,9 @@
 /* And as it isn't really necessary, it's a perfect example of loadable L2
  * module.
  */
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/sched.h>
-#include <linux/kernel.h>
 #include <linux/sched/task.h>
 #include <linux/mm.h>
-#include <linux/errno.h>
-#include <linux/medusa/l3/registry.h>
+#include "l3/registry.h"
 
 struct cstrmem_kobject {
 	pid_t pid;		/* pid of process to read/write */

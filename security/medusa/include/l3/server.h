@@ -8,8 +8,8 @@
  * and constants, and API for the auth. server.
  */
 
-#include <linux/medusa/l3/constants.h>
-#include <linux/medusa/l3/kobject.h>
+#include "l3/constants.h"
+#include "l3/kobject.h"
 
 struct medusa_authserver_s {
 	char name[MEDUSA_SERVERNAME_MAX];

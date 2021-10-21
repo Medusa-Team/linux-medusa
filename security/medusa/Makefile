@@ -3,6 +3,7 @@
 #
 #KBUILD_CFLAGS += -g -Wall
 KBUILD_CFLAGS += -Werror=deprecated-declarations
+LINUXINCLUDE    += -I$(srctree)/security/medusa/include
 
 subdir-$(CONFIG_SECURITY_MEDUSA)	+= l1
 subdir-$(CONFIG_SECURITY_MEDUSA)        += l2

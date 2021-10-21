@@ -10,11 +10,10 @@
 #ifndef _MEDUSA_L1_IPC_H
 #define _MEDUSA_L1_IPC_H
 
-#include <linux/mutex.h>
-#include <linux/msg.h>
+#include <linux/ipc.h>
 #include <linux/lsm_hooks.h>
-#include <linux/medusa/l3/med_model.h>
-#include <linux/medusa/l3/constants.h>
+#include "l3/med_model.h"
+#include "l3/constants.h"
 
 /**
  * types of System V IPC objects

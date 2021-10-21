@@ -1,5 +1,6 @@
-#include "kobject_socket.h"
-#include "kobject_process.h"
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_socket.h"
 
 struct socket_create_access {
 	MEDUSA_ACCESS_HEADER;

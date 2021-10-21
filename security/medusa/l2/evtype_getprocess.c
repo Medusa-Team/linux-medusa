@@ -1,11 +1,7 @@
 /* (C) 2002 Milan Pikula */
 
-#include <linux/medusa/l3/registry.h>
-#include <linux/init.h>
-#include <linux/mm.h>
-
-#include "kobject_process.h"
-#include <linux/medusa/l1/process_handlers.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 /*
  *

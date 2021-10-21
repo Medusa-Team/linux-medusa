@@ -1,10 +1,6 @@
 /* kobject_printk.c, (C) 2002 Milan Pikula */
 
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/medusa/l3/registry.h>
+#include "l3/registry.h"
 
 struct printk_kobject {
 	char message[512];

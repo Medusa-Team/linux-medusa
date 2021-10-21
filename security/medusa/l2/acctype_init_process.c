@@ -1,8 +1,6 @@
-#include <linux/medusa/l3/registry.h>
-#include "kobject_process.h"
-#include <linux/init.h>
-#include <linux/medusa/l1/task.h>
-#include <linux/mm.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_file.h"
 
 struct init_process {
 	MEDUSA_ACCESS_HEADER;

@@ -12,17 +12,8 @@
  *                  roderik.ploszek@gmail.com
  */
 
-#include <linux/sched.h>
-#include <linux/sched/signal.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/mm.h>
-#include <linux/user_namespace.h>
-
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/task.h>
-
-#include "kobject_process.h"
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 /**
  * uid_differs() - Check equality of original and new (proposed) UID.

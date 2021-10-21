@@ -1,7 +1,7 @@
 #ifndef _MEDUSA_CONSTANTS_H
 #define _MEDUSA_CONSTANTS_H
 
-#include <linux/medusa/l4/comm.h>
+#include "l4/comm.h"
 
 /* these constants may be used by both internal kernel data structures,
  * and a communication protocol. if you alter them, you'll break the

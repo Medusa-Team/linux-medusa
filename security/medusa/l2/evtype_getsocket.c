@@ -1,5 +1,5 @@
-#include <linux/medusa/l1/socket.h>
-#include "kobject_socket.h"
+#include "l3/registry.h"
+#include "l2/kobject_socket.h"
 
 struct socket_event {
 	MEDUSA_ACCESS_HEADER;

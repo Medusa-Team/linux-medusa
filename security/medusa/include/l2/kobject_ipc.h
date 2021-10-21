@@ -1,12 +1,10 @@
-#include <linux/kernel.h>
-#include <linux/sched.h>
-#include <linux/syscalls.h>
-#include <../../../ipc/util.h>	// FIXME FIXME FIXME TODO
-#include <linux/medusa/l3/kobject.h>
-#include <linux/medusa/l3/med_model.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/constants.h>
-#include <linux/medusa/l1/ipc.h>
+// SPDX-License-Identifier: GPL-2.0
+
+#ifndef _IPC_KOBJECT_H
+#define _IPC_KOBJECT_H
+
+#include "l3/kobject.h"
+#include "l1/ipc.h"
 
 /*
  * medusa_ipc_perm - struct holding relevant entries from 'kern_ipc_perm' (see linux/ipc.h)
@@ -43,3 +41,5 @@ medusa_answer_t ipc_update(struct medusa_kobject_s * kobj);
 struct ipc_kobject * ipc_kern2kobj(struct ipc_kobject *, struct kern_ipc_perm *, bool);
 int ipc_getref(struct kern_ipc_perm *ipcp, bool unlock);
 int ipc_putref(struct kern_ipc_perm *ipcp, bool lock);
+
+#endif

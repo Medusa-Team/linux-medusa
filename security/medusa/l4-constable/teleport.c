@@ -5,10 +5,10 @@
  * data to userspace go through this programmable teleport ;)
  */
 
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l4/comm.h>
-#include <linux/medusa/l3/constants.h>
-#include <linux/medusa/l3/kobject.h>
+#include "l3/arch.h"
+#include "l4/comm.h"
+#include "l3/constants.h"
+#include "l3/kobject.h"
 
 #if MED_RO != MED_COMM_TYPE_READ_ONLY
 #error "L3 and L4 constants don't match. We don't convert them. Go well, go hell."
@@ -16,7 +16,7 @@
 
 #define DEBUG	/* define this to get extra debugging output */
 
-#include "teleport.h"
+#include "l4/teleport.h"
 
 #undef PARANOIA_CHECKS	/* define this to enable extra checking */
 
