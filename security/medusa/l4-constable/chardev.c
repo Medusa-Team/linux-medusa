@@ -35,10 +35,9 @@
 #include "l3/arch.h"
 #include "l3/registry.h"
 #include "l3/server.h"
+#include "l3/med_cache.h"
 #include "l4/comm.h"
-
 #include "l4/teleport.h"
-#include "l4/med_cache.h"
 
 #define MEDUSA_MAJOR 111
 #define MODULENAME "chardev/linux"

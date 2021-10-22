@@ -6,6 +6,6 @@ O_TARGET := l3.o
 
 export-objs :=	med_l3_init.o
 
-obj-y := comm.o registry.o med_l3_init.o
+obj-y := comm.o registry.o med_l3_init.o med_cache.o
 
 
