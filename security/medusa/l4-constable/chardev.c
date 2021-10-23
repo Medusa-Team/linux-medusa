@@ -321,7 +321,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s *event,
 	struct tele_item *local_tele_item;
 	struct waitlist_item local_waitlist_item;
 
-	if (in_interrupt()) {
+	if (!in_task()) {
 		/* houston, we have a problem! */
 		med_pr_err("%s called from interrupt context :(\n", __func__);
 		return MED_ERR;

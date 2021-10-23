@@ -65,7 +65,7 @@
 /* sanity checks for decision */
 #include <linux/sched.h>
 #include <linux/interrupt.h>
-#define ARCH_CANNOT_DECIDE(x) (in_interrupt() || current->pid == 0)
+#define ARCH_CANNOT_DECIDE(x) (!in_task() || current->pid == 0)
 
 /* linkage */ /* FIXME: is this needed? */
 #include <linux/module.h>

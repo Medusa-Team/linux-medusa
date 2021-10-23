@@ -172,7 +172,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 		struct medusa_kobject_s * o1, struct medusa_kobject_s * o2)
 {
 	int retval;
-	if (in_interrupt()) {
+	if (!in_task()) {
 		/* houston, we have a problem! */
 		med_pr_err("decide called from interrupt context :(\n");
 		return MED_ERR;

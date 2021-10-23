@@ -35,7 +35,7 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
         /* process_kobject sender is zeroed by process_kern2kobj function */
         /* process_kobject receiver is zeroed by process_kern2kobj function */
 
-	if (in_interrupt())
+	if (!in_task())
 		return MED_ALLOW;
 	/* always allow signals coming from kernel - see kernel/signal.c:send_signalnal() */
 	if (info == SEND_SIG_PRIV)

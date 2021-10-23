@@ -34,7 +34,7 @@ medusa_answer_t medusa_capable(int cap)
         memset(&access, '\0', sizeof(struct capable_access));
         /* process_kobject process is zeroed by process_kern2kobj function */
 
-	if (in_interrupt()) {
+	if (!in_task()) {
 		med_pr_warn("CAPABLE IN INTERRUPT\n");
 #warning "finish me"
 		return MED_ALLOW;
