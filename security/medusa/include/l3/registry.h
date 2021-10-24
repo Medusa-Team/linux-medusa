@@ -1,4 +1,6 @@
-/* medusa/l3/registry.h, (C) 2002 Milan Pikula
+/* SPDX-License-Identifier: GPL-2.0 */
+
+/* (C) 2002 Milan Pikula
  *
  * This header file defines the routines and data structures
  * for L2 and L4 code to interact with L3. This means access
@@ -29,23 +31,23 @@ extern int med_unregister_kclass(struct medusa_kclass_s *med_kclass);
 
 extern int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags);
 extern void med_unregister_evtype(struct medusa_evtype_s *med_evtype);
-#define MED_REGISTER_EVTYPE(structname,flags) \
-		med_register_evtype(&MED_EVTYPEOF(structname),flags)
+#define MED_REGISTER_EVTYPE(structname, flags) \
+		med_register_evtype(&MED_EVTYPEOF(structname), flags)
 #define MED_UNREGISTER_EVTYPE(structname) \
 		med_unregister_evtype(&MED_EVTYPEOF(structname))
 
-#define MED_REGISTER_ACCTYPE(structname,flags) \
+#define MED_REGISTER_ACCTYPE(structname, flags) \
 		MED_REGISTER_EVTYPE(structname, flags)
 #define MED_UNREGISTER_ACCTYPE(structname) \
 		MED_UNREGISTER_EVTYPE(structname)
 /* here, the 'flags' field is one of
- * 	MEDUSA_ACCTYPE_NOTTRIGGERED (monitoring of this event can't be turned off),
+ *	MEDUSA_ACCTYPE_NOTTRIGGERED (monitoring of this event can't be turned off),
  *	MEDUSA_ACCTYPE_TRIGGEREDATOBJECT (the event is triggered by changing the object)
  *	MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT (the ... subject)
  */
 
 extern enum medusa_answer_t med_decide(struct medusa_evtype_s *, void *, void *, void *);
-#define MED_DECIDE(structname,arg1,arg2,arg3) \
+#define MED_DECIDE(structname, arg1, arg2, arg3) \
 		med_decide(&MED_EVTYPEOF(structname), arg1, arg2, arg3)
 
 /* interface to L2 and L4 */
