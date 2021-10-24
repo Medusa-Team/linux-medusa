@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _MEDUSA_KOBJECT_H
 #define _MEDUSA_KOBJECT_H
 
@@ -58,10 +60,10 @@ struct medusa_attribute_s {
 #define _MED_ATTR_RO_5(sn, sm, sz, an, ty) MED_ATTR_ORIG(sn, sm, sz, an, (ty) | MED_RO)
 #define _MED_ATTR_KEY_5(sn, sm, sz, an, ty) MED_ATTR_ORIG(sn, sm, sz, an, (ty) | MED_KEY)
 #define _MED_ATTR_KEY_RO_5(sn, sm, sz, an, ty) MED_ATTR_ORIG(sn, sm, sz, an, (ty) | MED_KEY | MED_RO)
-#define _MED_ATTR_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn*)0)->sm), an, ty)
-#define _MED_ATTR_RO_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn*)0)->sm), an, (ty) | MED_RO)
-#define _MED_ATTR_KEY_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn*)0)->sm), an, (ty) | MED_KEY)
-#define _MED_ATTR_KEY_RO_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn*)0)->sm), an, (ty) | MED_KEY | MED_RO)
+#define _MED_ATTR_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn *)0)->sm), an, ty)
+#define _MED_ATTR_RO_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn *)0)->sm), an, (ty) | MED_RO)
+#define _MED_ATTR_KEY_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn *)0)->sm), an, (ty) | MED_KEY)
+#define _MED_ATTR_KEY_RO_4(sn, sm, an, ty) MED_ATTR_ORIG(sn, sm, sizeof(((struct sn *)0)->sm), an, (ty) | MED_KEY | MED_RO)
 #define _MED_ATTR(_1, _2, _3, _4, _5, __MED_ATTR, ...) __MED_ATTR
 
 /*
@@ -89,11 +91,11 @@ struct medusa_attribute_s {
 	MED_ATTR(sn, med_subject.vsw, CONFIG_MEDUSA_VS >> 3, "vsw", MED_BITMAP),	/* type vs_t */ \
 	MED_ATTR(sn, med_subject.vss, CONFIG_MEDUSA_VS >> 3, "vss", MED_BITMAP),	/* type vs_t */ \
 	MED_ATTR(sn, med_subject.act, CONFIG_MEDUSA_ACT >> 3, "med_sact", MED_BITMAP),	/* type act_t */ \
-	MED_ATTR(sn, med_subject.cinfo, sizeof(s_cinfo_t), "s_cinfo", MED_BITMAP)	/* type s_cinfo_t */
+	MED_ATTR(sn, med_subject.cinfo, sizeof(struct s_cinfo_t), "s_cinfo", MED_BITMAP)/* type s_cinfo_t */
 #define MED_ATTR_OBJECT(sn) /* internal macro copying medusa/l3/model.h */ \
 	MED_ATTR(sn, med_object.vs, CONFIG_MEDUSA_VS >> 3, "vs", MED_BITMAP),		/* type vs_t */ \
 	MED_ATTR(sn, med_object.act, CONFIG_MEDUSA_ACT >> 3, "med_oact", MED_BITMAP),	/* type act_t */ \
-	MED_ATTR(sn, med_object.cinfo, sizeof(s_cinfo_t), "o_cinfo", MED_BITMAP)	/* type o_cinfo_t */
+	MED_ATTR(sn, med_object.cinfo, sizeof(struct s_cinfo_t), "o_cinfo", MED_BITMAP)	/* type o_cinfo_t */
 
 /**/
 /**/
@@ -103,9 +105,9 @@ struct medusa_attribute_s {
 #define MED_DECLARE_KCLASSOF(structname) struct medusa_kclass_s (structname##_kclass)
 struct medusa_kclass_s {
 	/* l3-defined data, filled by register_kobject */
-	struct medusa_kclass_s * next;	/* through all kclasses */
+	struct medusa_kclass_s *next;	/* through all kclasses */
 	int use_count;
-	cinfo_t cinfo; /* l4 hint */
+	void *cinfo; /* l4 hint: must be able to hold pointer for linked list of registered kclass */
 #ifdef CONFIG_MEDUSA_PROFILING
 	unsigned long long l2_to_l4;
 	unsigned long long l4_to_l2;
@@ -113,13 +115,13 @@ struct medusa_kclass_s {
 
 	/* l2-defined data */
 	unsigned int kobject_size;		/* sizeof(kobject) */
-	struct medusa_attribute_s * attr;	/* attributes */
+	struct medusa_attribute_s *attr;	/* attributes */
 	char name[MEDUSA_KCLASSNAME_MAX];	/* string: kclass name */
-	void * reg;
-	void * unreg;
-	struct medusa_kobject_s * (* fetch)(struct medusa_kobject_s * key_obj); /* fetch the kobj. by key */
-	medusa_answer_t (* update)(struct medusa_kobject_s * kobj); /* update the kobj. */
-	void (* unmonitor)(struct medusa_kobject_s * kobj); /* disable all monitoring on kobj. optional; cannot sleep. */
+	void *reg;
+	void *unreg;
+	struct medusa_kobject_s *(*fetch)(struct medusa_kobject_s *key_obj); /* fetch the kobj. by key */
+	enum medusa_answer_t (*update)(struct medusa_kobject_s *kobj); /* update the kobj. */
+	void (*unmonitor)(struct medusa_kobject_s *kobj); /* disable all monitoring on kobj. optional; cannot sleep. */
 };
 
 #ifdef CONFIG_MEDUSA_PROFILING
@@ -173,10 +175,11 @@ struct medusa_kobject_s {
 #define MED_EVTYPEOF(structname) (structname##_evtype)
 struct medusa_evtype_s {
 	/* l3-defined data */
-	struct medusa_evtype_s * next;
+	struct medusa_evtype_s *next;
 	unsigned short bitnr;	/* which bit at subject or object triggers
 				 * monitoring of this evtype. The value is
-				 * OR'd with these flags: */
+				 * OR'd with these flags:
+				 */
 	/* if you change/swap them, check the usage anywhere (l3/registry.c) */
 #define MASK_BITNR				0x3fff
 #define MEDUSA_EVTYPE_NOTTRIGGERED		MASK_BITNR
@@ -193,42 +196,42 @@ struct medusa_evtype_s {
 				MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT)
 
 /* internal macro */
-#define ___MEDUSA_EVENTOP(evname,kobjptr,OP,WHAT,WHERE) \
+#define ___MEDUSA_EVENTOP(evname, kobjptr, OP, WHAT, WHERE) \
 		OP(MED_EVTYPEOF(evname).WHAT, (kobjptr)->med_ ## WHERE.act)
 
 /* is the event monitored (at object) ? */
-#define MEDUSA_MONITORED_EVENT_O(evname,kobjptr) \
+#define MEDUSA_MONITORED_EVENT_O(evname, kobjptr) \
 	___MEDUSA_EVENTOP(evname, kobjptr, MED_TST_BIT, bitnr & MASK_BITNR, object)
 /* is the event monitored (at subject) ? */
-#define MEDUSA_MONITORED_EVENT_S(evname,kobjptr) \
+#define MEDUSA_MONITORED_EVENT_S(evname, kobjptr) \
 	___MEDUSA_EVENTOP(evname, kobjptr, MED_TST_BIT, bitnr, subject)
 /* set the event monitoring at object */
-#define MEDUSA_MONITOR_EVENT_O(evname,kobjptr) \
+#define MEDUSA_MONITOR_EVENT_O(evname, kobjptr) \
 	___MEDUSA_EVENTOP(evname, kobjptr, MED_SET_BIT, bitnr & MASK_BITNR, object)
 /* set the event monitoring at subject */
-#define MEDUSA_MONITOR_EVENT_S(evname,kobjptr) \
+#define MEDUSA_MONITOR_EVENT_S(evname, kobjptr) \
 	___MEDUSA_EVENTOP(evname, kobjptr, MED_SET_BIT, bitnr, subject)
 /* unset the event monitoring at object */
-#define MEDUSA_UNMONITOR_EVENT_O(evname,kobjptr) \
+#define MEDUSA_UNMONITOR_EVENT_O(evname, kobjptr) \
 	___MEDUSA_EVENTOP(evname, kobjptr, MED_CLR_BIT, bitnr & MASK_BITNR, object)
 /* unset the event monitoring at subject */
-#define MEDUSA_UNMONITOR_EVENT_S(evname,kobjptr) \
+#define MEDUSA_UNMONITOR_EVENT_S(evname, kobjptr) \
 	___MEDUSA_EVENTOP(evname, kobjptr, MED_CLR_BIT, bitnr, subject)
 
-#define MEDUSA_MONITORED_ACCESS_O(evname,kobjptr) \
-		MEDUSA_MONITORED_EVENT_O(evname,kobjptr)
-#define MEDUSA_MONITORED_ACCESS_S(evname,kobjptr) \
-		MEDUSA_MONITORED_EVENT_S(evname,kobjptr)
-#define MEDUSA_MONITOR_ACCESS_O(evname,kobjptr) \
-		MEDUSA_MONITOR_EVENT_O(evname,kobjptr)
-#define MEDUSA_MONITOR_ACCESS_S(evname,kobjptr) \
-		MEDUSA_MONITOR_EVENT_S(evname,kobjptr)
-#define MEDUSA_UNMONITOR_ACCESS_O(evname,kobjptr) \
-		MEDUSA_UNMONITOR_EVENT_O(evname,kobjptr)
-#define MEDUSA_UNMONITOR_ACCESS_S(evname,kobjptr) \
-		MEDUSA_UNMONITOR_EVENT_S(evname,kobjptr)
+#define MEDUSA_MONITORED_ACCESS_O(evname, kobjptr) \
+		MEDUSA_MONITORED_EVENT_O(evname, kobjptr)
+#define MEDUSA_MONITORED_ACCESS_S(evname, kobjptr) \
+		MEDUSA_MONITORED_EVENT_S(evname, kobjptr)
+#define MEDUSA_MONITOR_ACCESS_O(evname, kobjptr) \
+		MEDUSA_MONITOR_EVENT_O(evname, kobjptr)
+#define MEDUSA_MONITOR_ACCESS_S(evname, kobjptr) \
+		MEDUSA_MONITOR_EVENT_S(evname, kobjptr)
+#define MEDUSA_UNMONITOR_ACCESS_O(evname, kobjptr) \
+		MEDUSA_UNMONITOR_EVENT_O(evname, kobjptr)
+#define MEDUSA_UNMONITOR_ACCESS_S(evname, kobjptr) \
+		MEDUSA_UNMONITOR_EVENT_S(evname, kobjptr)
 
-	cinfo_t cinfo; /* l4 hint */
+	void *cinfo; /* l4 hint: must be able to hold pointer for linked list of registered events */
 #ifdef CONFIG_MEDUSA_PROFILING
 	unsigned long long l2_to_l4;
 	unsigned long long l4_to_l2;
@@ -236,28 +239,28 @@ struct medusa_evtype_s {
 
 	/* l2-defined data */
 	char name[MEDUSA_EVNAME_MAX];		/* string: event name */
-	struct medusa_kclass_s * arg_kclass[2];	/* kclasses of arguments */
+	struct medusa_kclass_s *arg_kclass[2];	/* kclasses of arguments */
 	char arg_name[2][MEDUSA_ATTRNAME_MAX];	/* names of arguments */
 	unsigned int event_size;		/* sizeof(event) */
-	struct medusa_attribute_s * attr;	/* attributes */
+	struct medusa_attribute_s *attr;	/* attributes */
 };
 
 #ifdef CONFIG_MEDUSA_PROFILING
 #define MEDUSA_DEFAULT_EVTYPE_HEADER \
-	NULL,	/*                   register_evtype */ \
+	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
 	0 /* cinfo */, \
 	0, 0
 #else
 #define MEDUSA_DEFAULT_EVTYPE_HEADER \
-	NULL,	/*                   register_evtype */ \
+	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
 	0 /* cinfo */
 #endif
 #define MEDUSA_DEFAULT_ACCTYPE_HEADER MEDUSA_DEFAULT_EVTYPE_HEADER
 
-#define MED_EVTYPE(structname,evtypename,s1name,arg1name,s2name,arg2name) \
-	struct medusa_evtype_s (MED_EVTYPEOF(structname)) = { 		\
+#define MED_EVTYPE(structname, evtypename, s1name, arg1name, s2name, arg2name) \
+	struct medusa_evtype_s (MED_EVTYPEOF(structname)) = {		\
 		MEDUSA_DEFAULT_ACCTYPE_HEADER,				\
 		(evtypename),						\
 		{ &MED_KCLASSOF(s1name), &MED_KCLASSOF(s2name) },	\
@@ -265,12 +268,12 @@ struct medusa_evtype_s {
 		sizeof(struct structname),				\
 		MED_ATTRSOF(structname)					\
 	}
-#define MED_ACCTYPE(structname,acctypename,s1name,arg1name,s2name,arg2name) \
-		MED_EVTYPE(structname,acctypename,s1name,arg1name,s2name,arg2name)
+#define MED_ACCTYPE(structname, acctypename, s1name, arg1name, s2name, arg2name) \
+	MED_EVTYPE(structname, acctypename, s1name, arg1name, s2name, arg2name)
 
 /* this is the access header - use it at the beginning of l2 structures */
 #define MEDUSA_ACCESS_HEADER \
-	struct medusa_evtype_s * evtype_id
+	struct medusa_evtype_s *evtype_id
 /* used by l3 and l4 to easily access the header of l2 structures */
 struct medusa_event_s {
 	MEDUSA_ACCESS_HEADER;

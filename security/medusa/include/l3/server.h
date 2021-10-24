@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _MEDUSA_SERVER_H
 #define _MEDUSA_SERVER_H
 
@@ -34,13 +36,13 @@ struct medusa_authserver_s {
 	 * they're guaranteed to be run one at time by l3; cannot sleep.
 	 */
 
-	int (*add_kclass)(struct medusa_kclass_s * cl);
+	int (*add_kclass)(struct medusa_kclass_s *cl);
 			/* called when new kclass arrives */
-	void (*del_kclass)(struct medusa_kclass_s * cl);
+	void (*del_kclass)(struct medusa_kclass_s *cl);
 			/* and this when it dies */
-	int (*add_evtype)(struct medusa_evtype_s * at);
+	int (*add_evtype)(struct medusa_evtype_s *at);
 			/* called when new event type arrives */
-	void (*del_evtype)(struct medusa_evtype_s * at);
+	void (*del_evtype)(struct medusa_evtype_s *at);
 			/* and this when it dies */
 
 	/*
@@ -49,9 +51,9 @@ struct medusa_authserver_s {
 	 * May sleep. I hope.
 	 */
 
-	medusa_answer_t (*decide)(struct medusa_event_s * req,
-		struct medusa_kobject_s * o1,
-		struct medusa_kobject_s * o2);
+	medusa_answer_t (*decide)(struct medusa_event_s *req,
+		struct medusa_kobject_s *o1,
+		struct medusa_kobject_s *o2);
 };
 
 #endif

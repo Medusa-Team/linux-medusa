@@ -199,7 +199,7 @@ static int l4_add_kclass(struct medusa_kclass_s *cl)
 	atomic_inc(&announce_ready);
 	barrier();
 
-	cl->cinfo = (cinfo_t)kclasses_registered;
+	cl->cinfo = (void *)kclasses_registered;
 	kclasses_registered = cl;
 	local_tele_item->size = 0;
 	tele_mem_kclass[0].opcode = tp_PUTPtr;
@@ -255,7 +255,7 @@ static int l4_add_evtype(struct medusa_evtype_s *at)
 	atomic_inc(&announce_ready);
 	barrier();
 
-	at->cinfo = (cinfo_t)evtypes_registered;
+	at->cinfo = (void *)evtypes_registered;
 	evtypes_registered = at;
 	local_tele_item->size = 0;
 	tele_mem_evtype[0].opcode = tp_PUTPtr;

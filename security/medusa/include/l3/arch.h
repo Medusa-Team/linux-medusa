@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _MEDUSA_ARCH_H
 #define _MEDUSA_ARCH_H
 #include <linux/spinlock.h>
@@ -6,8 +8,8 @@
 /* data locks */
 #define MED_DECLARE_LOCK_DATA(name)	extern rwlock_t name
 #define MED_LOCK_DATA(name)		DEFINE_RWLOCK(name)
-#define MED_LOCK_R(name)		{ 			\
-					barrier(); 		\
+#define MED_LOCK_R(name)		{			\
+					barrier();		\
 					read_lock(&name);	\
 					barrier();		\
 					}
@@ -19,7 +21,7 @@
 					}
 #define MED_UNLOCK_R(name)		{			\
 					barrier();		\
-					read_unlock(&name); 	\
+					read_unlock(&name);	\
 					barrier();		\
 					}
 #define MED_UNLOCK_W(name)		{			\

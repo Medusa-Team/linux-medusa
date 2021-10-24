@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _VSMODEL_H
 #define _VSMODEL_H
 
@@ -14,8 +16,8 @@
 #define VSW(X) _VSW(&((X)->med_subject))
 #define VSS(X) _VSS(&((X)->med_subject))
 
-typedef struct { DECLARE_BITMAP(pack, CONFIG_MEDUSA_VS); } vs_t;
-typedef struct { DECLARE_BITMAP(pack, CONFIG_MEDUSA_ACT); } act_t;
+struct vs_t { DECLARE_BITMAP(pack, CONFIG_MEDUSA_VS); };
+struct act_t { DECLARE_BITMAP(pack, CONFIG_MEDUSA_ACT); };
 
 #define vs_intersects(X, Y) \
 	bitmap_intersects(X.pack, Y.pack, CONFIG_MEDUSA_VS)

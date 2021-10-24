@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _MEDUSA_MODEL_H
 #define _MEDUSA_MODEL_H
 
@@ -6,27 +8,27 @@
 
 extern int medusa_authserver_magic;
 
-typedef struct {
+struct s_cinfo_t {
 	u_int64_t data[1];
-} s_cinfo_t, o_cinfo_t;
+};
 
-/* cinfo_t is at kclass and events at l4
-   must be able to hold pointer for linked lists of registered kclass and events */
-typedef void* cinfo_t;
+struct o_cinfo_t {
+	u_int64_t data[1];
+};
 
 struct medusa_object_s {
-	vs_t vs;	/* virt. spaces of this object */
-	act_t act;	/* actions on this object, which are reported to L4 */
-	o_cinfo_t cinfo;/* l4 hint */
-	int magic;	/* whether this piece of crap is valid */
+	struct vs_t vs;		/* virt. spaces of this object */
+	struct act_t act;	/* actions on this object, which are reported to L4 */
+	struct o_cinfo_t cinfo;	/* l4 hint */
+	int magic;		/* whether this piece of crap is valid */
 };
 
 struct medusa_subject_s {
-	vs_t vsr;	/* which vs I can read from */
-	vs_t vsw;	/* which vs I can write to */
-	vs_t vss;	/* which vs I can see */
-	act_t act;	/* which actions of me are monitored. this may slig.. */
-	s_cinfo_t cinfo;/* l4 hint */
+	struct vs_t vsr;	/* which vs I can read from */
+	struct vs_t vsw;	/* which vs I can write to */
+	struct vs_t vss;	/* which vs I can see */
+	struct act_t act;	/* which actions of me are monitored. this may slig.. */
+	struct s_cinfo_t cinfo;	/* l4 hint */
 };
 
 static inline void init_med_object(struct medusa_object_s *med_object)
