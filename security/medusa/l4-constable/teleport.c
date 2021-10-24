@@ -24,12 +24,12 @@
 /* assumption: we're completely serialized (!!!) */
 
 static ssize_t (*_to_user)(void *, size_t) = NULL;
-static inline ssize_t place_to_user(teleport_t * teleport,
+static inline ssize_t place_to_user(struct teleport_s * teleport,
 		size_t * userlimit);
 
 /****/
 
-void teleport_reset(teleport_t * teleport, teleport_insn_t * addr,
+void teleport_reset(struct teleport_s * teleport, struct teleport_insn_s * addr,
 		ssize_t (*to_user)(void *, size_t))
 {
 	_to_user = to_user;
@@ -37,7 +37,7 @@ void teleport_reset(teleport_t * teleport, teleport_insn_t * addr,
 	teleport->cycle = tpc_FETCH;
 }
 
-ssize_t teleport_cycle(teleport_t * teleport, size_t userlimit)
+ssize_t teleport_cycle(struct teleport_s * teleport, size_t userlimit)
 {
 	ssize_t retval = 0;
 	ssize_t tmp;
@@ -185,7 +185,7 @@ ssize_t teleport_cycle(teleport_t * teleport, size_t userlimit)
 	return retval;
 }
 
-static inline ssize_t place_to_user(teleport_t * teleport,
+static inline ssize_t place_to_user(struct teleport_s * teleport,
 		size_t * userlimit)
 {
 	ssize_t len = min(*userlimit, teleport->remaining);

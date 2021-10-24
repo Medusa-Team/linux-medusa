@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _MEDUSA_COMM_H
 #define _MEDUSA_COMM_H
 
@@ -41,7 +43,7 @@ typedef uint64_t Mptr_t; // medusa pointer if you want to run effectivly medusa 
 #define MEDUSA_COMM_UPDATE_REQUEST	0x8a	/* c->k */
 #define MEDUSA_COMM_UPDATE_ANSWER	0x0a	/* k->c */
 
-#pragma pack(push,1)
+#pragma pack(push, 1)
 struct medusa_comm_attribute_s {
 	u_int16_t offset;			/* offset of attribute in object */
 	u_int16_t length;			/* bytes consumed by data */
@@ -60,11 +62,12 @@ struct medusa_comm_attribute_s {
 #define	MED_COMM_TYPE_READ_ONLY		0x80	/* this attribute is read-only */
 #define	MED_COMM_TYPE_PRIMARY_KEY	0x40	/* this attribute is used to lookup object */
 /* if it is some data structure with fixed endianness, we determine it by this 2 bits:
- * 0 - endianness by cpu, 1 - unused, 2 - big, 3 - little */
+ * 0 - endianness by cpu, 1 - unused, 2 - big, 3 - little
+ */
 #define MED_COMM_TYPE_LITTLE_ENDIAN	0x30	/* fixed endianness: little */
 #define MED_COMM_TYPE_BIG_ENDIAN	0x20	/* fixed endianness: big */
 
-#pragma pack(push,1)
+#pragma pack(push, 1)
 struct medusa_comm_kclass_s {
 	MCPptr_t kclassid;	/* unique identifier of this kclass */
 	u_int16_t	size;		/* size of object */
@@ -72,7 +75,7 @@ struct medusa_comm_kclass_s {
 };
 #pragma pack(pop)
 
-#pragma pack(push,1)
+#pragma pack(push, 1)
 struct medusa_comm_evtype_s {
 	MCPptr_t evid;
 	u_int16_t	size;

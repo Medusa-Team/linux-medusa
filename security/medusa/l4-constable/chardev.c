@@ -44,7 +44,7 @@
 
 static int user_release(struct inode *inode, struct file *file);
 
-static teleport_t teleport = {
+static struct teleport_s teleport = {
 	.cycle = tpc_HALT,
 };
 
@@ -89,7 +89,7 @@ static struct semaphore queue_items;
 static struct semaphore queue_lock;
 static LIST_HEAD(tele_queue);
 struct tele_item {
-	teleport_insn_t *tele;
+	struct teleport_insn_s *tele;
 	struct list_head list;
 	size_t size;
 	void (*post)(void *arg);
@@ -99,7 +99,7 @@ struct tele_item {
 // free the underlying data structures and clear them in user_close.
 static size_t left_in_teleport;
 static struct tele_item *local_list_item;
-static teleport_insn_t *processed_teleport;
+static struct teleport_insn_s *processed_teleport;
 
 static DEFINE_SEMAPHORE(ls_switch);
 static DEFINE_SEMAPHORE(lock_sem);
@@ -148,8 +148,8 @@ static struct medusa_authserver_s chardev_medusa = {
  */
 static void post_write(void *mem)
 {
-	if (((teleport_insn_t *)mem)[1].args.put32.what == MEDUSA_COMM_FETCH_ANSWER)
-		med_cache_free(((teleport_insn_t *)mem)[4].args.cutnpaste.from);
+	if (((struct teleport_insn_s *)mem)[1].args.put32.what == MEDUSA_COMM_FETCH_ANSWER)
+		med_cache_free(((struct teleport_insn_s *)mem)[4].args.cutnpaste.from);
 	med_cache_free(mem);
 }
 
@@ -175,13 +175,13 @@ static void l4_close_wake(void)
 
 static int l4_add_kclass(struct medusa_kclass_s *cl)
 {
-	teleport_insn_t *tele_mem_kclass;
+	struct teleport_insn_s *tele_mem_kclass;
 	struct tele_item *local_tele_item;
 	int attr_num = 1;
 	struct medusa_attribute_s *attr_ptr;
 
-	tele_mem_kclass = (teleport_insn_t *)
-		med_cache_alloc_size(sizeof(teleport_insn_t) * 5);
+	tele_mem_kclass = (struct teleport_insn_s *)
+		med_cache_alloc_size(sizeof(struct teleport_insn_s) * 5);
 	if (!tele_mem_kclass)
 		return -ENOMEM;
 	local_tele_item = (struct tele_item *)
@@ -233,13 +233,13 @@ static int l4_add_kclass(struct medusa_kclass_s *cl)
 
 static int l4_add_evtype(struct medusa_evtype_s *at)
 {
-	teleport_insn_t *tele_mem_evtype;
+	struct teleport_insn_s *tele_mem_evtype;
 	struct tele_item *local_tele_item;
 	int attr_num = 1;
 	struct medusa_attribute_s *attr_ptr;
 
-	tele_mem_evtype = (teleport_insn_t *)
-		med_cache_alloc_size(sizeof(teleport_insn_t)*5);
+	tele_mem_evtype = (struct teleport_insn_s *)
+		med_cache_alloc_size(sizeof(struct teleport_insn_s)*5);
 	if (!tele_mem_evtype)
 		return -ENOMEM;
 	local_tele_item = (struct tele_item *)
@@ -317,7 +317,7 @@ static medusa_answer_t l4_decide(struct medusa_event_s *event,
 		struct medusa_kobject_s *o1, struct medusa_kobject_s *o2)
 {
 	medusa_answer_t retval;
-	teleport_insn_t *tele_mem_decide;
+	struct teleport_insn_s *tele_mem_decide;
 	struct tele_item *local_tele_item;
 	struct waitlist_item local_waitlist_item;
 
@@ -335,8 +335,8 @@ static medusa_answer_t l4_decide(struct medusa_event_s *event,
 	if (gdb_pid == current->pid)
 		return MED_ALLOW;
 #endif
-	tele_mem_decide = (teleport_insn_t *)
-		med_cache_alloc_size(sizeof(teleport_insn_t)*6);
+	tele_mem_decide = (struct teleport_insn_s *)
+		med_cache_alloc_size(sizeof(struct teleport_insn_s)*6);
 	if (!tele_mem_decide)
 		return MED_ERR;
 
@@ -462,7 +462,7 @@ static ssize_t to_user(void *from, size_t len)
 	return len;
 }
 
-static void decrement_counters(teleport_insn_t *tele)
+static void decrement_counters(struct teleport_insn_s *tele)
 {
 	if (tele[1].opcode == tp_HALT)
 		return;
@@ -635,7 +635,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 {
 	size_t orig_count = count;
 	struct medusa_kclass_s *cl;
-	teleport_insn_t *tele_mem_write;
+	struct teleport_insn_s *tele_mem_write;
 	struct tele_item *local_tele_item;
 	medusa_answer_t answ_result;
 	MCPptr_t recv_type;
@@ -761,7 +761,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			med_cache_free(kclass_buf);
 		}
 		// Dynamic telemem structure for fetch/update
-		tele_mem_write = (teleport_insn_t *) med_cache_alloc_size(sizeof(teleport_insn_t)*6);
+		tele_mem_write = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*6);
 		if (!tele_mem_write)
 			return -ENOMEM;
 		local_tele_item = (struct tele_item *) med_cache_alloc_size(sizeof(struct tele_item));
@@ -854,7 +854,7 @@ static unsigned int user_poll(struct file *filp, poll_table *wait)
 static int user_open(struct inode *inode, struct file *file)
 {
 	int retval = -EPERM;
-	teleport_insn_t *tele_mem_open;
+	struct teleport_insn_s *tele_mem_open;
 	struct tele_item *local_tele_item;
 	struct task_struct *parent;
 
@@ -872,19 +872,19 @@ static int user_open(struct inode *inode, struct file *file)
 		retval = -ENOMEM;
 		goto out;
 	}
-	if (med_cache_register(sizeof(teleport_insn_t)*2)) {
+	if (med_cache_register(sizeof(struct teleport_insn_s)*2)) {
 		retval = -ENOMEM;
 		goto out;
 	}
-	if (med_cache_register(sizeof(teleport_insn_t)*5)) {
+	if (med_cache_register(sizeof(struct teleport_insn_s)*5)) {
 		retval = -ENOMEM;
 		goto out;
 	}
-	if (med_cache_register(sizeof(teleport_insn_t)*6)) {
+	if (med_cache_register(sizeof(struct teleport_insn_s)*6)) {
 		retval = -ENOMEM;
 		goto out;
 	}
-	tele_mem_open = (teleport_insn_t *) med_cache_alloc_size(sizeof(teleport_insn_t)*3);
+	tele_mem_open = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*3);
 	if (!tele_mem_open) {
 		retval = -ENOMEM;
 		goto out;
