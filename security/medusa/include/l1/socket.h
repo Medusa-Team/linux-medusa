@@ -1,4 +1,6 @@
-/* medusa/l1/socket.h, (C) 2019 Michal Zelencik
+/* SPDX-License-Identifier: GPL-2.0 */
+
+/* (C) 2019 Michal Zelencik
  *
  * sock struct extension: this structure is appended to in-kernel data,
  * and we define it separately just to make l1 code shorter.
@@ -14,7 +16,7 @@
 #include "l3/med_model.h"
 #include "l3/constants.h"
 
-#define sock_security(sk) ((struct medusa_l1_socket_s*)(sk->sk_security))
+#define sock_security(sk) ((struct medusa_l1_socket_s *)(sk->sk_security))
 
 struct med_inet6_addr_i {
 	__be16 port;

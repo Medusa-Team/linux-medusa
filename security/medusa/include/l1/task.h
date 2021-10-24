@@ -1,4 +1,6 @@
-/* medusa/l1/inode.h, (C) 2002 Milan Pikula
+/* SPDX-License-Identifier: GPL-2.0 */
+
+/* (C) 2002 Milan Pikula
  *
  * task-struct extension: this structure is appended to in-kernel data,
  * and we define it separately just to make l1 code shorter.
@@ -20,20 +22,17 @@ extern enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 extern enum medusa_answer_t medusa_capable(int cap);
 extern enum medusa_answer_t medusa_fork(unsigned long clone_flags);
 extern enum medusa_answer_t medusa_init_process(struct task_struct *new);
-extern enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info,
-		struct task_struct *p);
-extern enum medusa_answer_t medusa_afterexec(char *filename, char **argv,
-		char **envp);
+extern enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task_struct *p);
+extern enum medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp);
 extern int medusa_monitored_pexec(void);
 extern void medusa_monitor_pexec(int flag);
 extern int medusa_monitored_afterexec(void);
 extern void medusa_monitor_afterexec(int flag);
-extern enum medusa_answer_t medusa_sexec(struct linux_binprm * bprm);
-extern enum medusa_answer_t medusa_ptrace(struct task_struct * tracer,
-		struct task_struct * tracee);
-extern void medusa_kernel_thread(int (*fn) (void *));
+extern enum medusa_answer_t medusa_sexec(struct linux_binprm *bprm);
+extern enum medusa_answer_t medusa_ptrace(struct task_struct *tracer, struct task_struct *tracee);
+extern void medusa_kernel_thread(int (*fn)(void *));
 
-extern int process_kobj_validate_task(struct task_struct * ts);
+extern int process_kobj_validate_task(struct task_struct *ts);
 
 /* Struct task extension: this structure is appended to in-kernel data,
  * and we define it separately just to make l1 code shorter.
@@ -46,7 +45,7 @@ struct medusa_l1_task_s {
 	kuid_t luid;
 	struct medusa_subject_s med_subject;
 	struct medusa_object_s med_object;
-        char cmdline[128];
+	char cmdline[128];
 #ifdef CONFIG_MEDUSA_FORCE
 	void *force_code;       /* code to force or NULL, kfree */
 	int force_len;          /* force code length */

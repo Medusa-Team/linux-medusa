@@ -1,4 +1,6 @@
-/* medusa/l1/ipc.h, (C) 2018 Viliam Mihalik
+/* SPDX-License-Identifier: GPL-2.0 */
+
+/* (C) 2018 Viliam Mihalik
  *
  * IPC struct extension: this structure is appended to in-kernel data,
  * and we define it separately just to make l1 code shorter.
@@ -27,7 +29,7 @@
  * access to IPC Medusa security context
  */
 extern struct lsm_blob_sizes medusa_blob_sizes;
-#define ipc_security(ipc) ((struct medusa_l1_ipc_s*)(ipc->security + medusa_blob_sizes.lbs_ipc))
+#define ipc_security(ipc) ((struct medusa_l1_ipc_s *)(ipc->security + medusa_blob_sizes.lbs_ipc))
 
 /**
  * struct medusa_l1_ipc_s - security struct for System V IPC objects (sem, msg, shm)
@@ -44,7 +46,7 @@ struct medusa_l1_ipc_s {
 extern enum medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms);
 extern enum medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd);
 extern enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag);
-extern enum medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops, unsigned nsops, int alter);
+extern enum medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops, unsigned int nsops, int alter);
 extern enum medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmaddr, int shmflg);
 extern enum medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *msg, int msgflg);
 extern enum medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *msg, struct task_struct *target, long type, int mode);

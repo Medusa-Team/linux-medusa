@@ -1,4 +1,5 @@
-/* medusa/l1/fuck.h, (C) 2002 Milan Pikula */
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _MEDUSA_L1_FUCK_H
 #define _MEDUSA_L1_FUCK_H
 
@@ -9,7 +10,7 @@
 
 int validate_fuck_link(struct dentry *old_dentry);
 int validate_fuck(const struct path *fuck_path);
-int fuck_free(struct medusa_l1_inode_s* med);
+int fuck_free(struct medusa_l1_inode_s *med);
 
 #endif
 
