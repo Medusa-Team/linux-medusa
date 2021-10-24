@@ -1,4 +1,4 @@
-/* kobject_fuck.c, (C) 2002 Milan Pikula */
+/* SPDX-License-Identifier: GPL-2.0 */
 
 #include "l3/kobject.h"
 #include "l1/inode.h"

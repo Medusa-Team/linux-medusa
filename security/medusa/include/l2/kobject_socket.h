@@ -1,7 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _SOCKET_KOBJECT_H
 #define _SOCKET_KOBJECT_H
 
-//#include <linux/socket.h>
 #include <net/ipv6.h>
 #include "l3/kobject.h"
 #include "l1/socket.h"
@@ -21,8 +22,8 @@ struct socket_kobject {
 extern MED_DECLARE_KCLASSOF(socket_kobject);
 
 /* the conversion routines */
-int socket_kobj2kern(struct socket_kobject * sock_kobj, struct socket * sock);
-int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock);
+int socket_kobj2kern(struct socket_kobject *sock_kobj, struct socket *sock);
+int socket_kern2kobj(struct socket_kobject *sock_kobj, struct socket *sock);
 
 struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj);
 enum medusa_answer_t socket_update(struct medusa_kobject_s *kobj);

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 /* inode_kobject.h, (C) 2002 Milan Pikula
  *
  * FILE kobject: this file defines the kobject structure for inode, e.g.
@@ -53,16 +55,16 @@ struct file_sub_kobject { /* the 'subject' view... */
 extern MED_DECLARE_KCLASSOF(file_sub_kobject);
 
 /* the conversion routines */
-int file_kobj2kern(struct file_kobject * fk, struct inode * inode);
-int file_kern2kobj(struct file_kobject * fk, struct inode * inode);
+int file_kobj2kern(struct file_kobject *fk, struct inode *inode);
+int file_kern2kobj(struct file_kobject *fk, struct inode *inode);
 
 /* we want to keep a cache of "live" inodes - the ones which participate
  * on some access right now
  */
-void file_kobj_live_add(struct inode * ino);
-void file_kobj_live_remove(struct inode * ino);
+void file_kobj_live_add(struct inode *ino);
+void file_kobj_live_remove(struct inode *ino);
 
 /* conversion beteween filename (stored in dentry) and static buffer */
-void file_kobj_dentry2string(struct dentry * dentry, char * buf);
+void file_kobj_dentry2string(struct dentry *dentry, char *buf);
 
 #endif
