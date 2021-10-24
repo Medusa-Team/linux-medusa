@@ -27,6 +27,7 @@
 #define GDB_HACK
 
 /* TODO: Check the calls to l3; they can't be called from a lock. */
+#include <linux/module.h>
 #include <linux/semaphore.h>
 #include <linux/sched/signal.h>
 #include <linux/device.h>

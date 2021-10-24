@@ -1,5 +1,6 @@
 /* kobject_printk.c, (C) 2002 Milan Pikula */
 
+#include <linux/module.h>
 #include "l3/registry.h"
 
 struct printk_kobject {

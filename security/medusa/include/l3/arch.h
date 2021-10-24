@@ -62,12 +62,4 @@
 #include <linux/interrupt.h>
 #define ARCH_CANNOT_DECIDE(x) (!in_task() || current->pid == 0)
 
-/* linkage */ /* FIXME: is this needed? */
-#include <linux/module.h>
-
-#define MEDUSA_EXPORT_SYMBOL(symname) EXPORT_SYMBOL(x)
-#define MEDUSA_INIT_FUNC(symname) module_init(symname)
-#define MEDUSA_EXIT_FUNC(symname) module_exit(symname)
-#define MEDUSA_KETCHUP MODULE_LICENSE("GPL");
-
 #endif

@@ -11,6 +11,7 @@
 /* And as it isn't really necessary, it's a perfect example of loadable L2
  * module.
  */
+#include <linux/module.h>
 #include <linux/sched/task.h>
 #include <linux/mm.h>
 #include "l3/registry.h"
