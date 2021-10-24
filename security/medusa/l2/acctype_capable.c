@@ -25,11 +25,11 @@ int __init capable_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_capable(int cap)
+enum medusa_answer_t medusa_capable(int cap)
 {
 	struct capable_access access;
 	struct process_kobject process;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct capable_access));
         /* process_kobject process is zeroed by process_kern2kobj function */

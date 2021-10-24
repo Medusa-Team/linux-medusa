@@ -24,7 +24,7 @@ int __init socket_create_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_socket_create(int family, int type, int protocol)
+enum medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 {
 	struct socket_create_access access;
 	struct process_kobject process;

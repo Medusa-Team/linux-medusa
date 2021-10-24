@@ -366,10 +366,10 @@ out_err:
  *
  * Return: value < 0 on error, zero otherwise.
  */
-static medusa_answer_t process_update(struct medusa_kobject_s *kobj)
+static enum medusa_answer_t process_update(struct medusa_kobject_s *kobj)
 {
 	struct task_struct *p;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
 	rcu_read_lock();
 	/* Find task_struct based on pid in global (i.e. init) namespace */

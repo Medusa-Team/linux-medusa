@@ -19,7 +19,7 @@ int __init socket_evtype_init(void) {
 	return 0;
 }
 
-medusa_answer_t socket_kobj_validate(struct socket *sock) {
+enum medusa_answer_t socket_kobj_validate(struct socket *sock) {
 	struct socket_event event;
 	struct socket_kobject sock_kobj;
 	struct medusa_l1_socket_s *sk_sec;

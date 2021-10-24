@@ -57,11 +57,11 @@ int __init ipc_acctype_semop_init(void)
  *  |
  *  |<-- do_semtimedop()
  */
-medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp,
+enum medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 				 struct sembuf *sops, unsigned int nsops,
 				 int alter)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct ipc_semop_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;

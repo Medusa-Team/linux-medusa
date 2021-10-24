@@ -20,9 +20,9 @@ int __init fork_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_fork(unsigned long clone_flags)
+enum medusa_answer_t medusa_fork(unsigned long clone_flags)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct fork_access access;
 	struct process_kobject parent;
 

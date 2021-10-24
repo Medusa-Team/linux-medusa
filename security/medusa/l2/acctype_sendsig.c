@@ -21,9 +21,9 @@ int __init sendsig_acctype_init(void) {
 }
 /* TODO: add the same type, triggered at OBJECT */
 
-medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task_struct *p)
+enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task_struct *p)
 {
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 	struct send_signal access;
 	struct process_kobject sender;
 	struct process_kobject receiver;

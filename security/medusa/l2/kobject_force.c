@@ -25,10 +25,10 @@ MED_ATTRS(force_kobject) {
 	MED_ATTR_END
 };
 
-static medusa_answer_t force_update(struct medusa_kobject_s * kobj)
+static enum medusa_answer_t force_update(struct medusa_kobject_s * kobj)
 {
 	struct task_struct * p;
-	medusa_answer_t retval = MED_ERR;
+	enum medusa_answer_t retval = MED_ERR;
 	char * buf;
 
 	/* kmalloc() with GFP_KERNEL may sleep; it can't be in RCU */

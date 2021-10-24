@@ -16,7 +16,7 @@ static struct medusa_kobject_s *printk_fetch(struct medusa_kobject_s *key_obj)
 {
 	return NULL;
 }
-static medusa_answer_t printk_update(struct medusa_kobject_s *kobj)
+static enum medusa_answer_t printk_update(struct medusa_kobject_s *kobj)
 {
 	((struct printk_kobject *) kobj)->message[sizeof(((struct printk_kobject *) kobj)->message)-1] = '\0';
 	med_pr_info("%s", ((struct printk_kobject *) kobj)->message);

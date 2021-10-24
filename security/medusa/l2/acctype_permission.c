@@ -24,16 +24,16 @@ int __init permission_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inode, int mask);
+enum medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inode, int mask);
 /**
  * medusa_permission - L1-called code to create access of type 'permission'.
  * @inode: input inode for permission() call
  * @mask: mask of access rights to validate
  *
  */
-medusa_answer_t medusa_permission(struct inode *inode, int mask)
+enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct dentry *dentry;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
@@ -64,12 +64,12 @@ out_dput:
 	return retval;
 }
 
-medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inode, int mask)
+enum medusa_answer_t medusa_do_permission(struct dentry * dentry, struct inode * inode, int mask)
 {
 	struct permission_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct permission_access));
         /* process_kobject process is zeroed by process_kern2kobj function */

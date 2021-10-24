@@ -37,11 +37,11 @@ int __init exec_acctype_init(void) {
 	return 0;
 }
 
-static medusa_answer_t medusa_do_fexec(struct dentry * dentry);
-static medusa_answer_t medusa_do_pexec(struct dentry * dentry);
-medusa_answer_t medusa_exec(struct dentry ** dentryp)
+static enum medusa_answer_t medusa_do_fexec(struct dentry * dentry);
+static enum medusa_answer_t medusa_do_pexec(struct dentry * dentry);
+enum medusa_answer_t medusa_exec(struct dentry ** dentryp)
 {
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
 	if (!*dentryp || IS_ERR(*dentryp) || !(*dentryp)->d_inode)
 		return MED_ALLOW;
@@ -70,12 +70,12 @@ medusa_answer_t medusa_exec(struct dentry ** dentryp)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_fexec(struct dentry * dentry)
+static enum medusa_answer_t medusa_do_fexec(struct dentry * dentry)
 {
 	struct exec_faccess access;
 	struct process_kobject process;
 	struct file_kobject file;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct exec_faccess));
         /* process_kobject process is zeroed by process_kern2kobj function */
@@ -91,12 +91,12 @@ static medusa_answer_t medusa_do_fexec(struct dentry * dentry)
 		return retval;
 	return MED_ALLOW;
 }
-static medusa_answer_t medusa_do_pexec(struct dentry *dentry)
+static enum medusa_answer_t medusa_do_pexec(struct dentry *dentry)
 {
 	struct exec_paccess access;
 	struct process_kobject process;
 	struct file_kobject file;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
 	file_kobj_dentry2string(dentry, access.filename);
 	process_kern2kobj(&process, current);

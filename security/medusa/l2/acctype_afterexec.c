@@ -24,11 +24,11 @@ int __init afterexec_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
+enum medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 {
 	struct afterexec_access access;
 	struct process_kobject process;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct afterexec_access));
         /* process_kobject process is zeroed by process_kern2kobj function */

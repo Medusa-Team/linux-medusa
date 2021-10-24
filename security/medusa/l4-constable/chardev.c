@@ -73,7 +73,7 @@ static atomic_t announce_ready = ATOMIC_INIT(0);
 static atomic_t questions = ATOMIC_INIT(0);
 static atomic_t questions_waiting = ATOMIC_INIT(0);
 /* and the answer */
-static medusa_answer_t user_answer = MED_ERR;
+static enum medusa_answer_t user_answer = MED_ERR;
 static DEFINE_SEMAPHORE(waitlist_sem);
 static LIST_HEAD(answer_waitlist);
 struct waitlist_item {
@@ -126,7 +126,7 @@ static pid_t gdb_pid = -1;
  * kernel-space interface
  */
 
-static medusa_answer_t l4_decide(struct medusa_event_s *event,
+static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		struct medusa_kobject_s *o1,
 		struct medusa_kobject_s *o2);
 static int l4_add_kclass(struct medusa_kclass_s *cl);
@@ -314,10 +314,10 @@ static inline void ls_unlock(struct lightswitch *ls, struct semaphore *sem)
  * eating one processor by a constable... ;) One can imagine
  * the performance improvement, and buy one more CPU in advance :)
  */
-static medusa_answer_t l4_decide(struct medusa_event_s *event,
+static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		struct medusa_kobject_s *o1, struct medusa_kobject_s *o2)
 {
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 	struct teleport_insn_s *tele_mem_decide;
 	struct tele_item *local_tele_item;
 	struct waitlist_item local_waitlist_item;
@@ -638,7 +638,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	struct medusa_kclass_s *cl;
 	struct teleport_insn_s *tele_mem_write;
 	struct tele_item *local_tele_item;
-	medusa_answer_t answ_result;
+	enum medusa_answer_t answ_result;
 	MCPptr_t recv_type;
 	MCPptr_t answ_kclassid = 0;
 	struct medusa_kobject_s *answ_kobj = NULL;

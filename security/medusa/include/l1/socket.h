@@ -47,18 +47,18 @@ struct medusa_l1_socket_s {
 	union MED_ADDRESS address;
 };
 
-extern medusa_answer_t medusa_socket_create(int family, int type, int protocol);
-extern medusa_answer_t medusa_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen);
-extern medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen);
-extern medusa_answer_t medusa_socket_listen(struct socket *sock, int backlog);
-extern medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *newsock);
-extern medusa_answer_t medusa_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size);
-extern medusa_answer_t medusa_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags);
+extern enum medusa_answer_t medusa_socket_create(int family, int type, int protocol);
+extern enum medusa_answer_t medusa_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen);
+extern enum medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen);
+extern enum medusa_answer_t medusa_socket_listen(struct socket *sock, int backlog);
+extern enum medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *newsock);
+extern enum medusa_answer_t medusa_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size);
+extern enum medusa_answer_t medusa_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags);
 /*
  * The following routine makes a support for many of access types,
  * and it is used both in L1 and L2 code. It is defined in
  * l2/evtype_getsocket.c.
  */
-extern medusa_answer_t socket_kobj_validate(struct socket *sock);
+extern enum medusa_answer_t socket_kobj_validate(struct socket *sock);
 
 #endif

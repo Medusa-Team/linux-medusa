@@ -41,19 +41,19 @@ struct medusa_l1_ipc_s {
 	struct medusa_object_s med_object;
 };
 
-extern medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms);
-extern medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd);
-extern medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag);
-extern medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops, unsigned nsops, int alter);
-extern medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmaddr, int shmflg);
-extern medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *msg, int msgflg);
-extern medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *msg, struct task_struct *target, long type, int mode);
+extern enum medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms);
+extern enum medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd);
+extern enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag);
+extern enum medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops, unsigned nsops, int alter);
+extern enum medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmaddr, int shmflg);
+extern enum medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *msg, int msgflg);
+extern enum medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *msg, struct task_struct *target, long type, int mode);
 
 /*
  * The following routine makes a support for many of access types,
  * and it is used both in L1 and L2 code. It is defined in
  * l2/evtype_getipc.c.
  */
-extern medusa_answer_t ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp);
+extern enum medusa_answer_t ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp);
 
 #endif // _MEDUSA_L1_IPC_H

@@ -8,19 +8,19 @@
 
 MED_DECLARE_LOCK_DATA(registry_lock);
 
-inline int is_authserver_reached(medusa_answer_t answer)
+inline int is_authserver_reached(enum medusa_answer_t answer)
 {
 	return (answer != MED_ERR);
 }
 
-inline int is_supported_medusa_answer(medusa_answer_t answer)
+inline int is_supported_medusa_answer(enum medusa_answer_t answer)
 {
 	return (answer == MED_ALLOW || answer == MED_DENY);
 }
 
-medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event, void *o1, void *o2)
+enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event, void *o1, void *o2)
 {
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 	struct medusa_authserver_s * authserver;
 
 	if (ARCH_CANNOT_DECIDE(evtype))

@@ -20,20 +20,20 @@
 
 /* prototypes of L2 file related handlers called from L1 hooks */
 
-extern medusa_answer_t medusa_exec(struct dentry ** dentryp);
-extern medusa_answer_t medusa_create(struct dentry * dentry, int mode);
-extern medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry);
-extern medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length);
-extern medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dentry, int mode);
-extern medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode);
-extern medusa_answer_t medusa_permission(struct inode * inode, int mask);
-extern medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry);
-extern medusa_answer_t medusa_symlink(struct dentry *dentry,
+extern enum medusa_answer_t medusa_exec(struct dentry ** dentryp);
+extern enum medusa_answer_t medusa_create(struct dentry * dentry, int mode);
+extern enum medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry);
+extern enum medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length);
+extern enum medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dentry, int mode);
+extern enum medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode);
+extern enum medusa_answer_t medusa_permission(struct inode * inode, int mask);
+extern enum medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry);
+extern enum medusa_answer_t medusa_symlink(struct dentry *dentry,
 		const char * oldname);
-extern medusa_answer_t medusa_unlink(struct dentry *dentry);
-extern medusa_answer_t medusa_link(struct dentry *dentry, const char * newname);
-extern medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname);
-extern medusa_answer_t medusa_readlink(struct dentry *dentry);
+extern enum medusa_answer_t medusa_unlink(struct dentry *dentry);
+extern enum medusa_answer_t medusa_link(struct dentry *dentry, const char * newname);
+extern enum medusa_answer_t medusa_rename(struct dentry *dentry, const char * newname);
+extern enum medusa_answer_t medusa_readlink(struct dentry *dentry);
 
 /* the following routines are a support for many of access types,
  * and they're used both in L1 and L2 code. They're defined in
@@ -45,10 +45,10 @@ extern void medusa_get_upper_and_parent(struct path * ndsource,
 		struct path * ndupperp, struct path * ndparentp);
 extern void medusa_put_upper_and_parent(struct path * ndupper, struct path * ndparent);
 extern struct vfsmount * medusa_evocate_mnt(struct dentry *dentry);
-extern medusa_answer_t medusa_notify_change(struct dentry *dentry, struct iattr * attr);
+extern enum medusa_answer_t medusa_notify_change(struct dentry *dentry, struct iattr * attr);
 
-extern medusa_answer_t medusa_read(struct file * file);
-extern medusa_answer_t medusa_write(struct file * file);
+extern enum medusa_answer_t medusa_read(struct file * file);
+extern enum medusa_answer_t medusa_write(struct file * file);
 
 /* Struct inode extension: this structure is appended to in-kernel data,
  * and we define it separately just to make l1 code shorter.

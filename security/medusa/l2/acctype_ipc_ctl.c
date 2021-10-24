@@ -74,9 +74,9 @@ int __init ipc_acctype_ctl_init(void)
  *              |<-- shmctl_shm_info() (@ipcp is NULL, no rcu_read_lock())
  *              |<-- shmctl_ipc_info() (@ipcp is NULL, no rcu_read_lock())
  */
-medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
+enum medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct ipc_ctl_access access;
 	struct process_kobject process;
 	struct ipc_kobject object, *object_p = NULL;

@@ -26,11 +26,11 @@ int __init setresuid_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 {
 	struct setresuid access;
 	struct process_kobject process;
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 
         memset(&access, '\0', sizeof(struct setresuid));
         /* process_kobject process is zeroed by process_kern2kobj function */

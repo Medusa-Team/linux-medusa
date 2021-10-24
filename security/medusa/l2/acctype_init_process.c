@@ -17,9 +17,9 @@ int __init init_process_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_init_process(struct task_struct *new)
+enum medusa_answer_t medusa_init_process(struct task_struct *new)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct init_process access;
 	struct process_kobject process;
 	struct process_kobject parent;

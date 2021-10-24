@@ -24,8 +24,8 @@ int __init link_acctype_init(void) {
 	return 0;
 }
 
-static medusa_answer_t medusa_do_link(struct dentry *dentry, const char * newname);
-medusa_answer_t medusa_link(struct dentry *dentry, const char * newname)
+static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char * newname);
+enum medusa_answer_t medusa_link(struct dentry *dentry, const char * newname)
 {
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
 		return MED_ALLOW;
@@ -48,12 +48,12 @@ medusa_answer_t medusa_link(struct dentry *dentry, const char * newname)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_link(struct dentry *dentry, const char * newname)
+static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char * newname)
 {
 	struct link_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
         int newnamelen;
 
         memset(&access, '\0', sizeof(struct link_access));

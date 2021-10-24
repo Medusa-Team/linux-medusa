@@ -38,13 +38,13 @@ int __init sexec_acctype_init(void) {
  * @mask: mask of access rights to validate
  *
  */
-static medusa_answer_t medusa_do_sexec(struct linux_binprm * bprm);
+static enum medusa_answer_t medusa_do_sexec(struct linux_binprm * bprm);
 
 #define DENTRY (bprm->file->f_path.dentry)
 
-medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
+enum medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
@@ -59,12 +59,12 @@ medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
 	return retval;
 }
 
-static medusa_answer_t medusa_do_sexec(struct linux_binprm *bprm)
+static enum medusa_answer_t medusa_do_sexec(struct linux_binprm *bprm)
 {
 	struct sexec_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct sexec_access));
         /* process_kobject process is zeroed by process_kern2kobj function */

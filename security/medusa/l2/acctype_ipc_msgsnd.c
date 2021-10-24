@@ -58,10 +58,10 @@ int __init ipc_acctype_msgsnd_init(void)
  *  |
  *  |<-- do_msgsnd() (always get ipcp->lock)
  */
-medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
+enum medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
 				  struct msg_msg *msg, int msgflg)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct ipc_msgsnd_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;

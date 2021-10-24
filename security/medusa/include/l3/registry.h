@@ -44,7 +44,7 @@ extern void med_unregister_evtype(struct medusa_evtype_s *med_evtype);
  *	MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT (the ... subject)
  */
 
-extern medusa_answer_t med_decide(struct medusa_evtype_s *acctype, void * access, void *o1, void *o2);
+extern enum medusa_answer_t med_decide(struct medusa_evtype_s *, void *, void *, void *);
 #define MED_DECIDE(structname,arg1,arg2,arg3) \
 		med_decide(&MED_EVTYPEOF(structname), arg1, arg2, arg3)
 

@@ -191,10 +191,10 @@ static void file_unmonitor(struct medusa_kobject_s * kobj)
 	__unlookup();
 }
 
-static medusa_answer_t file_update(struct medusa_kobject_s * kobj)
+static enum medusa_answer_t file_update(struct medusa_kobject_s * kobj)
 {
 	struct inode * p;
-	medusa_answer_t retval = MED_ERR;
+	enum medusa_answer_t retval = MED_ERR;
 
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
 	if (p) {

@@ -19,7 +19,7 @@ int __init socket_listen_access_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_socket_listen(struct socket *sock, int backlog)
+enum medusa_answer_t medusa_socket_listen(struct socket *sock, int backlog)
 {
 	struct socket_listen_access access;
 	struct process_kobject process;

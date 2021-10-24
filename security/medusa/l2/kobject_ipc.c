@@ -128,7 +128,7 @@ inline struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject * ipc_kobj, struct k
  *
  * For now, it is called only from ipc_kobject update() operation.
  */
-static inline medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp)
+static inline enum medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp)
 {
 	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
 		med_pr_err("ERROR: NULL pointer: ipc_kobj2kern: ipc_kobj=%p or ipcp=%p", \
@@ -195,12 +195,12 @@ out_err:
  *	IPC object
  * Return: MED_ALLOW if successfull, MED_ERR otherwise
  */
-medusa_answer_t ipc_update(struct medusa_kobject_s * kobj)
+enum medusa_answer_t ipc_update(struct medusa_kobject_s * kobj)
 {
 	struct ipc_kobject *ipc_kobj;
 	struct kern_ipc_perm *ipcp;
 	struct ipc_ids *ids;
-	medusa_answer_t retval = MED_ERR;
+	enum medusa_answer_t retval = MED_ERR;
 
 	ipc_kobj = (struct ipc_kobject *)kobj;
 	if (!ipc_kobj)

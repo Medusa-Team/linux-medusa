@@ -61,9 +61,9 @@ int __init ipc_acctype_perm_init(void)
  *        |<-- semctl_stat()
  *        |<-- semctl_setval()
  */
-medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
+enum medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct ipc_perm_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;

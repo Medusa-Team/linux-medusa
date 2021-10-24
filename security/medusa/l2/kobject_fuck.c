@@ -146,7 +146,7 @@ static struct medusa_kobject_s * fuck_fetch(struct medusa_kobject_s * kobj)
  *					  - unable to get info about file specified by dev/ino numbers
  *					  - memory allocation error
  */
-static medusa_answer_t fuck_update(struct medusa_kobject_s * kobj)
+static enum medusa_answer_t fuck_update(struct medusa_kobject_s * kobj)
 {
 	struct fuck_kobject * fkobj =  (struct fuck_kobject *) kobj;
 	struct super_block *sb;

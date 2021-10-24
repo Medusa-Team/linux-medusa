@@ -23,12 +23,12 @@ int __init socket_bind_access_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_socket_bind_security(struct socket *sock, struct socket_bind_access *access)
+enum medusa_answer_t medusa_socket_bind_security(struct socket *sock, struct socket_bind_access *access)
 {
 	struct process_kobject process;
 	struct socket_kobject sock_kobj;
 	struct medusa_l1_socket_s *sk_sec = sock_security(sock->sk);
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
@@ -66,7 +66,7 @@ medusa_answer_t medusa_socket_bind_security(struct socket *sock, struct socket_b
 	return MED_ALLOW;
 }
 
-medusa_answer_t medusa_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
+enum medusa_answer_t medusa_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
 {
 	const int family = sock->sk->sk_family;
 	struct socket_bind_access access;

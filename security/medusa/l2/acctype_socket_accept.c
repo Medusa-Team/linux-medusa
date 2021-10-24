@@ -18,7 +18,7 @@ int __init socket_accept_access_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *newsock)
+enum medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *newsock)
 {
 	struct socket_accept_access access;
 	struct process_kobject process;

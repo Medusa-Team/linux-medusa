@@ -113,7 +113,7 @@ struct vfsmount * medusa_evocate_mnt(struct dentry *dentry)
 	return mntget(init_task.fs->root.mnt);
 }
 
-static medusa_answer_t do_file_kobj_validate_dentry(struct path * ndcurrent,
+static enum medusa_answer_t do_file_kobj_validate_dentry(struct path * ndcurrent,
 		struct path * ndupper, struct path * ndparent);
 
 void medusa_get_upper_and_parent(struct path * ndsource,
@@ -231,13 +231,13 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	return -1;
 }
 
-static medusa_answer_t do_file_kobj_validate_dentry(struct path* ndcurrent,
+static enum medusa_answer_t do_file_kobj_validate_dentry(struct path* ndcurrent,
 		struct path* ndupper, struct path* ndparent)
 {
 	struct getfile_event event;
 	struct file_kobject file;
 	struct file_kobject directory;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&event, '\0', sizeof(struct getfile_event));
         /* process_kobject file is zeroed by file_kern2kobj function */

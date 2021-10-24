@@ -28,7 +28,7 @@ MED_EVTYPE(getprocess_event, "getprocess", process_kobject, "process",
  */
 int process_kobj_validate_task(struct task_struct * ts)
 {
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 	struct getprocess_event event;
 	struct process_kobject proc;
 

@@ -26,11 +26,11 @@ int __init mknod_acctype_init(void) {
 	return 0;
 }
 
-static medusa_answer_t medusa_do_mknod(struct dentry *parent, struct dentry *dentry, dev_t dev, int mode);
-medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
+static enum medusa_answer_t medusa_do_mknod(struct dentry *parent, struct dentry *dentry, dev_t dev, int mode);
+enum medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 {
 	struct path ndcurrent, ndupper, ndparent;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
 	if (!dentry || IS_ERR(dentry))
 		return MED_ALLOW;
@@ -62,12 +62,12 @@ medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_mknod(struct dentry *parent, struct dentry *dentry, dev_t dev, int mode)
+static enum medusa_answer_t medusa_do_mknod(struct dentry *parent, struct dentry *dentry, dev_t dev, int mode)
 {
 	struct mknod_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct mknod_access));
         /* process_kobject process is zeroed by process_kern2kobj function */

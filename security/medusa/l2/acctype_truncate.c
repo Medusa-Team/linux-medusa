@@ -24,8 +24,8 @@ int __init truncate_acctype_init(void) {
 	return 0;
 }
 
-static medusa_answer_t medusa_do_truncate(struct dentry *dentry, unsigned long length);
-medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length)
+static enum medusa_answer_t medusa_do_truncate(struct dentry *dentry, unsigned long length);
+enum medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length)
 {
 	if (!dentry || IS_ERR(dentry) || !dentry->d_inode)
 		return MED_ALLOW;
@@ -46,12 +46,12 @@ medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_truncate(struct dentry *dentry, unsigned long length)
+static enum medusa_answer_t medusa_do_truncate(struct dentry *dentry, unsigned long length)
 {
 	struct truncate_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct truncate_access));
         /* process_kobject process is zeroed by process_kern2kobj function */

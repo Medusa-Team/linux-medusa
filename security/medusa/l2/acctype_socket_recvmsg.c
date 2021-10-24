@@ -21,7 +21,7 @@ int __init socket_recvmsg_access_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags)
+enum medusa_answer_t medusa_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags)
 {
 	int addrlen = msg->msg_namelen;
 	void *address = msg->msg_name;

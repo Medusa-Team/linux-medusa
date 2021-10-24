@@ -24,7 +24,7 @@ int __init socket_connect_access_init(void) {
 }
 
 
-medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen)
+enum medusa_answer_t medusa_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen)
 {
 	struct socket_connect_access access;
 	struct process_kobject process;

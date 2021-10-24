@@ -40,7 +40,7 @@ int __init syscall_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t asmlinkage medusa_syscall_i386(
+enum medusa_answer_t asmlinkage medusa_syscall_i386(
 	unsigned int eax,  /* in: syscall #, out: retval */
 	struct task_struct *curr,
 	volatile unsigned int p1,
@@ -49,7 +49,7 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
 	volatile unsigned int p4,
 	volatile unsigned int p5)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct syscall_access access;
 	struct process_kobject proc;
 

@@ -30,7 +30,7 @@ int __init ipc_evtype_init(void) {
  * to decrease it; of course not in ipcp->refcount, but in its copy in ipc_kobject
  */
 int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp) {
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 	struct ipc_event event;
 	struct ipc_kobject sender;
 

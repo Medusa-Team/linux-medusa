@@ -11,7 +11,7 @@
  * @file: file to read
  *
  */
-medusa_answer_t medusa_read(struct file *file)
+enum medusa_answer_t medusa_read(struct file *file)
 {
 	struct dentry *dentry;
 
@@ -40,7 +40,7 @@ medusa_answer_t medusa_read(struct file *file)
  * @file: file to write
  *
  */
-medusa_answer_t medusa_write(struct file *file)
+enum medusa_answer_t medusa_write(struct file *file)
 {
 	struct dentry *dentry;
 

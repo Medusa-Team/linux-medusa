@@ -23,8 +23,8 @@ int __init unlink_acctype_init(void) {
 	return 0;
 }
 
-static medusa_answer_t medusa_do_unlink(struct dentry *dentry);
-medusa_answer_t medusa_unlink(struct dentry *dentry)
+static enum medusa_answer_t medusa_do_unlink(struct dentry *dentry);
+enum medusa_answer_t medusa_unlink(struct dentry *dentry)
 {
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
 		return MED_ALLOW;
@@ -47,12 +47,12 @@ medusa_answer_t medusa_unlink(struct dentry *dentry)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_unlink(struct dentry *dentry)
+static enum medusa_answer_t medusa_do_unlink(struct dentry *dentry)
 {
 	struct unlink_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct unlink_access));
         /* process_kobject process is zeroed by process_kern2kobj function */

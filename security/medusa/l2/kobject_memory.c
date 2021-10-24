@@ -32,7 +32,7 @@ MED_ATTRS(memory_kobject) {
 };
 
 static struct medusa_kobject_s * memory_fetch(struct medusa_kobject_s *);
-static medusa_answer_t memory_update(struct medusa_kobject_s *);
+static enum medusa_answer_t memory_update(struct medusa_kobject_s *);
 
 MED_KCLASS(memory_kobject) {
 	MEDUSA_KCLASS_HEADER(memory_kobject),
@@ -103,7 +103,7 @@ static struct medusa_kobject_s *memory_fetch(struct medusa_kobject_s *key_obj)
 	return key_obj;
 }
 
-static medusa_answer_t memory_update(struct medusa_kobject_s *kobj)
+static enum medusa_answer_t memory_update(struct medusa_kobject_s *kobj)
 {
 	int ret;
 	struct task_struct *p;

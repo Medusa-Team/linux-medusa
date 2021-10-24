@@ -83,7 +83,7 @@ struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 	return NULL;
 }
 
-medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
+enum medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
 {
 	struct socket *sock;
 	struct inode *inode = NULL;

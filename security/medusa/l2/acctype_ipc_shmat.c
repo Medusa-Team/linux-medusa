@@ -48,10 +48,10 @@ int __init ipc_acctype_shmat_init(void)
  *  |
  *  |<-- do_shmat()
  */
-medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
+enum medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
 				 char __user *shmaddr, int shmflg)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct ipc_shmat_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;

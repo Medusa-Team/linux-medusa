@@ -53,9 +53,9 @@ int __init ipc_acctype_associate_init(void)
  *       is always called with ipcp->lock held
  *
  */
-medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
+enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct ipc_associate_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;

@@ -51,7 +51,7 @@ struct medusa_authserver_s {
 	 * May sleep. I hope.
 	 */
 
-	medusa_answer_t (*decide)(struct medusa_event_s *req,
+	enum medusa_answer_t (*decide)(struct medusa_event_s *req,
 		struct medusa_kobject_s *o1,
 		struct medusa_kobject_s *o2);
 };

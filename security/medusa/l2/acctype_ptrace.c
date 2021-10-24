@@ -21,12 +21,12 @@ int __init ptrace_acctype_init(void) {
 	return 0;
 }
 
-medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * tracee)
+enum medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * tracee)
 {
 	struct ptrace_access access;
 	struct process_kobject tracer_p;
 	struct process_kobject tracee_p;
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 
         memset(&access, '\0', sizeof(struct ptrace_access));
         /* process_kobject tracer_p is zeroed by process_kern2kobj function */
