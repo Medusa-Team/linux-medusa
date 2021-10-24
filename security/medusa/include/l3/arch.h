@@ -51,11 +51,6 @@
 #define med_pr_devel(fmt, ...) pr_devel("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
 #endif
 
-/* u_intX_t */
-#include "l3/arch_types.h"
-
-/* memcpy */
-
 /* non-atomic bit set/clear/test operations */
 #include <linux/bitmap.h>
 #define MED_SET_BIT(bitnr, ptr) set_bit((bitnr), (ptr).pack)
