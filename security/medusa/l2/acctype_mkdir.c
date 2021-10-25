@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_file.h"
@@ -11,20 +13,42 @@ struct mkdir_access {
 };
 
 MED_ATTRS(mkdir_access) {
-	MED_ATTR_RO (mkdir_access, filename, "filename", MED_STRING),
-	MED_ATTR_RO (mkdir_access, mode, "mode", MED_UNSIGNED),
+	MED_ATTR_RO(mkdir_access, filename, "filename", MED_STRING),
+	MED_ATTR_RO(mkdir_access, mode, "mode", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(mkdir_access, "mkdir", process_kobject, "process",
 		file_kobject, "file");
 
-int __init mkdir_acctype_init(void) {
+int __init mkdir_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(mkdir_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
 }
 
-static enum medusa_answer_t medusa_do_mkdir(struct dentry * parent, struct dentry *dentry, int mode);
+/* XXX Don't try to inline this. GCC tries to be too smart about stack. */
+static enum medusa_answer_t medusa_do_mkdir(struct dentry *parent, struct dentry *dentry, int mode)
+{
+	struct mkdir_access access;
+	struct process_kobject process;
+	struct file_kobject file;
+	enum medusa_answer_t retval;
+
+	memset(&access, '\0', sizeof(struct mkdir_access));
+	/* process_kobject process is zeroed by process_kern2kobj function */
+	/* file_kobject file is zeroed by file_kern2kobj function */
+
+	file_kobj_dentry2string(dentry, access.filename);
+	access.mode = mode;
+	process_kern2kobj(&process, current);
+	file_kern2kobj(&file, parent->d_inode);
+	file_kobj_live_add(parent->d_inode);
+	retval = MED_DECIDE(mkdir_access, &access, &process, &file);
+	file_kobj_live_remove(parent->d_inode);
+	return retval;
+}
+
 enum medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dentry, int mode)
 {
 	//struct path ndcurrent, ndupper, ndparent;
@@ -41,12 +65,12 @@ enum medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dent
 	//medusa_get_upper_and_parent(&ndcurrent,&ndupper,&ndparent);
 
 	if (!is_med_magic_valid(&(inode_security(parent->dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(parent->dentry,parent->mnt) <= 0) {
+			file_kobj_validate_dentry(parent->dentry, parent->mnt) <= 0) {
 		// medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_ALLOW;
 	}
-	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(parent->dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)),VS(inode_security(parent->dentry->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(parent->dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(parent->dentry->d_inode)))
 	) {
 		//medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_DENY;
@@ -59,25 +83,4 @@ enum medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dent
 	return retval;
 }
 
-/* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_mkdir(struct dentry * parent, struct dentry *dentry, int mode)
-{
-	struct mkdir_access access;
-	struct process_kobject process;
-	struct file_kobject file;
-	enum medusa_answer_t retval;
-
-        memset(&access, '\0', sizeof(struct mkdir_access));
-        /* process_kobject process is zeroed by process_kern2kobj function */
-        /* file_kobject file is zeroed by file_kern2kobj function */
-
-	file_kobj_dentry2string(dentry, access.filename);
-	access.mode = mode;
-	process_kern2kobj(&process, current);
-	file_kern2kobj(&file, parent->d_inode);
-	file_kobj_live_add(parent->d_inode);
-	retval = MED_DECIDE(mkdir_access, &access, &process, &file);
-	file_kobj_live_remove(parent->d_inode);
-	return retval;
-}
-__initcall(mkdir_acctype_init);
+device_initcall(mkdir_acctype_init);

@@ -1,6 +1,8 @@
-/* capable_acctype.c, (C) 2002 Milan Pikula
+// SPDX-License-Identifier: GPL-2.0
+
+/* (C) 2002 Milan Pikula
  *
- * This file defines the 'capable' call.
+ * This file defines the 'medusa_capable' call.
  */
 
 #include "l3/registry.h"
@@ -12,7 +14,7 @@ struct capable_access {
 };
 
 MED_ATTRS(capable_access) {
-	MED_ATTR_RO (capable_access, cap, "cap", MED_BITMAP | MED_LE),
+	MED_ATTR_RO(capable_access, cap, "cap", MED_BITMAP | MED_LE),
 	MED_ATTR_END
 };
 
@@ -20,7 +22,8 @@ MED_ACCTYPE(capable_access, "capable",
 		process_kobject, "process",
 		process_kobject, "process");
 
-int __init capable_acctype_init(void) {
+int __init capable_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(capable_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
@@ -31,8 +34,8 @@ enum medusa_answer_t medusa_capable(int cap)
 	struct process_kobject process;
 	enum medusa_answer_t retval;
 
-        memset(&access, '\0', sizeof(struct capable_access));
-        /* process_kobject process is zeroed by process_kern2kobj function */
+	memset(&access, '\0', sizeof(struct capable_access));
+	/* process_kobject process is zeroed by process_kern2kobj function */
 
 	if (!in_task()) {
 		med_pr_warn("CAPABLE IN INTERRUPT\n");
@@ -43,7 +46,7 @@ enum medusa_answer_t medusa_capable(int cap)
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
-	if (MEDUSA_MONITORED_ACCESS_S(capable_access,task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_S(capable_access, task_security(current))) {
 		access.cap = CAP_TO_MASK(cap);
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(capable_access, &access, &process, &process);
@@ -51,4 +54,5 @@ enum medusa_answer_t medusa_capable(int cap)
 	}
 	return MED_ALLOW;
 }
-__initcall(capable_acctype_init);
+
+device_initcall(capable_acctype_init);

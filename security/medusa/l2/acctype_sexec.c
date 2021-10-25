@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #include <linux/binfmts.h>
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
@@ -16,18 +18,19 @@ struct sexec_access {
 };
 
 MED_ATTRS(sexec_access) {
-	MED_ATTR_RO (sexec_access, cap_effective, "ecap", MED_BITMAP | MED_LE),
-	MED_ATTR_RO (sexec_access, cap_inheritable, "icap", MED_BITMAP | MED_LE),
-	MED_ATTR_RO (sexec_access, cap_permitted, "pcap", MED_BITMAP | MED_LE),
-	MED_ATTR_RO (sexec_access, uid, "uid", MED_SIGNED),
-	MED_ATTR_RO (sexec_access, gid, "gid", MED_SIGNED),
+	MED_ATTR_RO(sexec_access, cap_effective, "ecap", MED_BITMAP | MED_LE),
+	MED_ATTR_RO(sexec_access, cap_inheritable, "icap", MED_BITMAP | MED_LE),
+	MED_ATTR_RO(sexec_access, cap_permitted, "pcap", MED_BITMAP | MED_LE),
+	MED_ATTR_RO(sexec_access, uid, "uid", MED_SIGNED),
+	MED_ATTR_RO(sexec_access, gid, "gid", MED_SIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(sexec_access, "sexec", process_kobject, "process",
 		file_kobject, "file");
 
-int __init sexec_acctype_init(void) {
+int __init sexec_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(sexec_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
@@ -38,26 +41,8 @@ int __init sexec_acctype_init(void) {
  * @mask: mask of access rights to validate
  *
  */
-static enum medusa_answer_t medusa_do_sexec(struct linux_binprm * bprm);
 
 #define DENTRY (bprm->file->f_path.dentry)
-
-enum medusa_answer_t medusa_sexec(struct linux_binprm * bprm)
-{
-	enum medusa_answer_t retval = MED_ALLOW;
-
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
-		return MED_ALLOW;
-
-	if (!is_med_magic_valid(&(inode_security(DENTRY->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(DENTRY,bprm->file->f_path.mnt) <= 0)
-		return MED_ALLOW;
-	/* no sense in checking VS here */
-	if (MEDUSA_MONITORED_ACCESS_S(sexec_access, task_security(current)))
-		retval = medusa_do_sexec(bprm);
-	return retval;
-}
 
 static enum medusa_answer_t medusa_do_sexec(struct linux_binprm *bprm)
 {
@@ -66,9 +51,9 @@ static enum medusa_answer_t medusa_do_sexec(struct linux_binprm *bprm)
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-        memset(&access, '\0', sizeof(struct sexec_access));
-        /* process_kobject process is zeroed by process_kern2kobj function */
-        /* file_kobject file is zeroed by file_kern2kobj function */
+	memset(&access, '\0', sizeof(struct sexec_access));
+	/* process_kobject process is zeroed by process_kern2kobj function */
+	/* file_kobject file is zeroed by file_kern2kobj function */
 
 	file_kobj_dentry2string(DENTRY, access.filename);
 	access.cap_effective = bprm->cred->cap_effective;
@@ -83,6 +68,24 @@ static enum medusa_answer_t medusa_do_sexec(struct linux_binprm *bprm)
 	file_kobj_live_remove(DENTRY->d_inode);
 	return retval;
 }
+
+enum medusa_answer_t medusa_sexec(struct linux_binprm *bprm)
+{
+	enum medusa_answer_t retval = MED_ALLOW;
+
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+		process_kobj_validate_task(current) <= 0)
+		return MED_ALLOW;
+
+	if (!is_med_magic_valid(&(inode_security(DENTRY->d_inode)->med_object)) &&
+			file_kobj_validate_dentry(DENTRY, bprm->file->f_path.mnt) <= 0)
+		return MED_ALLOW;
+	/* no sense in checking VS here */
+	if (MEDUSA_MONITORED_ACCESS_S(sexec_access, task_security(current)))
+		retval = medusa_do_sexec(bprm);
+	return retval;
+}
+
 #undef DENTRY
 
-__initcall(sexec_acctype_init);
+device_initcall(sexec_acctype_init);

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_file.h"
@@ -11,59 +13,37 @@ struct link_access {
 };
 
 MED_ATTRS(link_access) {
-	MED_ATTR_RO (link_access, filename, "filename", MED_STRING),
-	MED_ATTR_RO (link_access, newname, "newname", MED_STRING),
+	MED_ATTR_RO(link_access, filename, "filename", MED_STRING),
+	MED_ATTR_RO(link_access, newname, "newname", MED_STRING),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(link_access, "link", process_kobject, "process",
 		file_kobject, "file");
 
-int __init link_acctype_init(void) {
+int __init link_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(link_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
 }
 
-static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char * newname);
-enum medusa_answer_t medusa_link(struct dentry *dentry, const char * newname)
-{
-	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
-		return MED_ALLOW;
-
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
-		return MED_ALLOW;
-
-	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(dentry,NULL) <= 0) {
-		return MED_ALLOW;
-	}
-	if (!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
-	)
-		return MED_DENY;
-	if (MEDUSA_MONITORED_ACCESS_O(link_access, inode_security(dentry->d_inode)))
-		return medusa_do_link(dentry, newname);
-	return MED_ALLOW;
-}
-
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char * newname)
+static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char *newname)
 {
 	struct link_access access;
 	struct process_kobject process;
 	struct file_kobject file;
 	enum medusa_answer_t retval;
-        int newnamelen;
+	int newnamelen;
 
-        memset(&access, '\0', sizeof(struct link_access));
-        /* process_kobject process is zeroed by process_kern2kobj function */
-        /* file_kobject file is zeroed by file_kern2kobj function */
+	memset(&access, '\0', sizeof(struct link_access));
+	/* process_kobject process is zeroed by process_kern2kobj function */
+	/* file_kobject file is zeroed by file_kern2kobj function */
 
 	file_kobj_dentry2string(dentry, access.filename);
-        newnamelen = strlen(newname);
-        if (newnamelen > NAME_MAX)
-                newnamelen = NAME_MAX;
+	newnamelen = strlen(newname);
+	if (newnamelen > NAME_MAX)
+		newnamelen = NAME_MAX;
 	memcpy(access.newname, newname, newnamelen);
 	access.newname[newnamelen] = '\0';
 	process_kern2kobj(&process, current);
@@ -73,4 +53,27 @@ static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char * n
 	file_kobj_live_remove(dentry->d_inode);
 	return retval;
 }
-__initcall(link_acctype_init);
+
+enum medusa_answer_t medusa_link(struct dentry *dentry, const char *newname)
+{
+	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
+		return MED_ALLOW;
+
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+		process_kobj_validate_task(current) <= 0)
+		return MED_ALLOW;
+
+	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
+			file_kobj_validate_dentry(dentry, NULL) <= 0) {
+		return MED_ALLOW;
+	}
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
+	)
+		return MED_DENY;
+	if (MEDUSA_MONITORED_ACCESS_O(link_access, inode_security(dentry->d_inode)))
+		return medusa_do_link(dentry, newname);
+	return MED_ALLOW;
+}
+
+device_initcall(link_acctype_init);

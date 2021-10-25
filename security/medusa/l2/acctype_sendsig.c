@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 
@@ -9,14 +11,15 @@ struct send_signal {
 };
 
 MED_ATTRS(send_signal) {
-	MED_ATTR_RO (send_signal, signal_number, "signal_number", MED_SIGNED),
+	MED_ATTR_RO(send_signal, signal_number, "signal_number", MED_SIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(send_signal, "kill", process_kobject, "sender", process_kobject, "receiver");
 
-int __init sendsig_acctype_init(void) {
-	MED_REGISTER_ACCTYPE(send_signal,MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
+int __init sendsig_acctype_init(void)
+{
+	MED_REGISTER_ACCTYPE(send_signal, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 /* TODO: add the same type, triggered at OBJECT */
@@ -31,9 +34,9 @@ enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct
 	if (!sig)
 		return 0; /* null signal; existence test */
 
-        memset(&access, '\0', sizeof(struct send_signal));
-        /* process_kobject sender is zeroed by process_kern2kobj function */
-        /* process_kobject receiver is zeroed by process_kern2kobj function */
+	memset(&access, '\0', sizeof(struct send_signal));
+	/* process_kobject sender is zeroed by process_kern2kobj function */
+	/* process_kobject receiver is zeroed by process_kern2kobj function */
 
 	if (!in_task())
 		return MED_ALLOW;
@@ -41,16 +44,16 @@ enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct
 	if (info == SEND_SIG_PRIV)
 		return MED_ALLOW;
 	/*
-	if (info) switch (info->si_code) {
-		case CLD_TRAPPED:
-		case CLD_STOPPED:
-		case CLD_DUMPED:
-		case CLD_KILLED:
-		case CLD_EXITED:
-		case SI_KERNEL:
-			return MED_ALLOW;
-	}
-	*/
+	 * if (info) switch (info->si_code) {
+	 *	case CLD_TRAPPED:
+	 *	case CLD_STOPPED:
+	 *	case CLD_DUMPED:
+	 *	case CLD_KILLED:
+	 *	case CLD_EXITED:
+	 *	case SI_KERNEL:
+	 *		return MED_ALLOW;
+	 * }
+	 */
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
@@ -73,4 +76,4 @@ enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct
 	return MED_ALLOW;
 }
 
-__initcall(sendsig_acctype_init);
+device_initcall(sendsig_acctype_init);

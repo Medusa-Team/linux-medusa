@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
+
 /*
- * security/medusa/l2/acctype_ipc_msgrcv.c
- *
  * IPC msgrcv access type implementation.
  *
  * Copyright (C) 2017-2018 Viliam Mihalik

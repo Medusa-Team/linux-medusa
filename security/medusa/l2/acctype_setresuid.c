@@ -1,4 +1,6 @@
-/* setresuid_acctype.c, (C) 2002 Milan Pikula
+// SPDX-License-Identifier: GPL-2.0-only
+
+/* (C) 2002 Milan Pikula
  *
  * This file defines the 'setresuid' access type, with object=subject=process.
  */
@@ -13,15 +15,16 @@ struct setresuid {
 };
 
 MED_ATTRS(setresuid) {
-	MED_ATTR_RO (setresuid, ruid, "ruid", MED_SIGNED),
-	MED_ATTR_RO (setresuid, euid, "euid", MED_SIGNED),
-	MED_ATTR_RO (setresuid, suid, "suid", MED_SIGNED),
+	MED_ATTR_RO(setresuid, ruid, "ruid", MED_SIGNED),
+	MED_ATTR_RO(setresuid, euid, "euid", MED_SIGNED),
+	MED_ATTR_RO(setresuid, suid, "suid", MED_SIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(setresuid, "setresuid", process_kobject, "process", process_kobject, "process");
 
-int __init setresuid_acctype_init(void) {
+int __init setresuid_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(setresuid, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
@@ -32,8 +35,8 @@ enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 	struct process_kobject process;
 	enum medusa_answer_t retval = MED_ALLOW;
 
-        memset(&access, '\0', sizeof(struct setresuid));
-        /* process_kobject process is zeroed by process_kern2kobj function */
+	memset(&access, '\0', sizeof(struct setresuid));
+	/* process_kobject process is zeroed by process_kern2kobj function */
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
@@ -49,4 +52,5 @@ enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 
 	return retval;
 }
-__initcall(setresuid_acctype_init);
+
+device_initcall(setresuid_acctype_init);

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 /* this file is not really a part of the model. however, someone may find
  * it useful.
  */
@@ -23,11 +25,11 @@ enum medusa_answer_t medusa_read(struct file *file)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(dentry,NULL) <= 0)
+			file_kobj_validate_dentry(dentry, NULL) <= 0)
 		return MED_ALLOW;
 	if (
-		!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSR(task_security(current)),VS(inode_security(dentry->d_inode)))
+		!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSR(task_security(current)), VS(inode_security(dentry->d_inode)))
 	   ) {
 		return MED_DENY;
 	}
@@ -52,11 +54,11 @@ enum medusa_answer_t medusa_write(struct file *file)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(dentry,NULL) <= 0)
+			file_kobj_validate_dentry(dentry, NULL) <= 0)
 		return MED_ALLOW;
 	if (
-		!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
+		!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
 	   ) {
 		return MED_DENY;
 	}
