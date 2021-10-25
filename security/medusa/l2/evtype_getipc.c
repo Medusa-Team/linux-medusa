@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
+
+/* (C) 2020 Matus Jokay */
+
 #include "l3/registry.h"
 #include "l2/kobject_ipc.h"
 
@@ -7,13 +11,14 @@ struct ipc_event {
 };
 
 MED_ATTRS(ipc_event) {
-	MED_ATTR_RO (ipc_event, ipc_class, "ipc_class", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_event, ipc_class, "ipc_class", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
 MED_EVTYPE(ipc_event, "getipc", ipc_kobject, "ipc", ipc_kobject, "ipc");
 
-int __init ipc_evtype_init(void) {
+int __init ipc_evtype_init(void)
+{
 	MED_REGISTER_EVTYPE(ipc_event,
 			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
 			MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT |
@@ -29,7 +34,8 @@ int __init ipc_evtype_init(void) {
  * ipc_getref() increases ipcp->refcount, co we tell to ipc_kern2kobj() function
  * to decrease it; of course not in ipcp->refcount, but in its copy in ipc_kobject
  */
-int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp) {
+int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp)
+{
 	enum medusa_answer_t retval;
 	struct ipc_event event;
 	struct ipc_kobject sender;
@@ -46,4 +52,4 @@ int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp) {
 	return MED_ERR;
 }
 
-__initcall(ipc_evtype_init);
+device_initcall(ipc_evtype_init);

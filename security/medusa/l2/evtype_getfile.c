@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
+
 /* (C) 2002 Milan Pikula */
 
 #include <linux/fs_struct.h>
@@ -21,7 +23,7 @@ struct getfile_event {
 };
 
 MED_ATTRS(getfile_event) {
-	MED_ATTR_RO (getfile_event, filename, "filename", MED_STRING),
+	MED_ATTR_RO(getfile_event, filename, "filename", MED_STRING),
 	MED_ATTR_END
 };
 MED_EVTYPE(getfile_event, "getfile", file_kobject, "file",
@@ -38,10 +40,10 @@ MED_EVTYPE(getfile_event, "getfile", file_kobject, "file",
  * it right; and we try to avoid recursion 'cause we value the stack.
  */
 
-struct vfsmount * medusa_evocate_mnt(struct dentry *dentry)
+struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
 {
 	int depth, last_depth, maxdepth, can_nest;
-	struct mount * p;
+	struct mount *p;
 	int count = 0;
 
 	/* get the local root */
@@ -113,11 +115,11 @@ struct vfsmount * medusa_evocate_mnt(struct dentry *dentry)
 	return mntget(init_task.fs->root.mnt);
 }
 
-static enum medusa_answer_t do_file_kobj_validate_dentry(struct path * ndcurrent,
-		struct path * ndupper, struct path * ndparent);
+static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
+		struct path *ndupper, struct path *ndparent);
 
-void medusa_get_upper_and_parent(struct path * ndsource,
-		struct path * ndupperp, struct path * ndparentp)
+void medusa_get_upper_and_parent(struct path *ndsource,
+		struct path *ndupperp, struct path *ndparentp)
 {
 	*ndupperp = *ndsource;
 	dget(ndupperp->dentry);
@@ -127,7 +129,8 @@ void medusa_get_upper_and_parent(struct path * ndsource,
 		ndupperp->mnt = medusa_evocate_mnt(ndupperp->dentry); /* FIXME: may fail [?] */
 
 	while (IS_ROOT(ndupperp->dentry)) {
-		struct vfsmount * tmp;
+		struct vfsmount *tmp;
+
 		if (real_mount(ndupperp->mnt)->mnt_parent == real_mount(ndupperp->mnt)->mnt_parent->mnt_parent)
 			break;
 		dput(ndupperp->dentry);
@@ -149,10 +152,9 @@ void medusa_get_upper_and_parent(struct path * ndsource,
 	}
 
 	/* Now we have dentry and mnt. If IS_ROOT(dentry) then the dentry is global filesystem root */
-	return;
 }
 
-void medusa_put_upper_and_parent(struct path * ndupper, struct path * ndparent)
+void medusa_put_upper_and_parent(struct path *ndupper, struct path *ndparent)
 {
 	if (ndupper) {
 		dput(ndupper->dentry);
@@ -166,7 +168,6 @@ void medusa_put_upper_and_parent(struct path * ndupper, struct path * ndparent)
 	}
 }
 
-int medusa_l1_inode_alloc_security(struct inode *inode);
 /**
  * file_kobj_validate_dentry - get dentry security information from auth. server
  * @dentry: dentry to get the information for.
@@ -174,7 +175,7 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  *
  * This routine expects the existing, but !is_med_magic_valid Medusa dentry's inode security struct!
  */
-int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
+int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt)
 {
 	struct path ndcurrent;
 	struct path ndupper;
@@ -231,17 +232,17 @@ int file_kobj_validate_dentry(struct dentry * dentry, struct vfsmount * mnt)
 	return -1;
 }
 
-static enum medusa_answer_t do_file_kobj_validate_dentry(struct path* ndcurrent,
-		struct path* ndupper, struct path* ndparent)
+static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
+		struct path *ndupper, struct path *ndparent)
 {
 	struct getfile_event event;
 	struct file_kobject file;
 	struct file_kobject directory;
 	enum medusa_answer_t retval;
 
-        memset(&event, '\0', sizeof(struct getfile_event));
-        /* process_kobject file is zeroed by file_kern2kobj function */
-        /* process_kobject directory is zeroed by file_kern2kobj function */
+	memset(&event, '\0', sizeof(struct getfile_event));
+	/* process_kobject file is zeroed by file_kern2kobj function */
+	/* process_kobject directory is zeroed by file_kern2kobj function */
 
 	file_kern2kobj(&file, ndcurrent->dentry->d_inode);
 	file_kobj_dentry2string(ndupper->dentry, event.filename);
@@ -254,11 +255,12 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path* ndcurrent,
 	return retval;
 }
 
-int __init getfile_evtype_init(void) {
+int __init getfile_evtype_init(void)
+{
 	MED_REGISTER_EVTYPE(getfile_event,
 			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
 			MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT |
 			MEDUSA_EVTYPE_NOTTRIGGERED);
 	return 0;
 }
-__initcall(getfile_evtype_init);
+device_initcall(getfile_evtype_init);

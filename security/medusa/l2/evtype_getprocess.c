@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
+
 /* (C) 2002 Milan Pikula */
 
 #include "l3/registry.h"
@@ -26,14 +28,14 @@ MED_EVTYPE(getprocess_event, "getprocess", process_kobject, "process",
 /*
  * This routine expects the existing, but !is_med_magic_valid Medusa task_struct security struct!
  */
-int process_kobj_validate_task(struct task_struct * ts)
+int process_kobj_validate_task(struct task_struct *ts)
 {
 	enum medusa_answer_t retval;
 	struct getprocess_event event;
 	struct process_kobject proc;
 
-        memset(&event, '\0', sizeof(struct getprocess_event));
-        /* process_kobject proc is zeroed by process_kern2kobj function */
+	memset(&event, '\0', sizeof(struct getprocess_event));
+	/* process_kobject proc is zeroed by process_kern2kobj function */
 
 	init_med_object(&(task_security(ts)->med_object));
 	init_med_subject(&(task_security(ts)->med_subject));
@@ -47,9 +49,10 @@ int process_kobj_validate_task(struct task_struct * ts)
 	return -1;
 }
 
-int __init getprocess_evtype_init(void) {
+int __init getprocess_evtype_init(void)
+{
 	MED_REGISTER_EVTYPE(getprocess_event,
 			MEDUSA_EVTYPE_NOTTRIGGERED);
 	return 0;
 }
-__initcall(getprocess_evtype_init);
+device_initcall(getprocess_evtype_init);
