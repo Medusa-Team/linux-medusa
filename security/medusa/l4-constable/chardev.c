@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
+
 /*
  * L4 authorization server for Medusa DS9
  * Copyright (C) 2002 Milan Pikula <www@terminus.sk>, all rights reserved.
@@ -737,8 +739,8 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		count -= cl->kobject_size;
 
 		// if (atomic_read(&fetch_requests) || atomic_read(&update_requests)) {
-		// 	/* not so much to do... */
-		// 	med_put_kclass(answ_kclass);
+		//	/* not so much to do... */
+		//	med_put_kclass(answ_kclass);
 		//     // ked si to uzivatel precita, tak urob put - tam, kde sa rusi objekt
 		// }
 

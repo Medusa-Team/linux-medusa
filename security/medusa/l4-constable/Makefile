@@ -1,7 +1,5 @@
-#
-# Makefile for the Linux kernel part of Medusa DS9 Security System,
+# For the Linux kernel part of Medusa DS9 Security System,
 # L4/constable
-#
 
 export-objs :=  teleport_cycle teleport_reset
 
