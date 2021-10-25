@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
+
 #ifdef CONFIG_SECURITY_MEDUSA
 
 #include <linux/init.h>
@@ -33,7 +35,7 @@
 #include <net/netlabel.h>
 #include <linux/uaccess.h>
 #include <asm/ioctls.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <linux/bitops.h>
 #include <linux/interrupt.h>
 #include <linux/netdevice.h> /* for network interface checks */
@@ -68,147 +70,147 @@
 int medusa_l1_inode_alloc_security(struct inode *inode);
 
 /*
-static int medusa_l1_quotactl(int cmds, int type, int id, struct super_block *sb)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_quotactl(int cmds, int type, int id, struct super_block *sb)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_quota_on(struct dentry *dentry)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_quota_on(struct dentry *dentry)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_bprm_check_security (struct linux_binprm *bprm)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_bprm_check_security (struct linux_binprm *bprm)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_bprm_committing_creds(struct linux_binprm *bprm)
-{
-}
-*/
+ * static void medusa_l1_bprm_committing_creds(struct linux_binprm *bprm)
+ * {
+ * }
+ */
 
 /*
-static void medusa_l1_bprm_committed_creds(struct linux_binprm *bprm)
-{
-}
-*/
+ * static void medusa_l1_bprm_committed_creds(struct linux_binprm *bprm)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_sb_alloc_security(struct super_block *sb)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_alloc_security(struct super_block *sb)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_sb_free_security(struct super_block *sb)
-{
-}
-*/
+ * static void medusa_l1_sb_free_security(struct super_block *sb)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_sb_remount(struct super_block *sb, void *data)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_remount(struct super_block *sb, void *data)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_sb_kern_mount(struct super_block *sb)
-{
-	struct inode *inode = sb->s_root->d_inode;
-
-	if (inode->i_security == NULL) {
-		med_pr_warn("WARNING: l1_sb_kern_mount_inode->i_security is NULL");
-		return medusa_l1_inode_alloc_security(inode);
-	}
-
-	return 0;
-}
-*/
-
-/*
-static int medusa_l1_sb_show_options(struct seq_file *m, struct super_block *sb)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_kern_mount(struct super_block *sb)
+ * {
+ *	struct inode *inode = sb->s_root->d_inode;
+ *
+ *	if (inode->i_security == NULL) {
+ *		med_pr_warn("WARNING: l1_sb_kern_mount_inode->i_security is NULL");
+ *		return medusa_l1_inode_alloc_security(inode);
+ *	}
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_sb_statfs(struct dentry *dentry)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_show_options(struct seq_file *m, struct super_block *sb)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_sb_mount(const char *dev_name, const struct path *path, const char *type,
-			unsigned long flags, void *data)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_statfs(struct dentry *dentry)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_sb_umount(struct vfsmount *mnt, int flags)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_mount(const char *dev_name, const struct path *path, const char *type,
+ *			unsigned long flags, void *data)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_sb_pivotroot(const struct path *old_path, const struct path *new_path)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_umount(struct vfsmount *mnt, int flags)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_sb_set_mnt_opts(struct super_block *sb,
-				void *opts,
-								unsigned long kern_flags,
-								unsigned long *set_kern_flags)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_pivotroot(const struct path *old_path, const struct path *new_path)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_sb_clone_mnt_opts(const struct super_block *oldsb,
-				struct super_block *newsb)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_sb_set_mnt_opts(struct super_block *sb,
+ *				void *opts,
+ *								unsigned long kern_flags,
+ *								unsigned long *set_kern_flags)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_dentry_init_security(struct dentry *dentry, int mode, 
-					const struct qstr *name, void **ctx, u32 *ctxlen)
-{
-	if (dentry->d_inode != NULL) {
-		if (dentry->d_inode->i_security == NULL) {
-			med_pr_warn("WARNING l1_dentry_init_security dentry->d_inode->i_security is NULL");
-			return medusa_l1_inode_alloc_security(dentry->d_inode);
-		}
+ * static int medusa_l1_sb_clone_mnt_opts(const struct super_block *oldsb,
+ *				struct super_block *newsb)
+ * {
+ *	return 0;
+ * }
+ */
 
-	}
-	// TODO: why return -EOPNOTSUPP ?
-	return -EOPNOTSUPP;
-}
-*/
+/*
+ * static int medusa_l1_dentry_init_security(struct dentry *dentry, int mode,
+ *					const struct qstr *name, void **ctx, u32 *ctxlen)
+ * {
+ *	if (dentry->d_inode != NULL) {
+ *		if (dentry->d_inode->i_security == NULL) {
+ *			med_pr_warn("WARNING l1_dentry_init_security dentry->d_inode->i_security is NULL");
+ *			return medusa_l1_inode_alloc_security(dentry->d_inode);
+ *		}
+ *
+ *	}
+ *	// TODO: why return -EOPNOTSUPP ?
+ *	return -EOPNOTSUPP;
+ * }
+ */
 
 int medusa_l1_inode_alloc_security(struct inode *inode)
 {
 	struct medusa_l1_inode_s *med;
 
-	med = (struct medusa_l1_inode_s*) kzalloc(sizeof(struct medusa_l1_inode_s), GFP_KERNEL);
+	med = kzalloc(sizeof(struct medusa_l1_inode_s), GFP_KERNEL);
 	if (med == NULL)
 		return -ENOMEM;
 
@@ -232,13 +234,13 @@ void medusa_l1_inode_free_security(struct inode *inode)
 }
 
 /*
-static int medusa_l1_inode_init_security(
-	struct inode *inode,
-	struct inode *dir,
-	const struct qstr *qstr, const char **name,
-	void **value, size_t *len)
-{
-	*/
+ * static int medusa_l1_inode_init_security(
+ *	struct inode *inode,
+ *	struct inode *dir,
+ *	const struct qstr *qstr, const char **name,
+ *	void **value, size_t *len)
+ * {
+ */
 	/*
 	 * Returns 0 if @name and @value have been successfully set,
 	 * -EOPNOTSUPP if no security attribute is needed, or
@@ -246,13 +248,13 @@ static int medusa_l1_inode_init_security(
 	 *
 	 * For details see include/linux/lsm_hooks.
 	 */
-	 /*
-	return -EOPNOTSUPP;
-}
-*/
+/*
+ *	return -EOPNOTSUPP;
+ * }
+ */
 
 static int medusa_l1_inode_create(struct inode *inode, struct dentry *dentry,
-				umode_t mode)
+				  umode_t mode)
 {
 	if (medusa_create(dentry, mode) == MED_DENY)
 		return -EACCES;
@@ -261,7 +263,7 @@ static int medusa_l1_inode_create(struct inode *inode, struct dentry *dentry,
 }
 
 static int medusa_l1_inode_link(struct dentry *old_dentry, struct inode *inode,
-			struct dentry *new_dentry)
+				struct dentry *new_dentry)
 {
 	if (medusa_link(old_dentry, new_dentry->d_name.name) == MED_DENY)
 		return -EACCES;
@@ -278,7 +280,7 @@ static int medusa_l1_inode_unlink(struct inode *inode, struct dentry *dentry)
 }
 
 static int medusa_l1_inode_symlink(struct inode *inode, struct dentry *dentry,
-				 const char *name)
+				   const char *name)
 {
 	if (medusa_symlink(dentry, name) == MED_DENY)
 		return -EACCES;
@@ -287,7 +289,7 @@ static int medusa_l1_inode_symlink(struct inode *inode, struct dentry *dentry,
 }
 
 static int medusa_l1_inode_mkdir(struct inode *inode, struct dentry *dentry,
-				umode_t mask)
+				 umode_t mask)
 {
 	//if(medusa_mkdir(dentry, mask) == MED_DENY)
 	//	return -EACCES;
@@ -304,15 +306,17 @@ static int medusa_l1_inode_rmdir(struct inode *inode, struct dentry *dentry)
 }
 
 static int medusa_l1_inode_mknod(struct inode *inode, struct dentry *dentry,
-			umode_t mode, dev_t dev)
+				 umode_t mode, dev_t dev)
 {
-	if(medusa_mknod(dentry, dev, mode) == MED_DENY)
+	if (medusa_mknod(dentry, dev, mode) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
-static int medusa_l1_inode_rename(struct inode *old_inode, struct dentry *old_dentry,
-				struct inode *new_inode, struct dentry *new_dentry)
+static int medusa_l1_inode_rename(struct inode *old_inode,
+				  struct dentry *old_dentry,
+				  struct inode *new_inode,
+				  struct dentry *new_dentry)
 {
 	//if (medusa_rename(old_dentry, new_dentry->d_name.name) == MED_DENY)
 	//	return -EACCES;
@@ -326,8 +330,9 @@ static int medusa_l1_inode_readlink(struct dentry *dentry)
 	return 0;
 }
 
-static int medusa_l1_inode_follow_link(struct dentry *dentry, struct inode* inode,
-				 bool rcu)
+static int medusa_l1_inode_follow_link(struct dentry *dentry,
+				       struct inode *inode,
+				       bool rcu)
 {
 	return 0;
 }
@@ -335,6 +340,7 @@ static int medusa_l1_inode_follow_link(struct dentry *dentry, struct inode* inod
 static int medusa_l1_inode_permission(struct inode *inode, int mask)
 {
 	int no_block = mask & MAY_NOT_BLOCK;
+
 	if (no_block)
 		return -ECHILD;
 
@@ -346,80 +352,81 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 	if (mask == 0)
 		return 0;
 
-	if(medusa_permission(inode, mask) == MED_DENY)
+	if (medusa_permission(inode, mask) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
 /*
-static int medusa_l1_inode_setattr(struct dentry *dentry, struct iattr *iattr)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_inode_setattr(struct dentry *dentry, struct iattr *iattr)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_inode_getattr(const struct path* path)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_inode_getattr(const struct path* path)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_inode_post_setxattr(
-	struct dentry *dentry,
-	const char *name,
-	const void *value, size_t size, int flags)
-{
-}
-*/
+ * static void medusa_l1_inode_post_setxattr(
+ *	struct dentry *dentry,
+ *	const char *name,
+ *	const void *value, size_t size, int flags)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_inode_getxattr(struct dentry *dentry, const char *name)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_inode_getxattr(struct dentry *dentry, const char *name)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_inode_listxattr(struct dentry *dentry)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_inode_listxattr(struct dentry *dentry)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_inode_setsecurity(struct inode *inode, const char *name,
-				 const void *value, size_t size, int flags)
-{
-	return -EOPNOTSUPP;
-}
-*/
+ * static int medusa_l1_inode_setsecurity(struct inode *inode, const char *name,
+ *				 const void *value, size_t size, int flags)
+ * {
+ *	return -EOPNOTSUPP;
+ * }
+ */
 
 /*
-static int medusa_l1_inode_listsecurity(struct inode *inode, char *buffer,
-				size_t buffer_size)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_inode_listsecurity(struct inode *inode, char *buffer,
+ *				size_t buffer_size)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_inode_getsecid(struct inode *inode, u32 *secid)
-{
-	*secid = 0;
-}
-*/
+ * static void medusa_l1_inode_getsecid(struct inode *inode, u32 *secid)
+ * {
+ *	*secid = 0;
+ * }
+ */
 
 #ifdef CONFIG_SECURITY_PATH
 
-static int medusa_l1_path_mknod(const struct path *dir, struct dentry *dentry, umode_t mode,
-				unsigned int dev)
+static int medusa_l1_path_mknod(const struct path *dir, struct dentry *dentry,
+				umode_t mode, unsigned int dev)
 {
 	return 0;
 }
 
-static int medusa_l1_path_mkdir(const struct path *dir, struct dentry *dentry, umode_t mode)
+static int medusa_l1_path_mkdir(const struct path *dir, struct dentry *dentry,
+				umode_t mode)
 {
 	return 0;
 }
@@ -437,22 +444,25 @@ static int medusa_l1_path_unlink(const struct path *dir, struct dentry *dentry)
 }
 
 static int medusa_l1_path_symlink(const struct path *dir, struct dentry *dentry,
-				const char *old_name)
+				  const char *old_name)
 {
 	return 0;
 }
 
-static int medusa_l1_path_link(struct dentry *old_dentry, const struct path *new_dir,
-			 struct dentry *new_dentry)
+static int medusa_l1_path_link(struct dentry *old_dentry,
+			       const struct path *new_dir,
+			       struct dentry *new_dentry)
 {
 	return validate_fuck_link(old_dentry);
 }
 
-static int medusa_l1_path_rename(const struct path *old_path, struct dentry *old_dentry,
-			const struct path *new_path, struct dentry *new_dentry)
+static int medusa_l1_path_rename(const struct path *old_path,
+				 struct dentry *old_dentry,
+				 const struct path *new_path,
+				 struct dentry *new_dentry)
 {
 	if (medusa_rename(old_dentry, new_dentry->d_name.name) == MED_DENY)
-	        return -EACCES;
+		return -EACCES;
 	return 0;
 }
 
@@ -479,90 +489,89 @@ static int medusa_l1_path_chroot(const struct path *root)
 #endif  /* CONFIG_SECURITY_PATH */
 
 /*
-static int medusa_l1_file_permission(struct file *file, int mask)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_file_permission(struct file *file, int mask)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_file_alloc_security(struct file *file)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_file_alloc_security(struct file *file)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_file_free_security(struct file *file)
-{
-}
-*/
+ * static void medusa_l1_file_free_security(struct file *file)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_file_ioctl(struct file *file, unsigned int command,
-			unsigned long arg)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_file_ioctl(struct file *file, unsigned int command,
+ *			unsigned long arg)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
-				 unsigned long prot)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot,
+ *				 unsigned long prot)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_file_lock(struct file *file, unsigned int cmd)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_file_lock(struct file *file, unsigned int cmd)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_file_fcntl(struct file *file, unsigned int cmd,
-			unsigned long arg)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_file_fcntl(struct file *file, unsigned int cmd,
+ *			unsigned long arg)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_file_set_fowner(struct file *file)
-{
-	return;
-}
-*/
+ * static void medusa_l1_file_set_fowner(struct file *file)
+ * {
+ *	return;
+ * }
+ */
 
 /*
-static int medusa_l1_file_send_sigiotask(struct task_struct *tsk,
-				struct fown_struct *fown, int sig)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_file_send_sigiotask(struct task_struct *tsk,
+ *				struct fown_struct *fown, int sig)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_file_receive(struct file *file)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_file_receive(struct file *file)
+ * {
+ *	return 0;
+ * }
+ */
 
 static int medusa_l1_file_open(struct file *file)
 {
-
 	return validate_fuck(&file->f_path);
 }
 
 /*
-* TODO TODO TODO: add support of 'task' in medusa_fork()
-*/
+ * TODO TODO TODO: add support of 'task' in medusa_fork()
+ */
 int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 {
-	struct medusa_l1_task_s* med = task_security(task);
+	struct medusa_l1_task_s *med = task_security(task);
 
 	// can @current do fork/clone?
 	//if(medusa_fork(clone_flags) == MED_DENY)
@@ -571,7 +580,7 @@ int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 	memset(med, '\0', sizeof(struct medusa_l1_task_s));
 	init_med_object(&(med->med_object));
 	init_med_subject(&(med->med_subject));
-        get_cmdline(task, med->cmdline, sizeof(med->cmdline));
+	get_cmdline(task, med->cmdline, sizeof(med->cmdline));
 
 	return 0;
 }
@@ -581,137 +590,138 @@ void medusa_l1_task_free(struct task_struct *task)
 }
 
 /*
-static int medusa_l1_cred_alloc_blank(struct cred *cred, gfp_t gfp)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_cred_alloc_blank(struct cred *cred, gfp_t gfp)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_cred_free(struct cred *cred)
-{
-}
-*/
+ * static void medusa_l1_cred_free(struct cred *cred)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_cred_prepare(struct cred *new, const struct cred *old, gfp_t gfp)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_cred_prepare(struct cred *new, const struct cred *old, gfp_t gfp)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_cred_transfer(struct cred *new, const struct cred *old)
-{
-}
-*/
+ * static void medusa_l1_cred_transfer(struct cred *new, const struct cred *old)
+ * {
+ * }
+ */
 
 /*
-static void medusa_l1_cred_getsecid(const struct cred *c, u32 *secid)
-{
-}
-*/
+ * static void medusa_l1_cred_getsecid(const struct cred *c, u32 *secid)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_kernel_act_as(struct cred *new, u32 secid)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_kernel_act_as(struct cred *new, u32 secid)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_kernel_create_files_as(struct cred *new, struct inode *inode)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_kernel_create_files_as(struct cred *new, struct inode *inode)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_kernel_module_request(char *kmod_name)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_kernel_module_request(char *kmod_name)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_task_setpgid(struct task_struct *p, pid_t pgid)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_task_setpgid(struct task_struct *p, pid_t pgid)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_task_getpgid(struct task_struct *p)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_task_getpgid(struct task_struct *p)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_task_getsid(struct task_struct *p)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_task_getsid(struct task_struct *p)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_task_getsecid(struct task_struct *p, u32 *secid)
-{
-	*secid = 0;
-}
-*/
+ * static void medusa_l1_task_getsecid(struct task_struct *p, u32 *secid)
+ * {
+ *	*secid = 0;
+ * }
+ */
 
 /*
-static int medusa_l1_task_getioprio(struct task_struct *p)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_task_getioprio(struct task_struct *p)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_task_setrlimit(struct task_struct *p, unsigned int resource,
-				 struct rlimit *new_rlim)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_task_setrlimit(struct task_struct *p, unsigned int resource,
+ *				 struct rlimit *new_rlim)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_task_getscheduler(struct task_struct *p)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_task_getscheduler(struct task_struct *p)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_task_movememory(struct task_struct *p)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_task_movememory(struct task_struct *p)
+ * {
+ *	return 0;
+ * }
+ */
 
 static int medusa_l1_task_kill(struct task_struct *p, struct siginfo *info,
-			 int sig, u32 secid)
+			       int sig, u32 secid)
 {
 	return 0;
 }
 
 /*
-static void medusa_l1_task_to_inode(struct task_struct *p, struct inode *inode)
-{
-}
-*/
+ * static void medusa_l1_task_to_inode(struct task_struct *p, struct inode *inode)
+ * {
+ * }
+ */
 
 //IPC hooks
 
 /*
  * helper function not LSM hook
  */
-int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp, unsigned int ipc_class)
+int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
+				 unsigned int ipc_class)
 {
 	struct medusa_l1_ipc_s *med;
 
-	med = (struct medusa_l1_ipc_s*) kmalloc(sizeof(struct medusa_l1_ipc_s), GFP_KERNEL);
+	med = kmalloc(sizeof(struct medusa_l1_ipc_s), GFP_KERNEL);
 	if (med == NULL)
 		return -ENOMEM;
 
@@ -727,7 +737,7 @@ void medusa_l1_ipc_free_security(struct kern_ipc_perm *ipcp)
 {
 	struct medusa_l1_ipc_s *med;
 
-	if(ipcp->security != NULL) {
+	if (ipcp->security != NULL) {
 		med = ipcp->security;
 		ipcp->security = NULL;
 		kfree(med);
@@ -736,17 +746,17 @@ void medusa_l1_ipc_free_security(struct kern_ipc_perm *ipcp)
 
 static int medusa_l1_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 {
-	if(medusa_ipc_permission(ipcp, flag) == MED_DENY)
+	if (medusa_ipc_permission(ipcp, flag) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
 /*
-static void medusa_l1_ipc_getsecid(struct kern_ipc_perm *ipcp, u32 *secid)
-{
-	*secid = 0;
-}
-*/
+ * static void medusa_l1_ipc_getsecid(struct kern_ipc_perm *ipcp, u32 *secid)
+ * {
+ *	*secid = 0;
+ * }
+ */
 
 //Message queue IPC
 int medusa_l1_msg_msg_alloc_security(struct msg_msg *msg)
@@ -780,30 +790,32 @@ void medusa_l1_msg_queue_free_security(struct kern_ipc_perm *msq)
 
 static int medusa_l1_msg_queue_associate(struct kern_ipc_perm *msq, int msqflg)
 {
-	if(medusa_ipc_associate(msq, msqflg) == MED_DENY)
+	if (medusa_ipc_associate(msq, msqflg) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_msg_queue_msgctl(struct kern_ipc_perm *msq, int cmd)
 {
-	if(medusa_ipc_ctl(msq, cmd) == MED_DENY)
+	if (medusa_ipc_ctl(msq, cmd) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
-static int medusa_l1_msg_queue_msgsnd(struct kern_ipc_perm *msq, struct msg_msg *msg,
-				int msgflg)
+static int medusa_l1_msg_queue_msgsnd(struct kern_ipc_perm *msq,
+				      struct msg_msg *msg, int msgflg)
 {
-	if(medusa_ipc_msgsnd(msq, msg, msgflg) == MED_DENY)
+	if (medusa_ipc_msgsnd(msq, msg, msgflg) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
-static int medusa_l1_msg_queue_msgrcv(struct kern_ipc_perm *msq, struct msg_msg *msg,
-				struct task_struct *target, long type, int mode)
+static int medusa_l1_msg_queue_msgrcv(struct kern_ipc_perm *msq,
+				      struct msg_msg *msg,
+				      struct task_struct *target,
+				      long type, int mode)
 {
-	if(medusa_ipc_msgrcv(msq, msg, target, type, mode) == MED_DENY)
+	if (medusa_ipc_msgrcv(msq, msg, target, type, mode) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
@@ -821,22 +833,22 @@ void medusa_l1_shm_free_security(struct kern_ipc_perm *shp)
 
 static int medusa_l1_shm_associate(struct kern_ipc_perm *shp, int shmflg)
 {
-	if(medusa_ipc_associate(shp, shmflg) == MED_DENY)
+	if (medusa_ipc_associate(shp, shmflg) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_shm_shmctl(struct kern_ipc_perm *shp, int cmd)
 {
-	if(medusa_ipc_ctl(shp, cmd) == MED_DENY)
+	if (medusa_ipc_ctl(shp, cmd) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_shm_shmat(struct kern_ipc_perm *shp, char __user *shmaddr,
-			 int shmflg)
+			       int shmflg)
 {
-	if(medusa_ipc_shmat(shp, shmaddr, shmflg) == MED_DENY)
+	if (medusa_ipc_shmat(shp, shmaddr, shmflg) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
@@ -854,22 +866,22 @@ void medusa_l1_sem_free_security(struct kern_ipc_perm *sma)
 
 static int medusa_l1_sem_associate(struct kern_ipc_perm *sma, int semflg)
 {
-	if(medusa_ipc_associate(sma, semflg) == MED_DENY)
+	if (medusa_ipc_associate(sma, semflg) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_sem_semctl(struct kern_ipc_perm *sma, int cmd)
 {
-	if(medusa_ipc_ctl(sma, cmd) == MED_DENY)
+	if (medusa_ipc_ctl(sma, cmd) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
 
 static int medusa_l1_sem_semop(struct kern_ipc_perm *sma, struct sembuf *sops,
-			 unsigned nsops, int alter)
+			       unsigned int nsops, int alter)
 {
-	if(medusa_ipc_semop(sma, sops, nsops, alter) == MED_DENY)
+	if (medusa_ipc_semop(sma, sops, nsops, alter) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
@@ -877,582 +889,582 @@ static int medusa_l1_sem_semop(struct kern_ipc_perm *sma, struct sembuf *sops,
 #ifdef CONFIG_SECURITY_NETWORK
 
 /*
-static int medusa_l1_unix_stream_connect(struct sock *sock, struct sock *other,
-				struct sock *newsk)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_unix_stream_connect(struct sock *sock, struct sock *other,
+ *				struct sock *newsk)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_unix_may_send(struct socket *sock, struct socket *other)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_unix_may_send(struct socket *sock, struct socket *other)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_create(int family, int type, int protocol, int kern)
-{
-	if (kern)
-		return 0;
-
-	if (medusa_socket_create(family, type, protocol) == MED_DENY)
-		return -EACCES;
-
-	return 0;
-}
-*/
-
-/*
-static int medusa_l1_socket_post_create(struct socket *sock, int family, int type,
-				int protocol, int kern)
-{
-	struct medusa_l1_socket_s *sk_sec;
-
-	if (sock->sk) {
-		sk_sec = sock_security(sock->sk);
-		sk_sec->addrlen = 0;
-	}
-
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_create(int family, int type, int protocol, int kern)
+ * {
+ *	if (kern)
+ *		return 0;
+ *
+ *	if (medusa_socket_create(family, type, protocol) == MED_DENY)
+ *		return -EACCES;
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_bind(struct socket *sock, struct sockaddr *address,
-				int addrlen)
-{
-	if (!sock->sk) {
-		return 0;
-	}
-
-	if (medusa_socket_bind(sock, address, addrlen) == MED_DENY)
-		return -EACCES;
-
-	return 0;
-}
-*/
-
-/*
-static int medusa_l1_socket_connect(struct socket *sock, struct sockaddr *address,
-				int addrlen)
-{
-	if (!sock->sk) {
-		return 0;
-	}
-
-	if (medusa_socket_connect(sock, address, addrlen) == MED_DENY)
-		return -EACCES;
-
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_post_create(struct socket *sock, int family, int type,
+ *				int protocol, int kern)
+ * {
+ *	struct medusa_l1_socket_s *sk_sec;
+ *
+ *	if (sock->sk) {
+ *		sk_sec = sock_security(sock->sk);
+ *		sk_sec->addrlen = 0;
+ *	}
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_listen(struct socket *sock, int backlog)
-{
-	if (!sock->sk) {
-		return 0;
-	}
-
-	if (medusa_socket_listen(sock, backlog) == MED_DENY)
-		return -EACCES;
-
-	return 0;
-}
-*/
-
-/*
-static int medusa_l1_socket_accept(struct socket *sock, struct socket *newsock)
-{
-	if (!sock->sk) {
-		return 0;
-	}
-
-	if (medusa_socket_accept(sock, newsock) == MED_DENY)
-		return -EACCES;
-
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_bind(struct socket *sock, struct sockaddr *address,
+ *				int addrlen)
+ * {
+ *	if (!sock->sk) {
+ *		return 0;
+ *	}
+ *
+ *	if (medusa_socket_bind(sock, address, addrlen) == MED_DENY)
+ *		return -EACCES;
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
-{
-	if (!sock->sk) {
-		return 0;
-	}
-
-	if (medusa_socket_sendmsg(sock, msg, size) == MED_DENY)
-		return -EACCES;
-
-	return 0;
-}
-*/
-
-/*
-static int medusa_l1_socket_recvmsg(struct socket *sock, struct msghdr *msg,
-				int size, int flags)
-{
-	if (!sock->sk) {
-		return 0;
-	}
-
-	if (medusa_socket_recvmsg(sock, msg, size, flags) == MED_DENY)
-		return -EACCES;
-
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_connect(struct socket *sock, struct sockaddr *address,
+ *				int addrlen)
+ * {
+ *	if (!sock->sk) {
+ *		return 0;
+ *	}
+ *
+ *	if (medusa_socket_connect(sock, address, addrlen) == MED_DENY)
+ *		return -EACCES;
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_getsockname(struct socket *sock)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_listen(struct socket *sock, int backlog)
+ * {
+ *	if (!sock->sk) {
+ *		return 0;
+ *	}
+ *
+ *	if (medusa_socket_listen(sock, backlog) == MED_DENY)
+ *		return -EACCES;
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_getpeername(struct socket *sock)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_accept(struct socket *sock, struct socket *newsock)
+ * {
+ *	if (!sock->sk) {
+ *		return 0;
+ *	}
+ *
+ *	if (medusa_socket_accept(sock, newsock) == MED_DENY)
+ *		return -EACCES;
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_setsockopt(struct socket *sock, int level, int optname)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
+ * {
+ *	if (!sock->sk) {
+ *		return 0;
+ *	}
+ *
+ *	if (medusa_socket_sendmsg(sock, msg, size) == MED_DENY)
+ *		return -EACCES;
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_getsockopt(struct socket *sock, int level, int optname)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_recvmsg(struct socket *sock, struct msghdr *msg,
+ *				int size, int flags)
+ * {
+ *	if (!sock->sk) {
+ *		return 0;
+ *	}
+ *
+ *	if (medusa_socket_recvmsg(sock, msg, size, flags) == MED_DENY)
+ *		return -EACCES;
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_shutdown(struct socket *sock, int how)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_getsockname(struct socket *sock)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_getpeername(struct socket *sock)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_getpeersec_stream(struct socket *sock,
-					char __user *optval,
-					int __user *optlen, unsigned len)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_setsockopt(struct socket *sock, int level, int optname)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_socket_getpeersec_dgram(struct socket *sock,
-					struct sk_buff *skb, u32 *secid)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_socket_getsockopt(struct socket *sock, int level, int optname)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_sk_alloc_security(struct sock *sk, int family, gfp_t priority)
-{
-	sk->sk_security = (struct medusa_l1_socket_s*) kmalloc(sizeof(struct medusa_l1_socket_s), GFP_KERNEL);
-
-	if (!sk->sk_security) {
-		return -1;
-	}
-
-	return 0;
-}
-*/
+ *static int medusa_l1_socket_shutdown(struct socket *sock, int how)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_sk_free_security(struct sock *sk)
-{
-	struct medusa_l1_socket_s *med;
-
-	if (sk->sk_security != NULL) {
-		med = sk->sk_security;
-		sk->sk_security = NULL;
-		kfree(med);
-	}
-}
-*/
+ * static int medusa_l1_socket_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_sk_clone_security(const struct sock *sk, struct sock *newsk)
-{
-	struct medusa_l1_socket_s *sk_sec = sk->sk_security;
-	struct medusa_l1_socket_s *newsk_sec = newsk->sk_security;
-
-	newsk_sec = (struct medusa_l1_socket_s*) kmalloc(sizeof(struct medusa_l1_socket_s), GFP_KERNEL);
-	newsk_sec->addrlen = 0;
-	newsk_sec->med_object = sk_sec->med_object;
-}
-*/
+ * static int medusa_l1_socket_getpeersec_stream(struct socket *sock,
+ *					char __user *optval,
+ *					int __user *optlen, unsigned len)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_sk_getsecid(struct sock *sk, u32 *secid)
-{
-}
-*/
+ * static int medusa_l1_socket_getpeersec_dgram(struct socket *sock,
+ *					struct sk_buff *skb, u32 *secid)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_sock_graft(struct sock *sk, struct socket *parent)
-{
-}
-*/
+ * static int medusa_l1_sk_alloc_security(struct sock *sk, int family, gfp_t priority)
+ * {
+ *	sk->sk_security = (struct medusa_l1_socket_s*) kmalloc(sizeof(struct medusa_l1_socket_s), GFP_KERNEL);
+ *
+ *	if (!sk->sk_security) {
+ *		return -1;
+ *	}
+ *
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_inet_conn_request(struct sock *sk, struct sk_buff *skb,
-				 struct request_sock *req)
-{
-	return 0;
-}
-*/
+ * static void medusa_l1_sk_free_security(struct sock *sk)
+ * {
+ *	struct medusa_l1_socket_s *med;
+ *
+ *	if (sk->sk_security != NULL) {
+ *		med = sk->sk_security;
+ *		sk->sk_security = NULL;
+ *		kfree(med);
+ *	}
+ * }
+ */
 
 /*
-static void medusa_l1_inet_csk_clone(struct sock *newsk,
-				const struct request_sock *req)
-{
-}
-*/
+ * static void medusa_l1_sk_clone_security(const struct sock *sk, struct sock *newsk)
+ * {
+ *	struct medusa_l1_socket_s *sk_sec = sk->sk_security;
+ *	struct medusa_l1_socket_s *newsk_sec = newsk->sk_security;
+ *
+ *	newsk_sec = (struct medusa_l1_socket_s*) kmalloc(sizeof(struct medusa_l1_socket_s), GFP_KERNEL);
+ *	newsk_sec->addrlen = 0;
+ *	newsk_sec->med_object = sk_sec->med_object;
+ * }
+ */
 
 /*
-static void medusa_l1_inet_conn_established(struct sock *sk, struct sk_buff *skb)
-{
-}
-*/
+ * static void medusa_l1_sk_getsecid(struct sock *sk, u32 *secid)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_secmark_relabel_packet(u32 secid)
-{
-		return 0;
-}
-*/
+ * static void medusa_l1_sock_graft(struct sock *sk, struct socket *parent)
+ * {
+ * }
+ */
 
 /*
-static void medusa_l1_secmark_refcount_inc(void)
-{
-}
-*/
+ * static int medusa_l1_inet_conn_request(struct sock *sk, struct sk_buff *skb,
+ *				 struct request_sock *req)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_secmark_refcount_dec(void)
-{
-}
-*/
+ * static void medusa_l1_inet_csk_clone(struct sock *newsk,
+ *				const struct request_sock *req)
+ * {
+ * }
+ */
 
 /*
-static void medusa_l1_req_classify_flow(const struct request_sock *req,
-				struct flowi *fl)
-{
-}
-*/
+ * static void medusa_l1_inet_conn_established(struct sock *sk, struct sk_buff *skb)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_tun_dev_alloc_security(void **security)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_secmark_relabel_packet(u32 secid)
+ * {
+ *		return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_tun_dev_free_security(void *security)
-{
-}
-*/
+ * static void medusa_l1_secmark_refcount_inc(void)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_tun_dev_create(void)
-{
-	return 0;
-}
-*/
+ * static void medusa_l1_secmark_refcount_dec(void)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_tun_dev_attach_queue(void *security)
-{
-	return 0;
-}
-*/
+ * static void medusa_l1_req_classify_flow(const struct request_sock *req,
+ *				struct flowi *fl)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_tun_dev_attach(struct sock *sk, void* security)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_tun_dev_alloc_security(void **security)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_tun_dev_open(void *security)
-{
-	return 0;
-}
-*/
+ * static void medusa_l1_tun_dev_free_security(void *security)
+ * {
+ * }
+ */
+
+/*
+ * static int medusa_l1_tun_dev_create(void)
+ * {
+ *	return 0;
+ * }
+ */
+
+/*
+ * static int medusa_l1_tun_dev_attach_queue(void *security)
+ * {
+ *	return 0;
+ * }
+ */
+
+/*
+ * static int medusa_l1_tun_dev_attach(struct sock *sk, void* security)
+ * {
+ *	return 0;
+ * }
+ */
+
+/*
+ * static int medusa_l1_tun_dev_open(void *security)
+ * {
+ *	return 0;
+ * }
+ */
 
 #endif	/* CONFIG_SECURITY_NETWORK */
 
 #ifdef CONFIG_SECURITY_NETWORK_XFRM
 
 /*
-static int medusa_l1_xfrm_policy_alloc(struct xfrm_sec_ctx **ctxp,
-										struct xfrm_user_sec_ctx *sec_ctx,
-										gfp_t gfp)
-
-{
-	return 0;
-}
-*/
-
-/*
-static int medusa_l1_xfrm_policy_clone(struct xfrm_sec_ctx *old_ctx,
-					struct xfrm_sec_ctx **new_ctxp)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_xfrm_policy_alloc(struct xfrm_sec_ctx **ctxp,
+ *										struct xfrm_user_sec_ctx *sec_ctx,
+ *										gfp_t gfp)
+ *
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_xfrm_policy_free(struct xfrm_sec_ctx *ctx)
-{
-}
-*/
+ * static int medusa_l1_xfrm_policy_clone(struct xfrm_sec_ctx *old_ctx,
+ *					struct xfrm_sec_ctx **new_ctxp)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_xfrm_policy_delete(struct xfrm_sec_ctx *ctx)
-{
-	return 0;
-}
-*/
+ * static void medusa_l1_xfrm_policy_free(struct xfrm_sec_ctx *ctx)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_xfrm_state_alloc(struct xfrm_state *x,
-					 struct xfrm_user_sec_ctx *sec_ctx)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_xfrm_policy_delete(struct xfrm_sec_ctx *ctx)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_xfrm_state_alloc_acquire(struct xfrm_state *x,
-					 struct xfrm_sec_ctx *polsec,
-					 u32 secid)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_xfrm_state_alloc(struct xfrm_state *x,
+ *					 struct xfrm_user_sec_ctx *sec_ctx)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_xfrm_state_free(struct xfrm_state *x)
-{
-}
-*/
+ * static int medusa_l1_xfrm_state_alloc_acquire(struct xfrm_state *x,
+ *					 struct xfrm_sec_ctx *polsec,
+ *					 u32 secid)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_xfrm_state_delete(struct xfrm_state *x)
-{
-	return 0;
-}
-*/
+ * static void medusa_l1_xfrm_state_free(struct xfrm_state *x)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_xfrm_policy_lookup(struct xfrm_sec_ctx *ctx, u32 sk_sid, u8 dir)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_xfrm_state_delete(struct xfrm_state *x)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_xfrm_state_pol_flow_match(struct xfrm_state *x,
-					 struct xfrm_policy *xp,
-					 const struct flowi *fl)
-{
-	return 1;
-}
-*/
+ * static int medusa_l1_xfrm_policy_lookup(struct xfrm_sec_ctx *ctx, u32 sk_sid, u8 dir)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_xfrm_decode_session(struct sk_buff *skb, u32 *fl, int ckall)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_xfrm_state_pol_flow_match(struct xfrm_state *x,
+ *					 struct xfrm_policy *xp,
+ *					 const struct flowi *fl)
+ * {
+ *	return 1;
+ * }
+ */
+
+/*
+ * static int medusa_l1_xfrm_decode_session(struct sk_buff *skb, u32 *fl, int ckall)
+ * {
+ *	return 0;
+ * }
+ */
 
 #endif /* CONFIG_SECURITY_NETWORK_XFRM */
 
 /*
-static void medusa_l1_d_instantiate(struct dentry *dentry, struct inode *inode)
-{
-}
-*/
+ * static void medusa_l1_d_instantiate(struct dentry *dentry, struct inode *inode)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_getprocattr(struct task_struct *p, char *name, char **value)
-{
-	return -EINVAL;
-}
-*/
+ * static int medusa_l1_getprocattr(struct task_struct *p, char *name, char **value)
+ * {
+ *	return -EINVAL;
+ * }
+ */
 
 /*
-static int medusa_l1_setprocattr(const char *name, void *value,
-			size_t size)
-{
-	return -EINVAL;
-}
-*/
+ * static int medusa_l1_setprocattr(const char *name, void *value,
+ *			size_t size)
+ * {
+ *	return -EINVAL;
+ * }
+ */
 
 /*
-static int medusa_l1_ismaclabel(const char *name) 
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_ismaclabel(const char *name)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_secid_to_secctx(u32 secid, char **secdata, u32 *seclen)
-{
-	return -EOPNOTSUPP;
-}
-*/
+ * static int medusa_l1_secid_to_secctx(u32 secid, char **secdata, u32 *seclen)
+ * {
+ *	return -EOPNOTSUPP;
+ * }
+ */
 
 /*
-static int medusa_l1_secctx_to_secid(const char *secdata, u32 seclen, u32 *secid)
-{
-	return -EOPNOTSUPP;
-}
-*/
+ * static int medusa_l1_secctx_to_secid(const char *secdata, u32 seclen, u32 *secid)
+ * {
+ *	return -EOPNOTSUPP;
+ * }
+ */
 
 /*
-static void medusa_l1_release_secctx(char *secdata, u32 seclen)
-{
-}
-*/
+ * static void medusa_l1_release_secctx(char *secdata, u32 seclen)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_inode_notifysecctx(struct inode *inode, void *ctx, u32 ctxlen)
-{
-	return -EOPNOTSUPP;
-}
-*/
+ * static int medusa_l1_inode_notifysecctx(struct inode *inode, void *ctx, u32 ctxlen)
+ * {
+ *	return -EOPNOTSUPP;
+ * }
+ */
 
 /*
-static int medusa_l1_inode_setsecctx(struct dentry *dentry, void *ctx, u32 ctxlen)
-{
-	return -EOPNOTSUPP;
-}
-*/
+ * static int medusa_l1_inode_setsecctx(struct dentry *dentry, void *ctx, u32 ctxlen)
+ * {
+ *	return -EOPNOTSUPP;
+ * }
+ */
 
 /*
-static int medusa_l1_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen)
-{
-	return -EOPNOTSUPP;
-}
-*/
+ * static int medusa_l1_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen)
+ * {
+ *	return -EOPNOTSUPP;
+ * }
+ */
 
 #ifdef CONFIG_KEYS
 
 /*
-static int medusa_l1_key_alloc(struct key *key, const struct cred *cred,
-			 unsigned long flags)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_key_alloc(struct key *key, const struct cred *cred,
+ *			 unsigned long flags)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_key_free(struct key *key)
-{
-}
-*/
+ * static void medusa_l1_key_free(struct key *key)
+ * {
+ * }
+ */
 
 /*
-static int medusa_l1_key_permission(key_ref_t key_ref, const struct cred *cred,
-				key_perm_t perm)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_key_permission(key_ref_t key_ref, const struct cred *cred,
+ *				key_perm_t perm)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_key_getsecurity(struct key *key, char **_buffer)
-{
-	*_buffer = NULL;
-	return 0;
-}
-*/
+ * static int medusa_l1_key_getsecurity(struct key *key, char **_buffer)
+ * {
+ *	*_buffer = NULL;
+ *	return 0;
+ * }
+ */
 
 #endif /* CONFIG_KEYS */
 
 #ifdef CONFIG_AUDIT
 
 /*
-static int medusa_l1_audit_rule_init(u32 field, u32 op, char *rulestr, void **lsmrule)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_audit_rule_init(u32 field, u32 op, char *rulestr, void **lsmrule)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_audit_rule_known(struct audit_krule *krule)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_audit_rule_known(struct audit_krule *krule)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_audit_rule_match(u32 secid, u32 field, u32 op, void *lsmrule)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_audit_rule_match(u32 secid, u32 field, u32 op, void *lsmrule)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static void medusa_l1_audit_rule_free(void *lsmrule)
-{
-}
-*/
+ * static void medusa_l1_audit_rule_free(void *lsmrule)
+ * {
+ * }
+ */
 
 #endif /* CONFIG_AUDIT */
 
 /*
-static int medusa_l1_syslog(int type)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_syslog(int type)
+ * {
+ *	return 0;
+ * }
+ */
 
 /*
-static int medusa_l1_netlink_send(struct sock *sk, struct sk_buff *skb)
-{
-	return 0;
-}
-*/
+ * static int medusa_l1_netlink_send(struct sock *sk, struct sk_buff *skb)
+ * {
+ *	return 0;
+ * }
+ */
 
 static int medusa_l1_inode_setxattr(struct dentry *dentry, const char *name,
-					const void *value, size_t size, int flags)
+				    const void *value, size_t size, int flags)
 {
 	return cap_inode_setxattr(dentry, name, value, size, flags);
-} 
+}
 
 
 static int medusa_l1_inode_removexattr(struct user_namespace *mnt_userns,
-					struct dentry *dentry, const char *name)
+				       struct dentry *dentry, const char *name)
 {
 	return cap_inode_removexattr(mnt_userns, dentry, name);
-} 
+}
 
 static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(ptrace_access_check, medusa_l1_ptrace_access_check),
@@ -1613,78 +1625,78 @@ static struct security_hook_list medusa_l1_hooks[] = {
 
 #ifdef CONFIG_SECURITY_NETWORK
 	/*
-	LSM_HOOK_INIT(unix_stream_connect, medusa_l1_unix_stream_connect),
-	LSM_HOOK_INIT(unix_may_send, medusa_l1_unix_may_send),
+	 * LSM_HOOK_INIT(unix_stream_connect, medusa_l1_unix_stream_connect),
+	 * LSM_HOOK_INIT(unix_may_send, medusa_l1_unix_may_send),
 
-	LSM_HOOK_INIT(socket_create, medusa_l1_socket_create),
-	LSM_HOOK_INIT(socket_post_create, medusa_l1_socket_post_create),
-	LSM_HOOK_INIT(socket_bind, medusa_l1_socket_bind),
-	LSM_HOOK_INIT(socket_connect, medusa_l1_socket_connect),
-	LSM_HOOK_INIT(socket_listen, medusa_l1_socket_listen),
-	LSM_HOOK_INIT(socket_accept, medusa_l1_socket_accept),
-	LSM_HOOK_INIT(socket_sendmsg, medusa_l1_socket_sendmsg),
-	LSM_HOOK_INIT(socket_recvmsg, medusa_l1_socket_recvmsg),
-	LSM_HOOK_INIT(socket_getsockname, medusa_l1_socket_getsockname),
-	LSM_HOOK_INIT(socket_getpeername, medusa_l1_socket_getpeername),
-	LSM_HOOK_INIT(socket_getsockopt, medusa_l1_socket_getsockopt),
-	LSM_HOOK_INIT(socket_setsockopt, medusa_l1_socket_setsockopt),
-	LSM_HOOK_INIT(socket_shutdown, medusa_l1_socket_shutdown),
-	LSM_HOOK_INIT(socket_sock_rcv_skb, medusa_l1_socket_sock_rcv_skb),
-	LSM_HOOK_INIT(socket_getpeersec_stream, medusa_l1_socket_getpeersec_stream),
-	LSM_HOOK_INIT(socket_getpeersec_dgram, medusa_l1_socket_getpeersec_dgram),
-	LSM_HOOK_INIT(sk_alloc_security, medusa_l1_sk_alloc_security),
-	LSM_HOOK_INIT(sk_free_security, medusa_l1_sk_free_security),
-	LSM_HOOK_INIT(sk_clone_security, medusa_l1_sk_clone_security),
-	LSM_HOOK_INIT(sk_getsecid, medusa_l1_sk_getsecid),
-	LSM_HOOK_INIT(sock_graft, medusa_l1_sock_graft),
-	LSM_HOOK_INIT(inet_conn_request, medusa_l1_inet_conn_request),
-	LSM_HOOK_INIT(inet_csk_clone, medusa_l1_inet_csk_clone),
-	LSM_HOOK_INIT(inet_conn_established, medusa_l1_inet_conn_established),
-	LSM_HOOK_INIT(secmark_relabel_packet, medusa_l1_secmark_relabel_packet),
-	LSM_HOOK_INIT(secmark_refcount_inc, medusa_l1_secmark_refcount_inc),
-	LSM_HOOK_INIT(secmark_refcount_dec, medusa_l1_secmark_refcount_dec),
-	LSM_HOOK_INIT(req_classify_flow, medusa_l1_req_classify_flow),
-	LSM_HOOK_INIT(tun_dev_alloc_security, medusa_l1_tun_dev_alloc_security),
-	LSM_HOOK_INIT(tun_dev_free_security, medusa_l1_tun_dev_free_security),
-	LSM_HOOK_INIT(tun_dev_create, medusa_l1_tun_dev_create),
-	LSM_HOOK_INIT(tun_dev_attach_queue, medusa_l1_tun_dev_attach_queue),
-	LSM_HOOK_INIT(tun_dev_attach, medusa_l1_tun_dev_attach),
-	LSM_HOOK_INIT(tun_dev_open, medusa_l1_tun_dev_open),
-	*/
+	 * LSM_HOOK_INIT(socket_create, medusa_l1_socket_create),
+	 * LSM_HOOK_INIT(socket_post_create, medusa_l1_socket_post_create),
+	 * LSM_HOOK_INIT(socket_bind, medusa_l1_socket_bind),
+	 * LSM_HOOK_INIT(socket_connect, medusa_l1_socket_connect),
+	 * LSM_HOOK_INIT(socket_listen, medusa_l1_socket_listen),
+	 * LSM_HOOK_INIT(socket_accept, medusa_l1_socket_accept),
+	 * LSM_HOOK_INIT(socket_sendmsg, medusa_l1_socket_sendmsg),
+	 * LSM_HOOK_INIT(socket_recvmsg, medusa_l1_socket_recvmsg),
+	 * LSM_HOOK_INIT(socket_getsockname, medusa_l1_socket_getsockname),
+	 * LSM_HOOK_INIT(socket_getpeername, medusa_l1_socket_getpeername),
+	 * LSM_HOOK_INIT(socket_getsockopt, medusa_l1_socket_getsockopt),
+	 * LSM_HOOK_INIT(socket_setsockopt, medusa_l1_socket_setsockopt),
+	 * LSM_HOOK_INIT(socket_shutdown, medusa_l1_socket_shutdown),
+	 * LSM_HOOK_INIT(socket_sock_rcv_skb, medusa_l1_socket_sock_rcv_skb),
+	 * LSM_HOOK_INIT(socket_getpeersec_stream, medusa_l1_socket_getpeersec_stream),
+	 * LSM_HOOK_INIT(socket_getpeersec_dgram, medusa_l1_socket_getpeersec_dgram),
+	 * LSM_HOOK_INIT(sk_alloc_security, medusa_l1_sk_alloc_security),
+	 * LSM_HOOK_INIT(sk_free_security, medusa_l1_sk_free_security),
+	 * LSM_HOOK_INIT(sk_clone_security, medusa_l1_sk_clone_security),
+	 * LSM_HOOK_INIT(sk_getsecid, medusa_l1_sk_getsecid),
+	 * LSM_HOOK_INIT(sock_graft, medusa_l1_sock_graft),
+	 * LSM_HOOK_INIT(inet_conn_request, medusa_l1_inet_conn_request),
+	 * LSM_HOOK_INIT(inet_csk_clone, medusa_l1_inet_csk_clone),
+	 * LSM_HOOK_INIT(inet_conn_established, medusa_l1_inet_conn_established),
+	 * LSM_HOOK_INIT(secmark_relabel_packet, medusa_l1_secmark_relabel_packet),
+	 * LSM_HOOK_INIT(secmark_refcount_inc, medusa_l1_secmark_refcount_inc),
+	 * LSM_HOOK_INIT(secmark_refcount_dec, medusa_l1_secmark_refcount_dec),
+	 * LSM_HOOK_INIT(req_classify_flow, medusa_l1_req_classify_flow),
+	 * LSM_HOOK_INIT(tun_dev_alloc_security, medusa_l1_tun_dev_alloc_security),
+	 * LSM_HOOK_INIT(tun_dev_free_security, medusa_l1_tun_dev_free_security),
+	 * LSM_HOOK_INIT(tun_dev_create, medusa_l1_tun_dev_create),
+	 * LSM_HOOK_INIT(tun_dev_attach_queue, medusa_l1_tun_dev_attach_queue),
+	 * LSM_HOOK_INIT(tun_dev_attach, medusa_l1_tun_dev_attach),
+	 * LSM_HOOK_INIT(tun_dev_open, medusa_l1_tun_dev_open),
+	 */
 #endif /* CONFIG_SECURITY_NETWORK */
 
 #ifdef CONFIG_SECURITY_NETWORK_XFRM
 	/*
-	LSM_HOOK_INIT(xfrm_policy_alloc_security, medusa_l1_xfrm_policy_alloc),
-	LSM_HOOK_INIT(xfrm_policy_clone_security, medusa_l1_xfrm_policy_clone),
-	LSM_HOOK_INIT(xfrm_policy_free_security, medusa_l1_xfrm_policy_free),
-	LSM_HOOK_INIT(xfrm_policy_delete_security, medusa_l1_xfrm_policy_delete),
-	LSM_HOOK_INIT(xfrm_state_alloc, medusa_l1_xfrm_state_alloc),
-	LSM_HOOK_INIT(xfrm_state_alloc_acquire, medusa_l1_xfrm_state_alloc_acquire),
-	LSM_HOOK_INIT(xfrm_state_free_security, medusa_l1_xfrm_state_free),
-	LSM_HOOK_INIT(xfrm_state_delete_security, medusa_l1_xfrm_state_delete),
-	LSM_HOOK_INIT(xfrm_policy_lookup, medusa_l1_xfrm_policy_lookup),
-	LSM_HOOK_INIT(xfrm_state_pol_flow_match, medusa_l1_xfrm_state_pol_flow_match),
-	LSM_HOOK_INIT(xfrm_decode_session, medusa_l1_xfrm_decode_session),
-	*/
+	 * LSM_HOOK_INIT(xfrm_policy_alloc_security, medusa_l1_xfrm_policy_alloc),
+	 * LSM_HOOK_INIT(xfrm_policy_clone_security, medusa_l1_xfrm_policy_clone),
+	 * LSM_HOOK_INIT(xfrm_policy_free_security, medusa_l1_xfrm_policy_free),
+	 * LSM_HOOK_INIT(xfrm_policy_delete_security, medusa_l1_xfrm_policy_delete),
+	 * LSM_HOOK_INIT(xfrm_state_alloc, medusa_l1_xfrm_state_alloc),
+	 * LSM_HOOK_INIT(xfrm_state_alloc_acquire, medusa_l1_xfrm_state_alloc_acquire),
+	 * LSM_HOOK_INIT(xfrm_state_free_security, medusa_l1_xfrm_state_free),
+	 * LSM_HOOK_INIT(xfrm_state_delete_security, medusa_l1_xfrm_state_delete),
+	 * LSM_HOOK_INIT(xfrm_policy_lookup, medusa_l1_xfrm_policy_lookup),
+	 * LSM_HOOK_INIT(xfrm_state_pol_flow_match, medusa_l1_xfrm_state_pol_flow_match),
+	 * LSM_HOOK_INIT(xfrm_decode_session, medusa_l1_xfrm_decode_session),
+	 */
 #endif /* CONFIG_SECURITY_NETWORK_XFRM */
 
 #ifdef CONFIG_KEYS
 	/*
-	LSM_HOOK_INIT(key_alloc, medusa_l1_key_alloc),
-	LSM_HOOK_INIT(key_free, medusa_l1_key_free),
-	LSM_HOOK_INIT(key_permission, medusa_l1_key_permission),
-	LSM_HOOK_INIT(key_getsecurity, medusa_l1_key_getsecurity),
-	*/
+	 * LSM_HOOK_INIT(key_alloc, medusa_l1_key_alloc),
+	 * LSM_HOOK_INIT(key_free, medusa_l1_key_free),
+	 * LSM_HOOK_INIT(key_permission, medusa_l1_key_permission),
+	 * LSM_HOOK_INIT(key_getsecurity, medusa_l1_key_getsecurity),
+	 */
 #endif /* CONFIG_KEYS */
 
 #ifdef CONFIG_AUDIT
 	/*
-	LSM_HOOK_INIT(audit_rule_init, medusa_l1_audit_rule_init),
-	LSM_HOOK_INIT(audit_rule_known, medusa_l1_audit_rule_known),
-	LSM_HOOK_INIT(audit_rule_match, medusa_l1_audit_rule_match),
-	LSM_HOOK_INIT(audit_rule_free, medusa_l1_audit_rule_free),
-	*/
+	 * LSM_HOOK_INIT(audit_rule_init, medusa_l1_audit_rule_init),
+	 * LSM_HOOK_INIT(audit_rule_known, medusa_l1_audit_rule_known),
+	 * LSM_HOOK_INIT(audit_rule_match, medusa_l1_audit_rule_match),
+	 * LSM_HOOK_INIT(audit_rule_free, medusa_l1_audit_rule_free),
+	 */
 #endif /* CONFIG_AUDIT */
 };
 
@@ -1727,11 +1739,10 @@ static int __init medusa_l1_init(void)
 	return ret;
 }
 
-static void __exit medusa_l1_exit (void)
-{	
+static void __exit medusa_l1_exit(void)
+{
 	med_pr_info("medusa unload");
 	//security_delete_hooks(medusa_hooks, ARRAY_SIZE(medusa_hooks));
-	return;
 }
 
 MODULE_LICENSE("GPL");
