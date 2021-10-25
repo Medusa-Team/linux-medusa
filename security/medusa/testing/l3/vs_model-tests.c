@@ -3,7 +3,7 @@
 
 static void vs_intersects_empty(struct kunit *test)
 {
-	vs_t a, b;
+	struct vs_t a, b;
 	vs_clear(a);
 	vs_clear(b);
 
@@ -12,7 +12,7 @@ static void vs_intersects_empty(struct kunit *test)
 
 static void vs_intersects_one_bit_intersects(struct kunit *test)
 {
-	vs_t a, b;
+	struct vs_t a, b;
 	vs_set(a);
 	vs_setbit(b, 8);
 
@@ -21,7 +21,7 @@ static void vs_intersects_one_bit_intersects(struct kunit *test)
 
 static void vs_intersects_partial_intersect(struct kunit *test)
 {
-	vs_t a, b;
+	struct vs_t a, b;
 	vs_set(a);
 	vs_set(b);
 	vs_clearbit(a, 0);
@@ -38,7 +38,7 @@ static void vs_intersects_partial_intersect(struct kunit *test)
 
 static void vs_intersects_full_intersect(struct kunit *test)
 {
-	vs_t a, b;
+	struct vs_t a, b;
 	vs_set(a);
 	vs_set(b);
 	vs_clearbit(a, 0);
@@ -51,7 +51,7 @@ static void vs_intersects_full_intersect(struct kunit *test)
 
 static void vs_intersects_disjoin_not_intersects(struct kunit *test)
 {
-	vs_t a, b;
+	struct vs_t a, b;
 	vs_set(a);
 	vs_clearbit(a, 0);
 	vs_clearbit(a, 1);
