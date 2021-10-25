@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
+
 #include "l3/arch.h"
 #include "l3/registry.h"
 #include "l3/med_cache.h"
@@ -7,9 +9,9 @@
 MED_LOCK_DATA(registry_lock); /* the linked list lock */
 static MED_LOCK_DATA(usecount_lock); /* the lock for modifying use-count */
 
-struct medusa_kclass_s *kclasses = NULL;
-struct medusa_evtype_s *evtypes = NULL;
-struct medusa_authserver_s *authserver = NULL;
+struct medusa_kclass_s *kclasses;
+struct medusa_evtype_s *evtypes;
+struct medusa_authserver_s *authserver;
 
 int medusa_authserver_magic = 1; /* the 'version' of authserver */
 /* WARNING! medusa_authserver_magic is not locked, nor atomic type,
@@ -57,7 +59,7 @@ void med_put_kclass(struct medusa_kclass_s *med_kclass)
  */
 struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s *med_kclass)
 {
-	struct medusa_kclass_s * tmp;
+	struct medusa_kclass_s *tmp;
 
 	MED_LOCK_R(registry_lock);
 	for (tmp = kclasses; tmp; tmp = tmp->next)
@@ -146,7 +148,11 @@ int med_unregister_kclass(struct medusa_kclass_s *med_kclass)
 	MED_LOCK_R(registry_lock);
 	MED_LOCK_R(usecount_lock);
 	if (med_kclass->use_count > 0 || med_kclass->next) { /* useless sanity check */
-		med_pr_crit("A fatal ERROR has occured; expect system crash. If you're removing a file-related kclass, press reset. Otherwise save now.\n");
+		char *err_str1 = "A fatal ERROR has occured; expect system crash.";
+		char *err_str2 = "If you're removing a file-related kclass, press reset.";
+		char *err_str3 = "Otherwise save now.";
+
+		med_pr_crit("%s %s %s\n", err_str1, err_str2, err_str3);
 		MED_UNLOCK_R(usecount_lock);
 		MED_UNLOCK_R(registry_lock);
 		return -1;
@@ -213,8 +219,8 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 	med_evtype->arg_name[1][MEDUSA_ATTRNAME_MAX-1] = '\0';
 	/* TODO: check whether kclasses are registered, maybe register automatically */
 	med_pr_info("Registering event type %s(%s:%s->%s:%s)\n", med_evtype->name,
-		med_evtype->arg_name[0],med_evtype->arg_kclass[0]->name,
-		med_evtype->arg_name[1],med_evtype->arg_kclass[1]->name);
+		    med_evtype->arg_name[0], med_evtype->arg_kclass[0]->name,
+		    med_evtype->arg_name[1], med_evtype->arg_kclass[1]->name);
 	MED_LOCK_W(registry_lock);
 	for (p = evtypes; p; p = p->next)
 		if (strcmp(p->name, med_evtype->name) == 0) {
@@ -230,8 +236,7 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 	if ((flags & MASK_BITNR) != MEDUSA_EVTYPE_NOTTRIGGERED) {
 		for (p = evtypes; p; p ? (p = p->next) : (p = evtypes)) {
 			if (p->bitnr != MEDUSA_EVTYPE_NOTTRIGGERED &&
-				(p->bitnr & MASK) == (med_evtype->bitnr & MASK)) {
-
+			    (p->bitnr & MASK) == (med_evtype->bitnr & MASK)) {
 				med_evtype->bitnr++;
 				p = NULL;
 				continue;
@@ -240,8 +245,10 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 #undef MASK
 		if ((med_evtype->bitnr & MASK_BITNR) >= CONFIG_MEDUSA_ACT) {
 			MED_UNLOCK_W(registry_lock);
-			med_pr_err("med_register_evtype(%s): bitnr %u >= %u (CONFIG_MEDUSA_ACT)",
-				    med_evtype->name, med_evtype->bitnr & MASK_BITNR, CONFIG_MEDUSA_ACT);
+			med_pr_err("%s(%s): bitnr %u >= %u (CONFIG_MEDUSA_ACT)",
+				   __func__, med_evtype->name,
+				   med_evtype->bitnr & MASK_BITNR,
+				   CONFIG_MEDUSA_ACT);
 			return -2;
 		}
 	}
@@ -261,6 +268,7 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 void med_unregister_evtype(struct medusa_evtype_s *med_evtype)
 {
 	struct medusa_evtype_s *tmp;
+
 	med_pr_info("Unregistering event type %s\n", med_evtype->name);
 	MED_LOCK_W(registry_lock);
 	if (med_evtype == evtypes)

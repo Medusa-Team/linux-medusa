@@ -1,6 +1,4 @@
-#
-# Makefile for the Linux kernel part of Medusa DS9 Security System, L3
-#
+# For the Linux kernel part of Medusa DS9 Security System, L3
 
 O_TARGET := l3.o
 
