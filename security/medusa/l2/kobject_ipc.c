@@ -13,12 +13,12 @@
 
 static struct ipc_kobject storage;
 
-#define COPY_WRITE_IPC_VARS(to,from) \
+#define COPY_WRITE_IPC_VARS(to, from) \
 	do { \
 		(to)->uid = (from)->uid; \
 		(to)->gid = (from)->gid; \
 		(to)->mode = (from)->mode; \
-	} while(0);
+	} while (0)
 
 #define COPY_READ_IPC_VARS(to, from) \
 	do { \
@@ -29,21 +29,21 @@ static struct ipc_kobject storage;
 		(to)->cgid = (from)->cgid; \
 		(to)->seq = (from)->seq; \
 		(to)->refcount = (from)->refcount; \
-	} while(0);
+	} while (0)
 
 MED_ATTRS(ipc_kobject) {
-	MED_ATTR_RO	(ipc_kobject, ipc_class, "ipc_class", MED_UNSIGNED),
-	MED_ATTR_RO	(ipc_kobject, ipc_perm.deleted, "deleted", MED_UNSIGNED),
-	MED_ATTR_RO	(ipc_kobject, ipc_perm.id, "id", MED_SIGNED),
-	MED_ATTR_RO	(ipc_kobject, ipc_perm.key, "key", MED_SIGNED),
-	MED_ATTR	(ipc_kobject, ipc_perm.uid, "uid", MED_UNSIGNED),
-	MED_ATTR	(ipc_kobject, ipc_perm.gid, "gid", MED_UNSIGNED),
-	MED_ATTR_RO	(ipc_kobject, ipc_perm.cuid, "cuid", MED_UNSIGNED),
-	MED_ATTR_RO	(ipc_kobject, ipc_perm.cgid, "cgid", MED_UNSIGNED),
-	MED_ATTR	(ipc_kobject, ipc_perm.mode, "mode", MED_UNSIGNED),
-	MED_ATTR_RO	(ipc_kobject, ipc_perm.seq, "seq", MED_UNSIGNED),
-	MED_ATTR_RO	(ipc_kobject, ipc_perm.refcount, "refcount", MED_UNSIGNED),
-	MED_ATTR_OBJECT (ipc_kobject),
+	MED_ATTR_RO(ipc_kobject, ipc_class, "ipc_class", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_kobject, ipc_perm.deleted, "deleted", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_kobject, ipc_perm.id, "id", MED_SIGNED),
+	MED_ATTR_RO(ipc_kobject, ipc_perm.key, "key", MED_SIGNED),
+	MED_ATTR(ipc_kobject, ipc_perm.uid, "uid", MED_UNSIGNED),
+	MED_ATTR(ipc_kobject, ipc_perm.gid, "gid", MED_UNSIGNED),
+	MED_ATTR(ipc_kobject, ipc_perm.cuid, "cuid", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_kobject, ipc_perm.cgid, "cgid", MED_UNSIGNED),
+	MED_ATTR(ipc_kobject, ipc_perm.mode, "mode", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_kobject, ipc_perm.seq, "seq", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_kobject, ipc_perm.refcount, "refcount", MED_UNSIGNED),
+	MED_ATTR_OBJECT(ipc_kobject),
 	MED_ATTR_END
 };
 
@@ -75,7 +75,7 @@ static inline struct ipc_ids *medusa_get_ipc_ids(unsigned int ipc_class)
 
 /**
  * ipc_kern2kobj - convert function from kernel structure to kobject
- * @ipc_kobj - pointer to ipc_kobject where data will be stored 
+ * @ipc_kobj - pointer to ipc_kobject where data will be stored
  * @ipcp - pointer to kernel structure used to get data
  * @dec_refcount - if set, decrement IPC object's refcount in returned @ipc_kobj
  * Return: pointer to @ipc_kobj with data on success, NULL on error (@ipc_kobj
@@ -85,11 +85,11 @@ static inline struct ipc_ids *medusa_get_ipc_ids(unsigned int ipc_class)
  * For validity of an IPC object, it must be always called after ipc_getref(),
  * before ipc_putref() functions.
  */
-inline struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject * ipc_kobj, struct kern_ipc_perm * ipcp, bool dec_refcount)
+inline struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp, bool dec_refcount)
 {
 	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
-		med_pr_err("ERROR: NULL pointer: ipc_kern2kobj: ipc_kobj=%p or ipcp=%p", \
-			ipc_kobj, ipcp);
+		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipcp=%p",
+			__func__, ipc_kobj, ipcp);
 		return NULL;
 	}
 
@@ -131,8 +131,8 @@ inline struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject * ipc_kobj, struct k
 static inline enum medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp)
 {
 	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
-		med_pr_err("ERROR: NULL pointer: ipc_kobj2kern: ipc_kobj=%p or ipcp=%p", \
-			ipc_kobj, ipcp);
+		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipcp=%p",
+			__func__, ipc_kobj, ipcp);
 		return MED_ERR;
 	}
 
@@ -149,19 +149,19 @@ static inline enum medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, s
  * Return: pointer to new ipc_kobject with related IPC object data on success, NULL
  *	on error (@kobj is NULL, not existing IPC object)
  */
-struct medusa_kobject_s * ipc_fetch(struct medusa_kobject_s *kobj)
+struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj)
 {
 	struct ipc_kobject *ipc_kobj;
 	struct ipc_kobject *new_kobj = NULL;
 	struct kern_ipc_perm *ipcp;
 	struct ipc_ids *ids;
 
-	ipc_kobj = (struct ipc_kobject*)kobj;
+	ipc_kobj = (struct ipc_kobject *)kobj;
 	if (!ipc_kobj)
 		goto out_err;
 
 	ids = medusa_get_ipc_ids(ipc_kobj->ipc_class);
-	if(!ids)
+	if (!ids)
 		goto out_err;
 
 	rcu_read_lock();
@@ -171,7 +171,7 @@ struct medusa_kobject_s * ipc_fetch(struct medusa_kobject_s *kobj)
 	 * on return of ipc_obtain_object_check().
 	 */
 	ipcp = ipc_obtain_object_check(ids, ipc_kobj->ipc_perm.id);
-	if(IS_ERR(ipcp) || !ipcp)
+	if (IS_ERR(ipcp) || !ipcp)
 		goto out_rcu_unlock;
 
 	/*
@@ -195,7 +195,7 @@ out_err:
  *	IPC object
  * Return: MED_ALLOW if successfull, MED_ERR otherwise
  */
-enum medusa_answer_t ipc_update(struct medusa_kobject_s * kobj)
+enum medusa_answer_t ipc_update(struct medusa_kobject_s *kobj)
 {
 	struct ipc_kobject *ipc_kobj;
 	struct kern_ipc_perm *ipcp;
@@ -207,9 +207,9 @@ enum medusa_answer_t ipc_update(struct medusa_kobject_s * kobj)
 		goto out_err;
 
 	ids = medusa_get_ipc_ids(ipc_kobj->ipc_class);
-	if(!ids)
+	if (!ids)
 		goto out_err;
-	
+
 	rcu_read_lock();
 
 	/*
@@ -217,7 +217,7 @@ enum medusa_answer_t ipc_update(struct medusa_kobject_s * kobj)
 	 * on return of ipc_obtain_object_check().
 	 */
 	ipcp = ipc_obtain_object_check(ids, ipc_kobj->ipc_perm.id);
-	if(IS_ERR(ipcp) || !ipcp)
+	if (IS_ERR(ipcp) || !ipcp)
 		goto out_rcu_unlock;
 
 	/*
@@ -248,7 +248,8 @@ out_err:
  * @unlock - if True, unlock relevant IPC object
  * Return: -EIDRM if IPC object is marked to deletion, 0 otherwise
  */
-inline int ipc_getref(struct kern_ipc_perm *ipcp, bool unlock) {
+inline int ipc_getref(struct kern_ipc_perm *ipcp, bool unlock)
+{
 	/* increase references to IPC object; check races with IPC_RMID */
 	if (unlikely(!ipc_rcu_getref(ipcp)))
 		return -EIDRM;
@@ -266,8 +267,10 @@ inline int ipc_getref(struct kern_ipc_perm *ipcp, bool unlock) {
  * @lock - if True, returns with locked IPC object
  * Return: -EIDRM if IPC object is marked to deletion, 0 otherwise
  */
-inline int ipc_putref(struct kern_ipc_perm *ipcp, bool lock) {
+inline int ipc_putref(struct kern_ipc_perm *ipcp, bool lock)
+{
 	int retval = 0;
+
 	rcu_read_lock();
 	/* ipc_valid_object() must be called with lock */
 	ipc_lock_object(ipcp);
@@ -291,11 +294,10 @@ MED_KCLASS(ipc_kobject) {
 	NULL,		/* unmonitor */
 };
 
-void ipc_kobject_rmmod(void);
-
-int __init ipc_kobject_init(void) {
+int __init ipc_kobject_init(void)
+{
 	MED_REGISTER_KCLASS(ipc_kobject);
 	return 0;
 }
 
-__initcall(ipc_kobject_init);
+device_initcall(ipc_kobject_init);

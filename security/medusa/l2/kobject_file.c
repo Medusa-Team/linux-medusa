@@ -1,9 +1,11 @@
-/* file_kobject.c, (C) 2002 Milan Pikula */
+// SPDX-License-Identifier: GPL-2.0
+
+/* (C) 2002 Milan Pikula */
 
 #include "l2/kobject_file.h"
 #include "l3/registry.h"
 
-int file_kobj2kern(struct file_kobject * fk, struct inode * inode)
+int file_kobj2kern(struct file_kobject *fk, struct inode *inode)
 {
 	/* TODO: either update the i-node on disk, or don't allow this at all */
 	inode->i_mode = fk->mode;
@@ -23,9 +25,9 @@ int file_kobj2kern(struct file_kobject * fk, struct inode * inode)
 /*
  * This routine expects the existing Medusa inode security struct!
  */
-int file_kern2kobj(struct file_kobject * fk, struct inode * inode)
+int file_kern2kobj(struct file_kobject *fk, struct inode *inode)
 {
-        memset( fk, '\0', sizeof(struct file_kobject));
+	memset(fk, '\0', sizeof(struct file_kobject));
 
 	fk->dev = (inode->i_sb->s_dev);
 	fk->ino = inode->i_ino;
@@ -45,23 +47,23 @@ int file_kern2kobj(struct file_kobject * fk, struct inode * inode)
 }
 
 /* second, we will describe its attributes, and provide fetch and update
- * routines */
-/* (that's for l4, they will be working with those descriptions) */
+ * routines (that's for l4, they will be working with those descriptions)
+ */
 
 MED_ATTRS(file_kobject) {
-	MED_ATTR_KEY_RO	(file_kobject, dev, "dev", MED_UNSIGNED),
-	MED_ATTR_KEY_RO	(file_kobject, ino, "ino", MED_UNSIGNED),
-	MED_ATTR	(file_kobject, mode, "mode", MED_UNSIGNED),
-	MED_ATTR_RO	(file_kobject, nlink, "nlink", MED_UNSIGNED),
-	MED_ATTR	(file_kobject, uid, "uid", MED_UNSIGNED),
-	MED_ATTR	(file_kobject, gid, "gid", MED_UNSIGNED),
-	MED_ATTR_RO	(file_kobject, rdev, "rdev", MED_UNSIGNED),
-	MED_ATTR_OBJECT	(file_kobject),
-	MED_ATTR	(file_kobject, user, "user", MED_UNSIGNED),
+	MED_ATTR_KEY_RO(file_kobject, dev, "dev", MED_UNSIGNED),
+	MED_ATTR_KEY_RO(file_kobject, ino, "ino", MED_UNSIGNED),
+	MED_ATTR(file_kobject, mode, "mode", MED_UNSIGNED),
+	MED_ATTR_RO(file_kobject, nlink, "nlink", MED_UNSIGNED),
+	MED_ATTR(file_kobject, uid, "uid", MED_UNSIGNED),
+	MED_ATTR(file_kobject, gid, "gid", MED_UNSIGNED),
+	MED_ATTR_RO(file_kobject, rdev, "rdev", MED_UNSIGNED),
+	MED_ATTR_OBJECT(file_kobject),
+	MED_ATTR(file_kobject, user, "user", MED_UNSIGNED),
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
-	MED_ATTR	(file_kobject, ecap, "ecap", MED_BITMAP | MED_LE),
-	MED_ATTR	(file_kobject, icap, "icap", MED_BITMAP | MED_LE),
-	MED_ATTR	(file_kobject, pcap, "pcap", MED_BITMAP | MED_LE),
+	MED_ATTR(file_kobject, ecap, "ecap", MED_BITMAP | MED_LE),
+	MED_ATTR(file_kobject, icap, "icap", MED_BITMAP | MED_LE),
+	MED_ATTR(file_kobject, pcap, "pcap", MED_BITMAP | MED_LE),
 #endif
 	MED_ATTR_END
 };
@@ -71,7 +73,7 @@ MED_ATTRS(file_kobject) {
  * way for L4 to fetch or update a i-node.
  */
 static DEFINE_RWLOCK(live_lock);
- static struct inode * live_inodes = NULL;
+static struct inode *live_inodes;
 
 /* TODO: if it shows there are many concurrent inodes in the list,
  * rewrite this to use in-kernel hashes; if there will be a FAST global
@@ -80,9 +82,9 @@ static DEFINE_RWLOCK(live_lock);
  * Note that we don't modify inode ref_count: call this only with
  * locked i-node.
  */
-void file_kobj_live_add(struct inode * ino)
+void file_kobj_live_add(struct inode *ino)
 {
-	struct inode * tmp;
+	struct inode *tmp;
 
 	write_lock(&live_lock);
 	for (tmp = live_inodes; tmp; tmp = inode_security(tmp)->next_live)
@@ -116,23 +118,21 @@ void file_kobj_live_remove(struct inode *ino)
 out:
 	write_unlock(&live_lock);
 }
-void file_kobj_dentry2string(struct dentry * dentry, char * buf)
+void file_kobj_dentry2string(struct dentry *dentry, char *buf)
 {
 	int len;
 
-	if( IS_ROOT(dentry) )
-	{
+	if (IS_ROOT(dentry)) {
 		struct path ndcurrent, ndupper;
-		
+
 		ndcurrent.dentry = dentry;
 		ndcurrent.mnt = NULL;
-		medusa_get_upper_and_parent(&ndcurrent,&ndupper,NULL);
-		dentry=dget(ndupper.dentry);
+		medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
+		dentry = dget(ndupper.dentry);
 		medusa_put_upper_and_parent(&ndupper, NULL);
-	}
-	else
+	} else
 		dget(dentry);
-		
+
 	if (!dentry || IS_ERR(dentry) || !dentry->d_name.name) {
 		buf[0] = '\0';
 		dput(dentry);
@@ -147,9 +147,9 @@ void file_kobj_dentry2string(struct dentry * dentry, char * buf)
 
 // static struct file_kobject storage;
 
-static inline struct inode * __lookup_inode_by_key(struct file_kobject * key_obj)
+static inline struct inode *__lookup_inode_by_key(struct file_kobject *key_obj)
 {
-	struct inode * p;
+	struct inode *p;
 
 	read_lock(&live_lock);
 	for (p = live_inodes; p; p = inode_security(p)->next_live)
@@ -165,13 +165,13 @@ static inline void __unlookup(void)
 	read_unlock(&live_lock);
 }
 
-static struct medusa_kobject_s * file_fetch(struct medusa_kobject_s * key_obj)
+static struct medusa_kobject_s *file_fetch(struct medusa_kobject_s *key_obj)
 {
-	struct inode * p;
+	struct inode *p;
 
 	p = __lookup_inode_by_key((struct file_kobject *)key_obj);
 	if (p) {
-		file_kern2kobj((struct file_kobject*)key_obj, p);
+		file_kern2kobj((struct file_kobject *)key_obj, p);
 		__unlookup();
 		return (struct medusa_kobject_s *)key_obj;
 	}
@@ -179,9 +179,9 @@ static struct medusa_kobject_s * file_fetch(struct medusa_kobject_s * key_obj)
 	return NULL;
 }
 
-static void file_unmonitor(struct medusa_kobject_s * kobj)
+static void file_unmonitor(struct medusa_kobject_s *kobj)
 {
-	struct inode * p;
+	struct inode *p;
 
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
 	if (p) {
@@ -191,9 +191,9 @@ static void file_unmonitor(struct medusa_kobject_s * kobj)
 	__unlookup();
 }
 
-static enum medusa_answer_t file_update(struct medusa_kobject_s * kobj)
+static enum medusa_answer_t file_update(struct medusa_kobject_s *kobj)
 {
-	struct inode * p;
+	struct inode *p;
 	enum medusa_answer_t retval = MED_ERR;
 
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
@@ -219,9 +219,10 @@ MED_KCLASS(file_kobject) {
 	file_unmonitor,	/* disable all monitoring on kobj. */
 };
 
-int __init file_kobject_init(void) {
+int __init file_kobject_init(void)
+{
 	MED_REGISTER_KCLASS(file_kobject);
 	return 0;
 }
 
-__initcall(file_kobject_init);
+device_initcall(file_kobject_init);

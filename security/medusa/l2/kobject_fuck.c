@@ -1,4 +1,6 @@
-/* kobject_fuck.c, (C) 2002 Milan Pikula */
+// SPDX-License-Identifier: GPL-2.0
+
+/* (C) 2020 Matus Jokay */
 
 #include <linux/namei.h>
 #include <linux/path.h>
@@ -9,10 +11,10 @@
 #include "l2/kobject_fuck.h"
 
 MED_ATTRS(fuck_kobject) {
-	MED_ATTR		(fuck_kobject, path, "path", MED_STRING),
-	MED_ATTR		(fuck_kobject, ino, "ino", MED_UNSIGNED), // unsigned long
-	MED_ATTR		(fuck_kobject, dev, "dev", MED_UNSIGNED), // unsigned int
-	MED_ATTR		(fuck_kobject, action, "action", MED_STRING),
+	MED_ATTR(fuck_kobject, path, "path", MED_STRING),
+	MED_ATTR(fuck_kobject, ino, "ino", MED_UNSIGNED), // unsigned long
+	MED_ATTR(fuck_kobject, dev, "dev", MED_UNSIGNED), // unsigned int
+	MED_ATTR(fuck_kobject, action, "action", MED_STRING),
 	MED_ATTR_END
 };
 
@@ -24,23 +26,22 @@ struct fuck_path {
 	char path[0];
 };
 
-// static struct fuck_kobject storage;
-
-static struct fuck_path* get_from_hash(char* path, int hash, struct medusa_l1_inode_s* inode) {
-	struct fuck_path* fuck_item;
+static struct fuck_path *get_from_hash(char *path, int hash, struct medusa_l1_inode_s *inode)
+{
+	struct fuck_path *fuck_item;
 
 	hash_for_each_possible(inode->fuck, fuck_item, list, hash) {
-		if (strncmp(path, fuck_item->path, PATH_MAX) == 0) {
+		if (strncmp(path, fuck_item->path, PATH_MAX) == 0)
 			return fuck_item;
-		}
 	}
 
 	return NULL;
 }
 
-static struct fuck_path* hash_get_first(struct medusa_l1_inode_s* med) {
+static struct fuck_path *hash_get_first(struct medusa_l1_inode_s *med)
+{
 	int bkt;
-	struct fuck_path* path;
+	struct fuck_path *path;
 
 	hash_for_each(med->fuck, bkt, path, list) {
 		return path;
@@ -49,8 +50,9 @@ static struct fuck_path* hash_get_first(struct medusa_l1_inode_s* med) {
 	return NULL;
 }
 
-int fuck_free(struct medusa_l1_inode_s* med) {
-	struct fuck_path* path;
+int fuck_free(struct medusa_l1_inode_s *med)
+{
+	struct fuck_path *path;
 
 	while ((path = hash_get_first(med))) {
 		hash_del(&path->list);
@@ -61,7 +63,8 @@ int fuck_free(struct medusa_l1_inode_s* med) {
 }
 
 //used in medusa_l1_path_chown, medusa_l1_path_chmod, medusa_l1_file_open
-int validate_fuck(const struct path* fuck_path) {
+int validate_fuck(const struct path *fuck_path)
+{
 	struct inode *fuck_inode = fuck_path->dentry->d_inode;
 	int hash, ret = 0;
 	char *accessed_path;
@@ -75,13 +78,12 @@ int validate_fuck(const struct path* fuck_path) {
 	if (unlikely(hash_empty(inode_security(fuck_inode)->fuck)))
 		goto out;
 
-	buf = (char *) kmalloc(sizeof(char) * (PATH_MAX + 1), GFP_KERNEL);
-	if (unlikely(!buf)) {
+	buf = kmalloc(sizeof(char) * (PATH_MAX + 1), GFP_KERNEL);
+	if (unlikely(!buf))
 		goto out;
-	}
 
 	accessed_path = d_absolute_path(fuck_path, buf, sizeof(buf));
-	if(!unlikely(accessed_path || IS_ERR(accessed_path))) {
+	if (!unlikely(accessed_path || IS_ERR(accessed_path))) {
 		/* accessed_path is NULL */
 		goto out;
 	}
@@ -97,18 +99,19 @@ out:
 	return ret;
 }
 
-//used in medusa_l1_path_link
-int validate_fuck_link(struct dentry *old_dentry) {
+// used in medusa_l1_path_link
+int validate_fuck_link(struct dentry *old_dentry)
+{
 	struct inode *fuck_inode = old_dentry->d_inode;
-	//if inode has no protected paths defined, allow hard link alse deny
-	if(hash_empty(inode_security(fuck_inode)->fuck))
+	/* if inode has no protected paths defined, allow hard link else deny */
+	if (hash_empty(inode_security(fuck_inode)->fuck))
 		return 0;
 	return -EACCES;
 }
 
-static struct medusa_kobject_s * fuck_fetch(struct medusa_kobject_s * kobj)
+static struct medusa_kobject_s *fuck_fetch(struct medusa_kobject_s *kobj)
 {
-	struct fuck_kobject * fkobj = (struct fuck_kobject *) kobj;
+	struct fuck_kobject *fkobj = (struct fuck_kobject *) kobj;
 	struct inode *fuck_inode;
 	struct path path;
 
@@ -146,9 +149,9 @@ static struct medusa_kobject_s * fuck_fetch(struct medusa_kobject_s * kobj)
  *					  - unable to get info about file specified by dev/ino numbers
  *					  - memory allocation error
  */
-static enum medusa_answer_t fuck_update(struct medusa_kobject_s * kobj)
+static enum medusa_answer_t fuck_update(struct medusa_kobject_s *kobj)
 {
-	struct fuck_kobject * fkobj =  (struct fuck_kobject *) kobj;
+	struct fuck_kobject *fkobj =  (struct fuck_kobject *) kobj;
 	struct super_block *sb;
 	struct inode *fuck_inode;
 	struct fuck_path *fuck_path;
@@ -167,26 +170,28 @@ static enum medusa_answer_t fuck_update(struct medusa_kobject_s * kobj)
 	hash = hash_function(fkobj->path);
 
 	if (strcmp(fkobj->action, "append") == 0) {
-		fuck_path = (struct fuck_path*) kmalloc(sizeof(fuck_path) + sizeof(char)*(strnlen(fkobj->path, PATH_MAX)+1), GFP_KERNEL);
+		fuck_path = kmalloc(sizeof(fuck_path) + sizeof(char)*(strnlen(fkobj->path, PATH_MAX)+1), GFP_KERNEL);
 		if (!fuck_path) {
 			iput(fuck_inode);
 			return MED_ERR;
 		}
 		strncpy(fuck_path->path, fkobj->path, PATH_MAX);
 
-		/* don't check for duplicity in hash table
-		   is up to admin do not add the same 'path' more than once */
+		/* Don't check for duplicity in hash table.
+		 * Is up to admin do not add the same 'path' more than once.
+		 */
 		hash_add(inode_security(fuck_inode)->fuck, &fuck_path->list, hash);
 	} else if (strcmp(fkobj->action, "remove") == 0) {
 		/* remove non-existing path in hash table is ok */
-		if ((fuck_path = get_from_hash(fkobj->path, hash, inode_security(fuck_inode))) == NULL)
+		fuck_path = get_from_hash(fkobj->path, hash, inode_security(fuck_inode));
+		if (!fuck_path)
 			goto out;
 		hash_del(&fuck_path->list);
 		kfree(fuck_path);
 	}
 
-	med_pr_debug("Fuck: '%s' (dev = %u, ino = %lu, act = %s)", \
-				fkobj->path, fkobj->dev, fkobj->ino, fkobj->action);
+	med_pr_debug("Fuck: '%s' (dev = %u, ino = %lu, act = %s)",
+		     fkobj->path, fkobj->dev, fkobj->ino, fkobj->action);
 
 out:
 	iput(fuck_inode);
@@ -203,11 +208,10 @@ MED_KCLASS(fuck_kobject) {
 	NULL,		/* unmonitor */
 };
 
-void fuck_kobject_rmmod(void);
-
-int __init fuck_kobject_init(void) {
+int __init fuck_kobject_init(void)
+{
 	MED_REGISTER_KCLASS(fuck_kobject);
 	return 0;
 }
 
-__initcall(fuck_kobject_init);
+device_initcall(fuck_kobject_init);

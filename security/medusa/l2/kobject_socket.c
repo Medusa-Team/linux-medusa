@@ -7,27 +7,28 @@
 #include "l2/kobject_socket.h"
 
 MED_ATTRS(socket_kobject) {
-	MED_ATTR_KEY_RO (socket_kobject, dev, "dev", MED_UNSIGNED),
-	MED_ATTR_KEY_RO (socket_kobject, ino, "ino", MED_UNSIGNED),
+	MED_ATTR_KEY_RO(socket_kobject, dev, "dev", MED_UNSIGNED),
+	MED_ATTR_KEY_RO(socket_kobject, ino, "ino", MED_UNSIGNED),
 
-	MED_ATTR_RO (socket_kobject, type, "type", MED_UNSIGNED),
-	MED_ATTR_RO (socket_kobject, family, "family", MED_UNSIGNED),
-	MED_ATTR_RO (socket_kobject, addrlen, "addrlen", MED_UNSIGNED),
-	MED_ATTR (socket_kobject, address, "address", MED_BYTES),
-	MED_ATTR (socket_kobject, uid, "uid", MED_UNSIGNED),
-	MED_ATTR_OBJECT	(socket_kobject),
+	MED_ATTR_RO(socket_kobject, type, "type", MED_UNSIGNED),
+	MED_ATTR_RO(socket_kobject, family, "family", MED_UNSIGNED),
+	MED_ATTR_RO(socket_kobject, addrlen, "addrlen", MED_UNSIGNED),
+	MED_ATTR(socket_kobject, address, "address", MED_BYTES),
+	MED_ATTR(socket_kobject, uid, "uid", MED_UNSIGNED),
+	MED_ATTR_OBJECT(socket_kobject),
 
 	MED_ATTR_END
 };
 
-int socket_kobj2kern(struct socket_kobject * sock_kobj, struct socket * sock)
+int socket_kobj2kern(struct socket_kobject *sock_kobj, struct socket *sock)
 {
 	struct medusa_l1_socket_s *sk_sec = sock_security(sock->sk);
+
 	sock_kobj->med_object = sk_sec->med_object;
 	return 0;
 }
 
-int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
+int socket_kern2kobj(struct socket_kobject *sock_kobj, struct socket *sock)
 {
 	struct inode *inode = SOCK_INODE(sock);
 	struct medusa_l1_socket_s *sk_sec = sock_security(sock->sk);
@@ -40,20 +41,20 @@ int socket_kern2kobj(struct socket_kobject * sock_kobj, struct socket * sock)
 	sock_kobj->uid = sock->sk->sk_uid;
 	sock_kobj->addrlen = sk_sec->addrlen;
 	if (sk_sec->addrlen > 0) {
-		switch(sock->ops->family) {
-			case AF_INET:
-				sock_kobj->address.inet_i.port = sk_sec->address.inet_i.port;
-				memcpy(sock_kobj->address.inet_i.addrdata, sk_sec->address.inet_i.addrdata, 4);
-				break;
-			case AF_INET6:
-				sock_kobj->address.inet6_i.port = sk_sec->address.inet6_i.port;
-				memcpy(sock_kobj->address.inet6_i.addrdata, sk_sec->address.inet6_i.addrdata, 16);
-				break;
-			case AF_UNIX:
-				memcpy(sock_kobj->address.unix_i.addrdata, sk_sec->address.unix_i.addrdata, UNIX_PATH_MAX);
-				break;
-			default:
-				break;
+		switch (sock->ops->family) {
+		case AF_INET:
+			sock_kobj->address.inet_i.port = sk_sec->address.inet_i.port;
+			memcpy(sock_kobj->address.inet_i.addrdata, sk_sec->address.inet_i.addrdata, 4);
+			break;
+		case AF_INET6:
+			sock_kobj->address.inet6_i.port = sk_sec->address.inet6_i.port;
+			memcpy(sock_kobj->address.inet6_i.addrdata, sk_sec->address.inet6_i.addrdata, 16);
+			break;
+		case AF_UNIX:
+			memcpy(sock_kobj->address.unix_i.addrdata, sk_sec->address.unix_i.addrdata, UNIX_PATH_MAX);
+			break;
+		default:
+			break;
 		}
 	}
 	sock_kobj->med_object = sk_sec->med_object;
@@ -65,15 +66,15 @@ struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 	struct socket *sock;
 	struct inode *inode = NULL;
 	struct super_block *sb = NULL;
-	struct socket_kobject *s_kobj = (struct socket_kobject*) kobj;
+	struct socket_kobject *s_kobj = (struct socket_kobject *) kobj;
 
-	if(s_kobj)
+	if (s_kobj)
 		sb = user_get_super(s_kobj->dev, false);
-	if(sb) {
+	if (sb) {
 		inode = ilookup(sb, s_kobj->ino);
 		drop_super(sb);
 	}
-	if(inode) {
+	if (inode) {
 		sock = SOCKET_I(inode);
 		socket_kern2kobj(s_kobj, sock);
 		iput(inode);
@@ -88,15 +89,15 @@ enum medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
 	struct socket *sock;
 	struct inode *inode = NULL;
 	struct super_block *sb = NULL;
-	struct socket_kobject *s_kobj = (struct socket_kobject*) kobj;
+	struct socket_kobject *s_kobj = (struct socket_kobject *) kobj;
 
-	if(s_kobj)
+	if (s_kobj)
 		sb = user_get_super(s_kobj->dev, false);
-	if(sb) {
+	if (sb) {
 		inode = ilookup(sb, s_kobj->ino);
 		drop_super(sb);
 	}
-	if(inode) {
+	if (inode) {
 		sock = SOCKET_I(inode);
 		socket_kobj2kern(s_kobj, sock);
 		iput(inode);
@@ -116,8 +117,10 @@ MED_KCLASS(socket_kobject) {
 	NULL,		/* unmonitor */
 };
 
-int __init socket_kobject_init( void ) {
-	MED_REGISTER_KCLASS( socket_kobject );
+int __init socket_kobject_init(void)
+{
+	MED_REGISTER_KCLASS(socket_kobject);
 	return 0;
 }
-__initcall( socket_kobject_init );
+
+device_initcall(socket_kobject_init);

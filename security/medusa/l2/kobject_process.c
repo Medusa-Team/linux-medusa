@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
+
 /*
- * security/medusa/l2/process_kobject.c
- *
  * Copyright (C) 2002 by Milan Pikula
  *
  * Fixes:
@@ -296,34 +295,34 @@ int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
  * Follows description of @process_kobject structure for l4.
  */
 MED_ATTRS(process_kobject) {
-	MED_ATTR_KEY_RO	(process_kobject, pid, "pid", MED_SIGNED),
-	MED_ATTR_RO	(process_kobject, pgrp, "pgrp", MED_SIGNED),
-	MED_ATTR_RO	(process_kobject, tgid, "tgid", MED_SIGNED),
-	MED_ATTR_RO	(process_kobject, session, "session", MED_SIGNED),
-	MED_ATTR_RO	(process_kobject, parent_pid, "parent_pid", MED_SIGNED),
-	MED_ATTR_RO	(process_kobject, child_pid, "child_pid", MED_SIGNED),
-	MED_ATTR_RO	(process_kobject, sibling_pid, "sibling_pid", MED_SIGNED),
-	MED_ATTR_RO     (process_kobject, cmdline, "cmdline", MED_STRING),
-	MED_ATTR	(process_kobject, uid, "uid", MED_UNSIGNED),
-	MED_ATTR	(process_kobject, euid, "euid", MED_UNSIGNED),
-	MED_ATTR	(process_kobject, suid, "suid", MED_UNSIGNED),
-	MED_ATTR	(process_kobject, fsuid, "fsuid", MED_UNSIGNED),
-	MED_ATTR	(process_kobject, gid, "gid", MED_UNSIGNED),
-	MED_ATTR	(process_kobject, egid, "egid", MED_UNSIGNED),
-	MED_ATTR	(process_kobject, sgid, "sgid", MED_UNSIGNED),
-	MED_ATTR	(process_kobject, fsgid, "fsgid", MED_UNSIGNED),
-	MED_ATTR	(process_kobject, ecap, "ecap", MED_BITMAP | MED_LE),
-	MED_ATTR	(process_kobject, icap, "icap", MED_BITMAP | MED_LE),
-	MED_ATTR	(process_kobject, pcap, "pcap", MED_BITMAP | MED_LE),
-	MED_ATTR	(process_kobject, bcap, "bcap", MED_BITMAP | MED_LE),
-	MED_ATTR	(process_kobject, acap, "acap", MED_BITMAP | MED_LE),
+	MED_ATTR_KEY_RO(process_kobject, pid, "pid", MED_SIGNED),
+	MED_ATTR_RO(process_kobject, pgrp, "pgrp", MED_SIGNED),
+	MED_ATTR_RO(process_kobject, tgid, "tgid", MED_SIGNED),
+	MED_ATTR_RO(process_kobject, session, "session", MED_SIGNED),
+	MED_ATTR_RO(process_kobject, parent_pid, "parent_pid", MED_SIGNED),
+	MED_ATTR_RO(process_kobject, child_pid, "child_pid", MED_SIGNED),
+	MED_ATTR_RO(process_kobject, sibling_pid, "sibling_pid", MED_SIGNED),
+	MED_ATTR_RO(process_kobject, cmdline, "cmdline", MED_STRING),
+	MED_ATTR(process_kobject, uid, "uid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, euid, "euid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, suid, "suid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, fsuid, "fsuid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, gid, "gid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, egid, "egid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, sgid, "sgid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, fsgid, "fsgid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, ecap, "ecap", MED_BITMAP | MED_LE),
+	MED_ATTR(process_kobject, icap, "icap", MED_BITMAP | MED_LE),
+	MED_ATTR(process_kobject, pcap, "pcap", MED_BITMAP | MED_LE),
+	MED_ATTR(process_kobject, bcap, "bcap", MED_BITMAP | MED_LE),
+	MED_ATTR(process_kobject, acap, "acap", MED_BITMAP | MED_LE),
 #ifdef CONFIG_AUDIT
-	MED_ATTR	(process_kobject, luid, "luid", MED_UNSIGNED),
+	MED_ATTR(process_kobject, luid, "luid", MED_UNSIGNED),
 #endif
 	MED_ATTR_SUBJECT(process_kobject),
-	MED_ATTR_OBJECT	(process_kobject),
+	MED_ATTR_OBJECT(process_kobject),
 #if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
-	MED_ATTR	(process_kobject, med_syscall, "syscall", MED_BYTES),
+	MED_ATTR(process_kobject, med_syscall, "syscall", MED_BYTES),
 #endif
 
 	MED_ATTR_END
@@ -339,7 +338,7 @@ MED_ATTRS(process_kobject) {
  *
  * Return: NULL on error, address of output storage otherwise.
  */
-static struct medusa_kobject_s * process_fetch(struct medusa_kobject_s *kobj)
+static struct medusa_kobject_s *process_fetch(struct medusa_kobject_s *kobj)
 {
 	struct task_struct *p;
 
@@ -427,4 +426,4 @@ int __init process_kobject_init(void)
 }
 
 /* Voila, we're done. */
-__initcall(process_kobject_init);
+device_initcall(process_kobject_init);

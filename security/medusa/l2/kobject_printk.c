@@ -1,4 +1,6 @@
-/* kobject_printk.c, (C) 2002 Milan Pikula */
+// SPDX-License-Identifier: GPL-2.0
+
+/* (C) 2002 Milan Pikula */
 
 #include <linux/module.h>
 #include "l3/registry.h"
@@ -16,6 +18,7 @@ static struct medusa_kobject_s *printk_fetch(struct medusa_kobject_s *key_obj)
 {
 	return NULL;
 }
+
 static enum medusa_answer_t printk_update(struct medusa_kobject_s *kobj)
 {
 	((struct printk_kobject *) kobj)->message[sizeof(((struct printk_kobject *) kobj)->message)-1] = '\0';

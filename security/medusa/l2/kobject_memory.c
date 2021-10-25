@@ -1,4 +1,6 @@
-/* kobject_memory.c, (C) 2002 Martin Ockajak, Milan Pikula */
+// SPDX-License-Identifier: GPL-2.0
+
+/* (C) 2002 Martin Ockajak, Milan Pikula */
 
 /* This kclass allows a user to read from a given process's memory, or
  * write there, using `fetch' and `update'. Kobjects of this type are
@@ -23,15 +25,15 @@ struct memory_kobject {
 };
 
 MED_ATTRS(memory_kobject) {
-	MED_ATTR_KEY_RO	(memory_kobject, pid, "pid", MED_UNSIGNED),
-	MED_ATTR_KEY_RO	(memory_kobject, address, "address", MED_UNSIGNED),
-	MED_ATTR_KEY_RO	(memory_kobject, size, "size", MED_UNSIGNED),
-	MED_ATTR_RO	(memory_kobject, retval, "retval", MED_SIGNED),
-	MED_ATTR	(memory_kobject, data, "data", MED_STRING),
+	MED_ATTR_KEY_RO(memory_kobject, pid, "pid", MED_UNSIGNED),
+	MED_ATTR_KEY_RO(memory_kobject, address, "address", MED_UNSIGNED),
+	MED_ATTR_KEY_RO(memory_kobject, size, "size", MED_UNSIGNED),
+	MED_ATTR_RO(memory_kobject, retval, "retval", MED_SIGNED),
+	MED_ATTR(memory_kobject, data, "data", MED_STRING),
 	MED_ATTR_END
 };
 
-static struct medusa_kobject_s * memory_fetch(struct medusa_kobject_s *);
+static struct medusa_kobject_s *memory_fetch(struct medusa_kobject_s *);
 static enum medusa_answer_t memory_update(struct medusa_kobject_s *);
 
 MED_KCLASS(memory_kobject) {
@@ -86,7 +88,7 @@ static struct medusa_kobject_s *memory_fetch(struct medusa_kobject_s *key_obj)
 {
 	int ret;
 	struct task_struct *p;
-	struct memory_kobject* kobj = (struct memory_kobject *) key_obj;
+	struct memory_kobject *kobj = (struct memory_kobject *) key_obj;
 
 	rcu_read_lock();
 	p = pid_task(find_vpid(kobj->pid), PIDTYPE_PID);
