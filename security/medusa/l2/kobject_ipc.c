@@ -38,7 +38,7 @@ MED_ATTRS(ipc_kobject) {
 	MED_ATTR_RO(ipc_kobject, ipc_perm.key, "key", MED_SIGNED),
 	MED_ATTR(ipc_kobject, ipc_perm.uid, "uid", MED_UNSIGNED),
 	MED_ATTR(ipc_kobject, ipc_perm.gid, "gid", MED_UNSIGNED),
-	MED_ATTR(ipc_kobject, ipc_perm.cuid, "cuid", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_kobject, ipc_perm.cuid, "cuid", MED_UNSIGNED),
 	MED_ATTR_RO(ipc_kobject, ipc_perm.cgid, "cgid", MED_UNSIGNED),
 	MED_ATTR(ipc_kobject, ipc_perm.mode, "mode", MED_UNSIGNED),
 	MED_ATTR_RO(ipc_kobject, ipc_perm.seq, "seq", MED_UNSIGNED),
