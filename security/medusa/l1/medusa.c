@@ -1705,8 +1705,6 @@ struct security_hook_list medusa_l1_hooks_special[] = {
 	LSM_HOOK_INIT(sem_free_security, medusa_l1_sem_free_security),
 };
 
-void __init medusa_init(void);
-
 static int __init medusa_l1_init(void)
 {
 	int ret = 0;
@@ -1714,7 +1712,6 @@ static int __init medusa_l1_init(void)
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");
 	med_pr_info("l1 registered with the kernel\n");
-	medusa_init();
 
 	/*
 	 * TODO TODO TODO
