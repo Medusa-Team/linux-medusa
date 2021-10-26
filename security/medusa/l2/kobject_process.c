@@ -211,8 +211,8 @@ out:
 
 /**
  * process_kern2kobj() - Make conversion from a kernel struct to a kobject.
- * @tk: Input kobject of a process.
- * @ts: Output task_struct of a process.
+ * @tk: Output kobject of a process.
+ * @ts: Input task_struct of a process.
  *
  * Copy information about process (stored in &struct task_struct @ts) for
  * authorization server (kobject @tk). This function is called from *fetch*
