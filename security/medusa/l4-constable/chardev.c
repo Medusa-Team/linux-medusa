@@ -729,6 +729,11 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 #endif
 		}
 		kclass_buf = (char *) med_cache_alloc_size(cl->kobject_size);
+		if (!kclass_buf) {
+			ls_unlock(&lightswitch, &ls_switch);
+			med_pr_err("write: OOM while `kclass_buf` alloc\n");
+			return -ENOMEM;
+		}
 		if (__copy_from_user(kclass_buf, buf, cl->kobject_size)) {
 			med_cache_free(kclass_buf);
 			ls_unlock(&lightswitch, &ls_switch);

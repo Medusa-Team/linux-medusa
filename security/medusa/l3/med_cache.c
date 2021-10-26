@@ -130,13 +130,16 @@ int med_cache_register(size_t size)
  *
  * Warning - selected index has to take fat pointer offset into account!
  *
- * Return: Pointer to allocated memory.
+ * Return: Pointer to allocated memory or %NULL in case of an error
  */
 static void *med_cache_alloc_index(size_t index)
 {
 	void *ret;
 
 	ret = kmem_cache_alloc(med_cache_array[index], GFP_NOWAIT);
+	if (!ret)
+		return NULL;
+
 	*((FAT_PTR_OFFSET_TYPE *)ret) = index;
 	ret = ((FAT_PTR_OFFSET_TYPE *)ret) + 1;
 	return ret;
