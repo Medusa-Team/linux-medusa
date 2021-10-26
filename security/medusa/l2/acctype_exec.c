@@ -70,6 +70,10 @@ static enum medusa_answer_t medusa_do_pexec(struct dentry *dentry)
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
+	memset(&access, '\0', sizeof(struct exec_paccess));
+	/* process_kobject process is zeroed by process_kern2kobj function */
+	/* process_kobject file is zeroed by file_kern2kobj function */
+
 	file_kobj_dentry2string(dentry, access.filename);
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, dentry->d_inode);
