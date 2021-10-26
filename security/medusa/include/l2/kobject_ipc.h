@@ -38,9 +38,8 @@ extern MED_DECLARE_KCLASSOF(ipc_kobject);
 struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj);
 enum medusa_answer_t ipc_update(struct medusa_kobject_s *kobj);
 
-struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject *ipc_kobj,
-				  struct kern_ipc_perm *ipcp,
-				  bool dec_refcount);
+int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp,
+		  bool dec_refcount);
 int ipc_getref(struct kern_ipc_perm *ipcp, bool unlock);
 int ipc_putref(struct kern_ipc_perm *ipcp, bool lock);
 

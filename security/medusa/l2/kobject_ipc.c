@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0
 
+/*
+ * Copyright (C) 2020 by Matus Jokay
+ */
+
 #include <linux/ipc_namespace.h>
 #include <linux/msg.h>
-#include "../../../ipc/util.h" // TODO
+#include "../../../ipc/util.h"
 #include "l3/registry.h"
 #include "l2/kobject_ipc.h"
 
@@ -10,8 +14,6 @@
 #define shm_ids(ns)	((ns)->ids[IPC_SHM_IDS])
 #define sem_ids(ns)	((ns)->ids[IPC_SEM_IDS])
 #define msg_ids(ns)	((ns)->ids[IPC_MSG_IDS])
-
-static struct ipc_kobject storage;
 
 #define COPY_WRITE_IPC_VARS(to, from) \
 	do { \
@@ -84,13 +86,15 @@ static inline struct ipc_ids *medusa_get_ipc_ids(unsigned int ipc_class)
  * This routine expects existing Medusa ipcp security struct.
  * For validity of an IPC object, it must be always called after ipc_getref(),
  * before ipc_putref() functions.
+ *
+ * Return: 0 on success, -EINVAL if invalid arguments
  */
-inline struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp, bool dec_refcount)
+inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp, bool dec_refcount)
 {
 	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
 		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipcp=%p",
 			__func__, ipc_kobj, ipcp);
-		return NULL;
+		return -EINVAL;
 	}
 
 	memset(ipc_kobj, '\0', sizeof(struct ipc_kobject));
@@ -113,7 +117,7 @@ inline struct ipc_kobject *ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct ke
 	if (likely(dec_refcount))
 		refcount_dec(&ipc_kobj->ipc_perm.refcount);
 
-	return ipc_kobj;
+	return 0;
 }
 
 /**
@@ -152,7 +156,6 @@ static inline enum medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, s
 struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj)
 {
 	struct ipc_kobject *ipc_kobj;
-	struct ipc_kobject *new_kobj = NULL;
 	struct kern_ipc_perm *ipcp;
 	struct ipc_ids *ids;
 
@@ -172,7 +175,7 @@ struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj)
 	 */
 	ipcp = ipc_obtain_object_check(ids, ipc_kobj->ipc_perm.id);
 	if (IS_ERR(ipcp) || !ipcp)
-		goto out_rcu_unlock;
+		goto out_err_rcu_unlock;
 
 	/*
 	 * IPC object can be marked to deletion (races with IPC_RMID)
@@ -181,12 +184,15 @@ struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj)
 	 * Third argument is false - do not decrement IPC object refcount
 	 * in returned ipc_kobj.
 	 */
-	new_kobj = ipc_kern2kobj(&storage, ipcp, false);
+	ipc_kern2kobj(ipc_kobj, ipcp, false);
 
-out_rcu_unlock:
+	rcu_read_unlock();
+	return (struct medusa_kobject_s *)ipc_kobj;
+
+out_err_rcu_unlock:
 	rcu_read_unlock();
 out_err:
-	return (struct medusa_kobject_s *)new_kobj;
+	return NULL;
 }
 
 /**
