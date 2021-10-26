@@ -234,6 +234,12 @@ int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
 	const struct cred *cred;
 	struct task_struct *task;
 
+	if (unlikely(!tk || !ts_security)) {
+		med_pr_err("ERROR: NULL pointer: %s: process_kobj=%p or task_securityp=%p",
+			__func__, tk, ts_security);
+		return -EINVAL;
+	}
+
 	memset(tk, '\0', sizeof(struct process_kobject));
 
 	rcu_read_lock();

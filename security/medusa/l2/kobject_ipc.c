@@ -92,8 +92,8 @@ static inline struct ipc_ids *medusa_get_ipc_ids(unsigned int ipc_class)
 inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp, bool dec_refcount)
 {
 	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
-		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipcp=%p",
-			__func__, ipc_kobj, ipcp);
+		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipc_security=%p",
+			__func__, ipc_kobj, ipc_security(ipcp));
 		return -EINVAL;
 	}
 
@@ -135,8 +135,8 @@ inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipc
 static inline enum medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp)
 {
 	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
-		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipcp=%p",
-			__func__, ipc_kobj, ipcp);
+		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipc_security=%p",
+			__func__, ipc_kobj, ipc_security(ipcp));
 		return MED_ERR;
 	}
 
