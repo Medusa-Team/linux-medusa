@@ -61,7 +61,10 @@ enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 
 	/* second argument true: returns with unlocked IPC object */
 	if (unlikely(ipc_getref(ipcp, true)))
-		/* for now, we don't support error codes */
+		/*
+		 * ipc_getref() returns -EIDRM if IPC object is marked to deletion,
+		 * so deny any operation on it.
+		 */
 		return MED_DENY;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object))

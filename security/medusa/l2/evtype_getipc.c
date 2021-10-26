@@ -31,7 +31,7 @@ int __init ipc_evtype_init(void)
  * For validity of an IPC object, it must be always called after ipc_getref(),
  * before ipc_putref() functions.
  *
- * ipc_getref() increases ipcp->refcount, co we tell to ipc_kern2kobj() function
+ * ipc_getref() increases ipcp->refcount, so we tell to ipc_kern2kobj() function
  * to decrease it; of course not in ipcp->refcount, but in its copy in ipc_kobject
  */
 int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp)

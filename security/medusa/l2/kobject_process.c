@@ -226,7 +226,7 @@ out:
  *       the same. So for now, the function gets information about the objective
  *       context of a given task.
  *
- * Return: always 0.
+ * Return: 0 on success, -EINVAL if invalid arguments
  */
 int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
 {
@@ -374,6 +374,7 @@ static enum medusa_answer_t process_update(struct medusa_kobject_s *kobj)
 	/* Find task_struct based on pid in global (i.e. init) namespace */
 	p = find_task_by_pid_ns(((struct process_kobject *)kobj)->pid, &init_pid_ns);
 	if (p) {
+		/* process_kobj2kern can return an error value */
 		retval = process_kobj2kern((struct process_kobject *)kobj, p);
 		rcu_read_unlock();
 		return retval;

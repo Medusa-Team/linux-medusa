@@ -84,7 +84,10 @@ enum medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 	if (likely(ipcp)) {
 		/* second argument false: don't need to unlock IPC object */
 		if (unlikely(ipc_getref(ipcp, false)))
-			/* for now, we don't support error codes */
+			/*
+			 * ipc_getref() returns -EIDRM if IPC object is marked to deletion,
+			 * so deny any operation on it.
+			 */
 			return MED_DENY;
 
 		object_p = &object;
