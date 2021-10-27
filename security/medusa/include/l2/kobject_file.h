@@ -48,12 +48,6 @@ struct file_kobject { /* was: m_inode_inf */
 };
 extern MED_DECLARE_KCLASSOF(file_kobject);
 
-struct file_sub_kobject { /* the 'subject' view... */
-	struct file_kobject f;
-	struct medusa_subject_s med_subject;
-};
-extern MED_DECLARE_KCLASSOF(file_sub_kobject);
-
 /* the conversion routines */
 int file_kobj2kern(struct file_kobject *fk, struct inode *inode);
 int file_kern2kobj(struct file_kobject *fk, struct inode *inode);
