@@ -4,11 +4,10 @@
 
 O_TARGET := l2.o
 
-export-objs :=	medusa_l2_ksyms.o
+export-objs :=
 
 # note that the order is important here!
 
-obj-y := medusa_l2_ksyms.o
 # kclass definitions, function to manipulate kobjects
 obj-y += kobject_process.o
 obj-y += kobject_file.o
@@ -36,7 +35,7 @@ obj-y += acctype_ipc_semop.o acctype_ipc_shmat.o acctype_ipc_msgsnd.o acctype_ip
 obj-y += acctype_socket_create.o acctype_socket_bind.o acctype_socket_connect.o acctype_socket_listen.o acctype_socket_accept.o
 obj-y += acctype_socket_sendmsg.o acctype_socket_recvmsg.o
 # arch-dependent files
-obj-y += acctype_ptrace.o 
+obj-y += acctype_ptrace.o
 #obj-$(CONFIG_MEDUSA_SYSCALL) += acctype_syscall.o
 #obj-y += acctype_syscall.o
 # event types
