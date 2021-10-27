@@ -5,8 +5,14 @@
 #include "l2/kobject_file.h"
 #include "l3/registry.h"
 
-int file_kobj2kern(struct file_kobject *fk, struct inode *inode)
+static inline int file_kobj2kern(struct file_kobject *fk, struct inode *inode)
 {
+	if (unlikely(!fk || !inode_security(inode))) {
+		med_pr_err("ERROR: NULL pointer: %s: file_kobj=%p or inode_security=%p",
+			__func__, fk, inode_security(inode));
+		return -EINVAL;
+	}
+
 	/* TODO: either update the i-node on disk, or don't allow this at all */
 	inode->i_mode = fk->mode;
 	inode->i_uid = fk->uid;
@@ -25,8 +31,14 @@ int file_kobj2kern(struct file_kobject *fk, struct inode *inode)
 /*
  * This routine expects the existing Medusa inode security struct!
  */
-int file_kern2kobj(struct file_kobject *fk, struct inode *inode)
+inline int file_kern2kobj(struct file_kobject *fk, struct inode *inode)
 {
+	if (unlikely(!fk || !inode_security(inode))) {
+		med_pr_err("ERROR: NULL pointer: %s: file_kobj=%p or inode_security=%p",
+			__func__, fk, inode_security(inode));
+		return -EINVAL;
+	}
+
 	memset(fk, '\0', sizeof(struct file_kobject));
 
 	fk->dev = (inode->i_sb->s_dev);
@@ -165,18 +177,22 @@ static inline void __unlookup(void)
 	read_unlock(&live_lock);
 }
 
-static struct medusa_kobject_s *file_fetch(struct medusa_kobject_s *key_obj)
+static struct medusa_kobject_s *file_fetch(struct medusa_kobject_s *kobj)
 {
 	struct inode *p;
+	struct medusa_kobject_s *retval = NULL;
 
-	p = __lookup_inode_by_key((struct file_kobject *)key_obj);
-	if (p) {
-		file_kern2kobj((struct file_kobject *)key_obj, p);
-		__unlookup();
-		return (struct medusa_kobject_s *)key_obj;
-	}
+	p = __lookup_inode_by_key((struct file_kobject *)kobj);
+	if (!p)
+		goto out_err_fetch;
+
+	retval = kobj;
+	if (unlikely(file_kern2kobj((struct file_kobject *)kobj, p) < 0))
+		retval = NULL;
+
+out_err_fetch:
 	__unlookup();
-	return NULL;
+	return retval;
 }
 
 static void file_unmonitor(struct medusa_kobject_s *kobj)
@@ -197,10 +213,14 @@ static enum medusa_answer_t file_update(struct medusa_kobject_s *kobj)
 	enum medusa_answer_t retval = MED_ERR;
 
 	p = __lookup_inode_by_key((struct file_kobject *)kobj);
-	if (p) {
-		file_kobj2kern((struct file_kobject *)kobj, p);
-		retval = MED_ALLOW;
-	}
+	if (!p)
+		goto out_err_update;
+
+	retval = MED_ALLOW;
+	if (unlikely(file_kobj2kern((struct file_kobject *)kobj, p) < 0))
+		retval = MED_ERR;
+
+out_err_update:
 	__unlookup();
 	return retval;
 }

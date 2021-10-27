@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* process_kobject.h, (C) 2002 Milan Pikula */
 
-#ifndef _TASK_KOBJECT_H
-#define _TASK_KOBJECT_H
+/* (C) 2002 Milan Pikula */
+
+#ifndef _PROCESS_KOBJECT_H
+#define _PROCESS_KOBJECT_H
 
 /* TASK kobject: this file defines the kobject structure for task, e.g.
  * the data, which we want to pass to the authorization server.

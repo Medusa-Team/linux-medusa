@@ -112,6 +112,12 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 	bool change_luid = false;
 #endif
 
+	if (unlikely(!tk || !ts_security)) {
+		med_pr_err("ERROR: NULL pointer: %s: process_kobj=%p or task_security=%p",
+			__func__, tk, ts_security);
+		return -EINVAL;
+	}
+
 	/* Save variable information stored in Medusa security context */
 	ts_security->med_subject = tk->med_subject;
 	ts_security->med_object = tk->med_object;
@@ -228,7 +234,7 @@ out:
  *
  * Return: 0 on success, -EINVAL if invalid arguments
  */
-int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
+inline int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
 {
 	struct medusa_l1_task_s *ts_security = task_security(ts);
 	const struct cred *cred;
@@ -347,18 +353,22 @@ MED_ATTRS(process_kobject) {
 static struct medusa_kobject_s *process_fetch(struct medusa_kobject_s *kobj)
 {
 	struct task_struct *p;
+	struct medusa_kobject_s *retval = NULL;
 
 	rcu_read_lock();
 	/* Find task_struct based on pid in global (i.e. init) namespace */
 	p = find_task_by_pid_ns(((struct process_kobject *)kobj)->pid, &init_pid_ns);
 	if (!p)
-		goto out_err;
-	process_kern2kobj((struct process_kobject *)kobj, p);
+		goto out_err_fetch;
+
+	/* process_kern2kobj can return an error value */
+	retval = kobj;
+	if (unlikely(process_kern2kobj((struct process_kobject *)kobj, p) < 0))
+		retval = NULL;
+
+out_err_fetch:
 	rcu_read_unlock();
-	return (struct medusa_kobject_s *)kobj;
-out_err:
-	rcu_read_unlock();
-	return NULL;
+	return retval;
 }
 
 /**
@@ -374,19 +384,22 @@ out_err:
 static enum medusa_answer_t process_update(struct medusa_kobject_s *kobj)
 {
 	struct task_struct *p;
-	enum medusa_answer_t retval;
+	enum medusa_answer_t retval = MED_ERR;
 
 	rcu_read_lock();
 	/* Find task_struct based on pid in global (i.e. init) namespace */
 	p = find_task_by_pid_ns(((struct process_kobject *)kobj)->pid, &init_pid_ns);
-	if (p) {
-		/* process_kobj2kern can return an error value */
-		retval = process_kobj2kern((struct process_kobject *)kobj, p);
-		rcu_read_unlock();
-		return retval;
-	}
+	if (!p)
+		goto out_err_update;
+
+	/* process_kobj2kern can return an error value */
+	retval = MED_ALLOW;
+	if (unlikely(process_kobj2kern((struct process_kobject *)kobj, p) < 0))
+		retval = MED_ERR;
+
+out_err_update:
 	rcu_read_unlock();
-	return MED_ERR;
+	return retval;
 }
 
 /**

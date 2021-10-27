@@ -124,7 +124,7 @@ inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipc
  * ipc_kobj2kern - convert function from kobject to kernel structure
  * @ipc_kobj - pointer to ipc_kobject used to get data
  * @ipcp - pointer to kernel structure where data will be stored
- * Return: MED_ERR on error (@ipc_kobj or @ipcp->security NULL), MED_ALLOW otherwise
+ * Return: -EINVAL on error (@ipc_kobj or @ipcp->security NULL), 0 otherwise
  *
  * This routine expects existing Medusa @ipcp security struct.
  * Due to write acces to an IPC object, this function must be called
@@ -132,18 +132,18 @@ inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipc
  *
  * For now, it is called only from ipc_kobject update() operation.
  */
-static inline enum medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp)
+static inline int ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp)
 {
 	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
 		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipc_security=%p",
 			__func__, ipc_kobj, ipc_security(ipcp));
-		return MED_ERR;
+		return -EINVAL;
 	}
 
 	COPY_WRITE_IPC_VARS(ipcp, &(ipc_kobj->ipc_perm));
 	ipc_security(ipcp)->med_object = ipc_kobj->med_object;
 	med_magic_validate(&(ipc_security(ipcp))->med_object);
-	return MED_ALLOW;
+	return 0;
 }
 
 /**
@@ -153,11 +153,12 @@ static inline enum medusa_answer_t ipc_kobj2kern(struct ipc_kobject *ipc_kobj, s
  * Return: pointer to new ipc_kobject with related IPC object data on success, NULL
  *	on error (@kobj is NULL, not existing IPC object)
  */
-struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj)
+static struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj)
 {
 	struct ipc_kobject *ipc_kobj;
 	struct kern_ipc_perm *ipcp;
 	struct ipc_ids *ids;
+	struct medusa_kobject_s *retval = NULL;
 
 	ipc_kobj = (struct ipc_kobject *)kobj;
 	if (!ipc_kobj)
@@ -184,15 +185,14 @@ struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj)
 	 * Third argument is false - do not decrement IPC object refcount
 	 * in returned ipc_kobj.
 	 */
-	ipc_kern2kobj(ipc_kobj, ipcp, false);
-
-	rcu_read_unlock();
-	return (struct medusa_kobject_s *)ipc_kobj;
+	retval = kobj;
+	if (unlikely(ipc_kern2kobj(ipc_kobj, ipcp, false) < 0))
+		retval = NULL;
 
 out_err_rcu_unlock:
 	rcu_read_unlock();
 out_err:
-	return NULL;
+	return retval;
 }
 
 /**
@@ -201,7 +201,7 @@ out_err:
  *	IPC object
  * Return: MED_ALLOW if successfull, MED_ERR otherwise
  */
-enum medusa_answer_t ipc_update(struct medusa_kobject_s *kobj)
+static enum medusa_answer_t ipc_update(struct medusa_kobject_s *kobj)
 {
 	struct ipc_kobject *ipc_kobj;
 	struct kern_ipc_perm *ipcp;
@@ -236,7 +236,9 @@ enum medusa_answer_t ipc_update(struct medusa_kobject_s *kobj)
 		goto out_ipc_unlock;
 
 	/* IPC object is valid, so update kernel structure */
-	retval = ipc_kobj2kern(ipc_kobj, ipcp);
+	retval = MED_ALLOW;
+	if (unlikely(ipc_kobj2kern(ipc_kobj, ipcp) < 0))
+		retval = MED_ERR;
 
 out_ipc_unlock:
 	ipc_unlock_object(ipcp);

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 
-/* inode_kobject.h, (C) 2002 Milan Pikula
+/* (C) 2002 Milan Pikula
  *
  * FILE kobject: this file defines the kobject structure for inode, e.g.
  * the data, which we want to pass to the authorization server.
@@ -13,8 +13,8 @@
  * 0.9.2, which is (C) Marek Zelem, Martin Ockajak and myself.
  */
 
-#ifndef _INODE_KOBJECT_H
-#define _INODE_KOBJECT_H
+#ifndef _FILE_KOBJECT_H
+#define _FILE_KOBJECT_H
 
 #include <linux/capability.h>
 #include "l3/kobject.h"
@@ -48,8 +48,7 @@ struct file_kobject { /* was: m_inode_inf */
 };
 extern MED_DECLARE_KCLASSOF(file_kobject);
 
-/* the conversion routines */
-int file_kobj2kern(struct file_kobject *fk, struct inode *inode);
+/* the conversion routine */
 int file_kern2kobj(struct file_kobject *fk, struct inode *inode);
 
 /* we want to keep a cache of "live" inodes - the ones which participate
