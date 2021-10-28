@@ -51,7 +51,7 @@ struct medusa_attribute_s {
 #define MED_ATTR_ORIG(structname, structmember, structmembersize, attrname, medtype) { \
 		(attrname), \
 		(medtype), \
-		(Mptr_t)(&(((struct structname *)0)->structmember)), \
+		(MCPptr_t)(&(((struct structname *)0)->structmember)), \
 		structmembersize, \
 	}
 #define MED_ATTR_END {"", MED_END, 0, 0}
