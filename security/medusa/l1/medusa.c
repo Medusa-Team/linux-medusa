@@ -152,31 +152,33 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  * }
  */
 
+/*
+ * Caller function security_inode_alloc() is called only from
+ * inode_init_always(). Invariant: if the inode security blob size is not zero
+ * and the inode in question is dynamically allocated by slab, inode security
+ * blob *must be* allocated. Implication: inode security blob in Medusa's
+ * inode_alloc_security() is always allocated.
+ *
+ * Are there in the kernel some inodes defined statically?
+ */
 int medusa_l1_inode_alloc_security(struct inode *inode)
 {
-	struct medusa_l1_inode_s *med;
-
-	med = kzalloc(sizeof(struct medusa_l1_inode_s), GFP_KERNEL);
-	if (med == NULL)
-		return -ENOMEM;
+	struct medusa_l1_inode_s *med = inode_security(inode);
 
 	hash_init(med->fuck);
 	init_med_object(&(med->med_object));
-	inode->i_security = med;
 
 	return 0;
 }
 
 void medusa_l1_inode_free_security(struct inode *inode)
 {
-	struct medusa_l1_inode_s *med;
+	struct medusa_l1_inode_s *med = inode_security(inode);
 
-	if (inode->i_security != NULL) {
-		med = inode->i_security;
-		inode->i_security = NULL;
-		fuck_free(med);
-		kfree(med);
-	}
+	if (!med)
+		return;
+
+	fuck_free(med);
 }
 
 /*
@@ -513,17 +515,16 @@ static int medusa_l1_file_open(struct file *file)
 }
 
 /*
- * TODO TODO TODO: add support of 'task' in medusa_fork()
+ * Function security_task_alloc() is called only from fork().
+ * If there is no memory for security blob allocation, -ENOMEM is returned
+ * to fork(). Invariant: each task *must have* a task security blob
+ * allocated, if its size is not zero. Implication: no checks for Medusa's
+ * task security blob are required.
  */
 int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 {
 	struct medusa_l1_task_s *med = task_security(task);
 
-	// can @current do fork/clone?
-	//if(medusa_fork(clone_flags) == MED_DENY)
-	//	return -EACCES;
-
-	memset(med, '\0', sizeof(struct medusa_l1_task_s));
 	init_med_object(&(med->med_object));
 	init_med_subject(&(med->med_subject));
 	get_cmdline(task, med->cmdline, sizeof(med->cmdline));
@@ -660,19 +661,42 @@ static int medusa_l1_task_kill(struct task_struct *p, struct siginfo *info,
 //IPC hooks
 
 /*
- * helper function not LSM hook
+ * Helper function, not a LSM hook.
+ *
+ * medusa_l1_ipc_alloc_security()
+ * ^
+ * |
+ * |-- medusa_l1_msg_queue_alloc_security()
+ * |       ^
+ * |       |-- security_queue_msg_alloc()
+ * |           ^
+ * |           |-- newque() (create a new msg queue, ipc/msg.c)
+ * |
+ * |-- medusa_l1_shm_alloc_security()
+ * |       ^
+ * |       |-- security_shm_alloc()
+ * |           ^
+ * |           |-- newseg() (create a new shared memory segment, ipc/shm.c)
+ * |
+ * --- medusa_l1_sem_alloc_security()
+ *         ^
+ *         |-- security_sem_alloc()
+ *             ^
+ *             |-- newary() (create a new semaphore set, ipc/sem.c)
+ *
+ * If allocation of an IPC security blob failed in security_*_alloc()
+ * function(s), IPC object is not created. Invariant: In an existing IPC
+ * object there is always allocated related security blob, if its blob size in
+ * a LSM is not zero. Implication: no checks for Medusa's IPC security blob
+ * are required.
  */
 int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
 				 unsigned int ipc_class)
 {
-	struct medusa_l1_ipc_s *med;
+	struct medusa_l1_ipc_s *med = ipc_security(ipcp);
 
-	med = kmalloc(sizeof(struct medusa_l1_ipc_s), GFP_KERNEL);
-	if (med == NULL)
-		return -ENOMEM;
-
+	init_med_object(&(med->med_object));
 	med->ipc_class = ipc_class;
-	ipcp->security = med;
 	return 0;
 }
 
@@ -681,13 +705,6 @@ int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
  */
 void medusa_l1_ipc_free_security(struct kern_ipc_perm *ipcp)
 {
-	struct medusa_l1_ipc_s *med;
-
-	if (ipcp->security != NULL) {
-		med = ipcp->security;
-		ipcp->security = NULL;
-		kfree(med);
-	}
 }
 
 static int medusa_l1_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
@@ -1455,8 +1472,6 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(path_chroot, medusa_l1_path_chroot),
 
 #endif /* CONFIG_SECURITY_PATH */
-	// inode_alloc_security --> medusa_l1_inode_alloc_security: transfered to medusa_l1_special
-	// inode_free_security --> medusa_l1_inode_free_security: transfered to medusa_l1_special
 	//LSM_HOOK_INIT(inode_init_security, medusa_l1_inode_init_security),
 	LSM_HOOK_INIT(inode_create, medusa_l1_inode_create),
 	LSM_HOOK_INIT(inode_link, medusa_l1_inode_link),
@@ -1499,8 +1514,6 @@ static struct security_hook_list medusa_l1_hooks[] = {
 
 	//LSM_HOOK_INIT(dentry_open, medusa_l1_dentry_open),
 
-	LSM_HOOK_INIT(task_alloc, medusa_l1_task_alloc),
-	// task_free --> medusa_l1_task_free: transfered to medusa_l1_special
 	//LSM_HOOK_INIT(cred_alloc_blank, medusa_l1_cred_alloc_blank),
 	//LSM_HOOK_INIT(cred_free, medusa_l1_cred_free),
 	//LSM_HOOK_INIT(cred_prepare, medusa_l1_cred_prepare),
@@ -1646,9 +1659,9 @@ static struct security_hook_list medusa_l1_hooks[] = {
 #endif /* CONFIG_AUDIT */
 };
 
-struct security_hook_list medusa_l1_hooks_special[] = {
-	//LSM_HOOK_INIT(task_alloc, medusa_l1_task_alloc),
-	//LSM_HOOK_INIT(task_free, medusa_l1_task_free),
+struct security_hook_list medusa_l1_hooks_alloc[] = {
+	LSM_HOOK_INIT(task_alloc, medusa_l1_task_alloc),
+	LSM_HOOK_INIT(task_free, medusa_l1_task_free),
 
 	LSM_HOOK_INIT(inode_alloc_security, medusa_l1_inode_alloc_security),
 	LSM_HOOK_INIT(inode_free_security, medusa_l1_inode_free_security),
@@ -1665,10 +1678,10 @@ struct security_hook_list medusa_l1_hooks_special[] = {
 
 static int __init medusa_l1_init(void)
 {
-	int ret = 0;
-
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");
+	security_add_hooks(medusa_l1_hooks_alloc,
+			   ARRAY_SIZE(medusa_l1_hooks_alloc), "medusa");
 	med_pr_info("l1 registered with the kernel\n");
 
 	/*
@@ -1682,7 +1695,7 @@ static int __init medusa_l1_init(void)
 	 * from l0 lists)
 	 */
 
-	return ret;
+	return 0;
 }
 
 static void __exit medusa_l1_exit(void)
