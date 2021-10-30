@@ -98,7 +98,9 @@ static inline bool gid_differs(int newid, kgid_t old,
  *       the intention (POC). As a consequence, function never fails (return
  *       -ENOMEM is never reached).
  *
- * This routine expects an existing &struct task_struct security context.
+ * This routine expects:
+ * 1) existing task security blob within an @ts (this is ensured by LSM itself)
+ * 2) not %NULL @tk (this is the responsibility of a Medusa's programmer)
  *
  * Return: 0 on success, -ENOMEM on failure (see Note above).
  */
@@ -111,12 +113,6 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 #ifdef CONFIG_AUDIT
 	bool change_luid = false;
 #endif
-
-	if (unlikely(!tk || !ts_security)) {
-		med_pr_err("ERROR: NULL pointer: %s: process_kobj=%p or task_security=%p",
-			__func__, tk, ts_security);
-		return -EINVAL;
-	}
 
 	/* Save variable information stored in Medusa security context */
 	ts_security->med_subject = tk->med_subject;
@@ -221,30 +217,26 @@ out:
  * @ts: Input task_struct of a process.
  *
  * Copy information about process (stored in &struct task_struct @ts) for
- * authorization server (kobject @tk). This function is called from *fetch*
- * operation of the authorization server and from process_kobj_validate_task(),
- * too.
+ * authorization server (kobject @tk). This function is called from: 1) *fetch*
+ * operation of the authorization server, 2) from process_kobj_validate_task(),
+ * 3) from each acctype which subject/object/attribute is a process.
  *
- * This routine expects an existing &struct task_struct security context.
+ * This routine expects:
+ * 1) existing task security blob within an @ts (this is ensured by LSM itself)
+ * 2) not %NULL @tk (this is the responsibility of a Medusa's programmer)
  *
  * Note: The kernel api permits secure access only to objective context of
  *       another task. Almost always the objective and subjective contexts are
  *       the same. So for now, the function gets information about the objective
  *       context of a given task.
  *
- * Return: 0 on success, -EINVAL if invalid arguments
+ * Return: 0 (success)
  */
 inline int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
 {
 	struct medusa_l1_task_s *ts_security = task_security(ts);
 	const struct cred *cred;
 	struct task_struct *task;
-
-	if (unlikely(!tk || !ts_security)) {
-		med_pr_err("ERROR: NULL pointer: %s: process_kobj=%p or task_securityp=%p",
-			__func__, tk, ts_security);
-		return -EINVAL;
-	}
 
 	memset(tk, '\0', sizeof(struct process_kobject));
 
@@ -361,10 +353,8 @@ static struct medusa_kobject_s *process_fetch(struct medusa_kobject_s *kobj)
 	if (!p)
 		goto out_err_fetch;
 
-	/* process_kern2kobj can return an error value */
 	retval = kobj;
-	if (unlikely(process_kern2kobj((struct process_kobject *)kobj, p) < 0))
-		retval = NULL;
+	process_kern2kobj((struct process_kobject *)kobj, p);
 
 out_err_fetch:
 	rcu_read_unlock();
@@ -385,6 +375,9 @@ static enum medusa_answer_t process_update(struct medusa_kobject_s *kobj)
 {
 	struct task_struct *p;
 	enum medusa_answer_t retval = MED_ERR;
+
+	if (!kobj)
+		return MED_ERR;
 
 	rcu_read_lock();
 	/* Find task_struct based on pid in global (i.e. init) namespace */
