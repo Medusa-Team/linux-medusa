@@ -82,11 +82,9 @@ enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 	}
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_associate_access, ipc_security(ipcp))) {
-		// TODO add check
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
-		if (unlikely(ipc_kern2kobj(&object, ipcp, true) < 0))
-			goto out;
+		ipc_kern2kobj(&object, ipcp, true);
 
 		memset(&access, '\0', sizeof(struct ipc_associate_access));
 		access.flag = flag;

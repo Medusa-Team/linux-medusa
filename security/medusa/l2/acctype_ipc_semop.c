@@ -83,8 +83,7 @@ enum medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_semop_access, ipc_security(ipcp))) {
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
-		if (unlikely(ipc_kern2kobj(&object, ipcp, true) < 0))
-			goto out;
+		ipc_kern2kobj(&object, ipcp, true);
 
 		memset(&access, '\0', sizeof(struct ipc_semop_access));
 		access.sem_op = sops->sem_op;

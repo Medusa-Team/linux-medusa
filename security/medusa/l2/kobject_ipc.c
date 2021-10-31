@@ -76,27 +76,29 @@ static inline struct ipc_ids *medusa_get_ipc_ids(unsigned int ipc_class)
 }
 
 /**
- * ipc_kern2kobj - convert function from kernel structure to kobject
- * @ipc_kobj - pointer to ipc_kobject where data will be stored
- * @ipcp - pointer to kernel structure used to get data
- * @dec_refcount - if set, decrement IPC object's refcount in returned @ipc_kobj
- * Return: pointer to @ipc_kobj with data on success, NULL on error (@ipc_kobj
- *	or @ipcp->security NULL)
+ * ipc_kern2kobj - Make conversion from a kernel struct to a kobject.
+ * @ipc_kobj: Pointer to ipc_kobject where data will be stored.
+ * @ipcp: Pointer to kernel structure used to get data.
+ * @dec_refcount: If set, decrement IPC object's refcount in returned @ipc_kobj.
  *
- * This routine expects existing Medusa ipcp security struct.
+ * Copy information about an IPC object (stored in &struct kern_ipc_perm @ipcp)
+ * for authorization server (&struct ipc_kobject @ipc_kobj). This function is
+ * called from:
+ * 1) *fetch* operation of the authorization server,
+ * 2) from ipc_kobj_validate_task(),
+ * 3) from each acctype which object/attribute is an IPC object.
+ *
+ * This routine expects:
+ * 1) existing IPC security blob within an @ipcp (this is ensured by LSM itself)
+ * 2) not %NULL @ipc_kobj (this is the responsibility of a Medusa's programmer)
+ *
  * For validity of an IPC object, it must be always called after ipc_getref(),
  * before ipc_putref() functions.
  *
- * Return: 0 on success, -EINVAL if invalid arguments
+ * Return: 0 (success)
  */
 inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp, bool dec_refcount)
 {
-	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
-		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipc_security=%p",
-			__func__, ipc_kobj, ipc_security(ipcp));
-		return -EINVAL;
-	}
-
 	memset(ipc_kobj, '\0', sizeof(struct ipc_kobject));
 
 	rcu_read_lock();
@@ -124,25 +126,24 @@ inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipc
  * ipc_kobj2kern - convert function from kobject to kernel structure
  * @ipc_kobj - pointer to ipc_kobject used to get data
  * @ipcp - pointer to kernel structure where data will be stored
- * Return: -EINVAL on error (@ipc_kobj or @ipcp->security NULL), 0 otherwise
  *
- * This routine expects existing Medusa @ipcp security struct.
+ * This routine expects:
+ * 1) existing IPC security blob within an @ipcp (this is ensured by LSM itself)
+ * 2) not %NULL @ipc_kobj (this is the responsibility of a Medusa's programmer)
+ *
  * Due to write acces to an IPC object, this function must be called
  * within an RCU update section with ipcp->lock held.
  *
  * For now, it is called only from ipc_kobject update() operation.
+ *
+ * Return: 0 (success)
  */
 static inline int ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp)
 {
-	if (unlikely(!ipc_kobj || !ipc_security(ipcp))) {
-		med_pr_err("ERROR: NULL pointer: %s: ipc_kobj=%p or ipc_security=%p",
-			__func__, ipc_kobj, ipc_security(ipcp));
-		return -EINVAL;
-	}
-
 	COPY_WRITE_IPC_VARS(ipcp, &(ipc_kobj->ipc_perm));
 	ipc_security(ipcp)->med_object = ipc_kobj->med_object;
 	med_magic_validate(&(ipc_security(ipcp))->med_object);
+
 	return 0;
 }
 
@@ -186,8 +187,7 @@ static struct medusa_kobject_s *ipc_fetch(struct medusa_kobject_s *kobj)
 	 * in returned ipc_kobj.
 	 */
 	retval = kobj;
-	if (unlikely(ipc_kern2kobj(ipc_kobj, ipcp, false) < 0))
-		retval = NULL;
+	ipc_kern2kobj(ipc_kobj, ipcp, false);
 
 out_err_rcu_unlock:
 	rcu_read_unlock();
@@ -237,8 +237,7 @@ static enum medusa_answer_t ipc_update(struct medusa_kobject_s *kobj)
 
 	/* IPC object is valid, so update kernel structure */
 	retval = MED_ALLOW;
-	if (unlikely(ipc_kobj2kern(ipc_kobj, ipcp) < 0))
-		retval = MED_ERR;
+	ipc_kobj2kern(ipc_kobj, ipcp);
 
 out_ipc_unlock:
 	ipc_unlock_object(ipcp);
