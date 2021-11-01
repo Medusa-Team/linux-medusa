@@ -37,10 +37,6 @@ static enum medusa_answer_t medusa_do_mknod(struct dentry *parent, struct dentry
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	memset(&access, '\0', sizeof(struct mknod_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-	/* file_kobject file is zeroed by file_kern2kobj function */
-
 	file_kobj_dentry2string(dentry, access.filename);
 	access.dev = dev;
 	access.mode = mode;

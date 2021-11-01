@@ -85,11 +85,6 @@ enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
-
-		memset(&access, '\0', sizeof(struct ipc_associate_access));
-		access.flag = flag;
-		access.ipc_class = object.ipc_class;
-
 		retval = MED_DECIDE(ipc_associate_access, &access, &process, &object);
 	}
 out:

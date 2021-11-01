@@ -34,14 +34,12 @@ enum medusa_answer_t medusa_capable(int cap)
 	struct process_kobject process;
 	enum medusa_answer_t retval;
 
-	memset(&access, '\0', sizeof(struct capable_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-
 	if (!in_task()) {
 		med_pr_warn("CAPABLE IN INTERRUPT\n");
 #warning "finish me"
 		return MED_ALLOW;
 	}
+
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
@@ -52,6 +50,7 @@ enum medusa_answer_t medusa_capable(int cap)
 		retval = MED_DECIDE(capable_access, &access, &process, &process);
 		return retval;
 	}
+
 	return MED_ALLOW;
 }
 

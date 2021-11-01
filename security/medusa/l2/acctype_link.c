@@ -36,10 +36,6 @@ static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char *ne
 	enum medusa_answer_t retval;
 	int newnamelen;
 
-	memset(&access, '\0', sizeof(struct link_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-	/* file_kobject file is zeroed by file_kern2kobj function */
-
 	file_kobj_dentry2string(dentry, access.filename);
 	newnamelen = strlen(newname);
 	if (newnamelen > NAME_MAX)

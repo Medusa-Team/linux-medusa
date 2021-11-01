@@ -43,8 +43,7 @@ int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp)
 	init_med_object(&(ipc_security(ipcp)->med_object));
 	/* 3-th argument is true: decrement IPC object's refcount in returned object */
 	ipc_kern2kobj(&sender, ipcp, true);
-
-	memset(&event, '\0', sizeof(struct ipc_event));
+	event.ipc_class = ipc_security(ipcp)->ipc_class;
 	retval = MED_DECIDE(ipc_event, &event, &sender, &sender);
 	if (retval != MED_ERR)
 		return 1;

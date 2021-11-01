@@ -27,10 +27,6 @@ enum medusa_answer_t medusa_init_process(struct task_struct *new)
 	struct process_kobject process;
 	struct process_kobject parent;
 
-	memset(&access, '\0', sizeof(struct init_process));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-	/* process_kobject parent is zeroed by process_kern2kobj function */
-
 	if (!is_med_magic_valid(&(task_security(new)->med_object)) &&
 		process_kobj_validate_task(new) <= 0)
 		return MED_ALLOW;

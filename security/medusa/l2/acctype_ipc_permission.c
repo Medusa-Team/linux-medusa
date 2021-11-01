@@ -140,7 +140,6 @@ enum medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
-		memset(&access, '\0', sizeof(struct ipc_perm_access));
 		access.perms = perms;
 		access.ipc_class = object.ipc_class;
 

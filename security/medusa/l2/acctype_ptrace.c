@@ -31,10 +31,6 @@ enum medusa_answer_t medusa_ptrace(struct task_struct *tracer, struct task_struc
 	struct process_kobject tracee_p;
 	enum medusa_answer_t retval;
 
-	memset(&access, '\0', sizeof(struct ptrace_access));
-	/* process_kobject tracer_p is zeroed by process_kern2kobj function */
-	/* process_kobject tracee_p is zeroed by process_kern2kobj function */
-
 	if (!is_med_magic_valid(&(task_security(tracer)->med_object)) &&
 		process_kobj_validate_task(tracer) <= 0)
 		return MED_ALLOW;

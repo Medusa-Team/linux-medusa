@@ -33,16 +33,9 @@ static enum medusa_answer_t medusa_do_readlink(struct dentry *dentry)
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	memset(&access, '\0', sizeof(struct readlink_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-	/* file_kobject file is zeroed by file_kern2kobj function */
-
 	file_kobj_dentry2string(dentry, access.filename);
-
 	process_kern2kobj(&process, current);
-
 	file_kern2kobj(&file, dentry->d_inode);
-
 	file_kobj_live_add(dentry->d_inode);
 	retval = MED_DECIDE(readlink_access, &access, &process, &file);
 	file_kobj_live_remove(dentry->d_inode);

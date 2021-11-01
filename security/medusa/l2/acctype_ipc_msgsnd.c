@@ -85,7 +85,6 @@ enum medusa_answer_t medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
-		memset(&access, '\0', sizeof(struct ipc_msgsnd_access));
 		access.m_type = msg->m_type;
 		access.m_ts = msg->m_ts;
 		access.msgflg = msgflg;

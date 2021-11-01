@@ -56,9 +56,6 @@ asmlinkage enum medusa_answer_t medusa_syscall_i386(
 	struct syscall_access access;
 	struct process_kobject proc;
 
-	memset(&access, '\0', sizeof(struct syscall_access));
-	/* process_kobject proc is zeroed by process_kern2kobj function */
-
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;

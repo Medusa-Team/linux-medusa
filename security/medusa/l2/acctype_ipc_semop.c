@@ -85,7 +85,6 @@ enum medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
-		memset(&access, '\0', sizeof(struct ipc_semop_access));
 		access.sem_op = sops->sem_op;
 		access.sem_num = sops->sem_num;
 		access.sem_flg = sops->sem_flg;

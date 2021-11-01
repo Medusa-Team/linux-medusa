@@ -101,7 +101,6 @@ enum medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_ctl_access, ipc_security(ipcp))) {
-		memset(&access, '\0', sizeof(struct ipc_ctl_access));
 		access.cmd = cmd;
 		access.ipc_class = MED_IPC_UNDEFINED;
 

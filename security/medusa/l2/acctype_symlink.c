@@ -36,10 +36,6 @@ static enum medusa_answer_t medusa_do_symlink(struct dentry *parent, struct dent
 	enum medusa_answer_t retval;
 	int oldnamelen;
 
-	memset(&access, '\0', sizeof(struct symlink_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-	/* file_kobject file is zeroed by file_kern2kobj function */
-
 	file_kobj_dentry2string(dentry, access.filename);
 	oldnamelen = strlen(oldname);
 	if (oldnamelen > NAME_MAX)

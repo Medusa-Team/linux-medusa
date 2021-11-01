@@ -35,10 +35,6 @@ static enum medusa_answer_t medusa_do_truncate(struct dentry *dentry, unsigned l
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	memset(&access, '\0', sizeof(struct truncate_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-	/* file_kobject file is zeroed by file_kern2kobj function */
-
 	file_kobj_dentry2string(dentry, access.filename);
 	access.length = length;
 	process_kern2kobj(&process, current);

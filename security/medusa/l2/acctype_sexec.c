@@ -51,9 +51,8 @@ static enum medusa_answer_t medusa_do_sexec(struct linux_binprm *bprm)
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
+	/* clear all bitmaps... */
 	memset(&access, '\0', sizeof(struct sexec_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-	/* file_kobject file is zeroed by file_kern2kobj function */
 
 	file_kobj_dentry2string(DENTRY, access.filename);
 	access.cap_effective = bprm->cred->cap_effective;

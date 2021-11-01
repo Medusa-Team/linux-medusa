@@ -34,10 +34,6 @@ enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct
 	if (!sig)
 		return 0; /* null signal; existence test */
 
-	memset(&access, '\0', sizeof(struct send_signal));
-	/* process_kobject sender is zeroed by process_kern2kobj function */
-	/* process_kobject receiver is zeroed by process_kern2kobj function */
-
 	if (!in_task())
 		return MED_ALLOW;
 	/* always allow signals coming from kernel - see kernel/signal.c:send_signalnal() */

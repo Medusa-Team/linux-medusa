@@ -29,9 +29,6 @@ enum medusa_answer_t medusa_fork(unsigned long clone_flags)
 	struct fork_access access;
 	struct process_kobject parent;
 
-	memset(&access, '\0', sizeof(struct fork_access));
-	/* process_kobject parent is zeroed by process_kern2kobj function */
-
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;

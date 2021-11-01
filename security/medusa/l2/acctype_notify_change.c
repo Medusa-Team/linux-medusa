@@ -45,10 +45,6 @@ static enum medusa_answer_t medusa_do_notify_change(struct dentry *dentry, struc
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	memset(&access, '\0', sizeof(struct notify_change_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-	/* file_kobject file is zeroed by file_kern2kobj function */
-
 	file_kobj_dentry2string(dentry, access.filename);
 	access.attr.ia_valid = attr->ia_valid;
 	access.attr.ia_mode = attr->ia_mode;

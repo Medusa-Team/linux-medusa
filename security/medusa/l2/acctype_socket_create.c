@@ -38,7 +38,6 @@ enum medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 	if (MEDUSA_MONITORED_ACCESS_S(socket_create_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 
-		memset(&access, '\0', sizeof(struct socket_create_access));
 		access.family = family;
 		access.type = type;
 		access.protocol = protocol;

@@ -75,7 +75,6 @@ enum medusa_answer_t medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
-		memset(&access, '\0', sizeof(struct ipc_shmat_access));
 		access.shmflg = shmflg;
 		access.shmaddr = shmaddr;
 		access.ipc_class = object.ipc_class;

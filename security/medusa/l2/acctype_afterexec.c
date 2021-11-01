@@ -33,9 +33,6 @@ enum medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 	struct process_kobject process;
 	enum medusa_answer_t retval;
 
-	memset(&access, '\0', sizeof(struct afterexec_access));
-	/* process_kobject process is zeroed by process_kern2kobj function */
-
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
@@ -46,6 +43,7 @@ enum medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 				&process, &process);
 		return retval;
 	}
+
 	return MED_ALLOW;
 }
 
