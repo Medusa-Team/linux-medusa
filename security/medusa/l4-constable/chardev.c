@@ -63,7 +63,7 @@ static atomic_t fetch_requests = ATOMIC_INIT(0);
 static atomic_t update_requests = ATOMIC_INIT(0);
 
 /* to-register queue for constable */
-static MED_LOCK_DATA(registration_lock);
+static DEFINE_MUTEX(registration_lock);
 /* the following two are circular lists, they have to be global
  * because of put operations in user_close()
  */
@@ -196,10 +196,8 @@ static int l4_add_kclass(struct medusa_kclass_s *cl)
 
 	med_get_kclass(cl); // put is in user_release
 
-	MED_LOCK_W(registration_lock);
-	barrier();
+	mutex_lock(&registration_lock);
 	atomic_inc(&announce_ready);
-	barrier();
 
 	cl->cinfo = (void *)kclasses_registered;
 	kclasses_registered = cl;
@@ -230,7 +228,7 @@ static int l4_add_kclass(struct medusa_kclass_s *cl)
 	up(&queue_lock);
 	up(&queue_items);
 	wake_up(&userspace_chardev);
-	MED_UNLOCK_W(registration_lock);
+	mutex_unlock(&registration_lock);
 	return 0;
 }
 
@@ -252,10 +250,8 @@ static int l4_add_evtype(struct medusa_evtype_s *at)
 		return -ENOMEM;
 	}
 
-	MED_LOCK_W(registration_lock);
-	barrier();
+	mutex_lock(&registration_lock);
 	atomic_inc(&announce_ready);
-	barrier();
 
 	at->cinfo = (void *)evtypes_registered;
 	evtypes_registered = at;
@@ -286,7 +282,7 @@ static int l4_add_evtype(struct medusa_evtype_s *at)
 	up(&queue_lock);
 	up(&queue_items);
 	wake_up(&userspace_chardev);
-	MED_UNLOCK_W(registration_lock);
+	mutex_unlock(&registration_lock);
 	return 0;
 }
 
@@ -954,7 +950,7 @@ static int user_release(struct inode *inode, struct file *file)
 {
 	struct list_head *pos, *next;
 	struct waitlist_item  *local_waitlist_item;
-	DECLARE_WAITQUEUE(wait, current);
+	DECLARE_WAITQUEUE(waitqueue, current);
 
 	// Operation close has to wait for read and write system calls to finish
 	// Close has priority, so starvation can't occur
@@ -975,7 +971,7 @@ static int user_release(struct inode *inode, struct file *file)
 	 * if (!am_i_constable())
 	 * return 0;
 	 */
-	MED_LOCK_W(registration_lock);
+	mutex_lock(&registration_lock);
 	if (evtypes_registered) {
 		struct medusa_evtype_s *p1, *p2;
 
@@ -998,7 +994,7 @@ static int user_release(struct inode *inode, struct file *file)
 		} while (p1);
 	}
 	kclasses_registered = NULL;
-	MED_UNLOCK_W(registration_lock);
+	mutex_unlock(&registration_lock);
 	atomic_set(&fetch_requests, 0);
 	atomic_set(&update_requests, 0);
 
@@ -1011,8 +1007,7 @@ static int user_release(struct inode *inode, struct file *file)
 	med_pr_warn("No security daemon, rebooting system.\n");
 	ctrl_alt_del();
 #endif
-	add_wait_queue(&close_wait, &wait);
-	set_current_state(TASK_UNINTERRUPTIBLE);
+	add_wait_queue(&close_wait, &waitqueue);
 	MED_UNREGISTER_AUTHSERVER(chardev_medusa);
 	down(&constable_openclose);
 
@@ -1051,11 +1046,12 @@ static int user_release(struct inode *inode, struct file *file)
 	// wake up waiting processes, this has to be outside of constable_openclose
 	// lock because wake_up_all causes context switch (locking and unlocking
 	// cpu may not be the same)
-	if (am_i_constable())
+	if (am_i_constable()) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule();
-	else
+	} else
 		med_pr_crit("Authorization server is not responding.\n");
-	remove_wait_queue(&close_wait, &wait);
+	remove_wait_queue(&close_wait, &waitqueue);
 	//MOD_DEC_USE_COUNT; Not needed anymore? JK
 
 

@@ -6,8 +6,8 @@
 
 /* nesting as follows: registry_lock is outer, usecount_lock is inner. */
 
-MED_LOCK_DATA(registry_lock); /* the linked list lock */
-static MED_LOCK_DATA(usecount_lock); /* the lock for modifying use-count */
+DEFINE_MUTEX(registry_lock); /* the linked list lock */
+static DEFINE_MUTEX(usecount_lock); /* the lock for modifying use-count */
 
 struct medusa_kclass_s *kclasses;
 struct medusa_evtype_s *evtypes;
@@ -30,9 +30,9 @@ int medusa_authserver_magic = 1; /* the 'version' of authserver */
  */
 void med_get_kclass(struct medusa_kclass_s *med_kclass)
 {
-	MED_LOCK_W(usecount_lock);
+	mutex_lock(&usecount_lock);
 	med_kclass->use_count++;
-	MED_UNLOCK_W(usecount_lock);
+	mutex_unlock(&usecount_lock);
 }
 
 /**
@@ -45,10 +45,10 @@ void med_get_kclass(struct medusa_kclass_s *med_kclass)
  */
 void med_put_kclass(struct medusa_kclass_s *med_kclass)
 {
-	MED_LOCK_W(usecount_lock);
+	mutex_lock(&usecount_lock);
 	if (med_kclass->use_count > 0) /* sanity check only */
 		med_kclass->use_count--;
-	MED_UNLOCK_W(usecount_lock);
+	mutex_unlock(&usecount_lock);
 }
 
 /**
@@ -61,13 +61,13 @@ struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s *med_kc
 {
 	struct medusa_kclass_s *tmp;
 
-	MED_LOCK_R(registry_lock);
+	mutex_lock(&registry_lock);
 	for (tmp = kclasses; tmp; tmp = tmp->next)
 		if (med_kclass == tmp) {
 			med_get_kclass(med_kclass);
 			break;
 		}
-	MED_UNLOCK_R(registry_lock);
+	mutex_unlock(&registry_lock);
 	return tmp;
 }
 
@@ -118,16 +118,16 @@ int med_unlink_kclass(struct medusa_kclass_s *med_kclass)
 {
 	int retval = -1;
 
-	MED_LOCK_W(registry_lock);
-	MED_LOCK_R(usecount_lock);
+	mutex_lock(&registry_lock);
+	mutex_lock(&usecount_lock);
 	if (med_kclass->use_count == 0) {
 		retval = _med_unlink_kclass(med_kclass);
 		if (retval != -1)
 			med_kclass->next = NULL;
 	}
 
-	MED_UNLOCK_R(usecount_lock);
-	MED_UNLOCK_W(registry_lock);
+	mutex_unlock(&usecount_lock);
+	mutex_unlock(&registry_lock);
 	return retval;
 }
 
@@ -145,20 +145,20 @@ int med_unlink_kclass(struct medusa_kclass_s *med_kclass)
 int med_unregister_kclass(struct medusa_kclass_s *med_kclass)
 {
 	med_pr_info("Unregistering kclass %s\n", med_kclass->name);
-	MED_LOCK_R(registry_lock);
-	MED_LOCK_R(usecount_lock);
+	mutex_lock(&registry_lock);
+	mutex_lock(&usecount_lock);
 	if (med_kclass->use_count > 0 || med_kclass->next) { /* useless sanity check */
 		char *err_str1 = "A fatal ERROR has occured; expect system crash.";
 		char *err_str2 = "If you're removing a file-related kclass, press reset.";
 		char *err_str3 = "Otherwise save now.";
 
 		med_pr_crit("%s %s %s\n", err_str1, err_str2, err_str3);
-		MED_UNLOCK_R(usecount_lock);
-		MED_UNLOCK_R(registry_lock);
+		mutex_unlock(&usecount_lock);
+		mutex_unlock(&registry_lock);
 		return -1;
 	}
-	MED_UNLOCK_R(usecount_lock);
-	MED_UNLOCK_R(registry_lock);
+	mutex_unlock(&usecount_lock);
+	mutex_unlock(&registry_lock);
 	if (authserver && authserver->del_kclass)
 		authserver->del_kclass(med_kclass);
 	/* FIXME: this isn't safe. add use-count to authserver too... */
@@ -182,11 +182,11 @@ int med_register_kclass(struct medusa_kclass_s *med_kclass)
 	/* Register kmem cache for L4. */
 	med_cache_register(med_kclass->kobject_size);
 
-	MED_LOCK_W(registry_lock);
+	mutex_lock(&registry_lock);
 	for (p = kclasses; p; p = p->next)
 		if (strcmp(p->name, med_kclass->name) == 0) {
 			med_pr_err("Error: '%s' kclass already exists.\n", med_kclass->name);
-			MED_UNLOCK_W(registry_lock);
+			mutex_unlock(&registry_lock);
 			return -1;
 		}
 	/* we don't write-lock usecount_lock. That's OK, because noone is
@@ -196,7 +196,7 @@ int med_register_kclass(struct medusa_kclass_s *med_kclass)
 	med_kclass->use_count = 1;
 	med_kclass->next = kclasses;
 	kclasses = med_kclass;
-	MED_UNLOCK_W(registry_lock);
+	mutex_unlock(&registry_lock);
 	if (authserver && authserver->add_kclass)
 		authserver->add_kclass(med_kclass); /* TODO: some day, check the return value */
 	med_put_kclass(med_kclass);
@@ -221,10 +221,10 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 	med_pr_info("Registering event type %s(%s:%s->%s:%s)\n", med_evtype->name,
 		    med_evtype->arg_name[0], med_evtype->arg_kclass[0]->name,
 		    med_evtype->arg_name[1], med_evtype->arg_kclass[1]->name);
-	MED_LOCK_W(registry_lock);
+	mutex_lock(&registry_lock);
 	for (p = evtypes; p; p = p->next)
 		if (strcmp(p->name, med_evtype->name) == 0) {
-			MED_UNLOCK_W(registry_lock);
+			mutex_unlock(&registry_lock);
 			med_pr_err("Error: '%s' event type already exists.\n", med_evtype->name);
 			return -1;
 		}
@@ -244,7 +244,7 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 		}
 #undef MASK
 		if ((med_evtype->bitnr & MASK_BITNR) >= CONFIG_MEDUSA_ACT) {
-			MED_UNLOCK_W(registry_lock);
+			mutex_unlock(&registry_lock);
 			med_pr_err("%s(%s): bitnr %u >= %u (CONFIG_MEDUSA_ACT)",
 				   __func__, med_evtype->name,
 				   med_evtype->bitnr & MASK_BITNR,
@@ -256,7 +256,7 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 	evtypes = med_evtype;
 	if (authserver && authserver->add_evtype)
 		authserver->add_evtype(med_evtype); /* TODO: some day, check for response */
-	MED_UNLOCK_W(registry_lock);
+	mutex_unlock(&registry_lock);
 	return 0;
 }
 
@@ -270,11 +270,12 @@ void med_unregister_evtype(struct medusa_evtype_s *med_evtype)
 	struct medusa_evtype_s *tmp;
 
 	med_pr_info("Unregistering event type %s\n", med_evtype->name);
-	MED_LOCK_W(registry_lock);
-	if (med_evtype == evtypes)
+	mutex_lock(&registry_lock);
+	if (med_evtype == evtypes) {
 		evtypes = med_evtype->next;
-		MED_UNLOCK_W(registry_lock);
+		mutex_unlock(&registry_lock);
 		return;
+	}
 
 	for (tmp = evtypes; tmp; tmp = tmp->next) {
 		if (tmp->next == med_evtype) {
@@ -285,7 +286,7 @@ void med_unregister_evtype(struct medusa_evtype_s *med_evtype)
 		}
 	}
 	/* TODO: verify whether we found it */
-	MED_UNLOCK_W(registry_lock);
+	mutex_unlock(&registry_lock);
 }
 
 /**
@@ -302,10 +303,10 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 	struct medusa_evtype_s *ap;
 
 	med_pr_info("Registering authorization server %s\n", med_authserver->name);
-	MED_LOCK_W(registry_lock);
+	mutex_lock(&registry_lock);
 	if (authserver) {
 		med_pr_err("Failed registration of auth. server '%s', reason: '%s' already present!\n", med_authserver->name, authserver->name);
-		MED_UNLOCK_W(registry_lock);
+		mutex_unlock(&registry_lock);
 		return -1;
 	}
 	/* we don't write-lock usecount_lock. That's OK, because noone is
@@ -326,7 +327,7 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 		for (ap = evtypes; ap; ap = ap->next)
 			med_authserver->add_evtype(ap); /* TODO: the same for this */
 
-	MED_UNLOCK_W(registry_lock);
+	mutex_unlock(&registry_lock);
 	return 0;
 }
 
@@ -342,17 +343,17 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 void med_unregister_authserver(struct medusa_authserver_s *med_authserver)
 {
 	med_pr_info("Unregistering authserver %s\n", med_authserver->name);
-	MED_LOCK_W(registry_lock);
+	mutex_lock(&registry_lock);
 	/* the following code is a little bit useless, but we keep it here
 	 * to allow multiple different authentication servers some day
 	 */
 	if (med_authserver != authserver) {
-		MED_UNLOCK_W(registry_lock);
+		mutex_unlock(&registry_lock);
 		return;
 	}
 	medusa_authserver_magic++;
 	authserver = NULL;
-	MED_UNLOCK_W(registry_lock);
+	mutex_unlock(&registry_lock);
 	med_put_authserver(med_authserver);
 }
 
@@ -364,13 +365,13 @@ void med_unregister_authserver(struct medusa_authserver_s *med_authserver)
  */
 struct medusa_authserver_s *med_get_authserver(void)
 {
-	MED_LOCK_W(usecount_lock);
+	mutex_lock(&usecount_lock);
 	if (authserver) {
 		authserver->use_count++;
-		MED_UNLOCK_W(usecount_lock);
+		mutex_unlock(&usecount_lock);
 		return authserver;
 	}
-	MED_UNLOCK_W(usecount_lock);
+	mutex_unlock(&usecount_lock);
 	return NULL;
 }
 
@@ -385,14 +386,14 @@ struct medusa_authserver_s *med_get_authserver(void)
  */
 void med_put_authserver(struct medusa_authserver_s *med_authserver)
 {
-	MED_LOCK_W(usecount_lock);
+	mutex_lock(&usecount_lock);
 	if (med_authserver->use_count) /* sanity check only */
 		med_authserver->use_count--;
 	if (med_authserver->use_count) { /* fast path */
-		MED_UNLOCK_W(usecount_lock);
+		mutex_unlock(&usecount_lock);
 		return;
 	}
-	MED_UNLOCK_W(usecount_lock);
+	mutex_unlock(&usecount_lock);
 	if (med_authserver->close)
 		med_authserver->close();
 }

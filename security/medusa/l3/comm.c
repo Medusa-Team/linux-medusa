@@ -6,7 +6,7 @@
 #include "l3/registry.h"
 #include "l3/server.h"
 
-MED_DECLARE_LOCK_DATA(registry_lock);
+extern struct mutex registry_lock;
 
 inline int is_authserver_reached(enum medusa_answer_t answer)
 {
@@ -27,7 +27,7 @@ enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
 	if (ARCH_CANNOT_DECIDE(evtype))
 		return MED_ALLOW;
 
-	MED_LOCK_W(registry_lock);
+	mutex_lock(&registry_lock);
 #ifdef CONFIG_MEDUSA_PROFILING
 	evtype->arg_kclass[0]->l2_to_l4++;
 	evtype->arg_kclass[1]->l2_to_l4++;
@@ -39,10 +39,10 @@ enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
 			evtype->arg_kclass[0]->unmonitor((struct medusa_kobject_s *) o1);
 		if (evtype->arg_kclass[1]->unmonitor)
 			evtype->arg_kclass[1]->unmonitor((struct medusa_kobject_s *) o2);
-		MED_UNLOCK_W(registry_lock);
+		mutex_unlock(&registry_lock);
 		return MED_ALLOW;
 	}
-	MED_UNLOCK_W(registry_lock);
+	mutex_unlock(&registry_lock);
 
 	((struct medusa_event_s *)event)->evtype_id = evtype;
 	retval = authserver->decide(event, o1, o2);
