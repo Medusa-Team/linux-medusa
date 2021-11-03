@@ -30,7 +30,8 @@ static inline int socket_kobj2kern(struct socket_kobject *sock_kobj, struct sock
 		return -EINVAL;
 	}
 
-	sock_kobj->med_object = sk_sec->med_object;
+	sk_sec->med_object = sock_kobj->med_object;
+	med_magic_validate(&sk_sec->med_object);
 	return 0;
 }
 
