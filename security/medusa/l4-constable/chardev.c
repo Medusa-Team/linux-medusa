@@ -395,8 +395,8 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	wake_up(&userspace_chardev);
 	// wait until answer is ready
 
-	local_waitlist_item.task = current;
 	get_task_struct(current);
+	local_waitlist_item.task = current;
 	down(&waitlist_sem);
 	list_add_tail(&local_waitlist_item.list, &answer_waitlist);
 	up(&waitlist_sem);
@@ -1047,8 +1047,10 @@ static int user_release(struct inode *inode, struct file *file)
 	// lock because wake_up_all causes context switch (locking and unlocking
 	// cpu may not be the same)
 	if (am_i_constable()) {
+		get_task_struct(current);
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule();
+		put_task_struct(current);
 	} else
 		med_pr_crit("Authorization server is not responding.\n");
 	remove_wait_queue(&close_wait, &waitqueue);
