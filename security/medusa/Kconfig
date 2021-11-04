@@ -43,4 +43,12 @@ config SECURITY_MEDUSA_TESTING
 	bool "MEDUSA Test Support"
 	depends on SECURITY_MEDUSA && KUNIT
 
+config SECURITY_MEDUSA_MONITOR_KTHREADS
+	bool "Monitor kernel threads"
+	depends on SECURITY_MEDUSA
+	default n
+	help
+	  If set, kernel threads are monitored by Medusa LSM.
+	  By default, this functionality is turned off.
+
 endif # if SECURITY_MEDUSA

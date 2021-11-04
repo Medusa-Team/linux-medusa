@@ -6,6 +6,8 @@
 #include "l3/config.h"
 #include "l3/vs_model.h"
 
+#define MAGIC_NOT_MONITORED (-1L)
+
 extern int medusa_authserver_magic;
 
 struct s_cinfo_t {
@@ -72,7 +74,7 @@ static inline void unmonitor_med_subject(struct medusa_subject_s *med_subject)
 
 static inline int _is_med_magic_valid(struct medusa_object_s *med_object, int expected_magic)
 {
-	return med_object->magic == expected_magic;
+	return (med_object->magic == MAGIC_NOT_MONITORED) || (med_object->magic == expected_magic);
 }
 
 static inline int is_med_magic_valid(struct medusa_object_s *med_object)
@@ -88,6 +90,11 @@ static inline void _med_magic_validate(struct medusa_object_s *med_object, int m
 static inline void med_magic_validate(struct medusa_object_s *med_object)
 {
 	_med_magic_validate(med_object, medusa_authserver_magic);
+}
+
+static inline void med_magic_not_monitored(struct medusa_object_s *med_object)
+{
+	_med_magic_validate(med_object, MAGIC_NOT_MONITORED);
 }
 
 static inline void med_magic_invalidate(struct medusa_object_s *med_object)
