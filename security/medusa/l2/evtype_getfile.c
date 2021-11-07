@@ -132,46 +132,50 @@ void inline info_mnt(struct mount *mnt)
 void medusa_get_upper_and_parent(struct path *ndsource,
 		struct path *ndupperp, struct path *ndparentp)
 {
-	pr_info("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry);
+	med_pr_info("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry);
 	*ndupperp = *ndsource;
 	dget(ndupperp->dentry);
 	if (ndupperp->mnt) {
 		mntget(ndupperp->mnt);
 	}
 	else if (IS_ROOT(ndupperp->dentry)) {
-		/* Nepozname mnt a ndupperp nema rodica (je to korenova dentry)
-		 * V tejto casti kodu sa vyhlada struktura vfsmount
-		 * prisluchajuca k danej dentry. Toto je potrebne, ked mame
-		 * iba inode, ale nie je to potrebne, ak pouzivame path hook */
+		/* We don't know `mnt` and `ndupperp` doesn't have a parent
+		 * (it's a root dentry. This code searches for `struct vfsmount`
+		 * for the given dentry. This is needed when we have an inode
+		 * (from an inode hook). We don't need to run
+		 * `medusa_evocate_mnt` for paths from path hooks. */
 		ndupperp->mnt = medusa_evocate_mnt(ndupperp->dentry); /* FIXME: may fail [?] */
 	}
 
 	while (IS_ROOT(ndupperp->dentry)) {
-		/* Cyklus pracuje dovtedy, kym nenajdeme dentry, ktora nie je root */
+		/* Cycle runs until we find a dentry that *isn't* a root. */
 		struct vfsmount *tmp;
 		if (real_mount(ndupperp->mnt)->mnt_parent == real_mount(ndupperp->mnt)->mnt_parent->mnt_parent) {
-			/* Cyklus skonci, ked rodic mountpointu uz nema dalsieho
-			 * rodica, resp. su totozne. */
-			pr_info("medusa_get_upper_and_parent: at root: %pd4, source: %pd4\n", real_mount(ndupperp->mnt)->mnt_parent->mnt_mountpoint, ndsource->dentry);
+			/* Cycle finishes when parent of the mountpoint doesn't
+			 * have another parent (i.e. they are the same). */
+			med_pr_info("medusa_get_upper_and_parent: at root: %pd4, source: %pd4\n", real_mount(ndupperp->mnt)->mnt_parent->mnt_mountpoint, ndsource->dentry);
 			break;
 		}
-		/* Prechod na vyssi mountpoint, najprv dentry pre mountpoint */
+		/* Go to the upper mountpoint. First entry for the
+		 * mountpoint. */
 		dput(ndupperp->dentry);
 		ndupperp->dentry = dget(real_mount(ndupperp->mnt)->mnt_mountpoint);
-		/* A potom samotna mount struktura */
+		/* And then `struct mount`. */
 		tmp = mntget(&real_mount(ndupperp->mnt)->mnt_parent->mnt);
 		mntput(ndupperp->mnt);
 		ndupperp->mnt = tmp;
 	}
 	if (ndparentp) {
-		/* Ak si volajuci vyziadal rodica, tak ho vyplnime */
+		/* The caller requested parent dentry. */
 		if (IS_ROOT(ndupperp->dentry)) {
-			/* Ak je ndupperp root, nastavime parenta rovnakeho ako source
-			 * (rodic je nastaveny tak, aby bol ten isty, aby sme pri iteracii nesli vyssie)*/
+			/* If `ndupperp->dentry` is a root, the `ndupperp` is
+			 * set the same as `ndsource` (parent is set the same so
+			 * we don't go higher when iterating.*/
 			*ndparentp = *ndsource;
 		}
 		else {
-			/* Ak to nie je root, vytiahneme parenta z ndupperp */
+			/* If it's not a root, we get the parent from
+			 * `ndupperp`. */
 			ndparentp->dentry = ndupperp->dentry->d_parent;
 			ndparentp->mnt = ndupperp->mnt;
 		}
@@ -196,8 +200,6 @@ void medusa_put_upper_and_parent(struct path *ndupper, struct path *ndparent)
 			mntput(ndparent->mnt);
 	}
 }
-
-// struct dentry* get_upper(struct )
 
 /**
  * Checks for correctness of current, upper and parent.
@@ -227,7 +229,7 @@ struct path check(struct dentry* dentry, struct path* dir, struct path* c, struc
 		if (c->mnt)
 			info_mnt(real_mount(c->mnt));
 		else
-			pr_info("mnt is null\n");
+			med_pr_info("mnt is null\n");
 	}
 	if (!path_equal(u, &ndupper)) {
 		pr_warn("upper not equal: %pd != %pd\n", ndupper.dentry, u->dentry);
@@ -235,7 +237,7 @@ struct path check(struct dentry* dentry, struct path* dir, struct path* c, struc
 		if (u->mnt)
 			info_mnt(real_mount(u->mnt));
 		else
-			pr_info("mnt is null\n");
+			med_pr_info("mnt is null\n");
 	}
 	if (!path_equal(p, &ndparent)) {
 		pr_warn("parent not equal: %pd != %pd\n", ndparent.dentry, p->dentry);
@@ -243,7 +245,7 @@ struct path check(struct dentry* dentry, struct path* dir, struct path* c, struc
 		if (p->mnt)
 			info_mnt(real_mount(p->mnt));
 		else
-			pr_info("mnt is null\n");
+			med_pr_info("mnt is null\n");
 	}
 
 	if (IS_ROOT(dentry)) {
@@ -348,9 +350,9 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 #endif
 	ndcurrent.dentry = dentry;
 	ndcurrent.mnt = mnt; /* may be NULL */
-	/* Ak pouzivame path hooky, budeme poznat aj mnt */
+	/* When using path hooks, we will have `mnt`. */
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
-	pr_info("current: %pd upper: %pd parent: %pd\n", ndcurrent.dentry, ndupper.dentry, ndparent.dentry);
+	med_pr_info("current: %pd upper: %pd parent: %pd\n", ndcurrent.dentry, ndupper.dentry, ndparent.dentry);
 	//if (ndcurrent.mnt)
 	//	info_mnt(real_mount(ndcurrent.mnt));
 	//if (ndupper.mnt)
