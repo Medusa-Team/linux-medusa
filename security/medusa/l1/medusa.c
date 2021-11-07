@@ -12,6 +12,7 @@
 #include "l1/ipc.h"
 #include "l1/socket.h"
 #include "l1/fuck.h"
+#include "../../../../fs/mount.h" /* real_mount(), struct mount */
 
 int medusa_l1_inode_alloc_security(struct inode *inode);
 
@@ -292,7 +293,7 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 	if (no_block)
 		return -ECHILD;
 
-	mask &= (MAY_READ|MAY_WRITE|MAY_EXEC|MAY_APPEND);*/
+	mask &= (MAY_READ|MAY_WRITE|MAY_EXEC|MAY_APPEND);
 	/*
 	 * Existence test.
 	 * TODO What about Medusa SEE permission?

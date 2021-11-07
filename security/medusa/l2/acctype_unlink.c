@@ -26,7 +26,7 @@ int __init unlink_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_unlink(const struct path *dir, struct dentry *dentry)
+static enum medusa_answer_t medusa_do_unlink(const struct path *dir, struct dentry *dentry)
 {
 	struct unlink_access access;
 	struct process_kobject process;
@@ -42,7 +42,6 @@ static medusa_answer_t medusa_do_unlink(const struct path *dir, struct dentry *d
 	return retval;
 }
 
-static medusa_answer_t medusa_do_unlink(const struct path *dir, struct dentry *dentry);
 enum medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry)
 {
 	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
