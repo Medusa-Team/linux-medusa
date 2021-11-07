@@ -50,8 +50,6 @@ enum medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dent
 	//struct path ndcurrent, ndupper, ndparent;
 	enum medusa_answer_t retval;
 
-	if (!dentry || IS_ERR(dentry))
-		return MED_ALLOW;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;

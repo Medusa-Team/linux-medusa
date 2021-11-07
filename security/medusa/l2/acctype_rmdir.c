@@ -44,10 +44,6 @@ static enum medusa_answer_t medusa_do_rmdir(struct dentry *dentry)
 
 enum medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 {
-
-	if (!dentry || IS_ERR(dir->dentry) || dentry->d_inode == NULL)
-		return MED_ALLOW;
-
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
