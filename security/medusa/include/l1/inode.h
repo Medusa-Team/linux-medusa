@@ -24,12 +24,13 @@ extern enum medusa_answer_t medusa_exec(struct dentry **dentryp);
 extern enum medusa_answer_t medusa_create(struct dentry *dentry, int mode);
 extern enum medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry);
 extern enum medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length);
-extern enum medusa_answer_t medusa_mkdir(const struct path *parent, struct dentry *dentry, int mode);
-extern enum medusa_answer_t medusa_mknod(struct dentry *dentry, dev_t dev, int mode);
+extern enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry, int mode);
+extern enum medusa_answer_t medusa_mknod(const struct path *dir,
+					struct dentry *dentry, umode_t mode, unsigned int dev);
 extern enum medusa_answer_t medusa_permission(struct inode *inode, int mask);
 extern enum medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry);
 extern enum medusa_answer_t medusa_symlink(struct dentry *dentry, const char *oldname);
-extern enum medusa_answer_t medusa_unlink(struct dentry *dentry);
+extern enum medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry);
 extern enum medusa_answer_t medusa_link(struct dentry *dentry, const char *newname);
 extern enum medusa_answer_t medusa_rename(struct dentry *dentry, const char *newname);
 extern enum medusa_answer_t medusa_readlink(struct dentry *dentry);
@@ -39,7 +40,8 @@ extern enum medusa_answer_t medusa_readlink(struct dentry *dentry);
  * l2/evtype_getfile.c. Look there before using any of these routines.
  */
 
-extern int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt);
+extern int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struct path *dir);
+extern int file_kobj_validate_dentry_dir(const struct vfsmount *mnt, struct dentry *dentry);
 extern void medusa_get_upper_and_parent(struct path *ndsource, struct path *ndupperp, struct path *ndparentp);
 extern void medusa_put_upper_and_parent(struct path *ndupper, struct path *ndparent);
 extern struct vfsmount *medusa_evocate_mnt(struct dentry *dentry);

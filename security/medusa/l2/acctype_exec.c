@@ -88,7 +88,7 @@ enum medusa_answer_t medusa_exec(struct dentry **dentryp)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security((*dentryp)->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(*dentryp, NULL) <= 0)
+		file_kobj_validate_dentry(*dentryp, NULL, NULL) <= 0)
 		return MED_ALLOW;
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security((*dentryp)->d_inode))) ||
 		!vs_intersects(VSR(task_security(current)), VS(inode_security((*dentryp)->d_inode)))

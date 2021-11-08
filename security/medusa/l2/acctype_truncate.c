@@ -54,7 +54,7 @@ enum medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(dentry, NULL) <= 0)
+		file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
 		return MED_ALLOW;
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
 		!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))

@@ -63,7 +63,7 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	if (!dentry || IS_ERR(dentry))
 		return retval;
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
-			file_kobj_validate_dentry(dentry, NULL) <= 0)
+		file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
 		goto out_dput;
 	if (
 		!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||

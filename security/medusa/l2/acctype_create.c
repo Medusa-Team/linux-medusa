@@ -61,7 +61,7 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
 
 	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt) <= 0) {
+		file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, NULL) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return MED_ALLOW;
 	}
