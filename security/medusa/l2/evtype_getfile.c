@@ -151,16 +151,17 @@ void medusa_get_upper_and_parent(struct path *ndsource,
 		/* Cycle runs until we find a dentry that *isn't* a root. */
 		struct vfsmount *tmp;
 		if (real_mount(ndupperp->mnt)->mnt_parent == real_mount(ndupperp->mnt)->mnt_parent->mnt_parent) {
-			/* Cycle finishes when parent of the mountpoint doesn't
-			 * have another parent (i.e. they are the same). */
+			/* We are already on the / filesystem (not on some
+			 * mounted filesystem). Break here because we don't want
+			 * the / directory. */
 			med_pr_info("medusa_get_upper_and_parent: at root: %pd4, source: %pd4\n", real_mount(ndupperp->mnt)->mnt_parent->mnt_mountpoint, ndsource->dentry);
 			break;
 		}
-		/* Go to the upper mountpoint. First entry for the
-		 * mountpoint. */
+		/* Go to the upper mountpoint. First entry for the mountpoint
+		 * from the outer filesystem. */
 		dput(ndupperp->dentry);
 		ndupperp->dentry = dget(real_mount(ndupperp->mnt)->mnt_mountpoint);
-		/* And then `struct mount`. */
+		/* And then its `struct mount`. */
 		tmp = mntget(&real_mount(ndupperp->mnt)->mnt_parent->mnt);
 		mntput(ndupperp->mnt);
 		ndupperp->mnt = tmp;
@@ -168,9 +169,7 @@ void medusa_get_upper_and_parent(struct path *ndsource,
 	if (ndparentp) {
 		/* The caller requested parent dentry. */
 		if (IS_ROOT(ndupperp->dentry)) {
-			/* If `ndupperp->dentry` is a root, the `ndupperp` is
-			 * set the same as `ndsource` (parent is set the same so
-			 * we don't go higher when iterating.*/
+			/* This is a disconnected root. */
 			*ndparentp = *ndsource;
 		}
 		else {
@@ -256,7 +255,7 @@ struct path check(struct dentry* dentry, struct path* dir, struct path* c, struc
 			.dentry = ndparent.dentry->d_parent};
 }
 
-int file_kobj_validate_dentry_dir(const struct path* dir, struct dentry *dentry)
+int file_kobj_validate_dentry_dir(const struct vfsmount* mnt, struct dentry *dentry)
 {
 	struct path ndcurrent;
 	struct path ndupper;
@@ -272,7 +271,7 @@ int file_kobj_validate_dentry_dir(const struct path* dir, struct dentry *dentry)
 	inode_security(dentry->d_inode)->ecap = CAP_FULL_SET;
 #endif
 	ndcurrent.dentry = dentry;
-	ndcurrent.mnt = dir->mnt;
+	ndcurrent.mnt = mnt;
 
 	ndupper = ndcurrent;
 
@@ -293,7 +292,7 @@ int file_kobj_validate_dentry_dir(const struct path* dir, struct dentry *dentry)
 		parent_dir = (struct path) {.mnt = ndparent.mnt,
 			                    .dentry = ndparent.dentry->d_parent};
 		if (!is_med_magic_valid(&inode_security(ndparent.dentry->d_inode)->med_object) &&
-			file_kobj_validate_dentry_dir(&parent_dir, ndparent.dentry) <= 0) {
+			file_kobj_validate_dentry_dir(parent_dir.mnt, ndparent.dentry) <= 0) {
 			path_put(&ndupper);
 			return 0;
 		}

@@ -60,7 +60,7 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(&ndupper, ndupper.dentry) <= 0) {
+		file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
 		return MED_ALLOW;
 	}
