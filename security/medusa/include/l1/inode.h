@@ -31,7 +31,7 @@ extern enum medusa_answer_t medusa_permission(struct inode *inode, int mask);
 extern enum medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry);
 extern enum medusa_answer_t medusa_symlink(const struct path *dir, struct dentry *dentry, const char *oldname);
 extern enum medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry);
-extern enum medusa_answer_t medusa_link(struct dentry *dentry, const char *newname);
+extern enum medusa_answer_t medusa_link(struct dentry *old_dentry, const struct path *new_dir, struct dentry *new_dentry);
 extern enum medusa_answer_t medusa_rename(struct dentry *dentry, const char *newname);
 extern enum medusa_answer_t medusa_readlink(struct dentry *dentry);
 

@@ -61,5 +61,6 @@ void file_kobj_live_remove(struct inode *ino);
 void file_kobj_dentry2string(struct dentry *dentry, char *buf);
 void file_kobj_dentry2string_mnt(const struct path *dir, struct dentry *dentry, char *buf);
 void file_kobj_dentry2string_dir(struct path *dir, struct dentry *dentry, char *buf);
+void dentry2string(struct dentry *dentry, char *buf);
 
 #endif

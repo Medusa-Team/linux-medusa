@@ -28,7 +28,7 @@ int __init link_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char *newname)
+static enum medusa_answer_t medusa_do_link(struct dentry *old_dentry, const char *newname)
 {
 	struct link_access access;
 	struct process_kobject process;
@@ -36,37 +36,63 @@ static enum medusa_answer_t medusa_do_link(struct dentry *dentry, const char *ne
 	enum medusa_answer_t retval;
 	int newnamelen;
 
-	file_kobj_dentry2string(dentry, access.filename);
+	dentry2string(old_dentry, access.filename);
 	newnamelen = strlen(newname);
 	if (newnamelen > NAME_MAX)
 		newnamelen = NAME_MAX;
 	memcpy(access.newname, newname, newnamelen);
 	access.newname[newnamelen] = '\0';
 	process_kern2kobj(&process, current);
-	file_kern2kobj(&file, dentry->d_inode);
-	file_kobj_live_add(dentry->d_inode);
+	file_kern2kobj(&file, old_dentry->d_inode);
+	file_kobj_live_add(old_dentry->d_inode);
 	retval = MED_DECIDE(link_access, &access, &process, &file);
-	file_kobj_live_remove(dentry->d_inode);
+	file_kobj_live_remove(old_dentry->d_inode);
 	return retval;
 }
 
-enum medusa_answer_t medusa_link(struct dentry *dentry, const char *newname)
+enum medusa_answer_t medusa_link(struct dentry *old_dentry,
+				const struct path *new_dir,
+				struct dentry *new_dentry)
 {
+	struct path ndcurrent, ndupper;
+	enum medusa_answer_t retval;
+
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
-	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry(dentry, NULL, NULL) <= 0) {
+	if (!is_med_magic_valid(&(inode_security(old_dentry->d_inode)->med_object)) &&
+		// new_dir->mnt and old_dentry because it is a hardlink, mnt will be the same
+		file_kobj_validate_dentry_dir(new_dir->mnt, old_dentry) <= 0) {
 		return MED_ALLOW;
 	}
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
-	)
+
+	ndcurrent = *new_dir;
+	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
+
+	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
+		file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
+		medusa_put_upper_and_parent(&ndupper, NULL);
+		return MED_ALLOW;
+	}
+	// TODO: Add VSR check for old_dentry? Rationale: UGO checks RW on target.
+	// TODO: We check parecnt directory here. That could be delegated to
+	// inode_permission if we choose to support that hook.
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndupper.dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndupper.dentry->d_inode))) ||
+		!vs_intersects(VSS(task_security(current)), VS(inode_security(old_dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(old_dentry->d_inode)))
+		) {
+		medusa_put_upper_and_parent(&ndupper, NULL);
 		return MED_DENY;
-	if (MEDUSA_MONITORED_ACCESS_O(link_access, inode_security(dentry->d_inode)))
-		return medusa_do_link(dentry, newname);
-	return MED_ALLOW;
+	}
+	if (MEDUSA_MONITORED_ACCESS_O(link_access, inode_security(old_dentry->d_inode)))
+		// TODO: Is this safe to just use the name from the dentry?
+		retval = medusa_do_link(old_dentry, new_dentry->d_name.name);
+	else
+		retval = MED_ALLOW;
+	medusa_put_upper_and_parent(&ndupper, NULL);
+	return retval;
 }
 
 device_initcall(link_acctype_init);

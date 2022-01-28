@@ -163,6 +163,23 @@ void file_kobj_dentry2string_dir(struct path *dir, struct dentry *dentry, char *
 	dput(dentry);
 }
 
+/* Just get the name of `dentry` into `buf`. */
+void dentry2string(struct dentry *dentry, char *buf)
+{
+	int len;
+
+	// TODO: This check is probably unneeded
+	/* if (!dentry || IS_ERR(dentry) || !dentry->d_name.name) { */
+	/* 	buf[0] = '\0'; */
+	/* 	dput(dentry); */
+	/* 	return; */
+	/* } */
+	len = dentry->d_name.len < NAME_MAX ?
+		dentry->d_name.len : NAME_MAX;
+	memcpy(buf, dentry->d_name.name, len);
+	buf[len] = '\0';
+}
+
 /* Uses mnt from dir and then gets ndupper as original file_kobj_dentry2string() */
 void file_kobj_dentry2string_mnt(const struct path *dir, struct dentry *dentry, char *buf)
 {
