@@ -392,9 +392,8 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	up(&queue_lock);
 	up(&queue_items);
 	atomic_inc(&questions);
-	wake_up(&userspace_chardev);
-	// wait until answer is ready
 
+	// wait until answer is ready
 	get_task_struct(current);
 	local_waitlist_item.task = current;
 	down(&waitlist_sem);
@@ -402,6 +401,9 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	up(&waitlist_sem);
 	ls_unlock(&lightswitch, &ls_switch);
 	set_current_state(TASK_UNINTERRUPTIBLE);
+	// Auth server shouldn't be notified earlier, so that it doesn't
+	// answer the request before the task goes to sleep.
+	wake_up(&userspace_chardev);
 	schedule();
 	put_task_struct(current);
 
@@ -698,7 +700,8 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		med_pr_debug("answer received for %px\n", answered_task);
 		// wake up correct process
 		while (!wake_up_process(answered_task))
-			;
+			// wait for `answered_task` to sleep if it's not sleeping yet
+			schedule();
 		med_pr_debug("woken up\n");
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
