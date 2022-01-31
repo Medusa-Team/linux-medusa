@@ -808,32 +808,64 @@ static int testmsg(struct msg_msg *msg, long type, int mode)
 	return 0;
 }
 
+static inline bool msr_in_msq(struct msg_receiver *msr, struct msg_queue *msq)
+{
+	struct msg_receiver *check;
+
+	list_for_each_entry(check, &msq->q_receivers, r_list) {
+		if (check == msr)
+			return true;
+	}
+
+	return false;
+}
+
 static inline int pipelined_send(struct msg_queue *msq, struct msg_msg *msg,
 				 struct wake_q_head *wake_q)
 {
 	struct msg_receiver *msr, *t;
+	int err;
 
+retry_pipelined_send:
 	list_for_each_entry_safe(msr, t, &msq->q_receivers, r_list) {
-		if (testmsg(msg, msr->r_msgtype, msr->r_mode) &&
-		    !security_msg_queue_msgrcv(&msq->q_perm, msg, msr->r_tsk,
-					       msr->r_msgtype, msr->r_mode)) {
+		if (!testmsg(msg, msr->r_msgtype, msr->r_mode))
+			continue;
+		/* Security hook can unlock IPC object @msq, so another task
+		 * can remove it or handle the same msr. After return from the
+		 * security hook the @msq will be locked again.
+		 */
+		err = security_msg_queue_msgrcv(&msq->q_perm, msg, msr->r_tsk,
+					        msr->r_msgtype, msr->r_mode);
 
-			list_del(&msr->r_list);
-			if (msr->r_maxsize < msg->m_ts) {
-				wake_q_add(wake_q, msr->r_tsk);
+		/* security hook raced with RMID? */
+		if (err == -EIDRM)
+			return -EIDRM;
 
-				/* See expunge_all regarding memory barrier */
-				smp_store_release(&msr->r_msg, ERR_PTR(-E2BIG));
-			} else {
-				ipc_update_pid(&msq->q_lrpid, task_pid(msr->r_tsk));
-				msq->q_rtime = ktime_get_real_seconds();
+		/* security hook raced with another pipelined_send and msr isn't
+		 * valid yet?
+		 */
+		if (!msr_in_msq(msr, msq))
+			goto retry_pipelined_send;
 
-				wake_q_add(wake_q, msr->r_tsk);
+		/* msr is valid but security hook denied the operation */
+		if (err)
+			continue;
 
-				/* See expunge_all regarding memory barrier */
-				smp_store_release(&msr->r_msg, msg);
-				return 1;
-			}
+		list_del(&msr->r_list);
+		if (msr->r_maxsize < msg->m_ts) {
+			wake_q_add(wake_q, msr->r_tsk);
+
+			/* See expunge_all regarding memory barrier */
+			smp_store_release(&msr->r_msg, ERR_PTR(-E2BIG));
+		} else {
+			ipc_update_pid(&msq->q_lrpid, task_pid(msr->r_tsk));
+			msq->q_rtime = ktime_get_real_seconds();
+
+			wake_q_add(wake_q, msr->r_tsk);
+
+			/* See expunge_all regarding memory barrier */
+			smp_store_release(&msr->r_msg, msg);
+			return 1;
 		}
 	}
 
@@ -931,7 +963,11 @@ static long do_msgsnd(int msqid, long mtype, void __user *mtext,
 	ipc_update_pid(&msq->q_lspid, task_tgid(current));
 	msq->q_stime = ktime_get_real_seconds();
 
-	if (!pipelined_send(msq, msg, &wake_q)) {
+	err = pipelined_send(msq, msg, &wake_q);
+	if (err == -EIDRM)
+		goto out_unlock0;
+
+	if (!err) {
 		/* no one is waiting for this message, enqueue it */
 		list_add_tail(&msg->m_list, &msq->q_messages);
 		msq->q_cbytes += msgsz;
@@ -1066,31 +1102,66 @@ static inline void free_copy(struct msg_msg *copy)
 }
 #endif
 
-static struct msg_msg *find_msg(struct msg_queue *msq, long *msgtyp, int mode)
+static inline bool msg_in_msq(struct msg_msg *msg, struct msg_queue *msq)
 {
-	struct msg_msg *msg, *found = NULL;
-	long count = 0;
+	struct msg_msg *check;
 
-	list_for_each_entry(msg, &msq->q_messages, m_list) {
-		if (testmsg(msg, *msgtyp, mode) &&
-		    !security_msg_queue_msgrcv(&msq->q_perm, msg, current,
-					       *msgtyp, mode)) {
-			if (mode == SEARCH_LESSEQUAL && msg->m_type != 1) {
-				*msgtyp = msg->m_type - 1;
-				found = msg;
-			} else if (mode == SEARCH_NUMBER) {
-				if (*msgtyp == count)
-					return msg;
-			} else
-				return msg;
-			count++;
-		}
+	list_for_each_entry(check, &msq->q_messages, m_list) {
+		if (check == msg)
+			return true;
 	}
 
+	return false;
+}
+
+struct msg_msg *find_msg(struct msg_queue *msq, long *msgtyp, int mode)
+{
+	struct msg_msg *msg, *t, *found;
+	long count;
+	int err;
+
+retry_find_msg:
+	found = NULL;
+	count = 0;
+	list_for_each_entry_safe(msg, t, &msq->q_messages, m_list) {
+		if (!testmsg(msg, *msgtyp, mode))
+			continue;
+		/* Security hook can unlock IPC object @msq, so another task
+		 * can remove it or handle the same msg. After return from the
+		 * security hook the @msq will be locked again.
+		 */
+		err = security_msg_queue_msgrcv(&msq->q_perm, msg, current,
+					        *msgtyp, mode);
+		/* security hook raced with RMID? */
+		if (err == -EIDRM)
+			return ERR_PTR(-EIDRM);
+
+		/* security hook raced with another msgrcv and msg isn't valid yet? */
+		if (!msg_in_msq(msg, msq))
+			goto retry_find_msg;
+
+		/* msg is valid but security hook denied the operation */
+		if (err)
+			continue;
+
+		if (mode == SEARCH_LESSEQUAL && msg->m_type != 1) {
+			*msgtyp = msg->m_type - 1;
+			found = msg;
+		} else if (mode == SEARCH_NUMBER) {
+			if (*msgtyp == count)
+				return msg;
+		} else
+			return msg;
+		count++;
+	}
+
+	/* iteration raced with another msgrcv and @found isn't valid yet? */
+	if (found && !msg_in_msq(found, msq))
+		goto retry_find_msg;
 	return found ?: ERR_PTR(-EAGAIN);
 }
 
-static long do_msgrcv(int msqid, void __user *buf, size_t bufsz, long msgtyp, int msgflg,
+long do_msgrcv(int msqid, void __user *buf, size_t bufsz, long msgtyp, int msgflg,
 	       long (*msg_handler)(void __user *, struct msg_msg *, size_t))
 {
 	int mode;
@@ -1137,6 +1208,9 @@ static long do_msgrcv(int msqid, void __user *buf, size_t bufsz, long msgtyp, in
 		}
 
 		msg = find_msg(msq, &msgtyp, mode);
+		if (msg == ERR_PTR(-EIDRM))
+			goto out_unlock0;
+
 		if (!IS_ERR(msg)) {
 			/*
 			 * Found a suitable message.

@@ -803,9 +803,7 @@ static int medusa_l1_msg_queue_msgrcv(struct kern_ipc_perm *msq,
 				      struct task_struct *target,
 				      long type, int mode)
 {
-	if (medusa_ipc_msgrcv(msq, msg, target, type, mode) == MED_DENY)
-		return -EACCES;
-	return 0;
+	return medusa_ipc_msgrcv(msq, msg, target, type, mode);
 }
 
 //shared memory
@@ -1564,30 +1562,30 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(task_prctl, medusa_l1_task_prctl),
 	//LSM_HOOK_INIT(task_to_inode, medusa_l1_task_to_inode),
 
-	LSM_HOOK_INIT(ipc_permission, medusa_l1_ipc_permission),
+	//mY1 LSM_HOOK_INIT(ipc_permission, medusa_l1_ipc_permission),
 	// LSM_HOOK_INIT(ipc_getsecid, medusa_l1_ipc_getsecid),
 
-	LSM_HOOK_INIT(msg_msg_alloc_security, medusa_l1_msg_msg_alloc_security),
-	LSM_HOOK_INIT(msg_msg_free_security, medusa_l1_msg_msg_free_security),
+	//mY1 LSM_HOOK_INIT(msg_msg_alloc_security, medusa_l1_msg_msg_alloc_security),
+	//mY1 LSM_HOOK_INIT(msg_msg_free_security, medusa_l1_msg_msg_free_security),
 
 	// msg_queue_alloc_security --> medusa_l1_msg_queue_alloc_security: transfered to medusa_l1_special
 	// msg_queue_free_security --> medusa_l1_msg_queue_free_security: transfered to medusa_l1_special
-	LSM_HOOK_INIT(msg_queue_associate, medusa_l1_msg_queue_associate),
-	LSM_HOOK_INIT(msg_queue_msgctl, medusa_l1_msg_queue_msgctl),
-	LSM_HOOK_INIT(msg_queue_msgsnd, medusa_l1_msg_queue_msgsnd),
+	//mY1 LSM_HOOK_INIT(msg_queue_associate, medusa_l1_msg_queue_associate),
+	//mY1 LSM_HOOK_INIT(msg_queue_msgctl, medusa_l1_msg_queue_msgctl),
+	//mY1 LSM_HOOK_INIT(msg_queue_msgsnd, medusa_l1_msg_queue_msgsnd),
 	LSM_HOOK_INIT(msg_queue_msgrcv, medusa_l1_msg_queue_msgrcv),
 
 	// shm_alloc_security --> medusa_l1_shm_alloc_security: transfered to medusa_l1_special
 	// shm_free_security --> medusa_l1_shm_free_security: transfered to medusa_l1_special
-	LSM_HOOK_INIT(shm_associate, medusa_l1_shm_associate),
-	LSM_HOOK_INIT(shm_shmctl, medusa_l1_shm_shmctl),
-	LSM_HOOK_INIT(shm_shmat, medusa_l1_shm_shmat),
+	//mY1 LSM_HOOK_INIT(shm_associate, medusa_l1_shm_associate),
+	//mY1 LSM_HOOK_INIT(shm_shmctl, medusa_l1_shm_shmctl),
+	//mY1 LSM_HOOK_INIT(shm_shmat, medusa_l1_shm_shmat),
 
 	// sem_alloc_security --> medusa_l1_sem_alloc_security: transfered to medusa_l1_special
 	// sem_free_security --> medusa_l1_sem_free_security: transfered to medusa_l1_special
-	LSM_HOOK_INIT(sem_associate, medusa_l1_sem_associate),
-	LSM_HOOK_INIT(sem_semctl, medusa_l1_sem_semctl),
-	LSM_HOOK_INIT(sem_semop, medusa_l1_sem_semop),
+	//mY1 LSM_HOOK_INIT(sem_associate, medusa_l1_sem_associate),
+	//mY1 LSM_HOOK_INIT(sem_semctl, medusa_l1_sem_semctl),
+	//mY1 LSM_HOOK_INIT(sem_semop, medusa_l1_sem_semop),
 
 	//LSM_HOOK_INIT(netlink_send, medusa_l1_netlink_send),
 

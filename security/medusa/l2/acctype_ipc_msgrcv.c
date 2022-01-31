@@ -105,10 +105,14 @@ enum medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 		retval = MED_DECIDE(ipc_msgrcv_access, &access, &process, &object);
 	}
 out:
+	if (retval == MED_DENY)
+		retval = -EACCES;
+	else
+		retval = 0;
+
 	/* second argument true: returns with locked IPC object */
 	if (unlikely(ipc_putref(ipcp, true)))
-		/* for now, we don't support error codes */
-		retval = MED_DENY;
+		retval = -EIDRM;
 	return retval;
 }
 
