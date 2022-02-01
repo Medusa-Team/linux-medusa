@@ -11,6 +11,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
+#include "l2/l2.h"
 
 struct ipc_msgrcv_access {
 	MEDUSA_ACCESS_HEADER;
@@ -70,18 +71,16 @@ enum medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 				  struct task_struct *target,
 				  long type, int mode)
 {
-	enum medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_msgrcv_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
+	int err;
 
 	/* second argument true: returns with unlocked IPC object */
-	if (unlikely(ipc_getref(ipcp, true)))
-		/*
-		 * ipc_getref() returns -EIDRM if IPC object is marked to deletion,
-		 * so deny any operation on it.
-		 */
-		return MED_DENY;
+	if (unlikely((err = ipc_getref(ipcp, true)) != 0))
+		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
+		return err;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object))
 	    && process_kobj_validate_task(current) <= 0)
@@ -102,18 +101,12 @@ enum medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 		access.target = target->pid;
 		access.ipc_class = object.ipc_class;
 
-		retval = MED_DECIDE(ipc_msgrcv_access, &access, &process, &object);
+		ans = MED_DECIDE(ipc_msgrcv_access, &access, &process, &object);
 	}
 out:
-	if (retval == MED_DENY)
-		retval = -EACCES;
-	else
-		retval = 0;
-
 	/* second argument true: returns with locked IPC object */
-	if (unlikely(ipc_putref(ipcp, true)))
-		retval = -EIDRM;
-	return retval;
+	err = ipc_putref(ipcp, true);
+	return lsm_retval(ans, err);
 }
 
 device_initcall(ipc_acctype_msgrcv_init);
