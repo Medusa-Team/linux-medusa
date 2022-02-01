@@ -8,10 +8,12 @@
 struct ipc_event {
 	MEDUSA_ACCESS_HEADER;
 	unsigned int ipc_class;
+	int pid;
 };
 
 MED_ATTRS(ipc_event) {
 	MED_ATTR_RO(ipc_event, ipc_class, "ipc_class", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_event, pid, "pid", MED_SIGNED),
 	MED_ATTR_END
 };
 
@@ -44,6 +46,7 @@ int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp)
 	/* 3-th argument is true: decrement IPC object's refcount in returned object */
 	ipc_kern2kobj(&sender, ipcp, true);
 	event.ipc_class = ipc_security(ipcp)->ipc_class;
+	event.pid = current->pid;
 	retval = MED_DECIDE(ipc_event, &event, &sender, &sender);
 	if (retval != MED_ERR)
 		return 1;
