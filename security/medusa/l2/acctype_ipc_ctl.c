@@ -10,6 +10,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
+#include "l2/l2.h"
 
 struct ipc_ctl_access {
 	MEDUSA_ACCESS_HEADER;
@@ -73,22 +74,20 @@ int __init ipc_acctype_ctl_init(void)
  *              |<-- shmctl_shm_info() (@ipcp is NULL, no rcu_read_lock())
  *              |<-- shmctl_ipc_info() (@ipcp is NULL, no rcu_read_lock())
  */
-enum medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
+int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 {
-	enum medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_ctl_access access;
 	struct process_kobject process;
 	struct ipc_kobject object, *object_p = NULL;
+	int err = 0;
 
 	/* 'ipcp' is NULL in case of 'cmd': IPC_INFO, MSG_INFO, SEM_INFO, SHM_INFO */
 	if (likely(ipcp)) {
 		/* second argument false: don't need to unlock IPC object */
-		if (unlikely(ipc_getref(ipcp, false)))
-			/*
-			 * ipc_getref() returns -EIDRM if IPC object is marked to deletion,
-			 * so deny any operation on it.
-			 */
-			return MED_DENY;
+		if (unlikely((err = ipc_getref(ipcp, false)) != 0))
+			/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
+			return err;
 
 		object_p = &object;
 		if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
@@ -112,18 +111,14 @@ enum medusa_answer_t medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
 		}
 
 		/* in case of NULL 'ipcp', 'object_p' is NULL too */
-		retval = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
-		if (retval == MED_ERR)
-			retval = MED_ALLOW;
+		ans = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
 	}
 out:
-	if (likely(ipcp)) {
+	if (likely(ipcp))
 		/* second argument false: don't need to lock IPC object */
-		if (unlikely(ipc_putref(ipcp, false)))
-			/* for now, we don't support error codes */
-			retval = MED_DENY;
-	}
-	return retval;
+		err = ipc_putref(ipcp, false);
+
+	return lsm_retval(ans, err);
 }
 
 device_initcall(ipc_acctype_ctl_init);

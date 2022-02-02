@@ -10,6 +10,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
+#include "l2/l2.h"
 
 struct ipc_perm_access {
 	MEDUSA_ACCESS_HEADER;
@@ -60,13 +61,14 @@ int __init ipc_acctype_perm_init(void)
  *        |<-- semctl_stat()
  *        |<-- semctl_setval()
  */
-enum medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
+int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 {
-	enum medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_perm_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
 	bool __maybe_unused use_locking = false;
+	int err = 0;
 
 	/*
 	 * WORKAROUND!!!
@@ -112,7 +114,7 @@ enum medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms
 		 * in this function this way we lose do_msgsnd() and ipc_check_perms()
 		 * controls...
 		 */
-		return retval;
+		return lsm_retval(ans, err);
 #endif
 	}
 
@@ -121,12 +123,9 @@ enum medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms
 	 *   true - returns with unlocked IPC object
 	 *   false - don't need to unlock IPC object
 	 */
-	if (unlikely(ipc_getref(ipcp, use_locking)))
-		/*
-		 * ipc_getref() returns -EIDRM if IPC object is marked to deletion,
-		 * so deny any operation on it.
-		 */
-		return MED_DENY;
+	if (unlikely((err = ipc_getref(ipcp, use_locking)) != 0))
+		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
+		return err;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object))
 	    && process_kobj_validate_task(current) <= 0)
@@ -140,10 +139,10 @@ enum medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
-		access.perms = perms;
+		access.perms = flag;
 		access.ipc_class = object.ipc_class;
 
-		retval = MED_DECIDE(ipc_perm_access, &access, &process, &object);
+		ans = MED_DECIDE(ipc_perm_access, &access, &process, &object);
 	}
 out:
 	/*
@@ -151,13 +150,9 @@ out:
 	 *   true - returns with locked IPC object
 	 *   false - don't need to lock IPC object
 	 */
-	if (unlikely(ipc_putref(ipcp, use_locking)))
-		/*
-		 * ipc_putref() returns -EIDRM if IPC object is marked to deletion,
-		 * so deny any operation on it.
-		 */
-		retval = MED_DENY;
-	return retval;
+	/* second argument true: returns with locked IPC object */
+	err = ipc_putref(ipcp, use_locking);
+	return lsm_retval(ans, err);
 }
 
 device_initcall(ipc_acctype_perm_init);

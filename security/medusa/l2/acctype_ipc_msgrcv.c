@@ -66,16 +66,17 @@ int __init ipc_acctype_msgrcv_init(void)
  *        |
  *        |<-- do_msgrcv() (always get ipcp->lock)
  */
-enum medusa_answer_t medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
-				  struct msg_msg *msg,
-				  struct task_struct *target,
-				  long type, int mode)
+int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
+		      struct msg_msg *msg,
+		      struct task_struct *target,
+		      long type,
+		      int mode)
 {
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_msgrcv_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
-	int err;
+	int err = 0;
 
 	/* second argument true: returns with unlocked IPC object */
 	if (unlikely((err = ipc_getref(ipcp, true)) != 0))
