@@ -1116,14 +1116,14 @@ static inline bool msg_in_msq(struct msg_msg *msg, struct msg_queue *msq)
 
 struct msg_msg *find_msg(struct msg_queue *msq, long *msgtyp, int mode)
 {
-	struct msg_msg *msg, *t, *found;
+	struct msg_msg *msg, *found;
 	long count;
 	int err;
 
 retry_find_msg:
 	found = NULL;
 	count = 0;
-	list_for_each_entry_safe(msg, t, &msq->q_messages, m_list) {
+	list_for_each_entry(msg, &msq->q_messages, m_list) {
 		if (!testmsg(msg, *msgtyp, mode))
 			continue;
 		/* Security hook can unlock IPC object @msq, so another task
