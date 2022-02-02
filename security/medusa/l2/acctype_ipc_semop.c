@@ -10,6 +10,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
+#include "l2/l2.h"
 
 struct ipc_semop_access {
 	MEDUSA_ACCESS_HEADER;
@@ -56,22 +57,21 @@ int __init ipc_acctype_semop_init(void)
  *  |
  *  |<-- do_semtimedop()
  */
-enum medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp,
-				 struct sembuf *sops, unsigned int nsops,
-				 int alter)
+int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
+		     struct sembuf *sops,
+		     unsigned int nsops,
+		     int alter)
 {
-	enum medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_semop_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
+	int err = 0;
 
 	/* second argument false: don't need to unlock IPC object */
-	if (unlikely(ipc_getref(ipcp, false)))
-		/*
-		 * ipc_getref() returns -EIDRM if IPC object is marked to deletion,
-		 * so deny any operation on it.
-		 */
-		return MED_DENY;
+	if (unlikely((err = ipc_getref(ipcp, false)) != 0))
+		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
+		return err;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object))
 	    && process_kobj_validate_task(current) <= 0)
@@ -92,14 +92,12 @@ enum medusa_answer_t medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 		access.alter = alter;
 		access.ipc_class = object.ipc_class;
 
-		retval = MED_DECIDE(ipc_semop_access, &access, &process, &object);
+		ans = MED_DECIDE(ipc_semop_access, &access, &process, &object);
 	}
 out:
 	/* second argument false: don't need to lock IPC object */
-	if (unlikely(ipc_putref(ipcp, false)))
-		/* for now, we don't support error codes */
-		retval = MED_DENY;
-	return retval;
+	err = ipc_putref(ipcp, false);
+	return lsm_retval(ans, err);
 }
 
 device_initcall(ipc_acctype_semop_init);

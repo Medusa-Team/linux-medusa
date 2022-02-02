@@ -117,7 +117,7 @@ inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipc
 	 * only in case of ipc_kobj operation fetch() not.
 	 */
 	if (likely(dec_refcount))
-		refcount_dec(&ipc_kobj->ipc_perm.refcount);
+		refcount_dec_and_test(&ipc_kobj->ipc_perm.refcount);
 
 	return 0;
 }

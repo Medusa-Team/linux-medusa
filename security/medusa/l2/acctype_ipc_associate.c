@@ -10,6 +10,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
+#include "l2/l2.h"
 
 struct ipc_associate_access {
 	MEDUSA_ACCESS_HEADER;
@@ -52,20 +53,18 @@ int __init ipc_acctype_associate_init(void)
  *       is always called with ipcp->lock held
  *
  */
-enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
+int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 {
-	enum medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_associate_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
+	int err = 0;
 
 	/* second argument true: returns with unlocked IPC object */
-	if (unlikely(ipc_getref(ipcp, true)))
-		/*
-		 * ipc_getref() returns -EIDRM if IPC object is marked to deletion,
-		 * so deny any operation on it.
-		 */
-		return MED_DENY;
+	if (unlikely((err = ipc_getref(ipcp, true)) != 0))
+		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
+		return err;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object))
 	    && process_kobj_validate_task(current) <= 0)
@@ -77,7 +76,7 @@ enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 	if (!vs_intersects(VSS(task_security(current)), VS(ipc_security(ipcp)))
 	    || !vs_intersects(VSW(task_security(current)), VS(ipc_security(ipcp)))
 	) {
-		retval = MED_DENY;
+		ans = MED_DENY;
 		goto out;
 	}
 
@@ -85,14 +84,12 @@ enum medusa_answer_t medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
-		retval = MED_DECIDE(ipc_associate_access, &access, &process, &object);
+		ans = MED_DECIDE(ipc_associate_access, &access, &process, &object);
 	}
 out:
 	/* second argument true: returns with locked IPC object */
-	if (unlikely(ipc_putref(ipcp, true)))
-		/* for now, we don't support error codes */
-		retval = MED_DENY;
-	return retval;
+	err = ipc_putref(ipcp, true);
+	return lsm_retval(ans, err);
 }
 
 device_initcall(ipc_acctype_associate_init);

@@ -383,7 +383,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		ls_unlock(&lightswitch, &ls_switch);
 		return MED_ERR;
 	}
-	med_pr_debug("new question %px\n", current);
+	med_pr_debug("new question %px pid %d\n", current, current->pid);
 	// prepare for next decision
 #undef decision_evtype
 	// insert teleport structure to the queue
@@ -415,10 +415,10 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		up(&waitlist_sem);
 		atomic_dec(&questions_waiting);
 		retval = user_answer;
-		med_pr_debug("question %p answered %i\n", current, retval);
+		med_pr_debug("question %px answered %i pid %d\n", current, retval, current->pid);
 	} else {
 		retval = MED_ERR;
-		med_pr_err("question %p not answered, authorization server disconnected\n",
+		med_pr_err("question %px not answered, authorization server disconnected\n",
 			current);
 	}
 	up(&take_answer);
@@ -697,12 +697,11 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 
 		user_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
 		answered_task = *(struct task_struct **)(recv_buf);
-		med_pr_debug("answer received for %px\n", answered_task);
+		med_pr_debug("answer received for %px pid %d\n", answered_task, answered_task->pid);
 		// wake up correct process
 		while (!wake_up_process(answered_task))
 			// wait for `answered_task` to sleep if it's not sleeping yet
 			schedule();
-		med_pr_debug("woken up\n");
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 		up(&take_answer);
@@ -797,7 +796,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		local_tele_item->size += sizeof(MCPptr_t);
 		if (recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 			atomic_inc(&update_requests);
-			med_pr_debug("answering update %llu\n", answ_seq);
+			//med_pr_debug("answering update %llu\n", answ_seq);
 			tele_mem_write[4].opcode = tp_PUT32;
 			tele_mem_write[4].args.put32.what = answ_result;
 			local_tele_item->size += sizeof(uint32_t);
