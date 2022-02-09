@@ -379,10 +379,10 @@ static int medusa_l1_path_mknod(const struct path *dir, struct dentry *dentry,
 static int medusa_l1_path_mkdir(const struct path *dir, struct dentry *dentry,
 				umode_t mode)
 {
-	char buf[128];
-	char *pos = d_absolute_path(dir, buf, 127);
-	if (!IS_ERR(pos))
-		med_pr_info("mkdir: %s", pos);
+	//char buf[128];
+	//char *pos = d_absolute_path(dir, buf, 127);
+	//if (!IS_ERR(pos))
+	//	med_pr_info("mkdir: %s", pos);
 	if (medusa_mkdir(dir, dentry, mode) == MED_DENY)
 		return -EACCES;
 	return 0;
@@ -390,10 +390,10 @@ static int medusa_l1_path_mkdir(const struct path *dir, struct dentry *dentry,
 
 static int medusa_l1_path_rmdir(const struct path *dir, struct dentry *dentry)
 {
-	struct mount *mnt = real_mount(dir->mnt);
-	med_pr_info("rmdir dir dentry: %pd\n", dir->dentry);
-	med_pr_info("rmdir dentry: %pd\n", dentry);
-	med_pr_info("mountpoint: %pd, vfs mnt root: %pd\n", mnt->mnt_mountpoint, mnt->mnt.mnt_root);
+	//struct mount *mnt = real_mount(dir->mnt);
+	//med_pr_info("rmdir dir dentry: %pd\n", dir->dentry);
+	//med_pr_info("rmdir dentry: %pd\n", dentry);
+	//med_pr_info("mountpoint: %pd, vfs mnt root: %pd\n", mnt->mnt_mountpoint, mnt->mnt.mnt_root);
 	if (medusa_rmdir(dir, dentry) == MED_DENY)
 		return -EACCES;
 	return 0;
@@ -401,10 +401,10 @@ static int medusa_l1_path_rmdir(const struct path *dir, struct dentry *dentry)
 
 static int medusa_l1_path_unlink(const struct path *dir, struct dentry *dentry)
 {
-	char buf[128];
-	char *pos = d_absolute_path(dir, buf, 127);
-	if (!IS_ERR(pos))
-		med_pr_info("unlink: %s", pos);
+	//char buf[128];
+	//char *pos = d_absolute_path(dir, buf, 127);
+	//if (!IS_ERR(pos))
+	//	med_pr_info("unlink: %s", pos);
 	if (medusa_unlink(dir, dentry) == MED_DENY)
 		return -EPERM;
 	return 0;

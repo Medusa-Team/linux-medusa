@@ -132,7 +132,7 @@ void inline info_mnt(struct mount *mnt)
 void medusa_get_upper_and_parent(struct path *ndsource,
 		struct path *ndupperp, struct path *ndparentp)
 {
-	med_pr_info("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry);
+	//med_pr_info("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry);
 	*ndupperp = *ndsource;
 	dget(ndupperp->dentry);
 	if (ndupperp->mnt) {
@@ -154,7 +154,7 @@ void medusa_get_upper_and_parent(struct path *ndsource,
 			/* We are already on the / filesystem (not on some
 			 * mounted filesystem). Break here because we don't want
 			 * the / directory. */
-			med_pr_info("medusa_get_upper_and_parent: at root: %pd4, source: %pd4\n", real_mount(ndupperp->mnt)->mnt_parent->mnt_mountpoint, ndsource->dentry);
+			//med_pr_info("medusa_get_upper_and_parent: at root: %pd4, source: %pd4\n", real_mount(ndupperp->mnt)->mnt_parent->mnt_mountpoint, ndsource->dentry);
 			break;
 		}
 		/* Go to the upper mountpoint. First entry for the mountpoint
@@ -351,7 +351,7 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 	ndcurrent.mnt = mnt; /* may be NULL */
 	/* When using path hooks, we will have `mnt`. */
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
-	med_pr_info("current: %pd upper: %pd parent: %pd\n", ndcurrent.dentry, ndupper.dentry, ndparent.dentry);
+	//med_pr_info("current: %pd upper: %pd parent: %pd\n", ndcurrent.dentry, ndupper.dentry, ndparent.dentry);
 	//if (ndcurrent.mnt)
 	//	info_mnt(real_mount(ndcurrent.mnt));
 	//if (ndupper.mnt)
@@ -407,8 +407,8 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 	struct file_kobject directory;
 	enum medusa_answer_t retval;
 
-	med_pr_info("nducurrent: %pd4", ndcurrent->dentry);
-	med_pr_info("ndparent: %pd4", ndparent->dentry);
+	//med_pr_info("nducurrent: %pd4", ndcurrent->dentry);
+	//med_pr_info("ndparent: %pd4", ndparent->dentry);
 	file_kern2kobj(&file, ndcurrent->dentry->d_inode);
 	file_kobj_dentry2string_dir(ndparent, ndupper->dentry, event.filename);
 	file_kern2kobj(&directory, ndparent->dentry->d_inode);
