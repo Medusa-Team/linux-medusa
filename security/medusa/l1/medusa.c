@@ -434,7 +434,7 @@ static int medusa_l1_path_rename(const struct path *old_path,
 				 const struct path *new_path,
 				 struct dentry *new_dentry)
 {
-	if (medusa_rename(old_dentry, new_dentry->d_name.name) == MED_DENY)
+	if (medusa_rename(old_path, old_dentry, new_path, new_dentry) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
@@ -1389,7 +1389,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(path_truncate, medusa_l1_path_truncate),
 	LSM_HOOK_INIT(path_symlink, medusa_l1_path_symlink),
 	LSM_HOOK_INIT(path_link, medusa_l1_path_link),
-	// LSM_HOOK_INIT(path_rename, medusa_l1_path_rename),
+	LSM_HOOK_INIT(path_rename, medusa_l1_path_rename),
 	// mY LSM_HOOK_INIT(path_chmod, medusa_l1_path_chmod),
 	// mY LSM_HOOK_INIT(path_chown, medusa_l1_path_chown),
 	//LSM_HOOK_INIT(path_chroot, medusa_l1_path_chroot),
@@ -1468,7 +1468,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	LSM_HOOK_INIT(msg_queue_associate, medusa_ipc_associate),
 	LSM_HOOK_INIT(msg_queue_msgctl, medusa_ipc_ctl),
 	LSM_HOOK_INIT(msg_queue_msgsnd, medusa_ipc_msgsnd),
-	LSM_HOOK_INIT(msg_queue_msgrcv, medusa_ipc_msgrcv),
+	/* LSM_HOOK_INIT(msg_queue_msgrcv, medusa_ipc_msgrcv), */
 
 	LSM_HOOK_INIT(shm_associate, medusa_ipc_associate),
 	LSM_HOOK_INIT(shm_shmctl, medusa_ipc_ctl),

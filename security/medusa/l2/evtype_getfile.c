@@ -132,7 +132,7 @@ void inline info_mnt(struct mount *mnt)
 void medusa_get_upper_and_parent(struct path *ndsource,
 		struct path *ndupperp, struct path *ndparentp)
 {
-	//med_pr_info("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry);
+	/* med_pr_info("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry); */
 	*ndupperp = *ndsource;
 	dget(ndupperp->dentry);
 	if (ndupperp->mnt) {
@@ -154,7 +154,7 @@ void medusa_get_upper_and_parent(struct path *ndsource,
 			/* We are already on the / filesystem (not on some
 			 * mounted filesystem). Break here because we don't want
 			 * the / directory. */
-			//med_pr_info("medusa_get_upper_and_parent: at root: %pd4, source: %pd4\n", real_mount(ndupperp->mnt)->mnt_parent->mnt_mountpoint, ndsource->dentry);
+			/* med_pr_info("medusa_get_upper_and_parent: at root: %pd4, source: %pd4\n", real_mount(ndupperp->mnt)->mnt_parent->mnt_mountpoint, ndsource->dentry); */
 			break;
 		}
 		/* Go to the upper mountpoint. First entry for the mountpoint
@@ -299,6 +299,7 @@ int file_kobj_validate_dentry_dir(const struct vfsmount* mnt, struct dentry *den
 
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
 					inode_security(ndparent.dentry->d_inode))) {
+			med_pr_info("validate_dentry_dir %pd4 inheriting from %pd4\n", ndcurrent.dentry, ndparent.dentry);
 			ndcurrent_inode = inode_security(ndcurrent.dentry->d_inode);
 			ndparent_inode = inode_security(ndparent.dentry->d_inode);
 			ndcurrent_inode->med_object = ndparent_inode->med_object;
@@ -351,7 +352,7 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 	ndcurrent.mnt = mnt; /* may be NULL */
 	/* When using path hooks, we will have `mnt`. */
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
-	//med_pr_info("current: %pd upper: %pd parent: %pd\n", ndcurrent.dentry, ndupper.dentry, ndparent.dentry);
+	/* med_pr_info("current: %pd upper: %pd parent: %pd\n", ndcurrent.dentry, ndupper.dentry, ndparent.dentry); */
 	//if (ndcurrent.mnt)
 	//	info_mnt(real_mount(ndcurrent.mnt));
 	//if (ndupper.mnt)
@@ -374,6 +375,7 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
 					inode_security(ndparent.dentry->d_inode))) {
+			med_pr_info("validate_dentry %pd4 inheriting from %pd4\n", ndcurrent.dentry, ndparent.dentry);
 			ndcurrent_inode = inode_security(ndcurrent.dentry->d_inode);
 			ndparent_inode = inode_security(ndparent.dentry->d_inode);
 			ndcurrent_inode->med_object = ndparent_inode->med_object;
@@ -406,9 +408,9 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 	struct file_kobject file;
 	struct file_kobject directory;
 	enum medusa_answer_t retval;
-
-	//med_pr_info("nducurrent: %pd4", ndcurrent->dentry);
-	//med_pr_info("ndparent: %pd4", ndparent->dentry);
+	med_pr_info("do_validate_dentry: current=%pd4 parent=%pd4\n", ndcurrent->dentry, ndparent->dentry);
+	/* med_pr_info("nducurrent: %pd4", ndcurrent->dentry); */
+	med_pr_info("ndparent: %pd4\n", ndparent->dentry);
 	file_kern2kobj(&file, ndcurrent->dentry->d_inode);
 	file_kobj_dentry2string_dir(ndparent, ndupper->dentry, event.filename);
 	file_kern2kobj(&directory, ndparent->dentry->d_inode);
