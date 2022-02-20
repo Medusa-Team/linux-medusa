@@ -290,7 +290,7 @@ int file_kobj_validate_dentry_dir(const struct vfsmount* mnt, struct dentry *den
 
 	if (ndcurrent.dentry != ndparent.dentry) {
 		parent_dir = (struct path) {.mnt = ndparent.mnt,
-			                    .dentry = ndparent.dentry->d_parent};
+			                    .dentry = ndparent.dentry};
 		if (!is_med_magic_valid(&inode_security(ndparent.dentry->d_inode)->med_object) &&
 			file_kobj_validate_dentry_dir(parent_dir.mnt, ndparent.dentry) <= 0) {
 			path_put(&ndupper);
