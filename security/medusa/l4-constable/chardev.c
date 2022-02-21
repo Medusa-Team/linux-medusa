@@ -34,6 +34,7 @@
 #include <linux/sched/signal.h>
 #include <linux/device.h>
 #include <linux/poll.h>
+#include <linux/rwsem.h>
 
 #include "l3/arch.h"
 #include "l3/registry.h"
@@ -104,19 +105,7 @@ static size_t left_in_teleport;
 static struct tele_item *local_list_item;
 static struct teleport_insn_s *processed_teleport;
 
-static DEFINE_SEMAPHORE(ls_switch);
-static DEFINE_SEMAPHORE(lock_sem);
-static DEFINE_SEMAPHORE(prior_sem);
-struct lightswitch {
-	struct semaphore *lock_sem;
-	struct semaphore *prior_sem;
-	int counter;
-};
-static struct lightswitch lightswitch = {
-	.lock_sem = &lock_sem,
-	.counter = 0,
-	.prior_sem = &prior_sem,
-};
+static DECLARE_RWSEM(lightswitch);
 
 #ifdef GDB_HACK
 static pid_t gdb_pid = -1;
@@ -286,26 +275,6 @@ static int l4_add_evtype(struct medusa_evtype_s *at)
 	return 0;
 }
 
-static inline void ls_lock(struct lightswitch *ls, struct semaphore *sem)
-{
-	down(ls->prior_sem);
-	up(ls->prior_sem);
-	down(ls->lock_sem);
-	ls->counter++;
-	if (ls->counter == 1)
-		down(sem);
-	up(ls->lock_sem);
-}
-
-static inline void ls_unlock(struct lightswitch *ls, struct semaphore *sem)
-{
-	down(ls->lock_sem);
-	ls->counter--;
-	if (!ls->counter)
-		up(sem);
-	up(ls->lock_sem);
-}
-
 /* the sad fact about this routine is that it sleeps...
  *
  * guess what? we can FULLY solve that silly problem on SMP,
@@ -375,12 +344,12 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		tele_mem_decide[5].opcode = tp_HALT;
 	}
 
-	ls_lock(&lightswitch, &ls_switch);
+	down_read(&lightswitch);
 
 	if (!atomic_read(&constable_present)) {
 		med_cache_free(local_tele_item);
 		med_cache_free(tele_mem_decide);
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return MED_ERR;
 	}
 	med_pr_debug("new question %px pid %d\n", current, current->pid);
@@ -399,7 +368,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	down(&waitlist_sem);
 	list_add_tail(&local_waitlist_item.list, &answer_waitlist);
 	up(&waitlist_sem);
-	ls_unlock(&lightswitch, &ls_switch);
+	up_read(&lightswitch);
 	set_current_state(TASK_UNINTERRUPTIBLE);
 	// Auth server shouldn't be notified earlier, so that it doesn't
 	// answer the request before the task goes to sleep.
@@ -408,7 +377,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	put_task_struct(current);
 
 
-	ls_lock(&lightswitch, &ls_switch);
+	down_read(&lightswitch);
 	if (atomic_read(&constable_present)) {
 		down(&waitlist_sem);
 		list_del(&local_waitlist_item.list);
@@ -422,7 +391,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 			current);
 	}
 	up(&take_answer);
-	ls_unlock(&lightswitch, &ls_switch);
+	up_read(&lightswitch);
 	return retval;
 }
 
@@ -501,14 +470,14 @@ static inline int teleport_pop(int trylock)
 		if (down_trylock(&queue_items))
 			return 1;
 	} else {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		while (down_timeout(&queue_items, 5*HZ) == -ETIME) {
-			ls_lock(&lightswitch, &ls_switch);
+			down_read(&lightswitch);
 			if (!atomic_read(&constable_present))
 				return -EPIPE;
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 		}
-		ls_lock(&lightswitch, &ls_switch);
+		down_read(&lightswitch);
 	}
 	down(&queue_lock);
 	local_list_item = list_first_entry(&tele_queue, struct tele_item, list);
@@ -542,23 +511,23 @@ static ssize_t user_read(struct file *filp, char __user *buf,
 
 	// Lightswitch
 	// has to be there: so close can't occur during read
-	ls_lock(&lightswitch, &ls_switch);
+	down_read(&lightswitch);
 
 	if (!atomic_read(&constable_present)) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -EPIPE;
 	}
 
 	if (!am_i_constable()) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -EPERM;
 	}
 	if (*ppos != filp->f_pos) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -ESPIPE;
 	}
 	if (!access_ok(buf, count)) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -EFAULT;
 	}
 
@@ -572,7 +541,7 @@ static ssize_t user_read(struct file *filp, char __user *buf,
 		// Interruptible waiting; -EPIPE if auth server was disconnected
 		if (teleport_pop(0) == -EPIPE) {
 			up(&user_read_lock);
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			return -EPIPE;
 		}
 	}
@@ -583,7 +552,7 @@ static ssize_t user_read(struct file *filp, char __user *buf,
 			left_in_teleport = 0;
 			teleport_put();
 			up(&user_read_lock);
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			return retval;
 		}
 		left_in_teleport -= retval;
@@ -609,7 +578,7 @@ static ssize_t user_read(struct file *filp, char __user *buf,
 				// Get new teleport
 				if (teleport_pop(0) == -EPIPE) {
 					up(&user_read_lock);
-					ls_unlock(&lightswitch, &ls_switch);
+					up_read(&lightswitch);
 					return -EPIPE;
 				}
 				continue;
@@ -619,13 +588,13 @@ static ssize_t user_read(struct file *filp, char __user *buf,
 	} // while
 	if (retval_sum > 0 || teleport.cycle != tpc_HALT) {
 		up(&user_read_lock);
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return retval_sum;
 	}
 
 	// Something is still in teleport, but we didn't transport any data
 	up(&user_read_lock);
-	ls_unlock(&lightswitch, &ls_switch);
+	up_read(&lightswitch);
 	return 0;
 }
 
@@ -649,33 +618,33 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 
 	// Lightswitch
 	// has to be there so close can't occur during write
-	ls_lock(&lightswitch, &ls_switch);
+	down_read(&lightswitch);
 
 	if (!atomic_read(&constable_present)) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		med_pr_err("write: constable not present\n");
 		return -EPIPE;
 	}
 
 	if (!am_i_constable()) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		med_pr_err("write: not called by authorization server\n");
 		return -EPERM;
 	}
 	if (*ppos != filp->f_pos) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		med_pr_err("write: incorrect file position\n");
 		return -ESPIPE;
 	}
 	if (!access_ok(buf, count)) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		med_pr_err("write: can't read buffer\n");
 		return -EFAULT;
 	}
 
 	if (__copy_from_user(((char *)&recv_type), buf,
 				sizeof(MCPptr_t))) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		med_pr_err("write: can't copy buffer\n");
 		return -EFAULT;
 	}
@@ -688,7 +657,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		// TODO Process something
 		if (__copy_from_user(recv_buf, buf, sizeof(int16_t) + sizeof(MCPptr_t))) {
 			up(&take_answer);
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
@@ -706,7 +675,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 		up(&take_answer);
 		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t)*2)) {
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
@@ -720,7 +689,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			med_pr_err("Protocol error at write(): unknown kclass 0x%p!\n",
 				(void *)(*(MCPptr_t *)(recv_buf)));
 #ifdef ERRORS_CAUSE_SEGFAULT
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			return -EFAULT;
 #else
 			break;
@@ -728,13 +697,13 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		}
 		kclass_buf = (char *) med_cache_alloc_size(cl->kobject_size);
 		if (!kclass_buf) {
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			med_pr_err("write: OOM while `kclass_buf` alloc\n");
 			return -ENOMEM;
 		}
 		if (__copy_from_user(kclass_buf, buf, cl->kobject_size)) {
 			med_cache_free(kclass_buf);
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
@@ -809,7 +778,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			tele_mem_write[5].opcode = tp_HALT;
 		} else
 			tele_mem_write[4].opcode = tp_HALT;
-		med_put_kclass(cl); /* slightly too soon */ // TODO Find out what is this
+		med_put_kclass(cl); /* slightly too soon */ /* TODO Find out what is this */
 		local_tele_item->tele = tele_mem_write;
 		local_tele_item->post = post_write;
 		down(&queue_lock);
@@ -822,11 +791,11 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		med_pr_err("Protocol error at write(): unknown command %llx!\n",
 			(MCPptr_t)recv_type);
 #ifdef ERRORS_CAUSE_SEGFAULT
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -EFAULT;
 #endif
 	}
-	ls_unlock(&lightswitch, &ls_switch);
+	up_read(&lightswitch);
 	return orig_count;
 }
 
@@ -954,14 +923,14 @@ static int user_release(struct inode *inode, struct file *file)
 	struct waitlist_item  *local_waitlist_item;
 	DECLARE_WAITQUEUE(waitqueue, current);
 
-	// Operation close has to wait for read and write system calls to finish
-	// Close has priority, so starvation can't occur
-	down(&prior_sem);
-	down(&ls_switch);
-	up(&prior_sem);
+	// Operation close has to wait for read and write system calls to
+	// finish.
+	// Close has priority, so starvation can't occur. This is guaranteed by
+	// the kernel if PREEMPT_RT is not set.
+	down_write(&lightswitch);
 
 	if (!atomic_read(&constable_present)) {
-		up(&ls_switch);
+		up_write(&lightswitch);
 		return 0;
 	}
 
@@ -1060,7 +1029,7 @@ static int user_release(struct inode *inode, struct file *file)
 
 
 	teleport.cycle = tpc_HALT;
-	up(&ls_switch);
+	up_write(&lightswitch);
 	return 0;
 }
 
