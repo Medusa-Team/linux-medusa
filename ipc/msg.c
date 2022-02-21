@@ -26,6 +26,7 @@
 #include <linux/capability.h>
 #include <linux/msg.h>
 #include <linux/spinlock.h>
+#include <linux/mutex.h>
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/proc_fs.h>
@@ -57,7 +58,9 @@ struct msg_queue {
 	struct pid *q_lrpid;		/* last receive pid */
 
 	struct list_head q_messages;
+	struct mutex q_messages_m;
 	struct list_head q_receivers;
+	struct mutex q_receivers_m;
 	struct list_head q_senders;
 } __randomize_layout;
 
@@ -130,6 +133,8 @@ static void msg_rcu_free(struct rcu_head *head)
 	struct msg_queue *msq = container_of(p, struct msg_queue, q_perm);
 
 	security_msg_queue_free(&msq->q_perm);
+	mutex_destroy(&msq->q_messages_m);
+	mutex_destroy(&msq->q_receivers_m);
 	kfree(msq);
 }
 
@@ -170,6 +175,8 @@ static int newque(struct ipc_namespace *ns, struct ipc_params *params)
 	INIT_LIST_HEAD(&msq->q_messages);
 	INIT_LIST_HEAD(&msq->q_receivers);
 	INIT_LIST_HEAD(&msq->q_senders);
+	mutex_init(&msq->q_messages_m);
+	mutex_init(&msq->q_receivers_m);
 
 	/* ipc_addid() locks msq upon success. */
 	retval = ipc_addid(&msg_ids(ns), &msq->q_perm, ns->msg_ctlmni);
@@ -808,47 +815,45 @@ static int testmsg(struct msg_msg *msg, long type, int mode)
 	return 0;
 }
 
-static inline bool msr_in_msq(struct msg_receiver *msr, struct msg_queue *msq)
-{
-	struct msg_receiver *check;
-
-	list_for_each_entry(check, &msq->q_receivers, r_list) {
-		if (check == msr)
-			return true;
-	}
-
-	return false;
-}
-
 static inline int pipelined_send(struct msg_queue *msq, struct msg_msg *msg,
 				 struct wake_q_head *wake_q)
 {
 	struct msg_receiver *msr, *t;
-	int err;
+	int ret = -EIDRM;
 
-retry_pipelined_send:
+	/* Only one task can make pipelined_send() on a given @msq->q_receivers.
+	 * Mutex locking can be done out of RCU, so getref() on IPC object,
+	 * unlock IPC object and RCU, get mutex, lock RCU and IPC object
+	 * and check validity of that IPC object again.
+	 */
+	if (!ipc_rcu_getref(&msq->q_perm))
+		return ret;
+	ipc_unlock_object(&msq->q_perm);
+	rcu_read_unlock();
+	mutex_lock(&msq->q_receivers_m);
+
+	rcu_read_lock();
+	ipc_lock_object(&msq->q_perm);
+	if (!ipc_valid_object(&msq->q_perm))
+		goto out_pipelined_send;
+
 	list_for_each_entry_safe(msr, t, &msq->q_receivers, r_list) {
 		if (!testmsg(msg, msr->r_msgtype, msr->r_mode))
 			continue;
+
 		/* Security hook can unlock IPC object @msq, so another task
 		 * can remove it or handle the same msr. After return from the
 		 * security hook the @msq will be locked again.
 		 */
-		err = security_msg_queue_msgrcv(&msq->q_perm, msg, msr->r_tsk,
+		ret = security_msg_queue_msgrcv(&msq->q_perm, msg, msr->r_tsk,
 					        msr->r_msgtype, msr->r_mode);
 
 		/* security hook raced with RMID? */
-		if (err == -EIDRM)
-			return -EIDRM;
+		if (ret == -EIDRM)
+			goto out_pipelined_send;
 
-		/* security hook raced with another pipelined_send and msr isn't
-		 * valid yet?
-		 */
-		if (!msr_in_msq(msr, msq))
-			goto retry_pipelined_send;
-
-		/* msr is valid but security hook denied the operation */
-		if (err)
+		/* security hook denied the operation */
+		if (ret)
 			continue;
 
 		list_del(&msr->r_list);
@@ -865,11 +870,16 @@ retry_pipelined_send:
 
 			/* See expunge_all regarding memory barrier */
 			smp_store_release(&msr->r_msg, msg);
-			return 1;
+			ret = 1;
+			goto out_pipelined_send;
 		}
 	}
+	ret = 0;
 
-	return 0;
+out_pipelined_send:
+	mutex_unlock(&msq->q_receivers_m);
+	ipc_rcu_putref(&msq->q_perm, msg_rcu_free);
+	return ret;
 }
 
 static long do_msgsnd(int msqid, long mtype, void __user *mtext,
@@ -1102,30 +1112,34 @@ static inline void free_copy(struct msg_msg *copy)
 }
 #endif
 
-static inline bool msg_in_msq(struct msg_msg *msg, struct msg_queue *msq)
-{
-	struct msg_msg *check;
-
-	list_for_each_entry(check, &msq->q_messages, m_list) {
-		if (check == msg)
-			return true;
-	}
-
-	return false;
-}
-
 struct msg_msg *find_msg(struct msg_queue *msq, long *msgtyp, int mode)
 {
-	struct msg_msg *msg, *found;
-	long count;
+	struct msg_msg *msg, *found = NULL;
+	long count = 0;
 	int err;
 
-retry_find_msg:
-	found = NULL;
-	count = 0;
+	/* Only one task can make find_msg() on a given @msq->q_messages.
+	 * Mutex locking can be done out of RCU, so getref() on IPC object,
+	 * unlock IPC object and RCU, get mutex, lock RCU and IPC object
+	 * and check validity of that IPC object again.
+	 */
+	if (!ipc_rcu_getref(&msq->q_perm))
+		return ERR_PTR(-EIDRM);
+	ipc_unlock_object(&msq->q_perm);
+	rcu_read_unlock();
+	mutex_lock(&msq->q_messages_m);
+
+	rcu_read_lock();
+	ipc_lock_object(&msq->q_perm);
+	if (!ipc_valid_object(&msq->q_perm)) {
+		found = ERR_PTR(-EIDRM);
+		goto out_find_msg;
+	}
+
 	list_for_each_entry(msg, &msq->q_messages, m_list) {
 		if (!testmsg(msg, *msgtyp, mode))
 			continue;
+
 		/* Security hook can unlock IPC object @msq, so another task
 		 * can remove it or handle the same msg. After return from the
 		 * security hook the @msq will be locked again.
@@ -1133,14 +1147,12 @@ retry_find_msg:
 		err = security_msg_queue_msgrcv(&msq->q_perm, msg, current,
 					        *msgtyp, mode);
 		/* security hook raced with RMID? */
-		if (err == -EIDRM)
-			return ERR_PTR(-EIDRM);
+		if (err == -EIDRM) {
+			found = ERR_PTR(-EIDRM);
+			goto out_find_msg;
+		}
 
-		/* security hook raced with another msgrcv and msg isn't valid yet? */
-		if (!msg_in_msq(msg, msq))
-			goto retry_find_msg;
-
-		/* msg is valid but security hook denied the operation */
+		/* security hook denied the operation */
 		if (err)
 			continue;
 
@@ -1148,16 +1160,20 @@ retry_find_msg:
 			*msgtyp = msg->m_type - 1;
 			found = msg;
 		} else if (mode == SEARCH_NUMBER) {
-			if (*msgtyp == count)
-				return msg;
-		} else
-			return msg;
+			if (*msgtyp == count) {
+				found = msg;
+				goto out_find_msg;
+			}
+		} else {
+			found = msg;
+			goto out_find_msg;
+		}
 		count++;
 	}
 
-	/* iteration raced with another msgrcv and @found isn't valid yet? */
-	if (found && !msg_in_msq(found, msq))
-		goto retry_find_msg;
+out_find_msg:
+	mutex_unlock(&msq->q_messages_m);
+	ipc_rcu_putref(&msq->q_perm, msg_rcu_free);
 	return found ?: ERR_PTR(-EAGAIN);
 }
 
