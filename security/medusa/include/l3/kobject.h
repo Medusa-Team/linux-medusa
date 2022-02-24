@@ -197,26 +197,26 @@ struct medusa_evtype_s {
 
 /* internal macro */
 #define ___MEDUSA_EVENTOP(evname, kobjptr, OP, WHAT, WHERE) \
-		OP(MED_EVTYPEOF(evname).WHAT, (kobjptr)->med_ ## WHERE.act)
+		OP((kobjptr)->med_ ## WHERE.act, MED_EVTYPEOF(evname).WHAT)
 
 /* is the event monitored (at object) ? */
 #define MEDUSA_MONITORED_EVENT_O(evname, kobjptr) \
-	___MEDUSA_EVENTOP(evname, kobjptr, MED_TST_BIT, bitnr & MASK_BITNR, object)
+	___MEDUSA_EVENTOP(evname, kobjptr, act_testbit, bitnr & MASK_BITNR, object)
 /* is the event monitored (at subject) ? */
 #define MEDUSA_MONITORED_EVENT_S(evname, kobjptr) \
-	___MEDUSA_EVENTOP(evname, kobjptr, MED_TST_BIT, bitnr, subject)
+	___MEDUSA_EVENTOP(evname, kobjptr, act_testbit, bitnr, subject)
 /* set the event monitoring at object */
 #define MEDUSA_MONITOR_EVENT_O(evname, kobjptr) \
-	___MEDUSA_EVENTOP(evname, kobjptr, MED_SET_BIT, bitnr & MASK_BITNR, object)
+	___MEDUSA_EVENTOP(evname, kobjptr, act_setbit, bitnr & MASK_BITNR, object)
 /* set the event monitoring at subject */
 #define MEDUSA_MONITOR_EVENT_S(evname, kobjptr) \
-	___MEDUSA_EVENTOP(evname, kobjptr, MED_SET_BIT, bitnr, subject)
+	___MEDUSA_EVENTOP(evname, kobjptr, act_setbit, bitnr, subject)
 /* unset the event monitoring at object */
 #define MEDUSA_UNMONITOR_EVENT_O(evname, kobjptr) \
-	___MEDUSA_EVENTOP(evname, kobjptr, MED_CLR_BIT, bitnr & MASK_BITNR, object)
+	___MEDUSA_EVENTOP(evname, kobjptr, act_clearbit, bitnr & MASK_BITNR, object)
 /* unset the event monitoring at subject */
 #define MEDUSA_UNMONITOR_EVENT_S(evname, kobjptr) \
-	___MEDUSA_EVENTOP(evname, kobjptr, MED_CLR_BIT, bitnr, subject)
+	___MEDUSA_EVENTOP(evname, kobjptr, act_clearbit, bitnr, subject)
 
 #define MEDUSA_MONITORED_ACCESS_O(evname, kobjptr) \
 		MEDUSA_MONITORED_EVENT_O(evname, kobjptr)

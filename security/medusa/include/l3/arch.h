@@ -27,12 +27,6 @@
 #define med_pr_devel(fmt, ...) pr_devel("medusa | " KBUILD_MODNAME ": " fmt, ##__VA_ARGS__)
 #endif
 
-/* non-atomic bit set/clear/test operations */
-#include <linux/bitmap.h>
-#define MED_SET_BIT(bitnr, ptr) set_bit((bitnr), (ptr).pack)
-#define MED_CLR_BIT(bitnr, ptr) clear_bit((bitnr), (ptr).pack)
-#define MED_TST_BIT(bitnr, ptr) test_bit((bitnr), (ptr).pack)
-
 /* sanity checks for decision */
 #include <linux/sched.h>
 #include <linux/interrupt.h>
