@@ -297,6 +297,11 @@ int file_kobj_validate_dentry_dir(const struct vfsmount* mnt, struct dentry *den
 			return 0;
 		}
 
+		/*
+		 * If triggering of the getfile event in the parent's security
+		 * information field is turned off, take the VS model for a new
+		 * Medusa's file object from its parent.
+		 */
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
 					inode_security(ndparent.dentry->d_inode))) {
 			ndcurrent_inode = inode_security(ndcurrent.dentry->d_inode);
@@ -372,6 +377,11 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 			return 0;
 		}
 
+		/*
+		 * If triggering of the getfile event in the parent's security
+		 * information field is turned off, take the VS model for a new
+		 * Medusa's file object from its parent.
+		 */
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
 					inode_security(ndparent.dentry->d_inode))) {
 			ndcurrent_inode = inode_security(ndcurrent.dentry->d_inode);
@@ -422,10 +432,14 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 
 int __init getfile_evtype_init(void)
 {
+	/*
+	 * Triggering of this event can be turned off to permit VS model
+	 * inheriting: if parent of newly created Medusa's file object does not
+	 * trigger getfile event, the new object inherites parent's VS model.
+	 */
 	MED_REGISTER_EVTYPE(getfile_event,
 			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
-			MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT |
-			MEDUSA_EVTYPE_NOTTRIGGERED);
+			MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT);
 	return 0;
 }
 device_initcall(getfile_evtype_init);
