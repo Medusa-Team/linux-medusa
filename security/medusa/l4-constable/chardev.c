@@ -24,7 +24,7 @@
 #define ERRORS_CAUSE_SEGFAULT
 
 /* define this to support workaround of decisions for named process. This
- * is especially usefull when using GDB on constable.
+ * is especially useful when using GDB on constable.
  */
 #define GDB_HACK
 
@@ -77,12 +77,9 @@ static atomic_t questions = ATOMIC_INIT(0);
 static atomic_t questions_waiting = ATOMIC_INIT(0);
 /* and the answer */
 static enum medusa_answer_t user_answer = MED_ERR;
-static DEFINE_SEMAPHORE(waitlist_sem);
-static LIST_HEAD(answer_waitlist);
-struct waitlist_item {
-	struct task_struct *task;
-	struct list_head list;
-};
+/* idr for storing answer ids */
+static DEFINE_SPINLOCK(answer_ids_idr_lock);
+static DEFINE_IDR(answer_ids_idr);
 
 static DECLARE_WAIT_QUEUE_HEAD(close_wait);
 
@@ -287,7 +284,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	enum medusa_answer_t retval;
 	struct teleport_insn_s *tele_mem_decide;
 	struct tele_item *local_tele_item;
-	struct waitlist_item local_waitlist_item;
+	int answer_id;
 
 	if (!in_task()) {
 		/* houston, we have a problem! */
@@ -316,12 +313,33 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	local_tele_item->size = 0;
 	local_tele_item->post = med_cache_free;
 
+	/*
+	 * We might be called with the IPC ids->rwsem held (from IPC security
+	 * hooks) and lightswitch should always nest inside the ids->rwsem one.
+	 * Attention: authorization server must NOT use IPC subsystem at all to
+	 * ========== avoid deadlock (trying to lock ids->rwsem inside the
+	 *            lightswitch)!.
+	 */
+	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
+
+	spin_lock(&answer_ids_idr_lock);
+	answer_id = idr_alloc_cyclic(&answer_ids_idr, current, 0, 0, GFP_ATOMIC);
+	spin_unlock(&answer_ids_idr_lock);
+	if (answer_id == -ENOMEM || answer_id == -ENOSPC) {
+		med_cache_free(tele_mem_decide);
+		med_cache_free(local_tele_item);
+		up_read(&lightswitch);
+		med_pr_err("%s: idr alloc error: %d\n", __func__, answer_id);
+		return MED_ERR;
+	}
+
 #define decision_evtype (event->evtype_id)
 	tele_mem_decide[0].opcode = tp_PUTPtr;
 	tele_mem_decide[0].args.putPtr.what = (MCPptr_t)decision_evtype; // possibility to encryption JK march 2015
 	local_tele_item->size += sizeof(MCPptr_t);
 	tele_mem_decide[1].opcode = tp_PUTPtr;
-	tele_mem_decide[1].args.putPtr.what = (MCPptr_t) current;
+	// idr uses only 32 lower bits from 64 bits of decision_request_id
+	tele_mem_decide[1].args.putPtr.what = (MCPptr_t) answer_id;
 	local_tele_item->size += sizeof(MCPptr_t);
 	tele_mem_decide[2].opcode = tp_CUTNPASTE;
 	tele_mem_decide[2].args.cutnpaste.from = (unsigned char *)event;
@@ -344,22 +362,16 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		tele_mem_decide[5].opcode = tp_HALT;
 	}
 
-	/*
-	 * We might be called with the IPC ids->rwsem held (from IPC security
-	 * hooks) and lightswitch should always nest inside the ids->rwsem one.
-	 * Attention: authorization server must NOT use IPC subsystem at all to
-	 * ========== avoid deadlock (trying to lock ids->rwsem inside the
-	 *            lightswitch)!.
-	 */
-	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
-
 	if (!atomic_read(&constable_present)) {
 		med_cache_free(local_tele_item);
 		med_cache_free(tele_mem_decide);
+		spin_lock(&answer_ids_idr_lock);
+		idr_remove(&answer_ids_idr, answer_id);
+		spin_unlock(&answer_ids_idr_lock);
 		up_read(&lightswitch);
 		return MED_ERR;
 	}
-	med_pr_debug("new question %px pid %d\n", current, current->pid);
+	med_pr_debug("new question %d pid %d\n", answer_id, current->pid);
 	// prepare for next decision
 #undef decision_evtype
 	// insert teleport structure to the queue
@@ -371,10 +383,6 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 
 	// wait until answer is ready
 	get_task_struct(current);
-	local_waitlist_item.task = current;
-	down(&waitlist_sem);
-	list_add_tail(&local_waitlist_item.list, &answer_waitlist);
-	up(&waitlist_sem);
 	up_read(&lightswitch);
 	set_current_state(TASK_UNINTERRUPTIBLE);
 	// Auth server shouldn't be notified earlier, so that it doesn't
@@ -393,16 +401,16 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	 */
 	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
 	if (atomic_read(&constable_present)) {
-		down(&waitlist_sem);
-		list_del(&local_waitlist_item.list);
-		up(&waitlist_sem);
+		spin_lock(&answer_ids_idr_lock);
+		idr_remove(&answer_ids_idr, answer_id);
+		spin_unlock(&answer_ids_idr_lock);
 		atomic_dec(&questions_waiting);
 		retval = user_answer;
-		med_pr_debug("question %px answered %i pid %d\n", current, retval, current->pid);
+		med_pr_debug("question %d answered %i pid %d\n", answer_id, retval, current->pid);
 	} else {
 		retval = MED_ERR;
-		med_pr_err("question %px not answered, authorization server disconnected\n",
-			current);
+		med_pr_err("question %d not answered, authorization server disconnected\n",
+			answer_id);
 	}
 	up(&take_answer);
 	up_read(&lightswitch);
@@ -628,6 +636,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	MCPptr_t answ_seq = 0;
 	char recv_buf[sizeof(MCPptr_t)*2];
 	char *kclass_buf;
+	int answered_task_id;
 	struct task_struct *answered_task;
 
 	// Lightswitch
@@ -668,7 +677,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	// Type of the message is received
 	down(&take_answer);
 	if (recv_type == MEDUSA_COMM_AUTHANSWER) {
-		// TODO Process something
 		if (__copy_from_user(recv_buf, buf, sizeof(int16_t) + sizeof(MCPptr_t))) {
 			up(&take_answer);
 			up_read(&lightswitch);
@@ -679,12 +687,25 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		count -= sizeof(int16_t) + sizeof(MCPptr_t);
 
 		user_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
-		answered_task = *(struct task_struct **)(recv_buf);
-		med_pr_debug("answer received for %px pid %d\n", answered_task, answered_task->pid);
+		// space for decision_request_id is 64 bit, but idr uses only 32 bit
+		answered_task_id = *(int *)(recv_buf);
+		rcu_read_lock();
+		//spin_lock(&answer_ids_idr_lock);
+		answered_task = (struct task_struct *) idr_find(&answer_ids_idr, answered_task_id);
+		//spin_unlock(&answer_ids_idr_lock);
+		rcu_read_unlock();
+		if (answered_task == NULL) {
+			up(&take_answer);
+			up_read(&lightswitch);
+			med_pr_err("decision_answer: invalid decision_request_id: %llx\n", *(uint64_t *)(recv_buf));
+			return -100;
+		}
+		med_pr_debug("answer received for %llx pid %d\n", *(uint64_t *)(recv_buf), answered_task->pid);
 		// wake up correct process
 		while (!wake_up_process(answered_task))
 			// wait for `answered_task` to sleep if it's not sleeping yet
 			schedule();
+
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 		up(&take_answer);
@@ -857,10 +878,6 @@ static int user_open(struct inode *inode, struct file *file)
 		retval = -ENOMEM;
 		goto out;
 	}
-	if (med_cache_register(sizeof(struct waitlist_item))) {
-		retval = -ENOMEM;
-		goto out;
-	}
 	if (med_cache_register(sizeof(struct teleport_insn_s)*2)) {
 		retval = -ENOMEM;
 		goto out;
@@ -934,7 +951,8 @@ good_out:
 static int user_release(struct inode *inode, struct file *file)
 {
 	struct list_head *pos, *next;
-	struct waitlist_item  *local_waitlist_item;
+	int answer_id;
+	struct task_struct *task;
 	DECLARE_WAITQUEUE(waitqueue, current);
 
 	// Operation close has to wait for read and write system calls to
@@ -1019,13 +1037,11 @@ static int user_release(struct inode *inode, struct file *file)
 		teleport_put();
 	}
 	up(&queue_lock);
-	down(&waitlist_sem);
-	list_for_each(pos, &answer_waitlist) {
-		local_waitlist_item = list_entry(pos, struct waitlist_item, list);
-		wake_up_process(local_waitlist_item->task);
-	}
-	INIT_LIST_HEAD(&answer_waitlist);
-	up(&waitlist_sem);
+
+	// locking not needed because lightswitch is locked by one thread running close()
+	idr_for_each_entry(&answer_ids_idr, task, answer_id) 
+		wake_up_process(task);
+	idr_destroy(&answer_ids_idr);
 
 	up(&constable_openclose);
 	// wake up waiting processes, this has to be outside of constable_openclose
