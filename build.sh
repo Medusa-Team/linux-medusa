@@ -176,6 +176,7 @@ fi
 
 if [ $MEDUSA_ONLY -eq 1 ]; then
         medusa_only
+        install_module
 else
         make_kernel
 	install_kernel
