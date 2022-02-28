@@ -110,7 +110,7 @@ init_always_do_direct_getprocess:
 	process_kern2kobj(&proc, ts);
 	retval = MED_DECIDE(getprocess_event, &event, &proc, &proc);
 	if (retval != MED_ERR)
-		return 1;
+		return is_med_magic_valid(&(task_security(ts)->med_object));
 	return -1;
 }
 
