@@ -59,6 +59,8 @@ struct medusa_l1_task_s {
 	/* bitmap of syscalls, which are reported */
 	unsigned char med_syscall[NR_syscalls / (sizeof(unsigned char) * 8)];
 #endif
+	struct mutex validation_in_progress;
+	int validation_depth_nesting;
 };
 
 #endif
