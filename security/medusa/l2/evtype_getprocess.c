@@ -39,6 +39,8 @@ int process_kobj_validate_task(struct task_struct *ts)
 #ifdef CONFIG_MEDUSA_FORCE
 	task_security(ts)->force_code = NULL;
 #endif
+
+	get_cmdline(ts, task_security(ts)->cmdline, sizeof(task_security(ts)->cmdline));
 	process_kern2kobj(&proc, ts);
 	retval = MED_DECIDE(getprocess_event, &event, &proc, &proc);
 	if (retval != MED_ERR)
