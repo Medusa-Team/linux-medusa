@@ -23,7 +23,7 @@ MED_ATTRS(getprocess_event) {
 	MED_ATTR_END
 };
 MED_EVTYPE(getprocess_event, "getprocess", process_kobject, "process",
-		process_kobject, "process");
+		process_kobject, "parent");
 
 /*
  * This routine expects the existing, but !is_med_magic_valid Medusa task_struct security struct!
@@ -33,6 +33,7 @@ int process_kobj_validate_task(struct task_struct *ts)
 	enum medusa_answer_t retval;
 	struct getprocess_event event;
 	struct process_kobject proc;
+	struct process_kobject parent;
 	struct task_struct *ts_parent;
 	struct medusa_authserver_s *authserver;
 	int err;
@@ -104,11 +105,12 @@ int process_kobj_validate_task(struct task_struct *ts)
 	}
 
 init_always_do_direct_getprocess:
+	process_kern2kobj(&parent, ts_parent);
 	put_task_struct(ts_parent);
 
 	get_cmdline(ts, task_security(ts)->cmdline, sizeof(task_security(ts)->cmdline));
 	process_kern2kobj(&proc, ts);
-	retval = MED_DECIDE(getprocess_event, &event, &proc, &proc);
+	retval = MED_DECIDE(getprocess_event, &event, &proc, &parent);
 	if (retval != MED_ERR)
 		return is_med_magic_valid(&(task_security(ts)->med_object));
 	return -1;
