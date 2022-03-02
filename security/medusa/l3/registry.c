@@ -397,3 +397,14 @@ void med_put_authserver(struct medusa_authserver_s *med_authserver)
 	if (med_authserver->close)
 		med_authserver->close();
 }
+
+/**
+ * med_is_authserver_present - information about authserver.
+ *
+ * Returns true, if the authserver is connected in the moment of calling this
+ * function, false otherwise.
+ */
+inline bool med_is_authserver_present(void)
+{
+	return !!authserver;
+}

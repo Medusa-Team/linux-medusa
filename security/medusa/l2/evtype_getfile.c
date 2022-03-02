@@ -266,6 +266,10 @@ int file_kobj_validate_dentry_dir(const struct vfsmount* mnt, struct dentry *den
 	struct medusa_l1_inode_s *ndcurrent_inode;
 	struct medusa_l1_inode_s *ndparent_inode;
 
+	/* nothing to do if there is no running authserver */
+	if (!med_is_authserver_present())
+		return 0;
+
 	medusa_clean_inode(dentry->d_inode);
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES
 	cap_clear(inode_security(dentry->d_inode)->pcap);
@@ -348,6 +352,10 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 	struct medusa_l1_inode_s *ndcurrent_inode;
 	struct medusa_l1_inode_s *ndparent_inode;
 	struct path parent_dir;
+
+	/* nothing to do if there is no running authserver */
+	if (!med_is_authserver_present())
+		return 0;
 
 	init_med_object(&(inode_security(dentry->d_inode)->med_object));
 #ifdef CONFIG_MEDUSA_FILE_CAPABILITIES

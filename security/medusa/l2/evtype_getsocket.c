@@ -28,6 +28,10 @@ enum medusa_answer_t socket_kobj_validate(struct socket *sock)
 	struct socket_kobject sock_kobj;
 	struct medusa_l1_socket_s *sk_sec;
 
+	/* nothing to do if there is no running authserver */
+	if (!med_is_authserver_present())
+		return 0;
+
 	if (!sock->sk)
 		return MED_ALLOW;
 

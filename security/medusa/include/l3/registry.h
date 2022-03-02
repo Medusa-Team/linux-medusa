@@ -56,6 +56,7 @@ extern void med_put_kclass(struct medusa_kclass_s *med_kclass);
 extern struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s *med_kclass);
 extern struct medusa_authserver_s *med_get_authserver(void);
 extern void med_put_authserver(struct medusa_authserver_s *med_authserver);
+extern inline bool med_is_authserver_present(void);
 
 /* interface to L4 */
 extern int med_register_authserver(struct medusa_authserver_s *med_authserver);

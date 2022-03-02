@@ -35,14 +35,11 @@ int process_kobj_validate_task(struct task_struct *ts)
 	struct process_kobject proc;
 	struct process_kobject parent;
 	struct task_struct *ts_parent;
-	struct medusa_authserver_s *authserver;
 	int err;
 
 	/* nothing to do if there is no running authserver */
-	authserver = med_get_authserver();
-	if (!authserver)
+	if (!med_is_authserver_present())
 		return 0;
-	med_put_authserver(authserver);
 
 	init_med_object(&(task_security(ts)->med_object));
 	init_med_subject(&(task_security(ts)->med_subject));

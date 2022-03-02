@@ -42,6 +42,10 @@ int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp)
 	struct ipc_event event;
 	struct ipc_kobject sender;
 
+	/* nothing to do if there is no running authserver */
+	if (!med_is_authserver_present())
+		return 0;
+
 	init_med_object(&(ipc_security(ipcp)->med_object));
 	/* 3-th argument is true: decrement IPC object's refcount in returned object */
 	ipc_kern2kobj(&sender, ipcp, true);
