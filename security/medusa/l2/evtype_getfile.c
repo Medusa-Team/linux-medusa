@@ -21,10 +21,12 @@
 struct getfile_event {
 	MEDUSA_ACCESS_HEADER;
 	char filename[NAME_MAX+1];
+	int pid;
 };
 
 MED_ATTRS(getfile_event) {
 	MED_ATTR_RO(getfile_event, filename, "filename", MED_STRING),
+	MED_ATTR_RO(getfile_event, pid, "pid", MED_SIGNED),
 	MED_ATTR_END
 };
 MED_EVTYPE(getfile_event, "getfile", file_kobject, "file",
@@ -426,6 +428,7 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 	file_kern2kobj(&directory, ndparent->dentry->d_inode);
 	file_kobj_live_add(ndcurrent->dentry->d_inode);
 	file_kobj_live_add(ndparent->dentry->d_inode);
+	event.pid = current->pid;
 	retval = MED_DECIDE(getfile_event, &event, &file, &directory);
 	file_kobj_live_remove(ndparent->dentry->d_inode);
 	file_kobj_live_remove(ndcurrent->dentry->d_inode);
