@@ -116,8 +116,14 @@ inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipc
 	 * Almost always is ipc_kern2kobj() called with @dec_refcount true;
 	 * only in case of ipc_kobj operation fetch() not.
 	 */
-	if (likely(dec_refcount))
-		refcount_dec_and_test(&ipc_kobj->ipc_perm.refcount);
+	if (likely(dec_refcount)) {
+		if (refcount_dec_and_test(&ipc_kobj->ipc_perm.refcount)) {
+			/*
+			 * Ignore return value of refcount_dec_and_test()
+			 * declared with attribute 'warn_unused_result'.
+			 */
+		}
+	}
 
 	return 0;
 }
