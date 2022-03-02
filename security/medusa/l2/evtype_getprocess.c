@@ -126,7 +126,8 @@ int __init getprocess_evtype_init(void)
 	 * Attention: Credentials (capabilities, IDs, GIDs) are not inherited!
 	 */
 	MED_REGISTER_EVTYPE(getprocess_event,
-			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT);
+			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
+			MEDUSA_EVTYPE_TRIGGEREDBYSUBJECTBIT);
 	return 0;
 }
 device_initcall(getprocess_evtype_init);
