@@ -344,7 +344,14 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		tele_mem_decide[5].opcode = tp_HALT;
 	}
 
-	down_read(&lightswitch);
+	/*
+	 * We might be called with the IPC ids->rwsem held (from IPC security
+	 * hooks) and lightswitch should always nest inside the ids->rwsem one.
+	 * Attention: authorization server must NOT use IPC subsystem at all to
+	 * ========== avoid deadlock (trying to lock ids->rwsem inside the
+	 *            lightswitch)!.
+	 */
+	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
 
 	if (!atomic_read(&constable_present)) {
 		med_cache_free(local_tele_item);
@@ -377,7 +384,14 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	put_task_struct(current);
 
 
-	down_read(&lightswitch);
+	/*
+	 * We might be called with the IPC ids->rwsem held (from IPC security
+	 * hooks) and lightswitch should always nest inside the ids->rwsem one.
+	 * Attention: authorization server must NOT use IPC subsystem at all to
+	 * ========== avoid deadlock (trying to lock ids->rwsem inside the
+	 *            lightswitch)!.
+	 */
+	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
 	if (atomic_read(&constable_present)) {
 		down(&waitlist_sem);
 		list_del(&local_waitlist_item.list);
