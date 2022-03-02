@@ -9,9 +9,9 @@
 DEFINE_MUTEX(registry_lock); /* the linked list lock */
 static DEFINE_MUTEX(usecount_lock); /* the lock for modifying use-count */
 
-struct medusa_kclass_s *kclasses;
-struct medusa_evtype_s *evtypes;
-struct medusa_authserver_s *authserver;
+static struct medusa_kclass_s *kclasses;
+static struct medusa_evtype_s *evtypes;
+static struct medusa_authserver_s *authserver;
 
 int medusa_authserver_magic = 1; /* the 'version' of authserver */
 /* WARNING! medusa_authserver_magic is not locked, nor atomic type,
