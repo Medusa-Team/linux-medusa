@@ -1037,7 +1037,7 @@ static int user_release(struct inode *inode, struct file *file)
 	up(&queue_lock);
 
 	// locking not needed because lightswitch is locked by one thread running close()
-	idr_for_each_entry(&answer_ids_idr, task, answer_id) 
+	idr_for_each_entry(&answer_ids_idr, task, answer_id)
 		wake_up_process(task);
 	idr_destroy(&answer_ids_idr);
 
