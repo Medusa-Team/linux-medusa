@@ -690,9 +690,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		// space for decision_request_id is 64 bit, but idr uses only 32 bit
 		answered_task_id = *(int *)(recv_buf);
 		rcu_read_lock();
-		//spin_lock(&answer_ids_idr_lock);
 		answered_task = (struct task_struct *) idr_find(&answer_ids_idr, answered_task_id);
-		//spin_unlock(&answer_ids_idr_lock);
 		rcu_read_unlock();
 		if (answered_task == NULL) {
 			up(&take_answer);
