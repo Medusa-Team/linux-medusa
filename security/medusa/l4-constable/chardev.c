@@ -35,6 +35,7 @@
 #include <linux/device.h>
 #include <linux/poll.h>
 #include <linux/rwsem.h>
+#include <linux/mm.h>
 
 #include "l3/arch.h"
 #include "l3/registry.h"
@@ -285,6 +286,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	struct teleport_insn_s *tele_mem_decide;
 	struct tele_item *local_tele_item;
 	int answer_id;
+	char debug_cmdline[1024];
 
 	if (!in_task()) {
 		/* houston, we have a problem! */
@@ -371,7 +373,14 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		up_read(&lightswitch);
 		return MED_ERR;
 	}
-	med_pr_debug("new question %d pid %d\n", answer_id, current->pid);
+
+	debug_cmdline[0] = '\0';
+	/* get_cmdline() is too expensive; uncomment it manually while debugging */
+	//get_cmdline(current, debug_cmdline, 1023);
+	//debug_cmdline[1023] = '\0';
+	med_pr_debug("task pid %d ('%s'), new question 0x%x for '%s'",
+		    current->pid, debug_cmdline, answer_id, decision_evtype->name);
+
 	// prepare for next decision
 #undef decision_evtype
 	// insert teleport structure to the queue
@@ -406,11 +415,12 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		spin_unlock(&answer_ids_idr_lock);
 		atomic_dec(&questions_waiting);
 		retval = user_answer;
-		med_pr_debug("question %d answered %i pid %d\n", answer_id, retval, current->pid);
+		med_pr_debug("task pid %d, question 0x%x answer %d",
+			    current->pid, answer_id, retval);
 	} else {
 		retval = MED_ERR;
-		med_pr_err("question %d not answered, authorization server disconnected\n",
-			answer_id);
+		med_pr_err("task pid %d, question 0x%x for '%s' not answered, authorization server disconnected",
+			current->pid, answer_id, event->evtype_id->name);
 	}
 	up(&take_answer);
 	up_read(&lightswitch);
