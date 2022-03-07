@@ -760,6 +760,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 						kclass_buf);
 			else {
 				answ_kobj = NULL;
+				med_cache_free(kclass_buf);
 			}
 		} else {
 			if (cl->update)
@@ -771,11 +772,18 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		}
 		// Dynamic telemem structure for fetch/update
 		tele_mem_write = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*6);
-		if (!tele_mem_write)
+		if (!tele_mem_write) {
+			med_cache_free(kclass_buf);
+			up_read(&lightswitch);
+			med_pr_err("write: OOM while `tele_mem_write` alloc");
 			return -ENOMEM;
+		}
 		local_tele_item = (struct tele_item *) med_cache_alloc_size(sizeof(struct tele_item));
 		if (!local_tele_item) {
 			med_cache_free(tele_mem_write);
+			med_cache_free(kclass_buf);
+			up_read(&lightswitch);
+			med_pr_err("write: OOM while `local_tele_item` alloc");
 			return -ENOMEM;
 		}
 		local_tele_item->size = 0;
@@ -784,7 +792,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		local_tele_item->size += sizeof(MCPptr_t);
 		tele_mem_write[1].opcode = tp_PUT32;
 		if (recv_type == MEDUSA_COMM_FETCH_REQUEST) { /* fetch */
-			atomic_inc(&fetch_requests);
 			tele_mem_write[1].args.put32.what = answ_kobj ?
 				MEDUSA_COMM_FETCH_ANSWER : MEDUSA_COMM_FETCH_ERROR;
 		} else { /* update */
@@ -798,7 +805,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		tele_mem_write[3].args.putPtr.what = (MCPptr_t)answ_seq;
 		local_tele_item->size += sizeof(MCPptr_t);
 		if (recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
-			atomic_inc(&update_requests);
 			//med_pr_debug("answering update %llu\n", answ_seq);
 			tele_mem_write[4].opcode = tp_PUT32;
 			tele_mem_write[4].args.put32.what = answ_result;
@@ -819,6 +825,15 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		list_add(&(local_tele_item->list), &tele_queue);
 		up(&queue_lock);
 		up(&queue_items);
+		/*
+		 * Increment counters right after inserting data into teleport
+		 * to avoid data processing if they are not ready yet: authserver
+		 * can be woken up from another parts of this module, too.
+		 */
+		if (recv_type == MEDUSA_COMM_FETCH_REQUEST) /* fetch */
+			atomic_inc(&fetch_requests);
+		else /* update */
+			atomic_inc(&update_requests);
 		wake_up(&userspace_chardev);
 	} else {
 		up(&take_answer);
