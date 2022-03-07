@@ -466,6 +466,7 @@ static void decrement_counters(struct teleport_insn_s *tele)
 	case tp_PUTPtr: // Fetch or update
 		switch (tele[1].args.put32.what) {
 		case MEDUSA_COMM_FETCH_ANSWER:
+		case MEDUSA_COMM_FETCH_ERROR:
 			atomic_dec(&fetch_requests);
 			break;
 		case MEDUSA_COMM_UPDATE_ANSWER:
