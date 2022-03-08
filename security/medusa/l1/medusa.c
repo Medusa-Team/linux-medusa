@@ -460,8 +460,10 @@ static int medusa_l1_path_chown(const struct path *path, kuid_t uid, kgid_t gid)
 	return validate_fuck(path);
 }
 
-static int medusa_l1_path_chroot(const struct path *root)
+static int medusa_l1_path_chroot(const struct path *path)
 {
+	if (medusa_chroot(path) == MED_DENY)
+		return -EACCES;
 	return 0;
 }
 
@@ -1416,7 +1418,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	LSM_HOOK_INIT(path_rename, medusa_l1_path_rename),
 	LSM_HOOK_INIT(path_chmod, medusa_l1_path_chmod),
 	LSM_HOOK_INIT(path_chown, medusa_l1_path_chown),
-	//LSM_HOOK_INIT(path_chroot, medusa_l1_path_chroot),
+	LSM_HOOK_INIT(path_chroot, medusa_l1_path_chroot),
 #endif /* CONFIG_SECURITY_PATH */
 
 	/* Needed for inode based security check */
