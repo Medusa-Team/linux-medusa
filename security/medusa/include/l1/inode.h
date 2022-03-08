@@ -23,7 +23,7 @@
 extern enum medusa_answer_t medusa_exec(struct dentry **dentryp);
 extern enum medusa_answer_t medusa_create(struct dentry *dentry, int mode);
 extern enum medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry);
-extern enum medusa_answer_t medusa_truncate(struct dentry *dentry, unsigned long length);
+extern enum medusa_answer_t medusa_truncate(const struct path *path);
 extern enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry, int mode);
 extern enum medusa_answer_t medusa_mknod(const struct path *dir,
 					struct dentry *dentry, umode_t mode, unsigned int dev);
