@@ -38,23 +38,13 @@ static struct fuck_path *get_from_hash(char *path, int hash, struct medusa_l1_in
 	return NULL;
 }
 
-static struct fuck_path *hash_get_first(struct medusa_l1_inode_s *med)
-{
-	int bkt;
-	struct fuck_path *path;
-
-	hash_for_each(med->fuck, bkt, path, list) {
-		return path;
-	}
-
-	return NULL;
-}
-
 int fuck_free(struct medusa_l1_inode_s *med)
 {
 	struct fuck_path *path;
+	struct hlist_node *tmp;
+	int bucket;
 
-	while ((path = hash_get_first(med))) {
+	hash_for_each_safe(med->fuck, bucket, tmp, path, list) {
 		hash_del(&path->list);
 		kfree(path);
 	}
@@ -75,7 +65,7 @@ int validate_fuck(const struct path *fuck_path)
 		goto out;
 	}
 
-	if (unlikely(hash_empty(inode_security(fuck_inode)->fuck)))
+	if (likely(hash_empty(inode_security(fuck_inode)->fuck)))
 		goto out;
 
 	buf = kmalloc(sizeof(char) * (PATH_MAX + 1), GFP_KERNEL);
@@ -103,6 +93,8 @@ out:
 int validate_fuck_link(struct dentry *old_dentry)
 {
 	struct inode *fuck_inode = old_dentry->d_inode;
+
+	med_pr_info("%s", old_dentry->d_name.name);
 	/* if inode has no protected paths defined, allow hard link else deny */
 	if (hash_empty(inode_security(fuck_inode)->fuck))
 		return 0;
@@ -121,7 +113,7 @@ static struct medusa_kobject_s *fuck_fetch(struct medusa_kobject_s *kobj)
 
 	fuck_inode = path.dentry->d_inode;
 	fkobj->ino = fuck_inode->i_ino;
-	fkobj->dev = fuck_inode->i_sb->s_dev;
+	fkobj->dev = new_encode_dev(fuck_inode->i_sb->s_dev);
 	memset(fkobj->action, '\0', sizeof(fkobj->action));
 
 	return (struct medusa_kobject_s *) kobj;
@@ -157,25 +149,31 @@ static enum medusa_answer_t fuck_update(struct medusa_kobject_s *kobj)
 	struct fuck_path *fuck_path;
 	int hash;
 
-	sb = user_get_super((dev_t)fkobj->dev, false);
-	if (!sb)
+	sb = user_get_super(new_decode_dev(fkobj->dev), false);
+	if (!sb) {
+		med_pr_warn("device %d not found", fkobj->dev);
 		return MED_ERR;
+	}
 	fuck_inode = ilookup(sb, fkobj->ino);
 	drop_super(sb);
 
-	if (!fuck_inode)
-		return MED_ALLOW;
+	if (!fuck_inode) {
+		med_pr_warn("inode %ld on dev %d not found in the cache",
+			    fkobj->ino, fkobj->dev);
+		return MED_ERR;
+	}
 
 	fkobj->path[sizeof(fkobj->path)-1] = '\0';
 	hash = hash_function(fkobj->path);
 
 	if (strcmp(fkobj->action, "append") == 0) {
-		fuck_path = kmalloc(sizeof(fuck_path) + sizeof(char)*(strnlen(fkobj->path, PATH_MAX)+1), GFP_KERNEL);
+		fuck_path = kzalloc(sizeof(struct fuck_path) + sizeof(char)*strnlen(fkobj->path, PATH_MAX), GFP_KERNEL);
 		if (!fuck_path) {
+			med_pr_warn("OOM ino %ld dev %d", fkobj->ino, fkobj->dev);
 			iput(fuck_inode);
 			return MED_ERR;
 		}
-		strncpy(fuck_path->path, fkobj->path, PATH_MAX);
+		strncpy(fuck_path->path, fkobj->path, PATH_MAX-1);
 
 		/* Don't check for duplicity in hash table.
 		 * Is up to admin do not add the same 'path' more than once.
@@ -190,7 +188,7 @@ static enum medusa_answer_t fuck_update(struct medusa_kobject_s *kobj)
 		kfree(fuck_path);
 	}
 
-	med_pr_debug("Fuck: '%s' (dev = %u, ino = %lu, act = %s)",
+	med_pr_info("Fuck: '%s' (dev = %u, ino = %lu, act = %s)",
 		     fkobj->path, fkobj->dev, fkobj->ino, fkobj->action);
 
 out:

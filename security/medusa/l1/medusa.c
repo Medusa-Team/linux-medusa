@@ -176,10 +176,8 @@ void medusa_l1_inode_free_security(struct inode *inode)
 {
 	struct medusa_l1_inode_s *med = inode_security(inode);
 
-	if (!med)
-		return;
-
-	fuck_free(med);
+	if (unlikely(med && !hash_empty(med->fuck)))
+		fuck_free(med);
 }
 
 /*
