@@ -16,4 +16,8 @@ struct fuck_kobject {
 };
 extern MED_DECLARE_KCLASSOF(fuck_kobject);
 
+/* prototypes of L2 fuck related handlers called from L2 hooks */
+
+int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *new);
+
 #endif

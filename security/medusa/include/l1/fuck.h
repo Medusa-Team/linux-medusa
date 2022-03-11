@@ -8,7 +8,6 @@
 
 /* prototypes of L2 fuck related handlers called from L1 hooks */
 
-int validate_fuck_link(struct dentry *old_dentry);
 int validate_fuck(const struct path *fuck_path);
 int fuck_free(struct medusa_l1_inode_s *med);
 

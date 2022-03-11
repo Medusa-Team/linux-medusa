@@ -3,6 +3,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_file.h"
+#include "l2/kobject_fuck.h"
 
 /* let's define the 'link' access type, with subj=task and obj=inode */
 
@@ -56,6 +57,13 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 {
 	struct path ndcurrent, ndupper;
 	enum medusa_answer_t retval;
+	int err;
+
+	err = allow_fuck(old_dentry, new_dir, new_dentry);
+	if (err < 0)
+		return MED_ERR;
+	else if (err == 0)
+		return MED_DENY;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)

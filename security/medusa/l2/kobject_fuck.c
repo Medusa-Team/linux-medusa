@@ -10,6 +10,8 @@
 #include "l3/registry.h"
 #include "l2/kobject_fuck.h"
 
+extern seqlock_t mount_lock;
+
 MED_ATTRS(fuck_kobject) {
 	MED_ATTR(fuck_kobject, path, "path", MED_STRING),
 	MED_ATTR(fuck_kobject, ino, "ino", MED_UNSIGNED), // unsigned long
@@ -25,6 +27,61 @@ struct fuck_path {
 	struct hlist_node list;
 	char path[0];
 };
+
+/*
+ * Inspired by apparmor/path.c and fs/d_path.c.
+ * For comments see fs/d_path.c!
+ */
+static int prepend(char *buffer, int buflen, const struct qstr *name)
+{
+	const char *dname;
+	u32 dlen;
+
+	dname = smp_load_acquire(&name->name);
+	dlen = READ_ONCE(name->len);
+
+	buflen -= dlen;
+	if (buflen < 0)
+		return -ENAMETOOLONG;
+	memcpy(buffer+buflen, dname, dlen);
+
+	return dlen;
+}
+
+/*
+ * Taken and modified from fs/d_path.c.
+ */
+static int prepend_dentry_name(char *buf, int buflen, struct dentry *dentry)
+{
+	unsigned seq, m_seq = 0;
+	int ret;
+
+	rcu_read_lock();
+restart_mnt:
+	read_seqbegin_or_lock(&mount_lock, &m_seq);
+	seq = 0;
+	rcu_read_lock();
+restart:
+	read_seqbegin_or_lock(&rename_lock, &seq);
+	ret = prepend(buf, buflen, &d_backing_dentry(dentry)->d_name);
+	if (!(seq & 1))
+		rcu_read_unlock();
+	if (need_seqretry(&rename_lock, seq)) {
+		seq = 1;
+		goto restart;
+	}
+	done_seqretry(&rename_lock, seq);
+
+	if (!(m_seq & 1))
+		rcu_read_unlock();
+	if (need_seqretry(&mount_lock, m_seq)) {
+		m_seq = 1;
+		goto restart_mnt;
+	}
+	done_seqretry(&mount_lock, m_seq);
+
+	return ret;
+}
 
 static struct fuck_path *get_from_hash(char *path, int hash, struct medusa_l1_inode_s *inode)
 {
@@ -90,15 +147,65 @@ out:
 }
 
 // used in medusa_l1_path_link
-int validate_fuck_link(struct dentry *old_dentry)
+int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *new)
 {
-	struct inode *fuck_inode = old_dentry->d_inode;
+	struct inode *fuck_inode = d_backing_inode(dentry);
+	char *buf, *examined_path, term = '\0';
+	int buflen = PATH_MAX, newnamelen = 0, ret = 0;
 
-	med_pr_info("%s", old_dentry->d_name.name);
-	/* if inode has no protected paths defined, allow hard link else deny */
-	if (hash_empty(inode_security(fuck_inode)->fuck))
-		return 0;
-	return -EACCES;
+	/* if inode has no protected paths defined, allow hard link */
+	if (likely(hash_empty(inode_security(fuck_inode)->fuck)))
+		return 1;
+
+	buf = __getname();
+	if (!buf) {
+		med_pr_err("%s: OOM", __func__);
+		return -ENOMEM;
+	}
+
+	/* `d_absolute_path()` stores the path string from the end of the buffer
+	 * included terminating character; a new dentry name should be therefore
+	 * stored from the end of the buffer, too.
+	 */
+	if (unlikely(new)) {
+		buf[buflen-1] = '\0';
+		buflen--;
+
+		ret = prepend_dentry_name(buf, buflen, new);
+		if (unlikely(ret < 0)) {
+			med_pr_err("%s: prepend_dentry_name() failed with %d",
+				   __func__, ret);
+			goto out_allow_fuck;
+		}
+		else if (unlikely(!ret)) {
+			med_pr_warn("%s: ooops, dentry name is empty!", __func__);
+			ret = -EINVAL;
+			goto out_allow_fuck;
+		}
+		newnamelen = ret;
+		buflen -= ret;
+		ret = 0;
+		term = '/';
+	}
+
+	examined_path = d_absolute_path(path, buf, buflen);
+	/* `d_absolute_path()` may return EINVAL or ENAMETOOLONG */
+	if (IS_ERR(examined_path)) {
+		ret = PTR_ERR(examined_path);
+		med_pr_err("%s: d_absolute_path() failed with %d",
+			   __func__, ret);
+		goto out_allow_fuck;
+	}
+	/* Change terminating character stored by `d_absolute_path()` to '/' if
+	 * necessary.
+	 */
+	buf[buflen-1] = term;
+
+	med_pr_info("%s: examined path='%s'", __func__, examined_path);
+
+out_allow_fuck:
+	__putname(buf);
+	return ret;
 }
 
 static struct medusa_kobject_s *fuck_fetch(struct medusa_kobject_s *kobj)
@@ -111,7 +218,7 @@ static struct medusa_kobject_s *fuck_fetch(struct medusa_kobject_s *kobj)
 	if (kern_path(fkobj->path, LOOKUP_FOLLOW, &path) < 0)
 		return NULL;
 
-	fuck_inode = path.dentry->d_inode;
+	fuck_inode = d_backing_inode(path.dentry);
 	fkobj->ino = fuck_inode->i_ino;
 	fkobj->dev = new_encode_dev(fuck_inode->i_sb->s_dev);
 	memset(fkobj->action, '\0', sizeof(fkobj->action));

@@ -423,8 +423,7 @@ static int medusa_l1_path_link(struct dentry *old_dentry,
 {
 	if (medusa_link(old_dentry, new_dir, new_dentry) == MED_DENY)
 		return -EACCES;
-
-	return validate_fuck_link(old_dentry);
+	return 0;
 }
 
 static int medusa_l1_path_rename(const struct path *old_path,
@@ -448,14 +447,16 @@ static int medusa_l1_path_chmod(const struct path *path, umode_t mode)
 {
 	if (medusa_chmod(path, mode) == MED_DENY)
 		return -EACCES;
-	return validate_fuck(path);
+	//return validate_fuck(path);
+	return 0;
 }
 
 static int medusa_l1_path_chown(const struct path *path, kuid_t uid, kgid_t gid)
 {
 	if (medusa_chown(path, uid, gid) == MED_DENY)
 		return -EACCES;
-	return validate_fuck(path);
+	//return validate_fuck(path);
+	return 0;
 }
 
 static int medusa_l1_path_chroot(const struct path *path)
@@ -542,7 +543,8 @@ static int medusa_l1_path_chroot(const struct path *path)
 
 static int medusa_l1_file_open(struct file *file)
 {
-	return validate_fuck(&file->f_path);
+	//return validate_fuck(&file->f_path);
+	return 0;
 }
 
 /*
