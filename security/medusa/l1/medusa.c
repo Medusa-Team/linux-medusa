@@ -562,7 +562,7 @@ int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 	init_med_subject(&(med->med_subject));
 
 	mutex_init(&(med->validation_in_progress));
-	med->validation_depth_nesting = 0;
+	med->validation_depth_nesting = 1;
 
 #ifndef CONFIG_SECURITY_MEDUSA_MONITOR_KTHREADS
 	/* Kernel threads have a superpower... Don't try to restrict them! */
