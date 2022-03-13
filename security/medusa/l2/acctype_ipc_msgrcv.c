@@ -78,6 +78,13 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 	struct ipc_kobject object;
 	int err = 0;
 
+	/* Access to the @msg should be done with locked IPC object @ipcp due to
+	 * race with freeque(), so fill related access structure fields before
+	 * unlocking the IPC object in ipc_getref().
+	 */
+	access.m_type = msg->m_type;
+	access.m_ts = msg->m_ts;
+
 	/* second argument true: returns with unlocked IPC object */
 	if (unlikely((err = ipc_getref(ipcp, true)) != 0))
 		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
@@ -95,8 +102,6 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
-		access.m_type = msg->m_type;
-		access.m_ts = msg->m_ts;
 		access.type = type;
 		access.mode = mode;
 		access.target = target->pid;
