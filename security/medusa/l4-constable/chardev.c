@@ -125,6 +125,7 @@ static void l4_close_wake(void);
 static struct medusa_authserver_s chardev_medusa = {
 	MODULENAME,
 	0,	/* use-count */
+	NULL,	/* struct pid *tgid */
 	l4_close_wake,		/* close */
 	l4_add_kclass,		/* add_kclass */
 	NULL,			/* del_kclass */
@@ -364,6 +365,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		tele_mem_decide[5].opcode = tp_HALT;
 	}
 
+	/* TODO: Replace by constable tgid and move up right below lightswitch */
 	if (!atomic_read(&constable_present)) {
 		med_cache_free(local_tele_item);
 		med_cache_free(tele_mem_decide);
@@ -955,6 +957,7 @@ static int user_open(struct inode *inode, struct file *file)
 	up(&queue_items);
 	wake_up(&userspace_chardev);
 
+	chardev_medusa.tgid = get_pid(task_tgid(current));
 	/* this must be the last thing done */
 	atomic_set(&constable_present, 1);
 	up(&constable_openclose);
@@ -1042,6 +1045,8 @@ static int user_release(struct inode *inode, struct file *file)
 	// functions is important!
 	user_answer = MED_ERR;
 	atomic_set(&constable_present, 0);
+	put_pid(chardev_medusa.tgid);
+	chardev_medusa.tgid = NULL;
 	constable = NULL;
 	gdb = NULL;
 

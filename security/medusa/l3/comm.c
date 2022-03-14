@@ -2,6 +2,8 @@
 
 /* (C) 2002 Milan Pikula <www@terminus.sk> */
 
+#include <linux/sched/signal.h>
+
 #include "l3/arch.h"
 #include "l3/registry.h"
 #include "l3/server.h"
@@ -45,6 +47,12 @@ enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
 	mutex_unlock(&registry_lock);
 
 	((struct medusa_event_s *)event)->evtype_id = evtype;
+	if (task_tgid(current) == authserver->tgid) {
+		med_pr_info("med_decide for Constable for event %s(%s:%s->%s:%s)\n",
+			   evtype->name,
+			   evtype->arg_name[0], evtype->arg_kclass[0]->name,
+			   evtype->arg_name[1], evtype->arg_kclass[1]->name);
+	}
 	retval = authserver->decide(event, o1, o2);
 	if (!is_authserver_reached(retval)) {
 		/* if L4 returned MED_ERR, it means that authserver could not

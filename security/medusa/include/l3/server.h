@@ -16,6 +16,7 @@
 struct medusa_authserver_s {
 	char name[MEDUSA_SERVERNAME_MAX];
 	int use_count; /* don't modify this directly from L2/L4 code */
+	struct pid *tgid;
 
 	/*
 	 * callbacks of authorization server.
