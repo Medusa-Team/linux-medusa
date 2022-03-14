@@ -468,12 +468,12 @@ static int medusa_l1_path_chroot(const struct path *path)
 
 #endif  /* CONFIG_SECURITY_PATH */
 
-/*
- * static int medusa_l1_file_permission(struct file *file, int mask)
- * {
- *	return 0;
- * }
- */
+static int medusa_l1_file_permission(struct file *file, int mask)
+{
+	if (medusa_file_permission(file, mask) == MED_DENY)
+		return -EACCES;
+	return 0;
+}
 
 /*
  * static int medusa_l1_file_alloc_security(struct file *file)
@@ -1454,7 +1454,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 
 	//LSM_HOOK_INIT(kernfs_init_security, medusa_l1_kernfs_init_security),
 
-	//LSM_HOOK_INIT(file_permission, medusa_l1_file_permission),
+	LSM_HOOK_INIT(file_permission, medusa_l1_file_permission),
 	//LSM_HOOK_INIT(file_alloc_security, medusa_l1_file_alloc_security),
 	//LSM_HOOK_INIT(file_free_security, medusa_l1_file_free_security),
 	//LSM_HOOK_INIT(file_ioctl, medusa_l1_file_ioctl),

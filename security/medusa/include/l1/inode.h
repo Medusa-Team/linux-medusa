@@ -39,6 +39,10 @@ extern enum medusa_answer_t medusa_chmod(const struct path *path, umode_t mode);
 extern enum medusa_answer_t medusa_chown(const struct path *path, kuid_t uid, kgid_t gid);
 extern enum medusa_answer_t medusa_chroot(const struct path *path);
 
+/* file hooks */
+
+extern enum medusa_answer_t medusa_file_permission(struct file *file, int mask);
+
 /* the following routines are a support for many of access types,
  * and they're used both in L1 and L2 code. They're defined in
  * l2/evtype_getfile.c. Look there before using any of these routines.
