@@ -52,6 +52,10 @@ enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
 			   evtype->name,
 			   evtype->arg_name[0], evtype->arg_kclass[0]->name,
 			   evtype->arg_name[1], evtype->arg_kclass[1]->name);
+		if (evtype->arg_kclass[0]->unmonitor)
+			evtype->arg_kclass[0]->unmonitor((struct medusa_kobject_s *) o1);
+		med_put_authserver(authserver);
+		return MED_ALLOW;
 	}
 	retval = authserver->decide(event, o1, o2);
 	if (!is_authserver_reached(retval)) {
