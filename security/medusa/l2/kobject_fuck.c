@@ -10,6 +10,19 @@
 #include "l3/registry.h"
 #include "l2/kobject_fuck.h"
 
+#define ACT_TEST 0	/* existence test for an entry in a hash table */
+#define ACT_REMOVE 1	/* remove entry from a hash table */
+#define ACT_APPEND 2	/* add entry to a hash table */
+#define is_allowed_path(path, inode) \
+	do_allowed_path(path, inode, ACT_TEST)
+#define remove_from_allowed_paths(path, inode) \
+	do_allowed_path(path, inode, ACT_REMOVE)
+#define append_to_allowed_paths(path, inode) \
+	do_allowed_path(path, inode, ACT_APPEND)
+
+// TODO add choices to menu config
+#define hash_function(path) crc32(0, path, strlen(path))
+
 extern seqlock_t mount_lock;
 
 MED_ATTRS(fuck_kobject) {
@@ -19,9 +32,6 @@ MED_ATTRS(fuck_kobject) {
 	MED_ATTR(fuck_kobject, action, "action", MED_STRING),
 	MED_ATTR_END
 };
-
-// TODO add choices to menu config
-#define hash_function(path) crc32(0, path, strlen(path))
 
 struct fuck_path {
 	struct hlist_node list;
@@ -83,16 +93,49 @@ restart:
 	return ret;
 }
 
-static struct fuck_path *get_from_hash(char *path, int hash, struct medusa_l1_inode_s *inode)
+/*
+ * Return %true if @path is in allowed paths in security blob of the @inode,
+ * %false otherwise. If @delete is %true and @path is in allowed paths, the
+ * @path is removed from the list of allowed paths.
+ */
+static bool do_allowed_path(char *path, struct medusa_l1_inode_s *inode,
+			    int action)
 {
-	struct fuck_path *fuck_item;
+	struct fuck_path *secure_path;
+	struct hlist_node *tmp;
+	int len;
+	u32 hash;
 
-	hash_for_each_possible(inode->fuck, fuck_item, list, hash) {
-		if (strncmp(path, fuck_item->path, PATH_MAX) == 0)
-			return fuck_item;
+	hash = hash_function(path);
+	hash_for_each_possible_safe(inode->fuck, secure_path, tmp, list, hash) {
+		if (strncmp(path, secure_path->path, PATH_MAX) == 0) {
+			if (action == ACT_REMOVE) {
+				hash_del(&secure_path->list);
+				kfree(secure_path);
+			}
+			/* If @action is %ACT_APPEND and corresponding entry is
+			 * found, appending is silently ignored to not introduce
+			 * duplicity in the hash table.
+			 */
+			return true;
+		}
 	}
 
-	return NULL;
+	/* If @action is %ACT_TEST or %ACT_REMOVE and the corresponding entry is
+	 * not found in the hash table, return %false.
+	 */
+	if (action != ACT_APPEND)
+		return false;
+
+	len = strlen(path) + 1;
+	secure_path = kmalloc(sizeof(struct fuck_path) + sizeof(char)*len, GFP_KERNEL);
+	if (!secure_path)
+		return false;
+	strncpy(secure_path->path, path, len);
+	secure_path->path[len-1] = '\0';
+	hash_add(inode->fuck, &secure_path->list, hash);
+
+	return true;
 }
 
 int fuck_free(struct medusa_l1_inode_s *med)
@@ -109,51 +152,20 @@ int fuck_free(struct medusa_l1_inode_s *med)
 	return 0;
 }
 
-//used in medusa_l1_path_chown, medusa_l1_path_chmod, medusa_l1_file_open
-int validate_fuck(const struct path *fuck_path)
-{
-	struct inode *fuck_inode = fuck_path->dentry->d_inode;
-	int hash, ret = 0;
-	char *accessed_path;
-	char *buf = NULL;
-
-	if (unlikely(!fuck_inode)) {
-		med_pr_info("medusa: empty inode\n");
-		goto out;
-	}
-
-	if (likely(hash_empty(inode_security(fuck_inode)->fuck)))
-		goto out;
-
-	buf = kmalloc(sizeof(char) * (PATH_MAX + 1), GFP_KERNEL);
-	if (unlikely(!buf))
-		goto out;
-
-	accessed_path = d_absolute_path(fuck_path, buf, sizeof(buf));
-	if (!unlikely(accessed_path || IS_ERR(accessed_path))) {
-		/* accessed_path is NULL */
-		goto out;
-	}
-
-	hash = hash_function(accessed_path);
-	if (likely(get_from_hash(accessed_path, hash, inode_security(fuck_inode)) == NULL)) {
-		med_pr_notice("VALIDATE_FUCK: denied path (not defined in allowed path list)\n");
-		ret = -EPERM;
-	}
-	med_pr_debug("VALIDATE_FUCK: accessed_path: %s inode: %lu result: %d\n", accessed_path, fuck_inode->i_ino, ret);
-out:
-	kfree(buf);
-	return ret;
-}
-
-// used in medusa_l1_path_link
+/*
+ * Check whether access to a @dentry from the @path is allowed or not. If a
+ * dentry @new is not %NULL, it's the last element of the examined path.
+ *
+ * Returns 1 if the access is granted, 0 if the access is denied and a value
+ * less than zero in the case of an error.
+ */
 int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *new)
 {
 	struct inode *fuck_inode = d_backing_inode(dentry);
 	char *buf, *examined_path, term = '\0';
-	int buflen = PATH_MAX, newnamelen = 0, ret = 0;
+	int buflen = PATH_MAX, newnamelen = 0, ret = 1;
 
-	/* if inode has no protected paths defined, allow hard link */
+	/* if inode has no protected paths defined, allow access */
 	if (likely(hash_empty(inode_security(fuck_inode)->fuck)))
 		return 1;
 
@@ -167,7 +179,7 @@ int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *ne
 	 * included terminating character; a new dentry name should be therefore
 	 * stored from the end of the buffer, too.
 	 */
-	if (unlikely(new)) {
+	if (new) {
 		buf[buflen-1] = '\0';
 		buflen--;
 
@@ -184,8 +196,8 @@ int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *ne
 		}
 		newnamelen = ret;
 		buflen -= ret;
-		ret = 0;
 		term = '/';
+		ret = 1;
 	}
 
 	examined_path = d_absolute_path(path, buf, buflen);
@@ -201,7 +213,14 @@ int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *ne
 	 */
 	buf[buflen-1] = term;
 
-	med_pr_info("%s: examined path='%s'", __func__, examined_path);
+	if (!is_allowed_path(examined_path, inode_security(fuck_inode))) {
+		med_pr_info("%s: denied access from the path '%s'", __func__,
+			    examined_path);
+		ret = 0;
+		goto out_allow_fuck;
+	}
+	med_pr_info("%s: access granted from the path '%s'", __func__,
+		    examined_path);
 
 out_allow_fuck:
 	__putname(buf);
@@ -253,8 +272,6 @@ static enum medusa_answer_t fuck_update(struct medusa_kobject_s *kobj)
 	struct fuck_kobject *fkobj =  (struct fuck_kobject *) kobj;
 	struct super_block *sb;
 	struct inode *fuck_inode;
-	struct fuck_path *fuck_path;
-	int hash;
 
 	sb = user_get_super(new_decode_dev(fkobj->dev), false);
 	if (!sb) {
@@ -271,34 +288,20 @@ static enum medusa_answer_t fuck_update(struct medusa_kobject_s *kobj)
 	}
 
 	fkobj->path[sizeof(fkobj->path)-1] = '\0';
-	hash = hash_function(fkobj->path);
-
 	if (strcmp(fkobj->action, "append") == 0) {
-		fuck_path = kzalloc(sizeof(struct fuck_path) + sizeof(char)*strnlen(fkobj->path, PATH_MAX), GFP_KERNEL);
-		if (!fuck_path) {
-			med_pr_warn("OOM ino %ld dev %d", fkobj->ino, fkobj->dev);
+		if (!append_to_allowed_paths(fkobj->path, inode_security(fuck_inode))) {
+			med_pr_warn("%s: OOM ino %ld dev %d", __func__, fkobj->ino, fkobj->dev);
 			iput(fuck_inode);
 			return MED_ERR;
 		}
-		strncpy(fuck_path->path, fkobj->path, PATH_MAX-1);
-
-		/* Don't check for duplicity in hash table.
-		 * Is up to admin do not add the same 'path' more than once.
-		 */
-		hash_add(inode_security(fuck_inode)->fuck, &fuck_path->list, hash);
 	} else if (strcmp(fkobj->action, "remove") == 0) {
-		/* remove non-existing path in hash table is ok */
-		fuck_path = get_from_hash(fkobj->path, hash, inode_security(fuck_inode));
-		if (!fuck_path)
-			goto out;
-		hash_del(&fuck_path->list);
-		kfree(fuck_path);
+		/* removing non-existing path from allowed paths is silently ignored */
+		remove_from_allowed_paths(fkobj->path, inode_security(fuck_inode));
 	}
 
-	med_pr_info("Fuck: '%s' (dev = %u, ino = %lu, act = %s)",
+	med_pr_info("%s: '%s' (dev = %u, ino = %lu, act = %s)", __func__,
 		     fkobj->path, fkobj->dev, fkobj->ino, fkobj->action);
 
-out:
 	iput(fuck_inode);
 	return MED_ALLOW;
 }
