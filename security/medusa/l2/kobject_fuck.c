@@ -38,7 +38,7 @@ struct fuck_path {
 	char path[0];
 };
 
-/*
+/**
  * Inspired by apparmor/path.c and fs/d_path.c.
  * For comments see fs/d_path.c!
  */
@@ -58,7 +58,7 @@ static int prepend(char *buffer, int buflen, const struct qstr *name)
 	return dlen;
 }
 
-/*
+/**
  * Taken and modified from fs/d_path.c.
  */
 static int prepend_dentry_name(char *buf, int buflen, struct dentry *dentry)
@@ -93,10 +93,14 @@ restart:
 	return ret;
 }
 
-/*
+/**
  * Return %true if @path is in allowed paths in security blob of the @inode,
- * %false otherwise. If @delete is %true and @path is in allowed paths, the
- * @path is removed from the list of allowed paths.
+ * %false otherwise.
+ *
+ * If @action is ACT_REMOVE and @path is in allowed paths, the @path is
+ * removed from the list of allowed paths.
+ * If @action is ACT_APPEND and @path is not in allowed paths, the @path
+ * is appended to the list of allowed paths.
  */
 static bool do_allowed_path(char *path, struct medusa_l1_inode_s *inode,
 			    int action)
@@ -152,7 +156,7 @@ int fuck_free(struct medusa_l1_inode_s *med)
 	return 0;
 }
 
-/*
+/**
  * Check whether access to a @dentry from the @path is allowed or not. If a
  * dentry @new is not %NULL, it's the last element of the examined path.
  *
