@@ -4,11 +4,13 @@
 
 #include <linux/namei.h>
 #include <linux/path.h>
-#include <linux/crc32.h>
+#include <linux/module.h>
+#include <crypto/hash.h>
 /* we need internal fs function 'user_get_super' */
 #include "../../fs/internal.h"
 #include "l3/registry.h"
 #include "l2/kobject_fuck.h"
+#include "l2/kobject_fuck_hash.h"
 
 #define ACT_TEST 0	/* existence test for an entry in a hash table */
 #define ACT_REMOVE 1	/* remove entry from a hash table */
@@ -20,8 +22,10 @@
 #define append_to_allowed_paths(path, inode) \
 	do_allowed_path(path, inode, ACT_APPEND)
 
-// TODO add choices to menu config
-#define hash_function(path) crc32(0, path, strlen(path))
+static int hash_initialized;
+static struct crypto_shash *hash_transformation;
+
+static struct kmem_cache *fuck_path_cache;
 
 extern seqlock_t mount_lock;
 
@@ -35,8 +39,41 @@ MED_ATTRS(fuck_kobject) {
 
 struct fuck_path {
 	struct hlist_node list;
-	char path[0];
+	char path_hash[FUCK_HASH_DIGEST_SIZE];
 };
+
+// needs to be declared here to be usable both in calc_hash and fuck_kobject_init
+static int initialize_hash_transformation(void);
+static int initialize_fuck_path_cache(void);
+
+/**
+ * Calculate hash of @path and save it into @hash_result.
+ * Returns %true if the function fails.
+ */
+static int calc_hash(char *path, char hash_result[FUCK_HASH_DIGEST_SIZE])
+{
+	SHASH_DESC_ON_STACK(sdesc, hash_transformation);
+	int error;
+
+	// try to allocate the hash transformation if it is not initialized
+	if (unlikely(!hash_initialized)) {
+		error = initialize_hash_transformation();
+		if (error) {
+			med_pr_err("%s: failed to allocate %s at runtime, error: %d",
+				__func__, FUCK_HASH_NAME, error);
+			return error;
+		}
+		hash_initialized = 1;
+		med_pr_info("%s: allocated hash_transformation at runtime", __func__);
+	}
+
+	sdesc->tfm = hash_transformation;
+	crypto_shash_digest(sdesc, path, strlen(path), hash_result);
+	hash_result[FUCK_HASH_DIGEST_SIZE - 1] = '\0';
+	med_pr_debug("%s: path: %s, hash: %s", __func__, path, hash_result);
+
+	return 0;
+}
 
 /**
  * Inspired by apparmor/path.c and fs/d_path.c.
@@ -107,15 +144,23 @@ static bool do_allowed_path(char *path, struct medusa_l1_inode_s *inode,
 {
 	struct fuck_path *secure_path;
 	struct hlist_node *tmp;
-	int len;
-	u32 hash;
+	u64 hash;
+	int error;
+	char path_hash[FUCK_HASH_DIGEST_SIZE];
 
-	hash = hash_function(path);
+	error = calc_hash(path, path_hash);
+	if (error) {
+		med_pr_err("%s: calc_hash failed, error: %d\n", __func__, error);
+		return false;
+	}
+
+	hash = *(u64 *) path_hash;
+	med_pr_info("%s: hash_start: %llu", __func__, hash);
 	hash_for_each_possible_safe(inode->fuck, secure_path, tmp, list, hash) {
-		if (strncmp(path, secure_path->path, PATH_MAX) == 0) {
+		if (memcmp(path_hash, secure_path->path_hash, FUCK_HASH_DIGEST_SIZE) == 0) {
 			if (action == ACT_REMOVE) {
 				hash_del(&secure_path->list);
-				kfree(secure_path);
+				kmem_cache_free(fuck_path_cache, secure_path);
 			}
 			/* If @action is %ACT_APPEND and corresponding entry is
 			 * found, appending is silently ignored to not introduce
@@ -131,12 +176,10 @@ static bool do_allowed_path(char *path, struct medusa_l1_inode_s *inode,
 	if (action != ACT_APPEND)
 		return false;
 
-	len = strlen(path) + 1;
-	secure_path = kmalloc(sizeof(*secure_path) + sizeof(char) * len, GFP_KERNEL);
+	secure_path = kmem_cache_alloc(fuck_path_cache, GFP_NOWAIT);
 	if (!secure_path)
 		return false;
-	strncpy(secure_path->path, path, len);
-	secure_path->path[len - 1] = '\0';
+	memcpy(secure_path->path_hash, path_hash, FUCK_HASH_DIGEST_SIZE);
 	hash_add(inode->fuck, &secure_path->list, hash);
 
 	return true;
@@ -150,7 +193,7 @@ int fuck_free(struct medusa_l1_inode_s *med)
 
 	hash_for_each_safe(med->fuck, bucket, tmp, path, list) {
 		hash_del(&path->list);
-		kfree(path);
+		kmem_cache_free(fuck_path_cache, path);
 	}
 
 	return 0;
@@ -319,10 +362,48 @@ MED_KCLASS(fuck_kobject) {
 	NULL,		/* unmonitor */
 };
 
+static int initialize_hash_transformation(void)
+{
+	hash_transformation = crypto_alloc_shash(FUCK_HASH_NAME, 0, 0);
+	if (IS_ERR(hash_transformation))
+		return PTR_ERR(hash_transformation);
+
+	hash_initialized = 1;
+	return 0;
+}
+
+static int initialize_fuck_path_cache(void)
+{
+	fuck_path_cache = kmem_cache_create("fuck_path_cache",
+			sizeof(struct fuck_path),
+			0,
+			SLAB_HWCACHE_ALIGN | SLAB_PANIC,
+			NULL);
+	if (!fuck_path_cache)
+		return -ENOMEM;
+	else
+		return 0;
+}
+
 int __init fuck_kobject_init(void)
 {
+	int error;
+
+	error = initialize_hash_transformation();
+	if (error) {
+		med_pr_err("%s: can't alloc %s during init, error: %d\n", __func__, FUCK_HASH_NAME, error);
+		// not returning here because the allocation will be retried at runtime
+	} else
+		med_pr_info("%s: allocated %s during init\n", __func__, FUCK_HASH_NAME);
+
+	error = initialize_fuck_path_cache();
+	if (error) {
+		med_pr_err("%s: can't alloc fuck_path_cache during init, error: %d", __func__, error);
+		return error;
+	}
+
 	MED_REGISTER_KCLASS(fuck_kobject);
 	return 0;
 }
 
-device_initcall(fuck_kobject_init);
+late_initcall(fuck_kobject_init);
