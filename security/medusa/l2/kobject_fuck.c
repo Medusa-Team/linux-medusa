@@ -22,7 +22,6 @@
 #define append_to_allowed_paths(path, inode) \
 	do_allowed_path(path, inode, ACT_APPEND)
 
-static int hash_initialized;
 static struct crypto_shash *hash_transformation;
 
 static struct kmem_cache *fuck_path_cache;
@@ -42,37 +41,16 @@ struct fuck_path {
 	char path_hash[FUCK_HASH_DIGEST_SIZE];
 };
 
-// needs to be declared here to be usable both in calc_hash and fuck_kobject_init
-static int initialize_hash_transformation(void);
-static int initialize_fuck_path_cache(void);
-
 /**
  * Calculate hash of @path and save it into @hash_result.
  * Returns %true if the function fails.
  */
-static int calc_hash(char *path, char hash_result[FUCK_HASH_DIGEST_SIZE])
+static void calc_hash(char *path, char hash_result[FUCK_HASH_DIGEST_SIZE])
 {
 	SHASH_DESC_ON_STACK(sdesc, hash_transformation);
-	int error;
-
-	// try to allocate the hash transformation if it is not initialized
-	if (unlikely(!hash_initialized)) {
-		error = initialize_hash_transformation();
-		if (error) {
-			med_pr_err("%s: failed to allocate %s at runtime, error: %d",
-				__func__, FUCK_HASH_NAME, error);
-			return error;
-		}
-		hash_initialized = 1;
-		med_pr_info("%s: allocated hash_transformation at runtime", __func__);
-	}
 
 	sdesc->tfm = hash_transformation;
 	crypto_shash_digest(sdesc, path, strlen(path), hash_result);
-	hash_result[FUCK_HASH_DIGEST_SIZE - 1] = '\0';
-	med_pr_debug("%s: path: %s, hash: %s", __func__, path, hash_result);
-
-	return 0;
 }
 
 /**
@@ -145,17 +123,10 @@ static bool do_allowed_path(char *path, struct medusa_l1_inode_s *inode,
 	struct fuck_path *secure_path;
 	struct hlist_node *tmp;
 	u64 hash;
-	int error;
 	char path_hash[FUCK_HASH_DIGEST_SIZE];
 
-	error = calc_hash(path, path_hash);
-	if (error) {
-		med_pr_err("%s: calc_hash failed, error: %d\n", __func__, error);
-		return false;
-	}
-
+	calc_hash(path, path_hash);
 	hash = *(u64 *) path_hash;
-	med_pr_info("%s: hash_start: %llu", __func__, hash);
 	hash_for_each_possible_safe(inode->fuck, secure_path, tmp, list, hash) {
 		if (memcmp(path_hash, secure_path->path_hash, FUCK_HASH_DIGEST_SIZE) == 0) {
 			if (action == ACT_REMOVE) {
@@ -362,43 +333,26 @@ MED_KCLASS(fuck_kobject) {
 	NULL,		/* unmonitor */
 };
 
-static int initialize_hash_transformation(void)
+int __init fuck_kobject_init(void)
 {
+	int error;
+
 	hash_transformation = crypto_alloc_shash(FUCK_HASH_NAME, 0, 0);
-	if (IS_ERR(hash_transformation))
-		return PTR_ERR(hash_transformation);
+	if (IS_ERR(hash_transformation)) {
+		error = PTR_ERR(hash_transformation);
+		med_pr_err("%s: can't alloc %s during init, error: %d\n", __func__, FUCK_HASH_NAME, error);
+		return error;
+	}
 
-	hash_initialized = 1;
-	return 0;
-}
-
-static int initialize_fuck_path_cache(void)
-{
 	fuck_path_cache = kmem_cache_create("fuck_path_cache",
 			sizeof(struct fuck_path),
 			0,
 			SLAB_HWCACHE_ALIGN | SLAB_PANIC,
 			NULL);
-	if (!fuck_path_cache)
-		return -ENOMEM;
-	else
-		return 0;
-}
-
-int __init fuck_kobject_init(void)
-{
-	int error;
-
-	error = initialize_hash_transformation();
-	if (error) {
-		med_pr_err("%s: can't alloc %s during init, error: %d\n", __func__, FUCK_HASH_NAME, error);
-		// not returning here because the allocation will be retried at runtime
-	} else
-		med_pr_info("%s: allocated %s during init\n", __func__, FUCK_HASH_NAME);
-
-	error = initialize_fuck_path_cache();
-	if (error) {
+	if (!fuck_path_cache) {
+		error = -ENOMEM;
 		med_pr_err("%s: can't alloc fuck_path_cache during init, error: %d", __func__, error);
+		crypto_free_shash(hash_transformation);
 		return error;
 	}
 

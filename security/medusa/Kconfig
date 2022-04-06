@@ -92,7 +92,7 @@ choice
 
 config SECURITY_MEDUSA_FUCK_BLAKE2B_256
 	bool "Blake2b-256"
-	depends on SECURITY_MEDUSA && CRYPTO_BLAKE2B
+	depends on SECURITY_MEDUSA && (CRYPTO_BLAKE2B=y)
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
@@ -101,7 +101,7 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_256
 
 config SECURITY_MEDUSA_FUCK_BLAKE2B_512
 	bool "Blake2b-512"
-	depends on SECURITY_MEDUSA && CRYPTO_BLAKE2B
+	depends on SECURITY_MEDUSA && (CRYPTO_BLAKE2B=y)
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
@@ -110,7 +110,7 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_512
 
 config SECURITY_MEDUSA_FUCK_BLAKE2S_256
 	bool "Blake2s-256"
-	depends on SECURITY_MEDUSA && CRYPTO_BLAKE2S
+	depends on SECURITY_MEDUSA && (CRYPTO_BLAKE2S=y)
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
@@ -123,26 +123,26 @@ config SECURITY_MEDUSA_FUCK_BLAKE2S_256
 
 config SECURITY_MEDUSA_FUCK_SHA2_256
 	bool "SHA2-256"
-	depends on SECURITY_MEDUSA && CRYPTO_SHA256
+	depends on SECURITY_MEDUSA && (CRYPTO_SHA256=y)
 	help
 	  Cryptograhpically secure
 
 config SECURITY_MEDUSA_FUCK_SHA2_512
 	bool "SHA2-512"
-	depends on SECURITY_MEDUSA && CRYPTO_SHA512
+	depends on SECURITY_MEDUSA && (CRYPTO_SHA512=y)
 	help
 	  Cryptographically secure. Usually faster than SHA256 on 64 bit machines
 
 config SECURITY_MEDUSA_FUCK_SHA3_256
 	bool "SHA3-256"
-	depends on SECURITY_MEDUSA && CRYPTO_SHA3
+	depends on SECURITY_MEDUSA && (CRYPTO_SHA3=y)
 	help
 	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
 	  protection than SHA-2 offers.
 
 config SECURITY_MEDUSA_FUCK_SHA3_512
 	bool "SHA3-512"
-	depends on SECURITY_MEDUSA && CRYPTO_SHA3
+	depends on SECURITY_MEDUSA && (CRYPTO_SHA3=y)
 	help
 	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
 	  protection than SHA-2 offers.
