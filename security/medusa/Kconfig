@@ -76,23 +76,25 @@ config SECURITY_MEDUSA_KILL_RESCHEDULING
 	  If unsure, say N.
 
 config SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
-	int "Number of buckets"
+	int "FUCK Number of hash table buckets"
 	depends on SECURITY_MEDUSA
 	default 3
 	help
-		Defines the number of buckets a FUCK hash table stored in
-		inode_security has.
+	  Defines the number of buckets a FUCK hash table stored in
+	  inode_security has.
 
 choice
-	prompt "FUCK hashing function"
-
-# config SECURITY_MEDUSA_FUCK_GHASH
-# 	bool "GHASH"
-# 	depends on SECURITY_MEDUSA && CRYPTO_GHASH
+	prompt "FUCK Hashing function"
+	help
+	  Select a hashing function to be used within the FUCK module.
+	  
+	  The selected hashing function must be marked as builtin in the
+	  Cryptographic API section, otherwise the build will fail.
 
 config SECURITY_MEDUSA_FUCK_BLAKE2B_256
 	bool "Blake2b-256"
-	depends on SECURITY_MEDUSA && (CRYPTO_BLAKE2B=y)
+	depends on SECURITY_MEDUSA
+	imply CRYPTO_BLAKE2B
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
@@ -101,7 +103,8 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_256
 
 config SECURITY_MEDUSA_FUCK_BLAKE2B_512
 	bool "Blake2b-512"
-	depends on SECURITY_MEDUSA && (CRYPTO_BLAKE2B=y)
+	depends on SECURITY_MEDUSA
+	imply CRYPTO_BLAKE2B
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
@@ -110,54 +113,43 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_512
 
 config SECURITY_MEDUSA_FUCK_BLAKE2S_256
 	bool "Blake2s-256"
-	depends on SECURITY_MEDUSA && (CRYPTO_BLAKE2S=y)
+	depends on SECURITY_MEDUSA
+	imply CRYPTO_BLAKE2S
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
 	  latest standard SHA-3.
 	  Optimized for 8- to 32-bit platforms. Produces 32 bytes long digests.
 
-# config SECURITY_MEDUSA_FUCK_POLY1305
-# 	bool "POLY1305"
-# 	depends on SECURITY_MEDUSA && CRYPTO_POLY1305
-
 config SECURITY_MEDUSA_FUCK_SHA2_256
 	bool "SHA2-256"
-	depends on SECURITY_MEDUSA && (CRYPTO_SHA256=y)
+	depends on SECURITY_MEDUSA
+	imply CRYPTO_SHA256
 	help
 	  Cryptograhpically secure
 
 config SECURITY_MEDUSA_FUCK_SHA2_512
 	bool "SHA2-512"
-	depends on SECURITY_MEDUSA && (CRYPTO_SHA512=y)
+	depends on SECURITY_MEDUSA
+	imply CRYPTO_SHA512
 	help
 	  Cryptographically secure. Usually faster than SHA256 on 64 bit machines
 
 config SECURITY_MEDUSA_FUCK_SHA3_256
 	bool "SHA3-256"
-	depends on SECURITY_MEDUSA && (CRYPTO_SHA3=y)
+	depends on SECURITY_MEDUSA
+	imply CRYPTO_SHA3
 	help
 	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
 	  protection than SHA-2 offers.
 
 config SECURITY_MEDUSA_FUCK_SHA3_512
 	bool "SHA3-512"
-	depends on SECURITY_MEDUSA && (CRYPTO_SHA3=y)
+	depends on SECURITY_MEDUSA
+	imply CRYPTO_SHA3
 	help
 	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
 	  protection than SHA-2 offers.
-
-# config SECURITY_MEDUSA_FUCK_SM3
-# 	bool "SM3"
-# 	depends on SECURITY_MEDUSA && CRYPTO_SM3
-
-# config SECURITY_MEDUSA_FUCK_STREEBOG
-# 	bool "STREEBOG"
-# 	depends on SECURITY_MEDUSA && CRYPTO_STREEBOG
-
-# config SECURITY_MEDUSA_FUCK_WHIRLPOOL512
-# 	bool "WHIRLPOOL512"
-# 	depends on SECURITY_MEDUSA && CRYPTO_WP512
 
 endchoice
 
