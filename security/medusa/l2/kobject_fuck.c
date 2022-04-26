@@ -360,4 +360,4 @@ int __init fuck_kobject_init(void)
 	return 0;
 }
 
-late_initcall(fuck_kobject_init);
+device_initcall(fuck_kobject_init);
