@@ -83,6 +83,7 @@ config SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
 	  Defines the number of buckets a FUCK hash table stored in
 	  inode_security has.
 
+# All of the options must have a matching elif branch in file include/l2/kobject_fuck_hash.h 
 choice
 	prompt "FUCK Hashing function"
 	help
