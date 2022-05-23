@@ -554,7 +554,7 @@ static int medusa_l1_file_open(struct file *file)
  * allocated, if its size is not zero. Implication: no checks for Medusa's
  * task security blob are required.
  */
-int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
+int medusa_l1_task_init(struct task_struct *task, unsigned long clone_flags)
 {
 	struct medusa_l1_task_s *med = task_security(task);
 
@@ -1651,7 +1651,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 };
 
 struct security_hook_list medusa_l1_hooks_alloc[] = {
-	LSM_HOOK_INIT(task_alloc, medusa_l1_task_alloc),
+	LSM_HOOK_INIT(task_alloc, medusa_l1_task_init),
 	LSM_HOOK_INIT(task_free, medusa_l1_task_free),
 
 	LSM_HOOK_INIT(inode_alloc_security, medusa_l1_inode_alloc_security),
@@ -1669,6 +1669,9 @@ struct security_hook_list medusa_l1_hooks_alloc[] = {
 
 static int __init medusa_l1_init(void)
 {
+	/* set the security info for the task pid 0 on boot cpu */
+	medusa_l1_task_init(current, 0);
+
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");
 	security_add_hooks(medusa_l1_hooks_alloc,
