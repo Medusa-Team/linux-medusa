@@ -543,6 +543,8 @@ static int medusa_l1_file_fcntl(struct file *file, unsigned int cmd,
 
 static int medusa_l1_file_open(struct file *file)
 {
+	if (medusa_open(file) == MED_DENY)
+		return -EACCES;
 	//return validate_fuck(&file->f_path);
 	return 0;
 }
