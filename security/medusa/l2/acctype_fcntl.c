@@ -54,38 +54,35 @@ enum medusa_answer_t medusa_fcntl(struct file *file, unsigned int cmd,
 {
 	struct inode *inode = file_inode(file);
 	if (unlikely(IS_PRIVATE(inode))) {
-		/* med_pr_info("fcntl: private inode\n"); */
 		return MED_ALLOW;
 	}
 
 	if (cmd != F_SETLK && cmd != F_SETLKW &&
 		cmd != F_SETOWN && cmd != F_SETSIG && cmd != F_SETFL) {
-		/* med_pr_info("fcntl: harmless operation\n"); */
 		return MED_ALLOW;
 	}
 
 	if (cmd == F_SETFL && !((arg ^ file->f_flags) & O_APPEND)) {
-		/* med_pr_info("fcntl: harmless operation\n"); */
 		return MED_ALLOW;
 	}
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0) {
-		med_pr_info("fcntl: can't validate subject\n");
 		return MED_ALLOW;
 	}
 
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
 		file_kobj_validate_dentry_dir(file->f_path.mnt, file_dentry(file)) <= 0) {
-		med_pr_info("fcntl: can't validate object\n");
 		return MED_ALLOW;
 	}
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
 		!vs_intersects(VSW(task_security(current)), VS(inode_security(inode)))
 	)
 		return MED_DENY;
-	if (MEDUSA_MONITORED_ACCESS_O(fcntl_access, task_security(current)))
+	med_pr_debug("file_fcntl: dev=%u ino=%lu vs=%*pbl act=%*pbl\n", inode->i_sb->s_dev, inode->i_ino, CONFIG_MEDUSA_VS, &VS(inode_security(inode)), CONFIG_MEDUSA_ACT, &inode_security(inode)->med_object.act);
+	if (MEDUSA_MONITORED_ACCESS_O(fcntl_access, inode_security(inode))) {
 		return medusa_do_fcntl(file, cmd, arg, inode);
+	}
 	return MED_ALLOW;
 }
 
