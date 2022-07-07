@@ -38,6 +38,8 @@ extern enum medusa_answer_t medusa_readlink(struct dentry *dentry);
 extern enum medusa_answer_t medusa_chmod(const struct path *path, umode_t mode);
 extern enum medusa_answer_t medusa_chown(const struct path *path, kuid_t uid, kgid_t gid);
 extern enum medusa_answer_t medusa_chroot(const struct path *path);
+extern enum medusa_answer_t medusa_fcntl(struct file *file, unsigned int cmd, unsigned long arg);
+extern enum medusa_answer_t medusa_open(struct file *file);
 
 /* the following routines are a support for many of access types,
  * and they're used both in L1 and L2 code. They're defined in

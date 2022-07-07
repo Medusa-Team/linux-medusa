@@ -227,6 +227,9 @@ static int l4_add_evtype(struct medusa_evtype_s *at)
 	int attr_num = 1;
 	struct medusa_attribute_s *attr_ptr;
 
+	med_pr_debug("%s: adding %s with bitnr=%d\n", __func__, at->name,
+		at->bitnr & MASK_BITNR);
+
 	tele_mem_evtype = (struct teleport_insn_s *)
 		med_cache_alloc_size(sizeof(struct teleport_insn_s)*5);
 	if (!tele_mem_evtype)

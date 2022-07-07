@@ -511,13 +511,13 @@ static int medusa_l1_path_chroot(const struct path *path)
  * }
  */
 
-/*
- * static int medusa_l1_file_fcntl(struct file *file, unsigned int cmd,
- *			unsigned long arg)
- * {
- *	return 0;
- * }
- */
+static int medusa_l1_file_fcntl(struct file *file, unsigned int cmd,
+				unsigned long arg)
+{
+	if (medusa_fcntl(file, cmd, arg) == MED_DENY)
+		return -EACCES;
+	return 0;
+}
 
 /*
  * static void medusa_l1_file_set_fowner(struct file *file)
@@ -543,6 +543,8 @@ static int medusa_l1_path_chroot(const struct path *path)
 
 static int medusa_l1_file_open(struct file *file)
 {
+	if (medusa_open(file) == MED_DENY)
+		return -EACCES;
 	//return validate_fuck(&file->f_path);
 	return 0;
 }
@@ -1462,7 +1464,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(mmap_file, medusa_l1_mmap_file),
 	//LSM_HOOK_INIT(file_mprotect, medusa_l1_file_mprotect),
 	//LSM_HOOK_INIT(file_lock, medusa_l1_file_lock),
-	//LSM_HOOK_INIT(file_fcntl, medusa_l1_file_fcntl),
+	LSM_HOOK_INIT(file_fcntl, medusa_l1_file_fcntl),
 	//LSM_HOOK_INIT(file_set_fowner, medusa_l1_file_set_fowner),
 	//LSM_HOOK_INIT(file_send_sigiotask, medusa_l1_file_send_sigiotask),
 	//LSM_HOOK_INIT(file_receive, medusa_l1_file_receive),
