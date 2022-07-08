@@ -44,6 +44,8 @@ static const struct meson_sm_chip gxbb_chip = {
 		CMD(SM_EFUSE_WRITE,	0x82000031),
 		CMD(SM_EFUSE_USER_MAX,	0x82000033),
 		CMD(SM_GET_CHIP_ID,	0x82000044),
+		CMD(SM_A1_PWRC_SET,	0x82000093),
+		CMD(SM_A1_PWRC_GET,	0x82000095),
 		{ /* sentinel */ },
 	},
 };
@@ -329,3 +331,4 @@ static struct platform_driver meson_sm_driver = {
 	},
 };
 module_platform_driver_probe(meson_sm_driver, meson_sm_probe);
+MODULE_LICENSE("GPL v2");

@@ -138,6 +138,7 @@ extern void __iomem *__arm_ioremap_caller(phys_addr_t, size_t, unsigned int,
 	void *);
 extern void __iomem *__arm_ioremap_pfn(unsigned long, unsigned long, size_t, unsigned int);
 extern void __iomem *__arm_ioremap_exec(phys_addr_t, size_t, bool cached);
+void __arm_iomem_set_ro(void __iomem *ptr, size_t size);
 extern void __iounmap(volatile void __iomem *addr);
 
 extern void __iomem * (*arch_ioremap_caller)(phys_addr_t, size_t,
@@ -179,7 +180,10 @@ void pci_ioremap_set_mem_type(int mem_type);
 static inline void pci_ioremap_set_mem_type(int mem_type) {}
 #endif
 
-extern int pci_ioremap_io(unsigned int offset, phys_addr_t phys_addr);
+struct resource;
+
+#define pci_remap_iospace pci_remap_iospace
+int pci_remap_iospace(const struct resource *res, phys_addr_t phys_addr);
 
 /*
  * PCI configuration space mapping function.
@@ -356,7 +360,6 @@ static inline void memcpy_toio(volatile void __iomem *to, const void *from,
  *
  * Function		Memory type	Cacheability	Cache hint
  * ioremap()		Device		n/a		n/a
- * ioremap_nocache()	Device		n/a		n/a
  * ioremap_cache()	Normal		Writeback	Read allocate
  * ioremap_wc()		Normal		Non-cacheable	n/a
  * ioremap_wt()		Normal		Non-cacheable	n/a
@@ -367,13 +370,6 @@ static inline void memcpy_toio(volatile void __iomem *to, const void *from,
  * - number, order and size of accesses are maintained
  * - unaligned accesses are "unpredictable"
  * - writes may be delayed before they hit the endpoint device
- *
- * ioremap_nocache() is the same as ioremap() as there are too many device
- * drivers using this for device registers, and documentation which tells
- * people to use it for such for this to be any different.  This is not a
- * safe fallback for memory-like mappings, or memory regions where the
- * compiler may generate unaligned accesses - eg, via inlining its own
- * memcpy.
  *
  * All normal memory mappings have the following properties:
  * - reads can be repeated with no side effects
@@ -438,18 +434,15 @@ extern void pci_iounmap(struct pci_dev *dev, void __iomem *addr);
  */
 #define xlate_dev_mem_ptr(p)	__va(p)
 
-/*
- * Convert a virtual cached pointer to an uncached pointer
- */
-#define xlate_dev_kmem_ptr(p)	p
-
 #include <asm-generic/io.h>
 
 #ifdef CONFIG_MMU
 #define ARCH_HAS_VALID_PHYS_ADDR_RANGE
 extern int valid_phys_addr_range(phys_addr_t addr, size_t size);
 extern int valid_mmap_phys_addr_range(unsigned long pfn, size_t size);
-extern int devmem_is_allowed(unsigned long pfn);
+extern bool arch_memremap_can_ram_remap(resource_size_t offset, size_t size,
+					unsigned long flags);
+#define arch_memremap_can_ram_remap arch_memremap_can_ram_remap
 #endif
 
 /*

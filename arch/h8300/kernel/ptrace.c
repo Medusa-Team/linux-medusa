@@ -12,7 +12,6 @@
 #include <linux/errno.h>
 #include <linux/ptrace.h>
 #include <linux/audit.h>
-#include <linux/tracehook.h>
 #include <linux/regset.h>
 #include <linux/elf.h>
 
@@ -87,20 +86,15 @@ int h8300_put_reg(struct task_struct *task, int regno, unsigned long data)
 
 static int regs_get(struct task_struct *target,
 		    const struct user_regset *regset,
-		    unsigned int pos, unsigned int count,
-		    void *kbuf, void __user *ubuf)
+		    struct membuf to)
 {
 	int r;
-	struct user_regs_struct regs;
-	long *reg = (long *)&regs;
 
-	/* build user regs in buffer */
-	BUILD_BUG_ON(sizeof(regs) % sizeof(long) != 0);
-	for (r = 0; r < sizeof(regs) / sizeof(long); r++)
-		*reg++ = h8300_get_reg(target, r);
+	BUILD_BUG_ON(sizeof(struct user_regs_struct) % sizeof(long) != 0);
+	for (r = 0; r < ELF_NGREG; r++)
+		membuf_store(&to, h8300_get_reg(target, r));
 
-	return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
-				   &regs, 0, sizeof(regs));
+	return 0;
 }
 
 static int regs_set(struct task_struct *target,
@@ -139,7 +133,7 @@ static const struct user_regset h8300_regsets[] = {
 		.n		= ELF_NGREG,
 		.size		= sizeof(long),
 		.align		= sizeof(long),
-		.get		= regs_get,
+		.regset_get		= regs_get,
 		.set		= regs_set,
 	},
 };
@@ -179,7 +173,7 @@ asmlinkage long do_syscall_trace_enter(struct pt_regs *regs)
 	long ret = 0;
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
-	    tracehook_report_syscall_entry(regs))
+	    ptrace_report_syscall_entry(regs))
 		/*
 		 * Tracing decided this syscall should not happen.
 		 * We'll return a bogus call number to get an ENOSYS
@@ -201,5 +195,5 @@ asmlinkage void do_syscall_trace_leave(struct pt_regs *regs)
 
 	step = test_thread_flag(TIF_SINGLESTEP);
 	if (step || test_thread_flag(TIF_SYSCALL_TRACE))
-		tracehook_report_syscall_exit(regs, step);
+		ptrace_report_syscall_exit(regs, step);
 }

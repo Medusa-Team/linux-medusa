@@ -135,14 +135,13 @@ static int mcu_gpiochip_add(struct mcu *mcu)
 	return gpiochip_add_data(gc, mcu);
 }
 
-static int mcu_gpiochip_remove(struct mcu *mcu)
+static void mcu_gpiochip_remove(struct mcu *mcu)
 {
 	kfree(mcu->gc.label);
 	gpiochip_remove(&mcu->gc);
-	return 0;
 }
 
-static int mcu_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int mcu_probe(struct i2c_client *client)
 {
 	struct mcu *mcu;
 	int ret;
@@ -187,7 +186,6 @@ err:
 static int mcu_remove(struct i2c_client *client)
 {
 	struct mcu *mcu = i2c_get_clientdata(client);
-	int ret;
 
 	kthread_stop(shutdown_thread);
 
@@ -198,9 +196,7 @@ static int mcu_remove(struct i2c_client *client)
 		glob_mcu = NULL;
 	}
 
-	ret = mcu_gpiochip_remove(mcu);
-	if (ret)
-		return ret;
+	mcu_gpiochip_remove(mcu);
 	kfree(mcu);
 	return 0;
 }
@@ -221,7 +217,7 @@ static struct i2c_driver mcu_driver = {
 		.name = "mcu-mpc8349emitx",
 		.of_match_table = mcu_of_match_table,
 	},
-	.probe = mcu_probe,
+	.probe_new = mcu_probe,
 	.remove	= mcu_remove,
 	.id_table = mcu_ids,
 };

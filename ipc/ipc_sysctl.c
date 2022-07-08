@@ -10,6 +10,7 @@
 #include <linux/nsproxy.h>
 #include <linux/sysctl.h>
 #include <linux/uaccess.h>
+#include <linux/capability.h>
 #include <linux/ipc_namespace.h>
 #include <linux/msg.h>
 #include "util.h"
@@ -22,9 +23,8 @@ static void *get_ipc(struct ctl_table *table)
 	return which;
 }
 
-#ifdef CONFIG_PROC_SYSCTL
 static int proc_ipc_dointvec(struct ctl_table *table, int write,
-	void __user *buffer, size_t *lenp, loff_t *ppos)
+		void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table ipc_table;
 
@@ -35,7 +35,7 @@ static int proc_ipc_dointvec(struct ctl_table *table, int write,
 }
 
 static int proc_ipc_dointvec_minmax(struct ctl_table *table, int write,
-	void __user *buffer, size_t *lenp, loff_t *ppos)
+		void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table ipc_table;
 
@@ -46,7 +46,7 @@ static int proc_ipc_dointvec_minmax(struct ctl_table *table, int write,
 }
 
 static int proc_ipc_dointvec_minmax_orphans(struct ctl_table *table, int write,
-	void __user *buffer, size_t *lenp, loff_t *ppos)
+		void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ipc_namespace *ns = current->nsproxy->ipc_ns;
 	int err = proc_ipc_dointvec_minmax(table, write, buffer, lenp, ppos);
@@ -59,7 +59,7 @@ static int proc_ipc_dointvec_minmax_orphans(struct ctl_table *table, int write,
 }
 
 static int proc_ipc_doulongvec_minmax(struct ctl_table *table, int write,
-	void __user *buffer, size_t *lenp, loff_t *ppos)
+		void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table ipc_table;
 	memcpy(&ipc_table, table, sizeof(ipc_table));
@@ -70,7 +70,7 @@ static int proc_ipc_doulongvec_minmax(struct ctl_table *table, int write,
 }
 
 static int proc_ipc_auto_msgmni(struct ctl_table *table, int write,
-	void __user *buffer, size_t *lenp, loff_t *ppos)
+		void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table ipc_table;
 	int dummy = 0;
@@ -85,7 +85,7 @@ static int proc_ipc_auto_msgmni(struct ctl_table *table, int write,
 }
 
 static int proc_ipc_sem_dointvec(struct ctl_table *table, int write,
-	void __user *buffer, size_t *lenp, loff_t *ppos)
+	void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int ret, semmni;
 	struct ipc_namespace *ns = current->nsproxy->ipc_ns;
@@ -104,13 +104,17 @@ static int proc_ipc_sem_dointvec(struct ctl_table *table, int write,
 	return ret;
 }
 
-#else
-#define proc_ipc_doulongvec_minmax NULL
-#define proc_ipc_dointvec	   NULL
-#define proc_ipc_dointvec_minmax   NULL
-#define proc_ipc_dointvec_minmax_orphans   NULL
-#define proc_ipc_auto_msgmni	   NULL
-#define proc_ipc_sem_dointvec	   NULL
+#ifdef CONFIG_CHECKPOINT_RESTORE
+static int proc_ipc_dointvec_minmax_checkpoint_restore(struct ctl_table *table,
+		int write, void *buffer, size_t *lenp, loff_t *ppos)
+{
+	struct user_namespace *user_ns = current->nsproxy->ipc_ns->user_ns;
+
+	if (write && !checkpoint_restore_ns_capable(user_ns))
+		return -EPERM;
+
+	return proc_ipc_dointvec_minmax(table, write, buffer, lenp, ppos);
+}
 #endif
 
 int ipc_mni = IPCMNI;
@@ -198,8 +202,8 @@ static struct ctl_table ipc_kern_table[] = {
 		.procname	= "sem_next_id",
 		.data		= &init_ipc_ns.ids[IPC_SEM_IDS].next_id,
 		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SEM_IDS].next_id),
-		.mode		= 0644,
-		.proc_handler	= proc_ipc_dointvec_minmax,
+		.mode		= 0666,
+		.proc_handler	= proc_ipc_dointvec_minmax_checkpoint_restore,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_INT_MAX,
 	},
@@ -207,8 +211,8 @@ static struct ctl_table ipc_kern_table[] = {
 		.procname	= "msg_next_id",
 		.data		= &init_ipc_ns.ids[IPC_MSG_IDS].next_id,
 		.maxlen		= sizeof(init_ipc_ns.ids[IPC_MSG_IDS].next_id),
-		.mode		= 0644,
-		.proc_handler	= proc_ipc_dointvec_minmax,
+		.mode		= 0666,
+		.proc_handler	= proc_ipc_dointvec_minmax_checkpoint_restore,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_INT_MAX,
 	},
@@ -216,8 +220,8 @@ static struct ctl_table ipc_kern_table[] = {
 		.procname	= "shm_next_id",
 		.data		= &init_ipc_ns.ids[IPC_SHM_IDS].next_id,
 		.maxlen		= sizeof(init_ipc_ns.ids[IPC_SHM_IDS].next_id),
-		.mode		= 0644,
-		.proc_handler	= proc_ipc_dointvec_minmax,
+		.mode		= 0666,
+		.proc_handler	= proc_ipc_dointvec_minmax_checkpoint_restore,
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_INT_MAX,
 	},

@@ -271,7 +271,7 @@ This option defaults to enabled (set) */
 
 #define XTE_TIE_OFFSET			0x000003A4 /* Interrupt enable */
 
-/**  MII Mamagement Control register (MGTCR) */
+/* MII Management Control register (MGTCR) */
 #define XTE_MGTDR_OFFSET		0x000003B0 /* MII data */
 #define XTE_MIIMAI_OFFSET		0x000003B4 /* MII control */
 
@@ -283,7 +283,7 @@ This option defaults to enabled (set) */
 
 #define STS_CTRL_APP0_ERR         (1 << 31)
 #define STS_CTRL_APP0_IRQONEND    (1 << 30)
-/* undoccumented */
+/* undocumented */
 #define STS_CTRL_APP0_STOPONEND   (1 << 29)
 #define STS_CTRL_APP0_CMPLT       (1 << 28)
 #define STS_CTRL_APP0_SOP         (1 << 27)
@@ -369,16 +369,22 @@ struct temac_local {
 	/* Buffer descriptors */
 	struct cdmac_bd *tx_bd_v;
 	dma_addr_t tx_bd_p;
+	u32 tx_bd_num;
 	struct cdmac_bd *rx_bd_v;
 	dma_addr_t rx_bd_p;
+	u32 rx_bd_num;
 	int tx_bd_ci;
-	int tx_bd_next;
 	int tx_bd_tail;
 	int rx_bd_ci;
+	int rx_bd_tail;
 
 	/* DMA channel control setup */
-	u32 tx_chnl_ctrl;
-	u32 rx_chnl_ctrl;
+	u8 coalesce_count_tx;
+	u8 coalesce_delay_tx;
+	u8 coalesce_count_rx;
+	u8 coalesce_delay_rx;
+
+	struct delayed_work restart_work;
 };
 
 /* Wrappers for temac_ior()/temac_iow() function pointers above */

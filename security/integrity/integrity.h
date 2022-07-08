@@ -6,9 +6,16 @@
  * Mimi Zohar <zohar@us.ibm.com>
  */
 
+#ifdef pr_fmt
+#undef pr_fmt
+#endif
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/types.h>
 #include <linux/integrity.h>
-#include <crypto/sha.h>
+#include <crypto/sha1.h>
+#include <crypto/hash.h>
 #include <linux/key.h>
 #include <linux/audit.h>
 
@@ -24,8 +31,8 @@
 #define IMA_HASH		0x00000100
 #define IMA_HASHED		0x00000200
 
-/* iint cache flags */
-#define IMA_ACTION_FLAGS	0xff000000
+/* iint policy rule cache flags */
+#define IMA_NONACTION_FLAGS	0xff000000
 #define IMA_DIGSIG_REQUIRED	0x01000000
 #define IMA_PERMIT_DIRECTIO	0x02000000
 #define IMA_NEW_FILE		0x04000000
@@ -101,7 +108,16 @@ struct ima_digest_data {
 		} ng;
 		u8 data[2];
 	} xattr;
-	u8 digest[0];
+	u8 digest[];
+} __packed;
+
+/*
+ * Instead of wrapping the ima_digest_data struct inside a local structure
+ * with the maximum hash size, define ima_max_digest_data struct.
+ */
+struct ima_max_digest_data {
+	struct ima_digest_data hdr;
+	u8 digest[HASH_MAX_DIGESTSIZE];
 } __packed;
 
 /*
@@ -113,7 +129,7 @@ struct signature_v2_hdr {
 	uint8_t	hash_algo;	/* Digest algorithm [enum hash_algo] */
 	__be32 keyid;		/* IMA key identifier - not X509/PGP specific */
 	__be16 sig_size;	/* signature size */
-	uint8_t sig[0];		/* signature payload */
+	uint8_t sig[];		/* signature payload */
 } __packed;
 
 /* integrity data associated with an inode */
@@ -145,7 +161,8 @@ int integrity_kernel_read(struct file *file, loff_t offset,
 #define INTEGRITY_KEYRING_EVM		0
 #define INTEGRITY_KEYRING_IMA		1
 #define INTEGRITY_KEYRING_PLATFORM	2
-#define INTEGRITY_KEYRING_MAX		3
+#define INTEGRITY_KEYRING_MACHINE	3
+#define INTEGRITY_KEYRING_MAX		4
 
 extern struct dentry *integrity_dir;
 
@@ -233,6 +250,11 @@ void integrity_audit_msg(int audit_msgno, struct inode *inode,
 			 const unsigned char *fname, const char *op,
 			 const char *cause, int result, int info);
 
+void integrity_audit_message(int audit_msgno, struct inode *inode,
+			     const unsigned char *fname, const char *op,
+			     const char *cause, int result, int info,
+			     int errno);
+
 static inline struct audit_buffer *
 integrity_audit_log_start(struct audit_context *ctx, gfp_t gfp_mask, int type)
 {
@@ -244,6 +266,14 @@ static inline void integrity_audit_msg(int audit_msgno, struct inode *inode,
 				       const unsigned char *fname,
 				       const char *op, const char *cause,
 				       int result, int info)
+{
+}
+
+static inline void integrity_audit_message(int audit_msgno,
+					   struct inode *inode,
+					   const unsigned char *fname,
+					   const char *op, const char *cause,
+					   int result, int info, int errno)
 {
 }
 
@@ -262,5 +292,19 @@ void __init add_to_platform_keyring(const char *source, const void *data,
 static inline void __init add_to_platform_keyring(const char *source,
 						  const void *data, size_t len)
 {
+}
+#endif
+
+#ifdef CONFIG_INTEGRITY_MACHINE_KEYRING
+void __init add_to_machine_keyring(const char *source, const void *data, size_t len);
+bool __init trust_moklist(void);
+#else
+static inline void __init add_to_machine_keyring(const char *source,
+						  const void *data, size_t len)
+{
+}
+static inline bool __init trust_moklist(void)
+{
+	return false;
 }
 #endif

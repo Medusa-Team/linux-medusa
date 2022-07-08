@@ -50,6 +50,7 @@ struct btrfs_block_rsv {
 };
 
 void btrfs_init_block_rsv(struct btrfs_block_rsv *rsv, unsigned short type);
+void btrfs_init_root_block_rsv(struct btrfs_root *root);
 struct btrfs_block_rsv *btrfs_alloc_block_rsv(struct btrfs_fs_info *fs_info,
 					      unsigned short type);
 void btrfs_init_metadata_block_rsv(struct btrfs_fs_info *fs_info,
@@ -57,11 +58,11 @@ void btrfs_init_metadata_block_rsv(struct btrfs_fs_info *fs_info,
 				   unsigned short type);
 void btrfs_free_block_rsv(struct btrfs_fs_info *fs_info,
 			  struct btrfs_block_rsv *rsv);
-int btrfs_block_rsv_add(struct btrfs_root *root,
+int btrfs_block_rsv_add(struct btrfs_fs_info *fs_info,
 			struct btrfs_block_rsv *block_rsv, u64 num_bytes,
 			enum btrfs_reserve_flush_enum flush);
 int btrfs_block_rsv_check(struct btrfs_block_rsv *block_rsv, int min_factor);
-int btrfs_block_rsv_refill(struct btrfs_root *root,
+int btrfs_block_rsv_refill(struct btrfs_fs_info *fs_info,
 			   struct btrfs_block_rsv *block_rsv, u64 min_reserved,
 			   enum btrfs_reserve_flush_enum flush);
 int btrfs_block_rsv_migrate(struct btrfs_block_rsv *src_rsv,
@@ -73,7 +74,7 @@ int btrfs_cond_migrate_bytes(struct btrfs_fs_info *fs_info,
 			     int min_factor);
 void btrfs_block_rsv_add_bytes(struct btrfs_block_rsv *block_rsv,
 			       u64 num_bytes, bool update_size);
-u64 __btrfs_block_rsv_release(struct btrfs_fs_info *fs_info,
+u64 btrfs_block_rsv_release(struct btrfs_fs_info *fs_info,
 			      struct btrfs_block_rsv *block_rsv,
 			      u64 num_bytes, u64 *qgroup_to_release);
 void btrfs_update_global_block_rsv(struct btrfs_fs_info *fs_info);
@@ -82,20 +83,12 @@ void btrfs_release_global_block_rsv(struct btrfs_fs_info *fs_info);
 struct btrfs_block_rsv *btrfs_use_block_rsv(struct btrfs_trans_handle *trans,
 					    struct btrfs_root *root,
 					    u32 blocksize);
-
-static inline void btrfs_block_rsv_release(struct btrfs_fs_info *fs_info,
-					   struct btrfs_block_rsv *block_rsv,
-					   u64 num_bytes)
-{
-	__btrfs_block_rsv_release(fs_info, block_rsv, num_bytes, NULL);
-}
-
 static inline void btrfs_unuse_block_rsv(struct btrfs_fs_info *fs_info,
 					 struct btrfs_block_rsv *block_rsv,
 					 u32 blocksize)
 {
 	btrfs_block_rsv_add_bytes(block_rsv, blocksize, false);
-	btrfs_block_rsv_release(fs_info, block_rsv, 0);
+	btrfs_block_rsv_release(fs_info, block_rsv, 0, NULL);
 }
 
 #endif /* BTRFS_BLOCK_RSV_H */

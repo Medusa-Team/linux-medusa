@@ -31,6 +31,22 @@ void pci_ats_init(struct pci_dev *dev)
 }
 
 /**
+ * pci_ats_supported - check if the device can use ATS
+ * @dev: the PCI device
+ *
+ * Returns true if the device supports ATS and is allowed to use it, false
+ * otherwise.
+ */
+bool pci_ats_supported(struct pci_dev *dev)
+{
+	if (!dev->ats_cap)
+		return false;
+
+	return (dev->untrusted == 0);
+}
+EXPORT_SYMBOL_GPL(pci_ats_supported);
+
+/**
  * pci_enable_ats - enable the ATS capability
  * @dev: the PCI device
  * @ps: the IOMMU page shift
@@ -42,7 +58,7 @@ int pci_enable_ats(struct pci_dev *dev, int ps)
 	u16 ctrl;
 	struct pci_dev *pdev;
 
-	if (!dev->ats_cap)
+	if (!pci_ats_supported(dev))
 		return -EINVAL;
 
 	if (WARN_ON(dev->ats_enabled))
@@ -69,6 +85,7 @@ int pci_enable_ats(struct pci_dev *dev, int ps)
 	dev->ats_enabled = 1;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(pci_enable_ats);
 
 /**
  * pci_disable_ats - disable the ATS capability
@@ -87,6 +104,7 @@ void pci_disable_ats(struct pci_dev *dev)
 
 	dev->ats_enabled = 0;
 }
+EXPORT_SYMBOL_GPL(pci_disable_ats);
 
 void pci_restore_ats_state(struct pci_dev *dev)
 {
@@ -170,7 +188,8 @@ void pci_pri_init(struct pci_dev *pdev)
 
 /**
  * pci_enable_pri - Enable PRI capability
- * @ pdev: PCI device structure
+ * @pdev: PCI device structure
+ * @reqs: outstanding requests
  *
  * Returns 0 on success, negative value on error
  */
@@ -307,6 +326,21 @@ int pci_prg_resp_pasid_required(struct pci_dev *pdev)
 
 	return pdev->pasid_required;
 }
+
+/**
+ * pci_pri_supported - Check if PRI is supported.
+ * @pdev: PCI device structure
+ *
+ * Returns true if PRI capability is present, false otherwise.
+ */
+bool pci_pri_supported(struct pci_dev *pdev)
+{
+	/* VFs share the PF PRI */
+	if (pci_physfn(pdev)->pri_cap)
+		return true;
+	return false;
+}
+EXPORT_SYMBOL_GPL(pci_pri_supported);
 #endif /* CONFIG_PCI_PRI */
 
 #ifdef CONFIG_PCI_PASID
@@ -342,7 +376,7 @@ int pci_enable_pasid(struct pci_dev *pdev, int features)
 	if (WARN_ON(pdev->pasid_enabled))
 		return -EBUSY;
 
-	if (!pdev->eetlp_prefix_path)
+	if (!pdev->eetlp_prefix_path && !pdev->pasid_no_tlp)
 		return -EINVAL;
 
 	if (!pasid)
@@ -364,6 +398,7 @@ int pci_enable_pasid(struct pci_dev *pdev, int features)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(pci_enable_pasid);
 
 /**
  * pci_disable_pasid - Disable the PASID capability
@@ -388,6 +423,7 @@ void pci_disable_pasid(struct pci_dev *pdev)
 
 	pdev->pasid_enabled = 0;
 }
+EXPORT_SYMBOL_GPL(pci_disable_pasid);
 
 /**
  * pci_restore_pasid_state - Restore PASID capabilities
@@ -424,11 +460,12 @@ void pci_restore_pasid_state(struct pci_dev *pdev)
 int pci_pasid_features(struct pci_dev *pdev)
 {
 	u16 supported;
-	int pasid = pdev->pasid_cap;
+	int pasid;
 
 	if (pdev->is_virtfn)
 		pdev = pci_physfn(pdev);
 
+	pasid = pdev->pasid_cap;
 	if (!pasid)
 		return -EINVAL;
 
@@ -438,11 +475,12 @@ int pci_pasid_features(struct pci_dev *pdev)
 
 	return supported;
 }
+EXPORT_SYMBOL_GPL(pci_pasid_features);
 
 #define PASID_NUMBER_SHIFT	8
 #define PASID_NUMBER_MASK	(0x1f << PASID_NUMBER_SHIFT)
 /**
- * pci_max_pasid - Get maximum number of PASIDs supported by device
+ * pci_max_pasids - Get maximum number of PASIDs supported by device
  * @pdev: PCI device structure
  *
  * Returns negative value when PASID capability is not present.
@@ -451,11 +489,12 @@ int pci_pasid_features(struct pci_dev *pdev)
 int pci_max_pasids(struct pci_dev *pdev)
 {
 	u16 supported;
-	int pasid = pdev->pasid_cap;
+	int pasid;
 
 	if (pdev->is_virtfn)
 		pdev = pci_physfn(pdev);
 
+	pasid = pdev->pasid_cap;
 	if (!pasid)
 		return -EINVAL;
 
@@ -465,4 +504,5 @@ int pci_max_pasids(struct pci_dev *pdev)
 
 	return (1 << supported);
 }
+EXPORT_SYMBOL_GPL(pci_max_pasids);
 #endif /* CONFIG_PCI_PASID */

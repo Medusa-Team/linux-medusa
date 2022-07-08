@@ -203,7 +203,7 @@ static void __init register_insn_emulation(struct insn_emulation_ops *ops)
 }
 
 static int emulation_proc_handler(struct ctl_table *table, int write,
-				  void __user *buffer, size_t *lenp,
+				  void *buffer, size_t *lenp,
 				  loff_t *ppos)
 {
 	int ret = 0;
@@ -277,9 +277,9 @@ static void __init register_insn_emulation_sysctl(void)
 
 #define __user_swpX_asm(data, addr, res, temp, temp2, B)	\
 do {								\
-	uaccess_enable();					\
+	uaccess_enable_privileged();				\
 	__asm__ __volatile__(					\
-	"	mov		%w3, %w7\n"			\
+	"	mov		%w3, %w6\n"			\
 	"0:	ldxr"B"		%w2, [%4]\n"			\
 	"1:	stxr"B"		%w0, %w1, [%4]\n"		\
 	"	cbz		%w0, 2f\n"			\
@@ -290,19 +290,13 @@ do {								\
 	"2:\n"							\
 	"	mov		%w1, %w2\n"			\
 	"3:\n"							\
-	"	.pushsection	 .fixup,\"ax\"\n"		\
-	"	.align		2\n"				\
-	"4:	mov		%w0, %w6\n"			\
-	"	b		3b\n"				\
-	"	.popsection"					\
-	_ASM_EXTABLE(0b, 4b)					\
-	_ASM_EXTABLE(1b, 4b)					\
+	_ASM_EXTABLE_UACCESS_ERR(0b, 3b, %w0)			\
+	_ASM_EXTABLE_UACCESS_ERR(1b, 3b, %w0)			\
 	: "=&r" (res), "+r" (data), "=&r" (temp), "=&r" (temp2)	\
 	: "r" ((unsigned long)addr), "i" (-EAGAIN),		\
-	  "i" (-EFAULT),					\
 	  "i" (__SWP_LL_SC_LOOPS)				\
 	: "memory");						\
-	uaccess_disable();					\
+	uaccess_disable_privileged();				\
 } while (0)
 
 #define __user_swp_asm(data, addr, res, temp, temp2) \
@@ -601,7 +595,7 @@ static struct undef_hook setend_hooks[] = {
 	},
 	{
 		/* Thumb mode */
-		.instr_mask	= 0x0000fff7,
+		.instr_mask	= 0xfffffff7,
 		.instr_val	= 0x0000b650,
 		.pstate_mask	= (PSR_AA32_T_BIT | PSR_AA32_MODE_MASK),
 		.pstate_val	= (PSR_AA32_T_BIT | PSR_AA32_MODE_USR),
@@ -618,7 +612,8 @@ static struct insn_emulation_ops setend_ops = {
 };
 
 /*
- * Invoked as late_initcall, since not needed before init spawned.
+ * Invoked as core_initcall, which guarantees that the instruction
+ * emulation is ready for userspace.
  */
 static int __init armv8_deprecated_init(void)
 {
@@ -629,7 +624,7 @@ static int __init armv8_deprecated_init(void)
 		register_insn_emulation(&cp15_barrier_ops);
 
 	if (IS_ENABLED(CONFIG_SETEND_EMULATION)) {
-		if(system_supports_mixed_endian_el0())
+		if (system_supports_mixed_endian_el0())
 			register_insn_emulation(&setend_ops);
 		else
 			pr_info("setend instruction emulation is not supported on this system\n");

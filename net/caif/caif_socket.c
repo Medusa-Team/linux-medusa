@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ":%s(): " fmt, __func__
 
+#include <linux/filter.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -243,7 +244,7 @@ static void caif_ctrl_cb(struct cflayer *layr,
 		cf_sk->sk.sk_shutdown = SHUTDOWN_MASK;
 		cf_sk->sk.sk_err = ECONNRESET;
 		set_rx_flow_on(cf_sk);
-		cf_sk->sk.sk_error_report(&cf_sk->sk);
+		sk_error_report(&cf_sk->sk);
 		break;
 
 	default:
@@ -539,7 +540,8 @@ static int caif_seqpkt_sendmsg(struct socket *sock, struct msghdr *msg,
 		goto err;
 
 	ret = -EINVAL;
-	if (unlikely(msg->msg_iter.iov->iov_base == NULL))
+	if (unlikely(msg->msg_iter.nr_segs == 0) ||
+	    unlikely(msg->msg_iter.iov->iov_base == NULL))
 		goto err;
 	noblock = msg->msg_flags & MSG_DONTWAIT;
 
@@ -669,8 +671,8 @@ out_err:
 	return sent ? : err;
 }
 
-static int setsockopt(struct socket *sock,
-		      int lvl, int opt, char __user *ov, unsigned int ol)
+static int setsockopt(struct socket *sock, int lvl, int opt, sockptr_t ov,
+		unsigned int ol)
 {
 	struct sock *sk = sock->sk;
 	struct caifsock *cf_sk = container_of(sk, struct caifsock, sk);
@@ -685,7 +687,7 @@ static int setsockopt(struct socket *sock,
 			return -EINVAL;
 		if (lvl != SOL_CAIF)
 			goto bad_sol;
-		if (copy_from_user(&linksel, ov, sizeof(int)))
+		if (copy_from_sockptr(&linksel, ov, sizeof(int)))
 			return -EINVAL;
 		lock_sock(&(cf_sk->sk));
 		cf_sk->conn_req.link_selector = linksel;
@@ -699,7 +701,7 @@ static int setsockopt(struct socket *sock,
 			return -ENOPROTOOPT;
 		lock_sock(&(cf_sk->sk));
 		if (ol > sizeof(cf_sk->conn_req.param.data) ||
-			copy_from_user(&cf_sk->conn_req.param.data, ov, ol)) {
+		    copy_from_sockptr(&cf_sk->conn_req.param.data, ov, ol)) {
 			release_sock(&cf_sk->sk);
 			return -EINVAL;
 		}
@@ -981,7 +983,6 @@ static const struct proto_ops caif_seqpacket_ops = {
 	.listen = sock_no_listen,
 	.shutdown = sock_no_shutdown,
 	.setsockopt = setsockopt,
-	.getsockopt = sock_no_getsockopt,
 	.sendmsg = caif_seqpkt_sendmsg,
 	.recvmsg = caif_seqpkt_recvmsg,
 	.mmap = sock_no_mmap,
@@ -1002,7 +1003,6 @@ static const struct proto_ops caif_stream_ops = {
 	.listen = sock_no_listen,
 	.shutdown = sock_no_shutdown,
 	.setsockopt = setsockopt,
-	.getsockopt = sock_no_getsockopt,
 	.sendmsg = caif_stream_sendmsg,
 	.recvmsg = caif_stream_recvmsg,
 	.mmap = sock_no_mmap,

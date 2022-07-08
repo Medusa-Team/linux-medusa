@@ -127,7 +127,7 @@ struct aem_data {
 	struct device		*hwmon_dev;
 	struct platform_device	*pdev;
 	struct mutex		lock;
-	char			valid;
+	bool			valid;
 	unsigned long		last_updated;	/* In jiffies */
 	u8			ver_major;
 	u8			ver_minor;
@@ -219,7 +219,7 @@ struct aem_read_sensor_req {
 
 struct aem_read_sensor_resp {
 	struct aem_iana_id	id;
-	u8			bytes[0];
+	u8			bytes[];
 } __packed;
 
 /* Data structures to talk to the IPMI layer */

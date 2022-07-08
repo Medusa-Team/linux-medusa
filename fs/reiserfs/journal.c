@@ -32,7 +32,7 @@
  *                      to disk for all backgrounded commits that have been
  *                      around too long.
  *		     -- Note, if you call this as an immediate flush from
- *		        from within kupdate, it will ignore the immediate flag
+ *		        within kupdate, it will ignore the immediate flag
  */
 
 #include <linux/time.h>
@@ -56,8 +56,6 @@
 /* gets a struct reiserfs_journal_list * from a list head */
 #define JOURNAL_LIST_ENTRY(h) (list_entry((h), struct reiserfs_journal_list, \
                                j_list))
-#define JOURNAL_WORK_ENTRY(h) (list_entry((h), struct reiserfs_journal_list, \
-                               j_working_list))
 
 /* must be correct to keep the desc and commit structs at 4k */
 #define JOURNAL_TRANS_HALF 1018
@@ -463,7 +461,6 @@ int reiserfs_in_journal(struct super_block *sb,
 			b_blocknr_t * next_zero_bit)
 {
 	struct reiserfs_journal *journal = SB_JOURNAL(sb);
-	struct reiserfs_journal_cnode *cn;
 	struct reiserfs_list_bitmap *jb;
 	int i;
 	unsigned long bl;
@@ -499,13 +496,12 @@ int reiserfs_in_journal(struct super_block *sb,
 	bl = bmap_nr * (sb->s_blocksize << 3) + bit_nr;
 	/* is it in any old transactions? */
 	if (search_all
-	    && (cn =
-		get_journal_hash_dev(sb, journal->j_list_hash_table, bl))) {
+	    && (get_journal_hash_dev(sb, journal->j_list_hash_table, bl))) {
 		return 1;
 	}
 
 	/* is it in the current transaction.  This should never happen */
-	if ((cn = get_journal_hash_dev(sb, journal->j_hash_table, bl))) {
+	if ((get_journal_hash_dev(sb, journal->j_hash_table, bl))) {
 		BUG();
 		return 1;
 	}
@@ -862,8 +858,8 @@ loop_next:
 			ret = -EIO;
 		}
 		/*
-		 * ugly interaction with invalidatepage here.
-		 * reiserfs_invalidate_page will pin any buffer that has a
+		 * ugly interaction with invalidate_folio here.
+		 * reiserfs_invalidate_folio will pin any buffer that has a
 		 * valid journal head from an older transaction.  If someone
 		 * else sets our buffer dirty after we write it in the first
 		 * loop, and then someone truncates the page away, nobody
@@ -955,7 +951,9 @@ static int reiserfs_async_progress_wait(struct super_block *s)
 		int depth;
 
 		depth = reiserfs_write_unlock_nested(s);
-		congestion_wait(BLK_RW_ASYNC, HZ / 10);
+		wait_var_event_timeout(&j->j_async_throttle,
+				       atomic_read(&j->j_async_throttle) == 0,
+				       HZ / 10);
 		reiserfs_write_lock_nested(s, depth);
 	}
 
@@ -1062,7 +1060,8 @@ static int flush_commit_list(struct super_block *s,
 			put_bh(tbh) ;
 		}
 	}
-	atomic_dec(&journal->j_async_throttle);
+	if (atomic_dec_and_test(&journal->j_async_throttle))
+		wake_up_var(&journal->j_async_throttle);
 
 	for (i = 0; i < (jl->j_len + 1); i++) {
 		bn = SB_ONDISK_JOURNAL_1st_BLOCK(s) +
@@ -2601,7 +2600,6 @@ static int journal_init_dev(struct super_block *super,
 	int result;
 	dev_t jdev;
 	fmode_t blkdev_mode = FMODE_READ | FMODE_WRITE | FMODE_EXCL;
-	char b[BDEVNAME_SIZE];
 
 	result = 0;
 
@@ -2623,8 +2621,8 @@ static int journal_init_dev(struct super_block *super,
 			result = PTR_ERR(journal->j_dev_bd);
 			journal->j_dev_bd = NULL;
 			reiserfs_warning(super, "sh-458",
-					 "cannot init journal device '%s': %i",
-					 __bdevname(jdev, b), result);
+					 "cannot init journal device unknown-block(%u,%u): %i",
+					 MAJOR(jdev), MINOR(jdev), result);
 			return result;
 		} else if (jdev != super->s_dev)
 			set_blocksize(journal->j_dev_bd, super->s_blocksize);
@@ -2760,6 +2758,20 @@ int journal_init(struct super_block *sb, const char *j_dev_name,
 				 SB_JOURNAL_1st_RESERVED_BLOCK(sb),
 				 SB_ONDISK_JOURNAL_SIZE(sb),
 				 sb->s_blocksize);
+		goto free_and_return;
+	}
+
+	/*
+	 * Sanity check to see if journal first block is correct.
+	 * If journal first block is invalid it can cause
+	 * zeroing important superblock members.
+	 */
+	if (!SB_ONDISK_JOURNAL_DEVICE(sb) &&
+	    SB_ONDISK_JOURNAL_1st_BLOCK(sb) < SB_JOURNAL_1st_RESERVED_BLOCK(sb)) {
+		reiserfs_warning(sb, "journal-1393",
+				 "journal 1st super block is invalid: 1st reserved block %d, but actual 1st block is %d",
+				 SB_JOURNAL_1st_RESERVED_BLOCK(sb),
+				 SB_ONDISK_JOURNAL_1st_BLOCK(sb));
 		goto free_and_return;
 	}
 

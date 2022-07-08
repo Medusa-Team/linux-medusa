@@ -64,7 +64,6 @@
 #include <asm/xen/hypercall.h>
 #include <asm/xen/interface.h>
 
-#include <asm/pgtable.h>
 #include <asm/sync_bitops.h>
 
 /* External tools reserve first few grant table entries. */
@@ -110,7 +109,7 @@ struct gnttab_ops {
 	void (*unmap_frames)(void);
 	/*
 	 * Introducing a valid entry into the grant table, granting the frame of
-	 * this grant entry to domain for accessing or transfering. Ref
+	 * this grant entry to domain for accessing. Ref
 	 * parameter is reference of this introduced grant entry, domid is id of
 	 * granted domain, frame is the page frame to be granted, and flags is
 	 * status of the grant entry to be updated.
@@ -119,28 +118,16 @@ struct gnttab_ops {
 			     unsigned long frame, unsigned flags);
 	/*
 	 * Stop granting a grant entry to domain for accessing. Ref parameter is
-	 * reference of a grant entry whose grant access will be stopped,
-	 * readonly is not in use in this function. If the grant entry is
-	 * currently mapped for reading or writing, just return failure(==0)
-	 * directly and don't tear down the grant access. Otherwise, stop grant
-	 * access for this entry and return success(==1).
+	 * reference of a grant entry whose grant access will be stopped.
+	 * If the grant entry is currently mapped for reading or writing, just
+	 * return failure(==0) directly and don't tear down the grant access.
+	 * Otherwise, stop grant access for this entry and return success(==1).
 	 */
-	int (*end_foreign_access_ref)(grant_ref_t ref, int readonly);
+	int (*end_foreign_access_ref)(grant_ref_t ref);
 	/*
-	 * Stop granting a grant entry to domain for transfer. Ref parameter is
-	 * reference of a grant entry whose grant transfer will be stopped. If
-	 * tranfer has not started, just reclaim the grant entry and return
-	 * failure(==0). Otherwise, wait for the transfer to complete and then
-	 * return the frame.
+	 * Read the frame number related to a given grant reference.
 	 */
-	unsigned long (*end_foreign_transfer_ref)(grant_ref_t ref);
-	/*
-	 * Query the status of a grant entry. Ref parameter is reference of
-	 * queried grant entry, return value is the status of queried entry.
-	 * Detailed status(writing/reading) can be gotten from the return value
-	 * by bit operations.
-	 */
-	int (*query_foreign_access)(grant_ref_t ref);
+	unsigned long (*read_frame)(grant_ref_t ref);
 };
 
 struct unmap_refs_callback_data {
@@ -234,10 +221,7 @@ static void put_free_entry(grant_ref_t ref)
  * Following applies to gnttab_update_entry_v1 and gnttab_update_entry_v2.
  * Introducing a valid entry into the grant table:
  *  1. Write ent->domid.
- *  2. Write ent->frame:
- *      GTF_permit_access:   Frame to which access is permitted.
- *      GTF_accept_transfer: Pseudo-phys frame slot being filled by new
- *                           frame, or zero if none.
+ *  2. Write ent->frame: Frame to which access is permitted.
  *  3. Write memory barrier (WMB).
  *  4. Write ent->flags, inc. valid type.
  */
@@ -285,23 +269,7 @@ int gnttab_grant_foreign_access(domid_t domid, unsigned long frame,
 }
 EXPORT_SYMBOL_GPL(gnttab_grant_foreign_access);
 
-static int gnttab_query_foreign_access_v1(grant_ref_t ref)
-{
-	return gnttab_shared.v1[ref].flags & (GTF_reading|GTF_writing);
-}
-
-static int gnttab_query_foreign_access_v2(grant_ref_t ref)
-{
-	return grstatus[ref] & (GTF_reading|GTF_writing);
-}
-
-int gnttab_query_foreign_access(grant_ref_t ref)
-{
-	return gnttab_interface->query_foreign_access(ref);
-}
-EXPORT_SYMBOL_GPL(gnttab_query_foreign_access);
-
-static int gnttab_end_foreign_access_ref_v1(grant_ref_t ref, int readonly)
+static int gnttab_end_foreign_access_ref_v1(grant_ref_t ref)
 {
 	u16 flags, nflags;
 	u16 *pflags;
@@ -317,7 +285,7 @@ static int gnttab_end_foreign_access_ref_v1(grant_ref_t ref, int readonly)
 	return 1;
 }
 
-static int gnttab_end_foreign_access_ref_v2(grant_ref_t ref, int readonly)
+static int gnttab_end_foreign_access_ref_v2(grant_ref_t ref)
 {
 	gnttab_shared.v2[ref].hdr.flags = 0;
 	mb();	/* Concurrent access by hypervisor. */
@@ -340,24 +308,33 @@ static int gnttab_end_foreign_access_ref_v2(grant_ref_t ref, int readonly)
 	return 1;
 }
 
-static inline int _gnttab_end_foreign_access_ref(grant_ref_t ref, int readonly)
+static inline int _gnttab_end_foreign_access_ref(grant_ref_t ref)
 {
-	return gnttab_interface->end_foreign_access_ref(ref, readonly);
+	return gnttab_interface->end_foreign_access_ref(ref);
 }
 
-int gnttab_end_foreign_access_ref(grant_ref_t ref, int readonly)
+int gnttab_end_foreign_access_ref(grant_ref_t ref)
 {
-	if (_gnttab_end_foreign_access_ref(ref, readonly))
+	if (_gnttab_end_foreign_access_ref(ref))
 		return 1;
 	pr_warn("WARNING: g.e. %#x still in use!\n", ref);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(gnttab_end_foreign_access_ref);
 
+static unsigned long gnttab_read_frame_v1(grant_ref_t ref)
+{
+	return gnttab_shared.v1[ref].frame;
+}
+
+static unsigned long gnttab_read_frame_v2(grant_ref_t ref)
+{
+	return gnttab_shared.v2[ref].full_page.frame;
+}
+
 struct deferred_entry {
 	struct list_head list;
 	grant_ref_t ref;
-	bool ro;
 	uint16_t warn_delay;
 	struct page *page;
 };
@@ -381,14 +358,11 @@ static void gnttab_handle_deferred(struct timer_list *unused)
 			break;
 		list_del(&entry->list);
 		spin_unlock_irqrestore(&gnttab_list_lock, flags);
-		if (_gnttab_end_foreign_access_ref(entry->ref, entry->ro)) {
+		if (_gnttab_end_foreign_access_ref(entry->ref)) {
 			put_free_entry(entry->ref);
-			if (entry->page) {
-				pr_debug("freeing g.e. %#x (pfn %#lx)\n",
-					 entry->ref, page_to_pfn(entry->page));
-				put_page(entry->page);
-			} else
-				pr_info("freeing g.e. %#x\n", entry->ref);
+			pr_debug("freeing g.e. %#x (pfn %#lx)\n",
+				 entry->ref, page_to_pfn(entry->page));
+			put_page(entry->page);
 			kfree(entry);
 			entry = NULL;
 		} else {
@@ -410,17 +384,24 @@ static void gnttab_handle_deferred(struct timer_list *unused)
 	spin_unlock_irqrestore(&gnttab_list_lock, flags);
 }
 
-static void gnttab_add_deferred(grant_ref_t ref, bool readonly,
-				struct page *page)
+static void gnttab_add_deferred(grant_ref_t ref, struct page *page)
 {
-	struct deferred_entry *entry = kmalloc(sizeof(*entry), GFP_ATOMIC);
+	struct deferred_entry *entry;
+	gfp_t gfp = (in_atomic() || irqs_disabled()) ? GFP_ATOMIC : GFP_KERNEL;
 	const char *what = KERN_WARNING "leaking";
+
+	entry = kmalloc(sizeof(*entry), gfp);
+	if (!page) {
+		unsigned long gfn = gnttab_interface->read_frame(ref);
+
+		page = pfn_to_page(gfn_to_pfn(gfn));
+		get_page(page);
+	}
 
 	if (entry) {
 		unsigned long flags;
 
 		entry->ref = ref;
-		entry->ro = readonly;
 		entry->page = page;
 		entry->warn_delay = 60;
 		spin_lock_irqsave(&gnttab_list_lock, flags);
@@ -436,114 +417,26 @@ static void gnttab_add_deferred(grant_ref_t ref, bool readonly,
 	       what, ref, page ? page_to_pfn(page) : -1);
 }
 
-void gnttab_end_foreign_access(grant_ref_t ref, int readonly,
-			       unsigned long page)
+int gnttab_try_end_foreign_access(grant_ref_t ref)
 {
-	if (gnttab_end_foreign_access_ref(ref, readonly)) {
+	int ret = _gnttab_end_foreign_access_ref(ref);
+
+	if (ret)
 		put_free_entry(ref);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(gnttab_try_end_foreign_access);
+
+void gnttab_end_foreign_access(grant_ref_t ref, unsigned long page)
+{
+	if (gnttab_try_end_foreign_access(ref)) {
 		if (page != 0)
 			put_page(virt_to_page(page));
 	} else
-		gnttab_add_deferred(ref, readonly,
-				    page ? virt_to_page(page) : NULL);
+		gnttab_add_deferred(ref, page ? virt_to_page(page) : NULL);
 }
 EXPORT_SYMBOL_GPL(gnttab_end_foreign_access);
-
-int gnttab_grant_foreign_transfer(domid_t domid, unsigned long pfn)
-{
-	int ref;
-
-	ref = get_free_entries(1);
-	if (unlikely(ref < 0))
-		return -ENOSPC;
-	gnttab_grant_foreign_transfer_ref(ref, domid, pfn);
-
-	return ref;
-}
-EXPORT_SYMBOL_GPL(gnttab_grant_foreign_transfer);
-
-void gnttab_grant_foreign_transfer_ref(grant_ref_t ref, domid_t domid,
-				       unsigned long pfn)
-{
-	gnttab_interface->update_entry(ref, domid, pfn, GTF_accept_transfer);
-}
-EXPORT_SYMBOL_GPL(gnttab_grant_foreign_transfer_ref);
-
-static unsigned long gnttab_end_foreign_transfer_ref_v1(grant_ref_t ref)
-{
-	unsigned long frame;
-	u16           flags;
-	u16          *pflags;
-
-	pflags = &gnttab_shared.v1[ref].flags;
-
-	/*
-	 * If a transfer is not even yet started, try to reclaim the grant
-	 * reference and return failure (== 0).
-	 */
-	while (!((flags = *pflags) & GTF_transfer_committed)) {
-		if (sync_cmpxchg(pflags, flags, 0) == flags)
-			return 0;
-		cpu_relax();
-	}
-
-	/* If a transfer is in progress then wait until it is completed. */
-	while (!(flags & GTF_transfer_completed)) {
-		flags = *pflags;
-		cpu_relax();
-	}
-
-	rmb();	/* Read the frame number /after/ reading completion status. */
-	frame = gnttab_shared.v1[ref].frame;
-	BUG_ON(frame == 0);
-
-	return frame;
-}
-
-static unsigned long gnttab_end_foreign_transfer_ref_v2(grant_ref_t ref)
-{
-	unsigned long frame;
-	u16           flags;
-	u16          *pflags;
-
-	pflags = &gnttab_shared.v2[ref].hdr.flags;
-
-	/*
-	 * If a transfer is not even yet started, try to reclaim the grant
-	 * reference and return failure (== 0).
-	 */
-	while (!((flags = *pflags) & GTF_transfer_committed)) {
-		if (sync_cmpxchg(pflags, flags, 0) == flags)
-			return 0;
-		cpu_relax();
-	}
-
-	/* If a transfer is in progress then wait until it is completed. */
-	while (!(flags & GTF_transfer_completed)) {
-		flags = *pflags;
-		cpu_relax();
-	}
-
-	rmb();  /* Read the frame number /after/ reading completion status. */
-	frame = gnttab_shared.v2[ref].full_page.frame;
-	BUG_ON(frame == 0);
-
-	return frame;
-}
-
-unsigned long gnttab_end_foreign_transfer_ref(grant_ref_t ref)
-{
-	return gnttab_interface->end_foreign_transfer_ref(ref);
-}
-EXPORT_SYMBOL_GPL(gnttab_end_foreign_transfer_ref);
-
-unsigned long gnttab_end_foreign_transfer(grant_ref_t ref)
-{
-	unsigned long frame = gnttab_end_foreign_transfer_ref(ref);
-	put_free_entry(ref);
-	return frame;
-}
-EXPORT_SYMBOL_GPL(gnttab_end_foreign_transfer);
 
 void gnttab_free_grant_reference(grant_ref_t ref)
 {
@@ -802,7 +695,7 @@ int gnttab_alloc_pages(int nr_pages, struct page **pages)
 {
 	int ret;
 
-	ret = alloc_xenballooned_pages(nr_pages, pages);
+	ret = xen_alloc_unpopulated_pages(nr_pages, pages);
 	if (ret < 0)
 		return ret;
 
@@ -813,6 +706,129 @@ int gnttab_alloc_pages(int nr_pages, struct page **pages)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(gnttab_alloc_pages);
+
+#ifdef CONFIG_XEN_UNPOPULATED_ALLOC
+static inline void cache_init(struct gnttab_page_cache *cache)
+{
+	cache->pages = NULL;
+}
+
+static inline bool cache_empty(struct gnttab_page_cache *cache)
+{
+	return !cache->pages;
+}
+
+static inline struct page *cache_deq(struct gnttab_page_cache *cache)
+{
+	struct page *page;
+
+	page = cache->pages;
+	cache->pages = page->zone_device_data;
+
+	return page;
+}
+
+static inline void cache_enq(struct gnttab_page_cache *cache, struct page *page)
+{
+	page->zone_device_data = cache->pages;
+	cache->pages = page;
+}
+#else
+static inline void cache_init(struct gnttab_page_cache *cache)
+{
+	INIT_LIST_HEAD(&cache->pages);
+}
+
+static inline bool cache_empty(struct gnttab_page_cache *cache)
+{
+	return list_empty(&cache->pages);
+}
+
+static inline struct page *cache_deq(struct gnttab_page_cache *cache)
+{
+	struct page *page;
+
+	page = list_first_entry(&cache->pages, struct page, lru);
+	list_del(&page->lru);
+
+	return page;
+}
+
+static inline void cache_enq(struct gnttab_page_cache *cache, struct page *page)
+{
+	list_add(&page->lru, &cache->pages);
+}
+#endif
+
+void gnttab_page_cache_init(struct gnttab_page_cache *cache)
+{
+	spin_lock_init(&cache->lock);
+	cache_init(cache);
+	cache->num_pages = 0;
+}
+EXPORT_SYMBOL_GPL(gnttab_page_cache_init);
+
+int gnttab_page_cache_get(struct gnttab_page_cache *cache, struct page **page)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&cache->lock, flags);
+
+	if (cache_empty(cache)) {
+		spin_unlock_irqrestore(&cache->lock, flags);
+		return gnttab_alloc_pages(1, page);
+	}
+
+	page[0] = cache_deq(cache);
+	cache->num_pages--;
+
+	spin_unlock_irqrestore(&cache->lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(gnttab_page_cache_get);
+
+void gnttab_page_cache_put(struct gnttab_page_cache *cache, struct page **page,
+			   unsigned int num)
+{
+	unsigned long flags;
+	unsigned int i;
+
+	spin_lock_irqsave(&cache->lock, flags);
+
+	for (i = 0; i < num; i++)
+		cache_enq(cache, page[i]);
+	cache->num_pages += num;
+
+	spin_unlock_irqrestore(&cache->lock, flags);
+}
+EXPORT_SYMBOL_GPL(gnttab_page_cache_put);
+
+void gnttab_page_cache_shrink(struct gnttab_page_cache *cache, unsigned int num)
+{
+	struct page *page[10];
+	unsigned int i = 0;
+	unsigned long flags;
+
+	spin_lock_irqsave(&cache->lock, flags);
+
+	while (cache->num_pages > num) {
+		page[i] = cache_deq(cache);
+		cache->num_pages--;
+		if (++i == ARRAY_SIZE(page)) {
+			spin_unlock_irqrestore(&cache->lock, flags);
+			gnttab_free_pages(i, page);
+			i = 0;
+			spin_lock_irqsave(&cache->lock, flags);
+		}
+	}
+
+	spin_unlock_irqrestore(&cache->lock, flags);
+
+	if (i != 0)
+		gnttab_free_pages(i, page);
+}
+EXPORT_SYMBOL_GPL(gnttab_page_cache_shrink);
 
 void gnttab_pages_clear_private(int nr_pages, struct page **pages)
 {
@@ -837,7 +853,7 @@ EXPORT_SYMBOL_GPL(gnttab_pages_clear_private);
 void gnttab_free_pages(int nr_pages, struct page **pages)
 {
 	gnttab_pages_clear_private(nr_pages, pages);
-	free_xenballooned_pages(nr_pages, pages);
+	xen_free_unpopulated_pages(nr_pages, pages);
 }
 EXPORT_SYMBOL_GPL(gnttab_free_pages);
 
@@ -1294,8 +1310,7 @@ static const struct gnttab_ops gnttab_v1_ops = {
 	.unmap_frames			= gnttab_unmap_frames_v1,
 	.update_entry			= gnttab_update_entry_v1,
 	.end_foreign_access_ref		= gnttab_end_foreign_access_ref_v1,
-	.end_foreign_transfer_ref	= gnttab_end_foreign_transfer_ref_v1,
-	.query_foreign_access		= gnttab_query_foreign_access_v1,
+	.read_frame			= gnttab_read_frame_v1,
 };
 
 static const struct gnttab_ops gnttab_v2_ops = {
@@ -1306,8 +1321,7 @@ static const struct gnttab_ops gnttab_v2_ops = {
 	.unmap_frames			= gnttab_unmap_frames_v2,
 	.update_entry			= gnttab_update_entry_v2,
 	.end_foreign_access_ref		= gnttab_end_foreign_access_ref_v2,
-	.end_foreign_transfer_ref	= gnttab_end_foreign_transfer_ref_v2,
-	.query_foreign_access		= gnttab_query_foreign_access_v2,
+	.read_frame			= gnttab_read_frame_v2,
 };
 
 static bool gnttab_need_v2(void)

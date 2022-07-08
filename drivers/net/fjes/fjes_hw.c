@@ -40,7 +40,7 @@ static u8 *fjes_hw_iomap(struct fjes_hw *hw)
 		return NULL;
 	}
 
-	base = (u8 *)ioremap_nocache(hw->hw_res.start, hw->hw_res.size);
+	base = (u8 *)ioremap(hw->hw_res.start, hw->hw_res.size);
 
 	return base;
 }
@@ -137,7 +137,8 @@ static void fjes_hw_free_epbuf(struct epbuf_handler *epbh)
 	epbh->ring = NULL;
 }
 
-void fjes_hw_setup_epbuf(struct epbuf_handler *epbh, u8 *mac_addr, u32 mtu)
+void fjes_hw_setup_epbuf(struct epbuf_handler *epbh, const u8 *mac_addr,
+			 u32 mtu)
 {
 	union ep_buffer_info *info = epbh->info;
 	u16 vlan_id[EP_BUFFER_SUPPORT_VLAN_MAX];

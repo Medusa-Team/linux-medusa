@@ -7,6 +7,14 @@ directory. These are intended to be small tests to exercise individual code
 paths in the kernel. Tests are intended to be run after building, installing
 and booting a kernel.
 
+Kselftest from mainline can be run on older stable kernels. Running tests
+from mainline offers the best coverage. Several test rings run mainline
+kselftest suite on stable releases. The reason is that when a new test
+gets added to test existing code to regression test a bug, we should be
+able to run that test on an older kernel. Hence, it is important to keep
+code that can still test an older kernel and make sure it skips the test
+gracefully on newer releases.
+
 You can find additional information on Kselftest framework, how to
 write new tests using the framework on Kselftest wiki:
 
@@ -125,31 +133,63 @@ Note that some tests will require root privileges.
 Install selftests
 =================
 
-You can use the kselftest_install.sh tool to install selftests in the
-default location, which is tools/testing/selftests/kselftest, or in a
-user specified location.
+You can use the "install" target of "make" (which calls the `kselftest_install.sh`
+tool) to install selftests in the default location (`tools/testing/selftests/kselftest_install`),
+or in a user specified location via the `INSTALL_PATH` "make" variable.
 
 To install selftests in default location::
 
-   $ cd tools/testing/selftests
-   $ ./kselftest_install.sh
+   $ make -C tools/testing/selftests install
 
 To install selftests in a user specified location::
 
-   $ cd tools/testing/selftests
-   $ ./kselftest_install.sh install_dir
+   $ make -C tools/testing/selftests install INSTALL_PATH=/some/other/path
 
 Running installed selftests
 ===========================
 
-Kselftest install as well as the Kselftest tarball provide a script
-named "run_kselftest.sh" to run the tests.
+Found in the install directory, as well as in the Kselftest tarball,
+is a script named `run_kselftest.sh` to run the tests.
 
 You can simply do the following to run the installed Kselftests. Please
 note some tests will require root privileges::
 
-   $ cd kselftest
+   $ cd kselftest_install
    $ ./run_kselftest.sh
+
+To see the list of available tests, the `-l` option can be used::
+
+   $ ./run_kselftest.sh -l
+
+The `-c` option can be used to run all the tests from a test collection, or
+the `-t` option for specific single tests. Either can be used multiple times::
+
+   $ ./run_kselftest.sh -c bpf -c seccomp -t timers:posix_timers -t timer:nanosleep
+
+For other features see the script usage output, seen with the `-h` option.
+
+Packaging selftests
+===================
+
+In some cases packaging is desired, such as when tests need to run on a
+different system. To package selftests, run::
+
+   $ make -C tools/testing/selftests gen_tar
+
+This generates a tarball in the `INSTALL_PATH/kselftest-packages` directory. By
+default, `.gz` format is used. The tar compression format can be overridden by
+specifying a `FORMAT` make variable. Any value recognized by `tar's auto-compress`_
+option is supported, such as::
+
+    $ make -C tools/testing/selftests gen_tar FORMAT=.xz
+
+`make gen_tar` invokes `make install` so you can use it to package a subset of
+tests by using variables specified in `Running a subset of selftests`_
+section::
+
+    $ make -C tools/testing/selftests gen_tar TARGETS="bpf" FORMAT=.xz
+
+.. _tar's auto-compress: https://www.gnu.org/software/tar/manual/html_node/gzip.html#auto_002dcompress
 
 Contributing new tests
 ======================
@@ -207,8 +247,8 @@ using a shell script test runner.  ``kselftest/module.sh`` is designed
 to facilitate this process.  There is also a header file provided to
 assist writing kernel modules that are for use with kselftest:
 
-- ``tools/testing/kselftest/kselftest_module.h``
-- ``tools/testing/kselftest/kselftest/module.sh``
+- ``tools/testing/selftests/kselftest_module.h``
+- ``tools/testing/selftests/kselftest/module.sh``
 
 How to use
 ----------
@@ -301,7 +341,8 @@ Helpers
 
 .. kernel-doc:: tools/testing/selftests/kselftest_harness.h
     :functions: TH_LOG TEST TEST_SIGNAL FIXTURE FIXTURE_DATA FIXTURE_SETUP
-                FIXTURE_TEARDOWN TEST_F TEST_HARNESS_MAIN
+                FIXTURE_TEARDOWN TEST_F TEST_HARNESS_MAIN FIXTURE_VARIANT
+                FIXTURE_VARIANT_ADD
 
 Operators
 ---------

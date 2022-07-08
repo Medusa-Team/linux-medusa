@@ -62,7 +62,6 @@
 
 #define SKL_FLIP_EVENT(pipe, plane) (PRIMARY_A_FLIP_DONE + (plane) * 3 + (pipe))
 
-#define PLANE_CTL_ASYNC_FLIP		(1 << 9)
 #define REG50080_FLIP_TYPE_MASK	0x3
 #define REG50080_FLIP_TYPE_ASYNC	0x1
 
@@ -94,10 +93,15 @@
 #define GFX_MODE_BIT_SET_IN_MASK(val, bit) \
 		((((bit) & 0xffff0000) == 0) && !!((val) & (((bit) << 16))))
 
+#define IS_MASKED_BITS_ENABLED(_val, _b) \
+		(((_val) & _MASKED_BIT_ENABLE(_b)) == _MASKED_BIT_ENABLE(_b))
+#define IS_MASKED_BITS_DISABLED(_val, _b) \
+		((_val) & _MASKED_BIT_DISABLE(_b))
+
 #define FORCEWAKE_RENDER_GEN9_REG 0xa278
 #define FORCEWAKE_ACK_RENDER_GEN9_REG 0x0D84
-#define FORCEWAKE_BLITTER_GEN9_REG 0xa188
-#define FORCEWAKE_ACK_BLITTER_GEN9_REG 0x130044
+#define FORCEWAKE_GT_GEN9_REG 0xa188
+#define FORCEWAKE_ACK_GT_GEN9_REG 0x130044
 #define FORCEWAKE_MEDIA_GEN9_REG 0xa270
 #define FORCEWAKE_ACK_MEDIA_GEN9_REG 0x0D88
 #define FORCEWAKE_ACK_HSW_REG 0x130044
@@ -128,4 +132,6 @@
 #define RING_GFX_MODE(base)	_MMIO((base) + 0x29c)
 #define VF_GUARDBAND		_MMIO(0x83a4)
 
+
+#define BCS_TILE_REGISTER_VAL_OFFSET (0x43*4)
 #endif

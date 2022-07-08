@@ -14,6 +14,7 @@
 #include <linux/platform_device.h>
 #include <linux/uaccess.h>
 #include <linux/slab.h>
+#include <linux/i2c.h>
 #include <linux/delay.h>
 #include <linux/mfd/da9063/registers.h>
 #include <linux/mfd/da9063/core.h>
@@ -46,15 +47,16 @@ static unsigned int da9063_wdt_timeout_to_sel(unsigned int secs)
 }
 
 /*
- * Return 0 if watchdog is disabled, else non zero.
+ * Read the currently active timeout.
+ * Zero means the watchdog is disabled.
  */
-static unsigned int da9063_wdt_is_running(struct da9063 *da9063)
+static unsigned int da9063_wdt_read_timeout(struct da9063 *da9063)
 {
 	unsigned int val;
 
 	regmap_read(da9063->regmap, DA9063_REG_CONTROL_D, &val);
 
-	return val & DA9063_TWDSCALE_MASK;
+	return wdt_timeout[val & DA9063_TWDSCALE_MASK];
 }
 
 static int da9063_wdt_disable_timer(struct da9063 *da9063)
@@ -120,6 +122,13 @@ static int da9063_wdt_ping(struct watchdog_device *wdd)
 	struct da9063 *da9063 = watchdog_get_drvdata(wdd);
 	int ret;
 
+	/*
+	 * Prevent pings from occurring late in system poweroff/reboot sequence
+	 * and possibly locking out restart handler from accessing i2c bus.
+	 */
+	if (system_state > SYSTEM_RUNNING)
+		return 0;
+
 	ret = regmap_write(da9063->regmap, DA9063_REG_CONTROL_F,
 			   DA9063_WATCHDOG);
 	if (ret)
@@ -161,13 +170,18 @@ static int da9063_wdt_restart(struct watchdog_device *wdd, unsigned long action,
 			      void *data)
 {
 	struct da9063 *da9063 = watchdog_get_drvdata(wdd);
+	struct i2c_client *client = to_i2c_client(da9063->dev);
 	int ret;
 
-	ret = regmap_write(da9063->regmap, DA9063_REG_CONTROL_F,
-			   DA9063_SHUTDOWN);
-	if (ret)
+	/* Don't use regmap because it is not atomic safe */
+	ret = i2c_smbus_write_byte_data(client, DA9063_REG_CONTROL_F,
+					DA9063_SHUTDOWN);
+	if (ret < 0)
 		dev_alert(da9063->dev, "Failed to shutdown (err = %d)\n",
 			  ret);
+
+	/* wait for reset to assert... */
+	mdelay(500);
 
 	return ret;
 }
@@ -191,6 +205,7 @@ static int da9063_wdt_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct da9063 *da9063;
 	struct watchdog_device *wdd;
+	unsigned int timeout;
 
 	if (!dev->parent)
 		return -EINVAL;
@@ -214,13 +229,19 @@ static int da9063_wdt_probe(struct platform_device *pdev)
 	watchdog_set_restart_priority(wdd, 128);
 	watchdog_set_drvdata(wdd, da9063);
 
-	/* Set default timeout, maybe override it with DT value, scale it */
 	wdd->timeout = DA9063_WDG_TIMEOUT;
+
+	/* Use pre-configured timeout if watchdog is already running. */
+	timeout = da9063_wdt_read_timeout(da9063);
+	if (timeout)
+		wdd->timeout = timeout;
+
+	/* Set timeout, maybe override it with DT value, scale it */
 	watchdog_init_timeout(wdd, 0, dev);
 	da9063_wdt_set_timeout(wdd, wdd->timeout);
 
-	/* Change the timeout to the default value if the watchdog is running */
-	if (da9063_wdt_is_running(da9063)) {
+	/* Update timeout if the watchdog is already running. */
+	if (timeout) {
 		da9063_wdt_update_timeout(da9063, wdd->timeout);
 		set_bit(WDOG_HW_RUNNING, &wdd->status);
 	}

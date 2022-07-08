@@ -333,7 +333,7 @@ static int mv88e6xxx_g1_atu_move(struct mv88e6xxx_chip *chip, u16 fid,
 	mask = chip->info->atu_move_port_mask;
 	shift = bitmap_weight(&mask, 16);
 
-	entry.state = 0xf, /* Full EntryState means Move */
+	entry.state = 0xf; /* Full EntryState means Move */
 	entry.portvec = from_port & mask;
 	entry.portvec |= (to_port & mask) << shift;
 
@@ -425,9 +425,12 @@ int mv88e6xxx_g1_atu_prob_irq_setup(struct mv88e6xxx_chip *chip)
 	if (chip->atu_prob_irq < 0)
 		return chip->atu_prob_irq;
 
+	snprintf(chip->atu_prob_irq_name, sizeof(chip->atu_prob_irq_name),
+		 "mv88e6xxx-%s-g1-atu-prob", dev_name(chip->dev));
+
 	err = request_threaded_irq(chip->atu_prob_irq, NULL,
 				   mv88e6xxx_g1_atu_prob_irq_thread_fn,
-				   IRQF_ONESHOT, "mv88e6xxx-g1-atu-prob",
+				   IRQF_ONESHOT, chip->atu_prob_irq_name,
 				   chip);
 	if (err)
 		irq_dispose_mapping(chip->atu_prob_irq);

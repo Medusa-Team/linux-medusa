@@ -343,10 +343,11 @@ static int rose_del_node(struct rose_route_struct *rose_route,
 				case 0:
 					rose_node->neighbour[0] =
 						rose_node->neighbour[1];
-					/* fall through */
+					fallthrough;
 				case 1:
 					rose_node->neighbour[1] =
 						rose_node->neighbour[2];
+					break;
 				case 2:
 					break;
 				}
@@ -400,7 +401,7 @@ void rose_add_loopback_neigh(void)
 /*
  *	Add a loopback node.
  */
-int rose_add_loopback_node(rose_address *address)
+int rose_add_loopback_node(const rose_address *address)
 {
 	struct rose_node *rose_node;
 	int err = 0;
@@ -445,7 +446,7 @@ out:
 /*
  *	Delete a loopback node.
  */
-void rose_del_loopback_node(rose_address *address)
+void rose_del_loopback_node(const rose_address *address)
 {
 	struct rose_node *rose_node;
 
@@ -505,9 +506,10 @@ void rose_rt_device_down(struct net_device *dev)
 				switch (i) {
 				case 0:
 					t->neighbour[0] = t->neighbour[1];
-					/* fall through */
+					fallthrough;
 				case 1:
 					t->neighbour[1] = t->neighbour[2];
+					break;
 				case 2:
 					break;
 				}
@@ -627,7 +629,8 @@ struct net_device *rose_dev_get(rose_address *addr)
 
 	rcu_read_lock();
 	for_each_netdev_rcu(&init_net, dev) {
-		if ((dev->flags & IFF_UP) && dev->type == ARPHRD_ROSE && rosecmp(addr, (rose_address *)dev->dev_addr) == 0) {
+		if ((dev->flags & IFF_UP) && dev->type == ARPHRD_ROSE &&
+		    rosecmp(addr, (const rose_address *)dev->dev_addr) == 0) {
 			dev_hold(dev);
 			goto out;
 		}
@@ -644,7 +647,8 @@ static int rose_dev_exists(rose_address *addr)
 
 	rcu_read_lock();
 	for_each_netdev_rcu(&init_net, dev) {
-		if ((dev->flags & IFF_UP) && dev->type == ARPHRD_ROSE && rosecmp(addr, (rose_address *)dev->dev_addr) == 0)
+		if ((dev->flags & IFF_UP) && dev->type == ARPHRD_ROSE &&
+		    rosecmp(addr, (const rose_address *)dev->dev_addr) == 0)
 			goto out;
 	}
 	dev = NULL;
@@ -696,7 +700,6 @@ struct rose_neigh *rose_get_neigh(rose_address *addr, unsigned char *cause,
 				for (i = 0; i < node->count; i++) {
 					if (!rose_ftimer_running(node->neighbour[i])) {
 						res = node->neighbour[i];
-						failed = 0;
 						goto out;
 					}
 					failed = 1;

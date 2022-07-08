@@ -8,8 +8,12 @@
  * See Documentation/ABI/testing/sysfs-platform-wilco-ec for more information.
  */
 
+#include <linux/device.h>
+#include <linux/kernel.h>
 #include <linux/platform_data/wilco-ec.h>
+#include <linux/string.h>
 #include <linux/sysfs.h>
+#include <linux/types.h>
 
 #define CMD_KB_CMOS			0x7C
 #define SUB_CMD_KB_CMOS_AUTO_ON		0x03
@@ -232,7 +236,7 @@ static struct attribute *wilco_dev_attrs[] = {
 	NULL,
 };
 
-static struct attribute_group wilco_dev_attr_group = {
+static const struct attribute_group wilco_dev_attr_group = {
 	.attrs = wilco_dev_attrs,
 };
 

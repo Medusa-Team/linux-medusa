@@ -67,11 +67,6 @@ __HEAD
 SYM_CODE_START(startup_32)
 	movl pa(initial_stack),%ecx
 	
-	/* test KEEP_SEGMENTS flag to see if the bootloader is asking
-		us to not reload segments */
-	testb $KEEP_SEGMENTS, BP_loadflags(%esi)
-	jnz 2f
-
 /*
  * Set segments to known values.
  */
@@ -82,7 +77,6 @@ SYM_CODE_START(startup_32)
 	movl %eax,%fs
 	movl %eax,%gs
 	movl %eax,%ss
-2:
 	leal -__PAGE_OFFSET(%ecx),%esp
 
 /*
@@ -140,38 +134,7 @@ SYM_CODE_START(startup_32)
 	movl %eax,pa(initial_page_table+0xffc)
 #endif
 
-#ifdef CONFIG_PARAVIRT
-	/* This is can only trip for a broken bootloader... */
-	cmpw $0x207, pa(boot_params + BP_version)
-	jb .Ldefault_entry
-
-	/* Paravirt-compatible boot parameters.  Look to see what architecture
-		we're booting under. */
-	movl pa(boot_params + BP_hardware_subarch), %eax
-	cmpl $num_subarch_entries, %eax
-	jae .Lbad_subarch
-
-	movl pa(subarch_entries)(,%eax,4), %eax
-	subl $__PAGE_OFFSET, %eax
-	jmp *%eax
-
-.Lbad_subarch:
-SYM_INNER_LABEL_ALIGN(xen_entry, SYM_L_WEAK)
-	/* Unknown implementation; there's really
-	   nothing we can do at this point. */
-	ud2a
-
-	__INITDATA
-
-subarch_entries:
-	.long .Ldefault_entry		/* normal x86/PC */
-	.long xen_entry			/* Xen hypervisor */
-	.long .Ldefault_entry		/* Moorestown MID */
-num_subarch_entries = (. - subarch_entries) / 4
-.previous
-#else
 	jmp .Ldefault_entry
-#endif /* CONFIG_PARAVIRT */
 SYM_CODE_END(startup_32)
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -355,8 +318,8 @@ SYM_FUNC_START(startup_32_smp)
 	movl $(__KERNEL_PERCPU), %eax
 	movl %eax,%fs			# set this cpu's percpu
 
-	movl $(__KERNEL_STACK_CANARY),%eax
-	movl %eax,%gs
+	xorl %eax,%eax
+	movl %eax,%gs			# clear possible garbage in %gs
 
 	xorl %eax,%eax			# Clear LDT
 	lldt %ax
@@ -376,22 +339,8 @@ SYM_FUNC_END(startup_32_smp)
  */
 __INIT
 setup_once:
-#ifdef CONFIG_STACKPROTECTOR
-	/*
-	 * Configure the stack canary. The linker can't handle this by
-	 * relocation.  Manually set base address in stack canary
-	 * segment descriptor.
-	 */
-	movl $gdt_page,%eax
-	movl $stack_canary,%ecx
-	movw %cx, 8 * GDT_ENTRY_STACK_CANARY + 2(%eax)
-	shrl $16, %ecx
-	movb %cl, 8 * GDT_ENTRY_STACK_CANARY + 4(%eax)
-	movb %ch, 8 * GDT_ENTRY_STACK_CANARY + 7(%eax)
-#endif
-
 	andl $0,setup_once_ref	/* Once is enough, thanks */
-	ret
+	RET
 
 SYM_FUNC_START(early_idt_handler_array)
 	# 36(%esp) %eflags
@@ -483,7 +432,7 @@ SYM_FUNC_START(early_ignore_irq)
 	pushl 32(%esp)
 	pushl 40(%esp)
 	pushl $int_msg
-	call printk
+	call _printk
 
 	call dump_stack
 

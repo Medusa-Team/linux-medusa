@@ -201,10 +201,7 @@ extern const struct omap_clkctrl_data am3_clkctrl_data[];
 extern const struct omap_clkctrl_data am3_clkctrl_compat_data[];
 extern struct ti_dt_clk am33xx_compat_clks[];
 extern const struct omap_clkctrl_data am4_clkctrl_data[];
-extern const struct omap_clkctrl_data am4_clkctrl_compat_data[];
-extern struct ti_dt_clk am43xx_compat_clks[];
 extern const struct omap_clkctrl_data am438x_clkctrl_data[];
-extern const struct omap_clkctrl_data am438x_clkctrl_compat_data[];
 extern const struct omap_clkctrl_data dm814_clkctrl_data[];
 extern const struct omap_clkctrl_data dm816_clkctrl_data[];
 
@@ -214,6 +211,7 @@ struct clk *ti_clk_register(struct device *dev, struct clk_hw *hw,
 			    const char *con);
 struct clk *ti_clk_register_omap_hw(struct device *dev, struct clk_hw *hw,
 				    const char *con);
+const char *ti_dt_clk_name(struct device_node *np);
 int ti_clk_add_alias(struct device *dev, struct clk *clk, const char *con);
 void ti_clk_add_aliases(void);
 
@@ -253,7 +251,7 @@ extern const struct clk_ops omap_gate_clk_ops;
 
 extern struct ti_clk_features ti_clk_features;
 
-void omap2_init_clk_clkdm(struct clk_hw *hw);
+int omap2_init_clk_clkdm(struct clk_hw *hw);
 int omap2_clkops_enable_clkdm(struct clk_hw *hw);
 void omap2_clkops_disable_clkdm(struct clk_hw *hw);
 

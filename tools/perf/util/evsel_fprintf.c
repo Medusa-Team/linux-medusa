@@ -11,6 +11,7 @@
 #include "strlist.h"
 #include "symbol.h"
 #include "srcline.h"
+#include "dso.h"
 
 static int comma_fprintf(FILE *fp, bool *first, const char *fmt, ...)
 {
@@ -35,8 +36,7 @@ static int __print_attr__fprintf(FILE *fp, const char *name, const char *val, vo
 	return comma_fprintf(fp, (bool *)priv, " %s: %s", name, val);
 }
 
-int perf_evsel__fprintf(struct evsel *evsel,
-			struct perf_attr_details *details, FILE *fp)
+int evsel__fprintf(struct evsel *evsel, struct perf_attr_details *details, FILE *fp)
 {
 	bool first = true;
 	int printed = 0;
@@ -44,22 +44,22 @@ int perf_evsel__fprintf(struct evsel *evsel,
 	if (details->event_group) {
 		struct evsel *pos;
 
-		if (!perf_evsel__is_group_leader(evsel))
+		if (!evsel__is_group_leader(evsel))
 			return 0;
 
 		if (evsel->core.nr_members > 1)
 			printed += fprintf(fp, "%s{", evsel->group_name ?: "");
 
-		printed += fprintf(fp, "%s", perf_evsel__name(evsel));
+		printed += fprintf(fp, "%s", evsel__name(evsel));
 		for_each_group_member(pos, evsel)
-			printed += fprintf(fp, ",%s", perf_evsel__name(pos));
+			printed += fprintf(fp, ",%s", evsel__name(pos));
 
 		if (evsel->core.nr_members > 1)
 			printed += fprintf(fp, "}");
 		goto out;
 	}
 
-	printed += fprintf(fp, "%s", perf_evsel__name(evsel));
+	printed += fprintf(fp, "%s", evsel__name(evsel));
 
 	if (details->verbose) {
 		printed += perf_event_attr__fprintf(fp, &evsel->core.attr,
@@ -101,6 +101,7 @@ out:
 	return ++printed;
 }
 
+#ifndef PYTHON_PERF
 int sample__fprintf_callchain(struct perf_sample *sample, int left_alignment,
 			      unsigned int print_opts, struct callchain_cursor *cursor,
 			      struct strlist *bt_stop_list, FILE *fp)
@@ -144,11 +145,16 @@ int sample__fprintf_callchain(struct perf_sample *sample, int left_alignment,
 			if (print_arrow && !first)
 				printed += fprintf(fp, " <-");
 
-			if (print_ip)
-				printed += fprintf(fp, "%c%16" PRIx64, s, node->ip);
-
 			if (map)
 				addr = map->map_ip(map, node->ip);
+
+			if (print_ip) {
+				/* Show binary offset for userspace addr */
+				if (map && !map->dso->kernel)
+					printed += fprintf(fp, "%c%16" PRIx64, s, addr);
+				else
+					printed += fprintf(fp, "%c%16" PRIx64, s, node->ip);
+			}
 
 			if (print_sym) {
 				printed += fprintf(fp, " ");
@@ -240,3 +246,4 @@ int sample__fprintf_sym(struct perf_sample *sample, struct addr_location *al,
 
 	return printed;
 }
+#endif /* PYTHON_PERF */

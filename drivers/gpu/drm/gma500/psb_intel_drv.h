@@ -12,7 +12,7 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_encoder.h>
 #include <drm/drm_probe_helper.h>
-#include <linux/gpio.h>
+#include <drm/drm_vblank.h>
 #include "gma_display.h"
 
 /*
@@ -54,25 +54,6 @@
 #define INTEL_OUTPUT_MIPI2 8
 #define INTEL_OUTPUT_DISPLAYPORT 9
 #define INTEL_OUTPUT_EDP 10
-
-#define INTEL_MODE_PIXEL_MULTIPLIER_SHIFT (0x0)
-#define INTEL_MODE_PIXEL_MULTIPLIER_MASK (0xf << INTEL_MODE_PIXEL_MULTIPLIER_SHIFT)
-
-static inline void
-psb_intel_mode_set_pixel_multiplier(struct drm_display_mode *mode,
-				int multiplier)
-{
-	mode->clock *= multiplier;
-	mode->private_flags |= multiplier;
-}
-
-static inline int
-psb_intel_mode_get_pixel_multiplier(const struct drm_display_mode *mode)
-{
-	return (mode->private_flags & INTEL_MODE_PIXEL_MULTIPLIER_MASK)
-	       >> INTEL_MODE_PIXEL_MULTIPLIER_SHIFT;
-}
-
 
 /*
  * Hold information useally put on the device driver privates here,
@@ -159,7 +140,7 @@ struct gma_crtc {
 	int pipe;
 	int plane;
 	uint32_t cursor_addr;
-	struct gtt_range *cursor_gt;
+	struct psb_gem_object *cursor_pobj;
 	u8 lut_adj[256];
 	struct psb_intel_framebuffer *fbdev_fb;
 	/* a mode_set for fbdev users on this crtc */
@@ -182,6 +163,8 @@ struct gma_crtc {
 	struct psb_intel_crtc_state *crtc_state;
 
 	const struct gma_clock_funcs *clock_funcs;
+
+	struct drm_pending_vblank_event *page_flip_event;
 };
 
 #define to_gma_crtc(x)	\
@@ -249,7 +232,6 @@ extern int psb_intel_lvds_set_property(struct drm_connector *connector,
 					struct drm_property *property,
 					uint64_t value);
 extern void psb_intel_lvds_destroy(struct drm_connector *connector);
-extern const struct drm_encoder_funcs psb_intel_lvds_enc_funcs;
 
 /* intel_gmbus.c */
 extern void gma_intel_i2c_reset(struct drm_device *dev);

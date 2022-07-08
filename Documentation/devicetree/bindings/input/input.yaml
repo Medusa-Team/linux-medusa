@@ -18,11 +18,10 @@ properties:
     description:
       Specifies an array of numeric keycode values to be used for reporting
       button presses.
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint32-array
-      - items:
-          minimum: 0
-          maximum: 0xff
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    items:
+      minimum: 0
+      maximum: 0xff
 
   poll-interval:
     description: Poll interval time in milliseconds.
@@ -33,4 +32,11 @@ properties:
       Duration in seconds which the key should be kept pressed for device to
       power off automatically. Device with key pressed shutdown feature can
       specify this property.
-    $ref: /schemas/types.yaml#/definitions/uint32
+
+  reset-time-sec:
+    description:
+      Duration in seconds which the key should be kept pressed for device to
+      reset automatically. Device with key pressed reset feature can specify
+      this property.
+
+additionalProperties: true

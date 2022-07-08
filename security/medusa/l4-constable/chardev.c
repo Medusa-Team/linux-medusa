@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
+
 /*
  * L4 authorization server for Medusa DS9
  * Copyright (C) 2002 Milan Pikula <www@terminus.sk>, all rights reserved.
@@ -22,50 +24,39 @@
 #define ERRORS_CAUSE_SEGFAULT
 
 /* define this to support workaround of decisions for named process. This
- * is especially usefull when using GDB on constable.
+ * is especially useful when using GDB on constable.
  */
 #define GDB_HACK
 
 /* TODO: Check the calls to l3; they can't be called from a lock. */
-
 #include <linux/module.h>
-#include <linux/types.h>
-#include <linux/reboot.h>
-#include <linux/sched.h>
-#include <linux/sched/signal.h> /* task_tgid() */
-#include <linux/device.h>
-#include <linux/fs.h>
-#include <linux/wait.h>
-#include <linux/poll.h>
 #include <linux/semaphore.h>
-#include <linux/jiffies.h>
-#include <linux/sched/task.h>
-#include <linux/uaccess.h>
-#include <linux/slab.h>
+#include <linux/sched/signal.h>
+#include <linux/device.h>
+#include <linux/poll.h>
+#include <linux/rwsem.h>
+#include <linux/mm.h>
 
-#include <linux/medusa/l3/arch.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/server.h>
-#include <linux/medusa/l4/comm.h>
-
-#include "teleport.h"
+#include "l3/arch.h"
+#include "l3/registry.h"
+#include "l3/server.h"
+#include "l3/med_cache.h"
+#include "l4/comm.h"
+#include "l4/teleport.h"
 
 #define MEDUSA_MAJOR 111
 #define MODULENAME "chardev/linux"
-#define CURRENTPTR current
-#define FAT_PTR_OFFSET_TYPE uint32_t
-#define FAT_PTR_OFFSET sizeof(FAT_PTR_OFFSET_TYPE)
 
 static int user_release(struct inode *inode, struct file *file);
 
-static teleport_t teleport = {
-	cycle: tpc_HALT,
+static struct teleport_s teleport = {
+	.cycle = tpc_HALT,
 };
 
 /* constable, our brave userspace daemon */
 static atomic_t constable_present = ATOMIC_INIT(0);
-static struct task_struct * constable = NULL;
-static struct task_struct * gdb = NULL;
+static struct task_struct *constable;
+static struct task_struct *gdb;
 static DEFINE_SEMAPHORE(constable_openclose);
 
 
@@ -74,27 +65,22 @@ static atomic_t fetch_requests = ATOMIC_INIT(0);
 static atomic_t update_requests = ATOMIC_INIT(0);
 
 /* to-register queue for constable */
-static MED_LOCK_DATA(registration_lock);
+static DEFINE_MUTEX(registration_lock);
 /* the following two are circular lists, they have to be global
- * because of put operations in user_close() */
-static struct medusa_kclass_s * kclasses_registered = NULL;
-static struct medusa_evtype_s * evtypes_registered = NULL;
+ * because of put operations in user_close()
+ */
+static struct medusa_kclass_s *kclasses_registered;
+static struct medusa_evtype_s *evtypes_registered;
 static atomic_t announce_ready = ATOMIC_INIT(0);
 
 /* a question from kernel to constable */
 static atomic_t questions = ATOMIC_INIT(0);
 static atomic_t questions_waiting = ATOMIC_INIT(0);
 /* and the answer */
-static medusa_answer_t user_answer = MED_ERR;
-static DEFINE_SEMAPHORE(waitlist_sem);
-static LIST_HEAD(answer_waitlist);
-struct waitlist_item {
-	struct task_struct *task;
-	struct list_head list;
-};
-
-/* is the user-space currently sending us something? */
-static atomic_t currently_receiving = ATOMIC_INIT(0);
+static enum medusa_answer_t user_answer = MED_ERR;
+/* idr for storing answer ids */
+static DEFINE_SPINLOCK(answer_ids_idr_lock);
+static DEFINE_IDR(answer_ids_idr);
 
 static DECLARE_WAIT_QUEUE_HEAD(close_wait);
 
@@ -105,35 +91,19 @@ static struct semaphore queue_items;
 static struct semaphore queue_lock;
 static LIST_HEAD(tele_queue);
 struct tele_item {
-	teleport_insn_t *tele;
+	struct teleport_insn_s *tele;
 	struct list_head list;
 	size_t size;
-	void (*post)(void*);
+	void (*post)(void *arg);
 };
-
-// Array for memory caches
-int cache_array_size = 0;
-static struct kmem_cache **med_cache_array;
 
 // Next three variables are used by user_open. They are here because we have to
 // free the underlying data structures and clear them in user_close.
-static size_t left_in_teleport = 0;
+static size_t left_in_teleport;
 static struct tele_item *local_list_item;
-static teleport_insn_t *processed_teleport;
+static struct teleport_insn_s *processed_teleport;
 
-static DEFINE_SEMAPHORE(ls_switch);
-static DEFINE_SEMAPHORE(lock_sem);
-static DEFINE_SEMAPHORE(prior_sem);
-typedef struct {
-	struct semaphore* lock_sem;
-	struct semaphore* prior_sem;
-	int counter;
-} lightswitch_t;
-static lightswitch_t lightswitch = {
-	.lock_sem = &lock_sem,
-	.counter = 0,
-	.prior_sem = &prior_sem,
-};
+static DECLARE_RWSEM(lightswitch);
 
 #ifdef GDB_HACK
 static pid_t gdb_pid = -1;
@@ -145,16 +115,17 @@ static pid_t gdb_pid = -1;
  * kernel-space interface
  */
 
-static medusa_answer_t l4_decide( struct medusa_event_s * event,
-		struct medusa_kobject_s * o1,
-		struct medusa_kobject_s * o2);
-static int l4_add_kclass(struct medusa_kclass_s * cl);
-static int l4_add_evtype(struct medusa_evtype_s * at);
+static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
+		struct medusa_kobject_s *o1,
+		struct medusa_kobject_s *o2);
+static int l4_add_kclass(struct medusa_kclass_s *cl);
+static int l4_add_evtype(struct medusa_evtype_s *at);
 static void l4_close_wake(void);
 
 static struct medusa_authserver_s chardev_medusa = {
 	MODULENAME,
 	0,	/* use-count */
+	NULL,	/* struct pid *tgid */
 	l4_close_wake,		/* close */
 	l4_add_kclass,		/* add_kclass */
 	NULL,			/* del_kclass */
@@ -163,154 +134,18 @@ static struct medusa_authserver_s chardev_medusa = {
 	l4_decide		/* decide */
 };
 
-/*******************************************************************************
- * memory cache interface
- */ 
-
-/**
- * Computes binary logarithm rounded up
- */
-static inline int get_log_index(int in) {
-	int ret = 1;
-	in--;
-	while (in >>= 1)
-		ret++;
-	return ret;
-}
-
-/**
- * Creates a memory cache on a given index.
- * If there is not enough space in the array, it will reallocate it.
- * If a cache already exists, it does nothing.
- */
-static struct kmem_cache* med_cache_create(size_t index) {
-	if (index >= cache_array_size)
-		return NULL;
-	if (med_cache_array[index])
-		return med_cache_array[index];
-	med_cache_array[index] = kmem_cache_create("med_cache",
-			1 << index,
-			0,
-			SLAB_HWCACHE_ALIGN,
-			NULL);
-	return med_cache_array[index];
-}
-
-/**
- * Allocates an array for memory caches and initializes it with nulls.
- */
-static struct kmem_cache** alloc_med_cache_array(size_t size) {
-	int i;
-	if (med_cache_array)
-		return med_cache_array;
-	med_cache_array = (struct kmem_cache**)
-		kmalloc(sizeof(struct kmem_cache*) * size, GFP_KERNEL);
-	if (med_cache_array) {
-		for (i = 0; i < size; i++)
-			med_cache_array[i] = NULL;
-		cache_array_size = size;
-	}
-	return med_cache_array;
-}
-
-/**
- * Reallocates the memory cache array for a given size.
- * If the size is smaller or the same as the existing array, it does nothing.
- */
-static struct kmem_cache** realloc_med_cache_array(size_t size) {
-	int i;
-	struct kmem_cache** new_cache_array;
-	if (size <= cache_array_size)
-		return med_cache_array;
-	new_cache_array = (struct kmem_cache**)
-		krealloc(med_cache_array, sizeof(struct kmem_cache*) * size, GFP_KERNEL);
-	if (new_cache_array) {
-		for (i = cache_array_size; i < size; i++)
-			med_cache_array[i] = NULL;
-		cache_array_size = size;
-	}
-	return new_cache_array;
-}
-
-/**
- * Creates a memory cache for a given size if it doesn't exist
- */
-static int med_cache_register(size_t size) {
-	int log;
-	size += FAT_PTR_OFFSET;
-	log = get_log_index(size);
-	if (log >= cache_array_size)
-		if (!realloc_med_cache_array(log))
-			return -ENOMEM;
-	if (!med_cache_array[log])
-		if (!med_cache_create(log))
-			return -ENOMEM;
-	return 0;
-}
-
-/**
- * Allocates memory from a memory pool chosen by the index argument
- * Warning - selected index has to take fat pointer offset into account
- */
-static void* med_cache_alloc_index(size_t index) {
-	void* ret;
-	ret = kmem_cache_alloc(med_cache_array[index], GFP_KERNEL);
-	*((FAT_PTR_OFFSET_TYPE*)ret) = index;
-	ret = ((FAT_PTR_OFFSET_TYPE*)ret) + 1;
-	return ret;
-}
-
-/**
- * Allocates memory from a memory pool chosen by the size argument
- */
-static void* med_cache_alloc_size(size_t size) {
-	int log;
-	size += FAT_PTR_OFFSET;
-	log = get_log_index(size);
-	return med_cache_alloc_index(log);
-}
-
-/**
- * Frees previously allocated memory
- */
-static void med_cache_free(void* mem) {
-	int log;
-	mem = ((FAT_PTR_OFFSET_TYPE*)mem) - 1;
-	log = *((FAT_PTR_OFFSET_TYPE*)mem);
-	kmem_cache_free(med_cache_array[log], mem);
-}
-
-/**
- * Destroys all memory caches in the array
- */
-static void med_cache_destroy(void) {
-	int i;
-	for(i = 0; i < cache_array_size; i++) {
-		if (med_cache_array[i])
-			kmem_cache_destroy(med_cache_array[i]);
-	}
-}
-
-/**
- * Frees the array of memory caches.
- */
-static void free_med_cache_array(void) {
-	med_cache_destroy();
-	kfree(med_cache_array);
-	med_cache_array = NULL;
-}
-
 /*
  * Used to clean up data structures after fetch or update.
  */
-static void post_write(void* mem) {
-	if (((teleport_insn_t*)mem)[1].args.put32.what == MEDUSA_COMM_FETCH_ANSWER)
-		med_cache_free(((teleport_insn_t*)mem)[4].args.cutnpaste.from);
+static void post_write(void *mem)
+{
+	if (((struct teleport_insn_s *)mem)[1].args.put32.what == MEDUSA_COMM_FETCH_ANSWER)
+		med_cache_free(((struct teleport_insn_s *)mem)[4].args.cutnpaste.from);
 	med_cache_free(mem);
 }
 
-static int am_i_constable(void) {
-
+static int am_i_constable(void)
+{
 	if (!constable)
 		return 0;
 
@@ -329,18 +164,18 @@ static void l4_close_wake(void)
 	wake_up(&close_wait);
 }
 
-static int l4_add_kclass(struct medusa_kclass_s * cl)
+static int l4_add_kclass(struct medusa_kclass_s *cl)
 {
-	teleport_insn_t *tele_mem_kclass;
+	struct teleport_insn_s *tele_mem_kclass;
 	struct tele_item *local_tele_item;
 	int attr_num = 1;
-	struct medusa_attribute_s * attr_ptr;
+	struct medusa_attribute_s *attr_ptr;
 
-	tele_mem_kclass = (teleport_insn_t*)
-		med_cache_alloc_size(sizeof(teleport_insn_t) * 5);
+	tele_mem_kclass = (struct teleport_insn_s *)
+		med_cache_alloc_size(sizeof(struct teleport_insn_s) * 5);
 	if (!tele_mem_kclass)
 		return -ENOMEM;
-	local_tele_item = (struct tele_item*)
+	local_tele_item = (struct tele_item *)
 		med_cache_alloc_size(sizeof(struct tele_item));
 	if (!local_tele_item) {
 		med_cache_free(tele_mem_kclass);
@@ -349,14 +184,10 @@ static int l4_add_kclass(struct medusa_kclass_s * cl)
 
 	med_get_kclass(cl); // put is in user_release
 
-	med_cache_register(cl->kobject_size);
-
-	MED_LOCK_W(registration_lock);
-	barrier();
+	mutex_lock(&registration_lock);
 	atomic_inc(&announce_ready);
-	barrier();
 
-	cl->cinfo = (cinfo_t)kclasses_registered;
+	cl->cinfo = (void *)kclasses_registered;
 	kclasses_registered = cl;
 	local_tele_item->size = 0;
 	tele_mem_kclass[0].opcode = tp_PUTPtr;
@@ -385,34 +216,35 @@ static int l4_add_kclass(struct medusa_kclass_s * cl)
 	up(&queue_lock);
 	up(&queue_items);
 	wake_up(&userspace_chardev);
-	MED_UNLOCK_W(registration_lock);
+	mutex_unlock(&registration_lock);
 	return 0;
 }
 
-static int l4_add_evtype(struct medusa_evtype_s * at)
+static int l4_add_evtype(struct medusa_evtype_s *at)
 {
-	teleport_insn_t *tele_mem_evtype;
+	struct teleport_insn_s *tele_mem_evtype;
 	struct tele_item *local_tele_item;
 	int attr_num = 1;
-	struct medusa_attribute_s * attr_ptr;
+	struct medusa_attribute_s *attr_ptr;
 
-	tele_mem_evtype = (teleport_insn_t*)
-		med_cache_alloc_size(sizeof(teleport_insn_t)*5);
+	med_pr_debug("%s: adding %s with bitnr=%d\n", __func__, at->name,
+		at->bitnr & MASK_BITNR);
+
+	tele_mem_evtype = (struct teleport_insn_s *)
+		med_cache_alloc_size(sizeof(struct teleport_insn_s)*5);
 	if (!tele_mem_evtype)
 		return -ENOMEM;
-	local_tele_item = (struct tele_item*)
+	local_tele_item = (struct tele_item *)
 		med_cache_alloc_size(sizeof(struct tele_item));
 	if (!local_tele_item) {
 		med_cache_free(tele_mem_evtype);
 		return -ENOMEM;
 	}
 
-	MED_LOCK_W(registration_lock);
-	barrier();
+	mutex_lock(&registration_lock);
 	atomic_inc(&announce_ready);
-	barrier();
 
-	at->cinfo = (cinfo_t)evtypes_registered;
+	at->cinfo = (void *)evtypes_registered;
 	evtypes_registered = at;
 	local_tele_item->size = 0;
 	tele_mem_evtype[0].opcode = tp_PUTPtr;
@@ -441,26 +273,8 @@ static int l4_add_evtype(struct medusa_evtype_s * at)
 	up(&queue_lock);
 	up(&queue_items);
 	wake_up(&userspace_chardev);
-	MED_UNLOCK_W(registration_lock);
+	mutex_unlock(&registration_lock);
 	return 0;
-}
-
-inline static void ls_lock(lightswitch_t* ls, struct semaphore* sem) {
-	down(ls->prior_sem);
-	up(ls->prior_sem);
-	down(ls->lock_sem);
-	ls->counter++;
-	if (ls->counter == 1)
-		down(sem);
-	up(ls->lock_sem);
-}
-
-inline static void ls_unlock(lightswitch_t* ls, struct semaphore* sem) {
-	down(ls->lock_sem);
-	ls->counter--;
-	if (!ls->counter)
-		up(sem);
-	up(ls->lock_sem);
 }
 
 /* the sad fact about this routine is that it sleeps...
@@ -469,46 +283,69 @@ inline static void ls_unlock(lightswitch_t* ls, struct semaphore* sem) {
  * eating one processor by a constable... ;) One can imagine
  * the performance improvement, and buy one more CPU in advance :)
  */
-static medusa_answer_t l4_decide(struct medusa_event_s * event,
-		struct medusa_kobject_s * o1, struct medusa_kobject_s * o2)
+static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
+		struct medusa_kobject_s *o1, struct medusa_kobject_s *o2)
 {
-	medusa_answer_t retval;
-	teleport_insn_t tele_mem_decide[6];
+	enum medusa_answer_t retval;
+	struct teleport_insn_s *tele_mem_decide;
 	struct tele_item *local_tele_item;
-	struct waitlist_item local_waitlist_item;
+	int answer_id;
+	char debug_cmdline[1024];
 
-	if (in_interrupt()) {
+	if (!in_task()) {
 		/* houston, we have a problem! */
-		med_pr_err("decide called from interrupt context :(\n");
+		med_pr_err("%s called from interrupt context :(\n", __func__);
 		return MED_ERR;
 	}
-	if (am_i_constable() || current == gdb) {
+	if (am_i_constable() || current == gdb)
 		return MED_ALLOW;
-	}
 
-	if (current->pid < 1) {
+	if (current->pid < 1)
 		return MED_ERR;
-	}
 #ifdef GDB_HACK
-	if (gdb_pid == current->pid) {
+	if (gdb_pid == current->pid)
 		return MED_ALLOW;
-	}
 #endif
+	tele_mem_decide = (struct teleport_insn_s *)
+		med_cache_alloc_size(sizeof(struct teleport_insn_s)*6);
+	if (!tele_mem_decide)
+		return MED_ERR;
 
-	local_tele_item = (struct tele_item*)
+	local_tele_item = (struct tele_item *)
 		med_cache_alloc_size(sizeof(struct tele_item));
 	if (!local_tele_item)
 		return MED_ERR;
 	local_tele_item->tele = tele_mem_decide;
 	local_tele_item->size = 0;
-	local_tele_item->post = NULL;
+	local_tele_item->post = med_cache_free;
+
+	/*
+	 * We might be called with the IPC ids->rwsem held (from IPC security
+	 * hooks) and lightswitch should always nest inside the ids->rwsem one.
+	 * Attention: authorization server must NOT use IPC subsystem at all to
+	 * ========== avoid deadlock (trying to lock ids->rwsem inside the
+	 *            lightswitch)!.
+	 */
+	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
+
+	spin_lock(&answer_ids_idr_lock);
+	answer_id = idr_alloc_cyclic(&answer_ids_idr, current, 0, 0, GFP_ATOMIC);
+	spin_unlock(&answer_ids_idr_lock);
+	if (answer_id == -ENOMEM || answer_id == -ENOSPC) {
+		med_cache_free(tele_mem_decide);
+		med_cache_free(local_tele_item);
+		up_read(&lightswitch);
+		med_pr_err("%s: idr alloc error: %d\n", __func__, answer_id);
+		return MED_ERR;
+	}
 
 #define decision_evtype (event->evtype_id)
 	tele_mem_decide[0].opcode = tp_PUTPtr;
 	tele_mem_decide[0].args.putPtr.what = (MCPptr_t)decision_evtype; // possibility to encryption JK march 2015
 	local_tele_item->size += sizeof(MCPptr_t);
 	tele_mem_decide[1].opcode = tp_PUTPtr;
-	tele_mem_decide[1].args.putPtr.what = (MCPptr_t) current;
+	// idr uses only 32 lower bits from 64 bits of decision_request_id
+	tele_mem_decide[1].args.putPtr.what = (MCPptr_t) answer_id;
 	local_tele_item->size += sizeof(MCPptr_t);
 	tele_mem_decide[2].opcode = tp_CUTNPASTE;
 	tele_mem_decide[2].args.cutnpaste.from = (unsigned char *)event;
@@ -531,14 +368,24 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 		tele_mem_decide[5].opcode = tp_HALT;
 	}
 
-	ls_lock(&lightswitch, &ls_switch);
-
+	/* TODO: Replace by constable tgid and move up right below lightswitch */
 	if (!atomic_read(&constable_present)) {
 		med_cache_free(local_tele_item);
-		ls_unlock(&lightswitch, &ls_switch);
+		med_cache_free(tele_mem_decide);
+		spin_lock(&answer_ids_idr_lock);
+		idr_remove(&answer_ids_idr, answer_id);
+		spin_unlock(&answer_ids_idr_lock);
+		up_read(&lightswitch);
 		return MED_ERR;
 	}
-	pr_debug("medusa: new question %px\n", current);
+
+	debug_cmdline[0] = '\0';
+	/* get_cmdline() is too expensive; uncomment it manually while debugging */
+	//get_cmdline(current, debug_cmdline, 1023);
+	//debug_cmdline[1023] = '\0';
+	med_pr_debug("task pid %d ('%s'), new question 0x%x for '%s'",
+		    current->pid, debug_cmdline, answer_id, decision_evtype->name);
+
 	// prepare for next decision
 #undef decision_evtype
 	// insert teleport structure to the queue
@@ -547,36 +394,41 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
 	up(&queue_lock);
 	up(&queue_items);
 	atomic_inc(&questions);
-	wake_up(&userspace_chardev);
-	// wait until answer is ready
 
-	local_waitlist_item.task = current;
+	// wait until answer is ready
 	get_task_struct(current);
-	down(&waitlist_sem);
-	list_add_tail(&local_waitlist_item.list, &answer_waitlist);
-	up(&waitlist_sem);
+	up_read(&lightswitch);
 	set_current_state(TASK_UNINTERRUPTIBLE);
-	ls_unlock(&lightswitch, &ls_switch);
+	// Auth server shouldn't be notified earlier, so that it doesn't
+	// answer the request before the task goes to sleep.
+	wake_up(&userspace_chardev);
 	schedule();
 	put_task_struct(current);
 
 
-	ls_lock(&lightswitch, &ls_switch);
+	/*
+	 * We might be called with the IPC ids->rwsem held (from IPC security
+	 * hooks) and lightswitch should always nest inside the ids->rwsem one.
+	 * Attention: authorization server must NOT use IPC subsystem at all to
+	 * ========== avoid deadlock (trying to lock ids->rwsem inside the
+	 *            lightswitch)!.
+	 */
+	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
 	if (atomic_read(&constable_present)) {
-		down(&waitlist_sem);
-		list_del(&local_waitlist_item.list);
-		up(&waitlist_sem);
+		spin_lock(&answer_ids_idr_lock);
+		idr_remove(&answer_ids_idr, answer_id);
+		spin_unlock(&answer_ids_idr_lock);
 		atomic_dec(&questions_waiting);
 		retval = user_answer;
-		pr_info("medusa: question %p answered %i\n", current, retval);
-	}
-	else {
+		med_pr_debug("task pid %d, question 0x%x answer %d",
+			    current->pid, answer_id, retval);
+	} else {
 		retval = MED_ERR;
-		pr_err("medusa: question %p not answered, authserver disconnected\n",
-			current);
+		med_pr_err("task pid %d, question 0x%x for '%s' not answered, authorization server disconnected",
+			current->pid, answer_id, event->evtype_id->name);
 	}
 	up(&take_answer);
-	ls_unlock(&lightswitch, &ls_switch);
+	up_read(&lightswitch);
 	return retval;
 }
 
@@ -584,67 +436,65 @@ static medusa_answer_t l4_decide(struct medusa_event_s * event,
  * user-space interface
  */
 
-static ssize_t user_read(struct file *filp, char __user *buf, size_t count, loff_t * ppos);
-static ssize_t user_write(struct file *filp, const char __user *buf, size_t count, loff_t * ppos);
-static unsigned int user_poll(struct file *filp, poll_table * wait);
+static ssize_t user_read(struct file *filp, char __user *buf, size_t count, loff_t *ppos);
+static ssize_t user_write(struct file *filp, const char __user *buf, size_t count, loff_t *ppos);
+static unsigned int user_poll(struct file *filp, poll_table *wait);
 static int user_open(struct inode *inode, struct file *file);
 static int user_release(struct inode *inode, struct file *file);
 
-static struct file_operations fops = {
-read:		user_read,
-		 write:		user_write,
-		 llseek:		no_llseek, /* -ESPIPE */
-		 poll:		user_poll,
-		 open:		user_open,
-		 release:	user_release
-			 /* we don't support async IO. I have no idea, when to call kill_fasync
-			  * to be correct. Only on decisions? Or also on answers to user-space
-			  * questions? Not a big problem, though... noone seems to be supporting
-			  * it anyway :). If you need it, let me know. <www@terminus.sk>
-			  */
-			 /* also, we don't like the ioctl() - we hope the character device can
-			  * be used over the network.
-			  */
+static const struct file_operations fops = {
+	.read		= user_read,
+	.write		= user_write,
+	.llseek		= no_llseek, /* -ESPIPE */
+	.poll		= user_poll,
+	.open		= user_open,
+	.release	= user_release
+	/* We don't support async IO. I have no idea, when to call kill_fasync
+	 * to be correct. Only on decisions? Or also on answers to user-space
+	 * questions? Not a big problem, though... noone seems to be supporting
+	 * it anyway :). If you need it, let me know. <www@terminus.sk>
+	 *
+	 * Also, we don't like the ioctl() - we hope the character device can
+	 * be used over the network.
+	 */
 };
-static char __user * userspace_buf;
+/* TODO: userspace_buf is GLOBAL variable */
+static char __user *userspace_buf;
 
-static ssize_t to_user(void * from, size_t len)
+static ssize_t to_user(void *from, size_t len)
 { /* we verify the access rights elsewhere */
-	if (__copy_to_user(userspace_buf, from, len));
+	if (__copy_to_user(userspace_buf, from, len))
+		;
 	userspace_buf += len;
 	return len;
 }
 
-static void decrement_counters(teleport_insn_t* tele) {
+static void decrement_counters(struct teleport_insn_s *tele)
+{
 	if (tele[1].opcode == tp_HALT)
 		return;
 	switch (tele[2].opcode) {
-		case tp_CUTNPASTE: // Authorization server answer
-			atomic_inc(&questions_waiting);
-			atomic_dec(&questions);
+	case tp_CUTNPASTE: // Authorization server answer
+		atomic_inc(&questions_waiting);
+		atomic_dec(&questions);
+		break;
+	case tp_PUTPtr: // Fetch or update
+		switch (tele[1].args.put32.what) {
+		case MEDUSA_COMM_FETCH_ANSWER:
+		case MEDUSA_COMM_FETCH_ERROR:
+			atomic_dec(&fetch_requests);
 			break;
-		case tp_PUTPtr: // Fetch or update
-			switch (tele[1].args.put32.what) {
-				case MEDUSA_COMM_FETCH_ANSWER:
-					atomic_dec(&fetch_requests);
-					break;
-				case MEDUSA_COMM_UPDATE_ANSWER:
-					atomic_dec(&update_requests);
-					break;
-			}
+		case MEDUSA_COMM_UPDATE_ANSWER:
+			atomic_dec(&update_requests);
 			break;
-		case tp_PUTKCLASS:
-		case tp_PUTEVTYPE:
-			atomic_dec(&announce_ready);
-			break;
+		}
+		break;
+	case tp_PUTKCLASS:
+	case tp_PUTEVTYPE:
+		atomic_dec(&announce_ready);
+		break;
 	}
 }
-
-#define DOWN(m) do {  \
-	if (down_trylock(m)) { \
-		med_pr_crit("Strasny vypis: %d\n", __LINE__); \
-	} \
-} while(0)
 
 /*
  * trylock - if true, don't block
@@ -652,21 +502,22 @@ static void decrement_counters(teleport_insn_t* tele) {
  * returns -EPIPE if Constable was disconnected
  * while waiting for new event
  */
-static inline int teleport_pop(int trylock) {
+static inline int teleport_pop(int trylock)
+{
 	if (trylock) {
 		if (down_trylock(&queue_items))
 			return 1;
 	} else {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		while (down_timeout(&queue_items, 5*HZ) == -ETIME) {
-			ls_lock(&lightswitch, &ls_switch);
+			down_read(&lightswitch);
 			if (!atomic_read(&constable_present))
 				return -EPIPE;
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 		}
-		ls_lock(&lightswitch, &ls_switch);
+		down_read(&lightswitch);
 	}
-	DOWN(&queue_lock);
+	down(&queue_lock);
 	local_list_item = list_first_entry(&tele_queue, struct tele_item, list);
 	processed_teleport = local_list_item->tele;
 	left_in_teleport = local_list_item->size;
@@ -677,7 +528,8 @@ static inline int teleport_pop(int trylock) {
 	return 0;
 }
 
-static inline void teleport_put(void) {
+static inline void teleport_put(void)
+{
 	if (local_list_item->post)
 		local_list_item->post(processed_teleport);
 	med_cache_free(local_list_item);
@@ -689,40 +541,45 @@ static inline void teleport_put(void) {
 /*
  * READ()
  */
-static ssize_t user_read(struct file * filp, char __user * buf,
-		size_t count, loff_t * ppos)
+static ssize_t user_read(struct file *filp, char __user *buf,
+		size_t count, loff_t *ppos)
 {
 	ssize_t retval;
 	size_t retval_sum = 0;
 
-	ls_lock(&lightswitch, &ls_switch);
+	// Lightswitch
+	// has to be there: so close can't occur during read
+	down_read(&lightswitch);
 
 	if (!atomic_read(&constable_present)) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -EPIPE;
 	}
 
 	if (!am_i_constable()) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -EPERM;
 	}
 	if (*ppos != filp->f_pos) {
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -ESPIPE;
 	}
-	if (!access_ok(buf, count)){
-		ls_unlock(&lightswitch, &ls_switch);
+	if (!access_ok(buf, count)) {
+		up_read(&lightswitch);
 		return -EFAULT;
 	}
 
 	// Lock it before someone can change the userspace_buf
-	DOWN(&user_read_lock);
+	// Only one reader can use it
+	down(&user_read_lock);
 	userspace_buf = buf;
 	// Get an item from the queue
+	// Get a new item only if the previous teleport has been fully transported
 	if (!left_in_teleport) {
-		// Get a new item only if the previous teleport has been fully transported
+		// Interruptible waiting; -EPIPE if auth server was disconnected
 		if (teleport_pop(0) == -EPIPE) {
-			ls_unlock(&lightswitch, &ls_switch);
+			up(&user_read_lock);
+			up_read(&lightswitch);
 			return -EPIPE;
 		}
 	}
@@ -733,7 +590,7 @@ static ssize_t user_read(struct file * filp, char __user * buf,
 			left_in_teleport = 0;
 			teleport_put();
 			up(&user_read_lock);
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			return retval;
 		}
 		left_in_teleport -= retval;
@@ -748,8 +605,8 @@ static ssize_t user_read(struct file * filp, char __user * buf,
 			if (teleport_pop(1))
 				break;
 			// left in teleport will be always zero, because while loop in
-	  // teleport_reset loops while count is not zero until it encounters 
-	// tpc_HALT
+			// teleport_reset loops while count is not zero until it encounters
+			// tpc_HALT
 		} else {
 			// Something was left in teleport
 			if (retval == 0 && teleport.cycle == tpc_HALT) {
@@ -758,7 +615,8 @@ static ssize_t user_read(struct file * filp, char __user * buf,
 				teleport_put();
 				// Get new teleport
 				if (teleport_pop(0) == -EPIPE) {
-					ls_unlock(&lightswitch, &ls_switch);
+					up(&user_read_lock);
+					up_read(&lightswitch);
 					return -EPIPE;
 				}
 				continue;
@@ -768,68 +626,65 @@ static ssize_t user_read(struct file * filp, char __user * buf,
 	} // while
 	if (retval_sum > 0 || teleport.cycle != tpc_HALT) {
 		up(&user_read_lock);
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return retval_sum;
 	}
 
 	// Something is still in teleport, but we didn't transport any data
 	up(&user_read_lock);
-	ls_unlock(&lightswitch, &ls_switch);
+	up_read(&lightswitch);
 	return 0;
 }
 
 /*
  * WRITE()
  */
-static ssize_t user_write(struct file *filp, const char __user *buf, size_t count, loff_t * ppos)
+static ssize_t user_write(struct file *filp, const char __user *buf, size_t count, loff_t *ppos)
 {
 	size_t orig_count = count;
-	struct medusa_kclass_s * cl;
-	teleport_insn_t *tele_mem_write;
+	struct medusa_kclass_s *cl;
+	struct teleport_insn_s *tele_mem_write;
 	struct tele_item *local_tele_item;
-	medusa_answer_t answ_result;
+	enum medusa_answer_t answ_result;
 	MCPptr_t recv_type;
 	MCPptr_t answ_kclassid = 0;
-	struct medusa_kobject_s * answ_kobj = NULL;
+	struct medusa_kobject_s *answ_kobj = NULL;
 	MCPptr_t answ_seq = 0;
 	char recv_buf[sizeof(MCPptr_t)*2];
 	char *kclass_buf;
+	int answered_task_id;
 	struct task_struct *answered_task;
 
 	// Lightswitch
 	// has to be there so close can't occur during write
-	ls_lock(&lightswitch, &ls_switch);
+	down_read(&lightswitch);
 
 	if (!atomic_read(&constable_present)) {
-		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: constable not present\n");
+		up_read(&lightswitch);
+		med_pr_err("write: constable not present\n");
 		return -EPIPE;
 	}
 
 	if (!am_i_constable()) {
-		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: not called by constable\n");
+		up_read(&lightswitch);
+		med_pr_err("write: not called by authorization server\n");
 		return -EPERM;
 	}
 	if (*ppos != filp->f_pos) {
-		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: uncorrect file position\n");
+		up_read(&lightswitch);
+		med_pr_err("write: incorrect file position\n");
 		return -ESPIPE;
 	}
 	if (!access_ok(buf, count)) {
-		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: cant read buffer\n");
+		up_read(&lightswitch);
+		med_pr_err("write: can't read buffer\n");
 		return -EFAULT;
 	}
 
-	if (!atomic_read(&currently_receiving)) {
-		atomic_set(&currently_receiving, 1);
-	} 
-
 	if (__copy_from_user(((char *)&recv_type), buf,
 				sizeof(MCPptr_t))) {
-		ls_unlock(&lightswitch, &ls_switch);
-		pr_err("write: cant copy buffer\n");
+		up_read(&lightswitch);
+		med_pr_err("write: can't copy buffer\n");
 		return -EFAULT;
 	}
 	buf += sizeof(MCPptr_t);
@@ -838,32 +693,39 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	// Type of the message is received
 	down(&take_answer);
 	if (recv_type == MEDUSA_COMM_AUTHANSWER) {
-		// TODO Process something
 		if (__copy_from_user(recv_buf, buf, sizeof(int16_t) + sizeof(MCPptr_t))) {
 			up(&take_answer);
-			ls_unlock(&lightswitch, &ls_switch);
-			atomic_set(&currently_receiving, 0);
-			pr_err("write: cant copy buffer\n");
+			up_read(&lightswitch);
+			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
 		buf += sizeof(int16_t) + sizeof(MCPptr_t);
 		count -= sizeof(int16_t) + sizeof(MCPptr_t);
 
 		user_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
-		answered_task = *(struct task_struct **)(recv_buf);
-		pr_info("medusa: answer received for %px\n", answered_task);
+		// space for decision_request_id is 64 bit, but idr uses only 32 bit
+		answered_task_id = *(int *)(recv_buf);
+		rcu_read_lock();
+		answered_task = (struct task_struct *) idr_find(&answer_ids_idr, answered_task_id);
+		rcu_read_unlock();
+		if (answered_task == NULL) {
+			up(&take_answer);
+			up_read(&lightswitch);
+			med_pr_err("decision_answer: invalid decision_request_id: %llx\n", *(uint64_t *)(recv_buf));
+			return -100;
+		}
+		med_pr_debug("answer received for %llx pid %d\n", *(uint64_t *)(recv_buf), answered_task->pid);
 		// wake up correct process
-		atomic_set(&currently_receiving, 0);
 		while (!wake_up_process(answered_task))
-			;
-		pr_debug("medusa: woken up\n");
+			// wait for `answered_task` to sleep if it's not sleeping yet
+			schedule();
+
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 		up(&take_answer);
 		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t)*2)) {
-			ls_unlock(&lightswitch, &ls_switch);
-			atomic_set(&currently_receiving, 0);
-			pr_err("write: cant copy buffer\n");
+			up_read(&lightswitch);
+			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
 		buf += sizeof(MCPptr_t)*2;
@@ -873,34 +735,38 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 				*(struct medusa_kclass_s **)(recv_buf) // posibility to decrypt JK march 2015
 				);
 		if (!cl) {
-			med_pr_err("Protocol error at write(): unknown kclass 0x%p!\n", (void*)(*(MCPptr_t*)(recv_buf)));
-			atomic_set(&currently_receiving, 0);
+			med_pr_err("Protocol error at write(): unknown kclass 0x%p!\n",
+				(void *)(*(MCPptr_t *)(recv_buf)));
 #ifdef ERRORS_CAUSE_SEGFAULT
-			ls_unlock(&lightswitch, &ls_switch);
+			up_read(&lightswitch);
 			return -EFAULT;
 #else
 			break;
 #endif
 		}
-		kclass_buf = (char*) med_cache_alloc_size(cl->kobject_size);
+		kclass_buf = (char *) med_cache_alloc_size(cl->kobject_size);
+		if (!kclass_buf) {
+			up_read(&lightswitch);
+			med_pr_err("write: OOM while `kclass_buf` alloc\n");
+			return -ENOMEM;
+		}
 		if (__copy_from_user(kclass_buf, buf, cl->kobject_size)) {
 			med_cache_free(kclass_buf);
-			atomic_set(&currently_receiving, 0);
-			ls_unlock(&lightswitch, &ls_switch);
-			pr_err("write: cant copy buffer\n");
+			up_read(&lightswitch);
+			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
 		}
 		buf += cl->kobject_size;
 		count -= cl->kobject_size;
 
 		// if (atomic_read(&fetch_requests) || atomic_read(&update_requests)) {
-	// 	/* not so much to do... */
-  // 	med_put_kclass(answ_kclass);
-  //     // ked si to uzivatel precita, tak urob put - tam, kde sa rusi objekt
-  // }
+		//	/* not so much to do... */
+		//	med_put_kclass(answ_kclass);
+		//     // ked si to uzivatel precita, tak urob put - tam, kde sa rusi objekt
+		// }
 
-		answ_kclassid = (*(MCPptr_t*)(recv_buf));
-		answ_seq = *(((MCPptr_t*)(recv_buf))+1);
+		answ_kclassid = (*(MCPptr_t *)(recv_buf));
+		answ_seq = *(((MCPptr_t *)(recv_buf))+1);
 
 
 		if (recv_type == MEDUSA_COMM_FETCH_REQUEST) {
@@ -909,6 +775,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 						kclass_buf);
 			else {
 				answ_kobj = NULL;
+				med_cache_free(kclass_buf);
 			}
 		} else {
 			if (cl->update)
@@ -919,12 +786,19 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			med_cache_free(kclass_buf);
 		}
 		// Dynamic telemem structure for fetch/update
-		tele_mem_write = (teleport_insn_t*) med_cache_alloc_size(sizeof(teleport_insn_t)*6);
-		if (!tele_mem_write)
+		tele_mem_write = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*6);
+		if (!tele_mem_write) {
+			med_cache_free(kclass_buf);
+			up_read(&lightswitch);
+			med_pr_err("write: OOM while `tele_mem_write` alloc");
 			return -ENOMEM;
-		local_tele_item = (struct tele_item*) med_cache_alloc_size(sizeof(struct tele_item));
+		}
+		local_tele_item = (struct tele_item *) med_cache_alloc_size(sizeof(struct tele_item));
 		if (!local_tele_item) {
 			med_cache_free(tele_mem_write);
+			med_cache_free(kclass_buf);
+			up_read(&lightswitch);
+			med_pr_err("write: OOM while `local_tele_item` alloc");
 			return -ENOMEM;
 		}
 		local_tele_item->size = 0;
@@ -933,7 +807,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		local_tele_item->size += sizeof(MCPptr_t);
 		tele_mem_write[1].opcode = tp_PUT32;
 		if (recv_type == MEDUSA_COMM_FETCH_REQUEST) { /* fetch */
-			atomic_inc(&fetch_requests);
 			tele_mem_write[1].args.put32.what = answ_kobj ?
 				MEDUSA_COMM_FETCH_ANSWER : MEDUSA_COMM_FETCH_ERROR;
 		} else { /* update */
@@ -947,8 +820,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		tele_mem_write[3].args.putPtr.what = (MCPptr_t)answ_seq;
 		local_tele_item->size += sizeof(MCPptr_t);
 		if (recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
-			atomic_inc(&update_requests);
-			pr_debug("medusa: answering update %llu\n", answ_seq);
+			//med_pr_debug("answering update %llu\n", answ_seq);
 			tele_mem_write[4].opcode = tp_PUT32;
 			tele_mem_write[4].args.put32.what = answ_result;
 			local_tele_item->size += sizeof(uint32_t);
@@ -961,32 +833,40 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			tele_mem_write[5].opcode = tp_HALT;
 		} else
 			tele_mem_write[4].opcode = tp_HALT;
-		med_put_kclass(cl); /* slightly too soon */ // TODO Find out what is this
+		med_put_kclass(cl); /* slightly too soon */ /* TODO Find out what is this */
 		local_tele_item->tele = tele_mem_write;
 		local_tele_item->post = post_write;
 		down(&queue_lock);
 		list_add(&(local_tele_item->list), &tele_queue);
 		up(&queue_lock);
-		atomic_set(&currently_receiving, 0);
 		up(&queue_items);
+		/*
+		 * Increment counters right after inserting data into teleport
+		 * to avoid data processing if they are not ready yet: authserver
+		 * can be woken up from another parts of this module, too.
+		 */
+		if (recv_type == MEDUSA_COMM_FETCH_REQUEST) /* fetch */
+			atomic_inc(&fetch_requests);
+		else /* update */
+			atomic_inc(&update_requests);
 		wake_up(&userspace_chardev);
 	} else {
 		up(&take_answer);
-		med_pr_err("Protocol error at write(): unknown command %llx!\n", (MCPptr_t)recv_type);
-		atomic_set(&currently_receiving, 0);
+		med_pr_err("Protocol error at write(): unknown command %llx!\n",
+			(MCPptr_t)recv_type);
 #ifdef ERRORS_CAUSE_SEGFAULT
-		ls_unlock(&lightswitch, &ls_switch);
+		up_read(&lightswitch);
 		return -EFAULT;
 #endif
 	}
-	ls_unlock(&lightswitch, &ls_switch);
+	up_read(&lightswitch);
 	return orig_count;
 }
 
 /*
  * POLL()
  */
-static unsigned int user_poll(struct file *filp, poll_table * wait)
+static unsigned int user_poll(struct file *filp, poll_table *wait)
 {
 	if (!am_i_constable())
 		return -EPERM;
@@ -996,12 +876,10 @@ static unsigned int user_poll(struct file *filp, poll_table * wait)
 	poll_wait(filp, &userspace_chardev, wait);
 	if (teleport.cycle != tpc_HALT) {
 		return POLLIN | POLLRDNORM;
-	}
-	else if (atomic_read(&fetch_requests) || atomic_read(&update_requests) ||
-			atomic_read(&announce_ready) || atomic_read(&questions)) {
+	} else if (atomic_read(&fetch_requests) || atomic_read(&update_requests) ||
+		   atomic_read(&announce_ready) || atomic_read(&questions)) {
 		return POLLIN | POLLRDNORM;
-	}
-	else if (atomic_read(&questions_waiting)) {
+	} else if (atomic_read(&questions_waiting)) {
 		return POLLOUT | POLLWRNORM;
 	}
 	// userspace_chardev wakes up only when adding teleport to the queue
@@ -1015,8 +893,9 @@ static unsigned int user_poll(struct file *filp, poll_table * wait)
 static int user_open(struct inode *inode, struct file *file)
 {
 	int retval = -EPERM;
-	teleport_insn_t *tele_mem_open;
+	struct teleport_insn_s *tele_mem_open;
 	struct tele_item *local_tele_item;
+	struct task_struct *parent;
 
 	//MOD_INC_USE_COUNT; Not needed anymore JK
 
@@ -1024,44 +903,41 @@ static int user_open(struct inode *inode, struct file *file)
 	if (atomic_read(&constable_present))
 		goto good_out;
 
-	if (!alloc_med_cache_array(15)) {
-		retval = -ENOMEM;
-		goto out;
-	}
 	if (med_cache_register(sizeof(struct tele_item))) {
 		retval = -ENOMEM;
 		goto out;
 	}
-	if (med_cache_register(sizeof(struct waitlist_item))) {
+	if (med_cache_register(sizeof(struct teleport_insn_s)*2)) {
 		retval = -ENOMEM;
 		goto out;
 	}
-	if (med_cache_register(sizeof(teleport_insn_t)*2)) {
+	if (med_cache_register(sizeof(struct teleport_insn_s)*5)) {
 		retval = -ENOMEM;
 		goto out;
 	}
-	if (med_cache_register(sizeof(teleport_insn_t)*5)) {
+	if (med_cache_register(sizeof(struct teleport_insn_s)*6)) {
 		retval = -ENOMEM;
 		goto out;
 	}
-	if (med_cache_register(sizeof(teleport_insn_t)*6)) {
-		retval = -ENOMEM;
-		goto out;
-	}
-	tele_mem_open = (teleport_insn_t*) med_cache_alloc_size(sizeof(teleport_insn_t)*2);
+	tele_mem_open = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*3);
 	if (!tele_mem_open) {
 		retval = -ENOMEM;
 		goto out;
 	}
-	local_tele_item = (struct tele_item*) med_cache_alloc_size(sizeof(struct tele_item));
+	local_tele_item = (struct tele_item *) med_cache_alloc_size(sizeof(struct tele_item));
 	if (!local_tele_item) {
 		retval = -ENOMEM;
 		goto out;
 	}
 
-	constable = CURRENTPTR;
+	constable = current;
+	rcu_read_lock();
+	parent = rcu_dereference(current->parent);
+	task_lock(parent);
 	if (strstr(current->parent->comm, "gdb"))
 		gdb = current->parent;
+	task_unlock(parent);
+	rcu_read_unlock();
 
 	teleport.cycle = tpc_HALT;
 	// Reset semaphores
@@ -1070,11 +946,12 @@ static int user_open(struct inode *inode, struct file *file)
 	sema_init(&queue_items, 0);
 	sema_init(&queue_lock, 1);
 
-	atomic_set(&currently_receiving, 0);
 	tele_mem_open[0].opcode = tp_PUTPtr;
 	tele_mem_open[0].args.putPtr.what = (MCPptr_t)MEDUSA_COMM_GREETING;
-	local_tele_item->size = sizeof(MCPptr_t);
-	tele_mem_open[1].opcode = tp_HALT;
+	tele_mem_open[1].opcode = tp_PUTPtr;
+	tele_mem_open[1].args.putPtr.what = (MCPptr_t)MEDUSA_COMM_VERSION;
+	local_tele_item->size = sizeof(MCPptr_t)*2;
+	tele_mem_open[2].opcode = tp_HALT;
 	local_tele_item->tele = tele_mem_open;
 	local_tele_item->post = med_cache_free;
 	down(&queue_lock);
@@ -1083,6 +960,7 @@ static int user_open(struct inode *inode, struct file *file)
 	up(&queue_items);
 	wake_up(&userspace_chardev);
 
+	chardev_medusa.tgid = get_pid(task_tgid(current));
 	/* this must be the last thing done */
 	atomic_set(&constable_present, 1);
 	up(&constable_openclose);
@@ -1092,7 +970,6 @@ static int user_open(struct inode *inode, struct file *file)
 out:
 	if (tele_mem_open)
 		med_cache_free(tele_mem_open);
-	med_cache_destroy();
 good_out:
 	up(&constable_openclose);
 	return retval;
@@ -1104,30 +981,33 @@ good_out:
 static int user_release(struct inode *inode, struct file *file)
 {
 	struct list_head *pos, *next;
-	struct waitlist_item  *local_waitlist_item;
-	DECLARE_WAITQUEUE(wait,current);
+	int answer_id;
+	struct task_struct *task;
+	DECLARE_WAITQUEUE(waitqueue, current);
 
-	// Operation close has to wait for read and write system calls to finish
-	// Close has priority, so starvation can't occur
-	down(&prior_sem);
-	down(&ls_switch);
-	up(&prior_sem);
+	// Operation close has to wait for read and write system calls to
+	// finish.
+	// Close has priority, so starvation can't occur. This is guaranteed by
+	// the kernel if PREEMPT_RT is not set.
+	down_write(&lightswitch);
 
 	if (!atomic_read(&constable_present)) {
-		up(&ls_switch);
+		up_write(&lightswitch);
 		return 0;
 	}
 
 	/* this function is invoked also from context of process which requires decision
-	 after 5s of inactivity of our brave user space authorization server constable;
-	 so we comment next two lines ;) */
-	/*
-	 if (!am_i_constable())
-	 return 0;
+	 * after 5s of inactivity of our brave user space authorization server constable;
+	 * so we comment next two lines ;)
 	 */
-	MED_LOCK_W(registration_lock);
+	/*
+	 * if (!am_i_constable())
+	 * return 0;
+	 */
+	mutex_lock(&registration_lock);
 	if (evtypes_registered) {
-		struct medusa_evtype_s * p1, * p2;
+		struct medusa_evtype_s *p1, *p2;
+
 		p1 = evtypes_registered;
 		do {
 			p2 = p1;
@@ -1137,7 +1017,8 @@ static int user_release(struct inode *inode, struct file *file)
 	}
 	evtypes_registered = NULL;
 	if (kclasses_registered) {
-		struct medusa_kclass_s * p1, * p2;
+		struct medusa_kclass_s *p1, *p2;
+
 		p1 = kclasses_registered;
 		do {
 			p2 = p1;
@@ -1146,7 +1027,7 @@ static int user_release(struct inode *inode, struct file *file)
 		} while (p1);
 	}
 	kclasses_registered = NULL;
-	MED_UNLOCK_W(registration_lock);
+	mutex_unlock(&registration_lock);
 	atomic_set(&fetch_requests, 0);
 	atomic_set(&update_requests, 0);
 
@@ -1159,8 +1040,7 @@ static int user_release(struct inode *inode, struct file *file)
 	med_pr_warn("No security daemon, rebooting system.\n");
 	ctrl_alt_del();
 #endif
-	add_wait_queue(&close_wait, &wait);
-	set_current_state(TASK_UNINTERRUPTIBLE);
+	add_wait_queue(&close_wait, &waitqueue);
 	MED_UNREGISTER_AUTHSERVER(chardev_medusa);
 	down(&constable_openclose);
 
@@ -1168,13 +1048,14 @@ static int user_release(struct inode *inode, struct file *file)
 	// functions is important!
 	user_answer = MED_ERR;
 	atomic_set(&constable_present, 0);
+	put_pid(chardev_medusa.tgid);
+	chardev_medusa.tgid = NULL;
 	constable = NULL;
 	gdb = NULL;
 
 	atomic_set(&questions, 0);
 	atomic_set(&questions_waiting, 0);
 	atomic_set(&announce_ready, 0);
-	atomic_set(&currently_receiving, 0);
 
 	// Clear the teleport queue
 	left_in_teleport = 0;
@@ -1188,35 +1069,34 @@ static int user_release(struct inode *inode, struct file *file)
 		teleport_put();
 	}
 	up(&queue_lock);
-	down(&waitlist_sem);
-	list_for_each(pos, &answer_waitlist) {
-		local_waitlist_item = list_entry(pos, struct waitlist_item, list);
-		wake_up_process(local_waitlist_item->task);
-	}
-	INIT_LIST_HEAD(&answer_waitlist);
-	up(&waitlist_sem);
 
-	free_med_cache_array();
+	// locking not needed because lightswitch is locked by one thread running close()
+	idr_for_each_entry(&answer_ids_idr, task, answer_id)
+		wake_up_process(task);
+	idr_destroy(&answer_ids_idr);
 
 	up(&constable_openclose);
 	// wake up waiting processes, this has to be outside of constable_openclose
 	// lock because wake_up_all causes context switch (locking and unlocking
 	// cpu may not be the same)
-	if (am_i_constable())
+	if (am_i_constable()) {
+		get_task_struct(current);
+		set_current_state(TASK_UNINTERRUPTIBLE);
 		schedule();
-	else
+		put_task_struct(current);
+	} else
 		med_pr_crit("Authorization server is not responding.\n");
-	remove_wait_queue(&close_wait, &wait);
+	remove_wait_queue(&close_wait, &waitqueue);
 	//MOD_DEC_USE_COUNT; Not needed anymore? JK
 
 
 	teleport.cycle = tpc_HALT;
-	up(&ls_switch);
+	up_write(&lightswitch);
 	return 0;
 }
 
-static struct class* medusa_class;
-static struct device* medusa_device;
+static struct class *medusa_class;
+static struct device *medusa_device;
 
 static int chardev_constable_init(void)
 {
@@ -1253,4 +1133,3 @@ static void chardev_constable_exit(void)
 module_init(chardev_constable_init);
 module_exit(chardev_constable_exit);
 MODULE_LICENSE("GPL");
-

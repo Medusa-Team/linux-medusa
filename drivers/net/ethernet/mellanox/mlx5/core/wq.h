@@ -80,6 +80,7 @@ int mlx5_wq_cyc_create(struct mlx5_core_dev *mdev, struct mlx5_wq_param *param,
 		       void *wqc, struct mlx5_wq_cyc *wq,
 		       struct mlx5_wq_ctrl *wq_ctrl);
 void mlx5_wq_cyc_wqe_dump(struct mlx5_wq_cyc *wq, u16 ix, u8 nstrides);
+void mlx5_wq_cyc_reset(struct mlx5_wq_cyc *wq);
 
 int mlx5_wq_qp_create(struct mlx5_core_dev *mdev, struct mlx5_wq_param *param,
 		      void *qpc, struct mlx5_wq_qp *wq,
@@ -92,6 +93,7 @@ int mlx5_cqwq_create(struct mlx5_core_dev *mdev, struct mlx5_wq_param *param,
 int mlx5_wq_ll_create(struct mlx5_core_dev *mdev, struct mlx5_wq_param *param,
 		      void *wqc, struct mlx5_wq_ll *wq,
 		      struct mlx5_wq_ctrl *wq_ctrl);
+void mlx5_wq_ll_reset(struct mlx5_wq_ll *wq);
 
 void mlx5_wq_destroy(struct mlx5_wq_ctrl *wq_ctrl);
 
@@ -168,6 +170,11 @@ static inline int mlx5_wq_cyc_cc_bigger(u16 cc1, u16 cc2)
 	int smaller = 0x8000 & (cc1 - cc2);
 
 	return !equal && !smaller;
+}
+
+static inline u16 mlx5_wq_cyc_get_counter(struct mlx5_wq_cyc *wq)
+{
+	return wq->wqe_ctr;
 }
 
 static inline u32 mlx5_cqwq_get_size(struct mlx5_cqwq *wq)
@@ -286,6 +293,16 @@ static inline void mlx5_wq_ll_pop(struct mlx5_wq_ll *wq, __be16 ix,
 static inline void mlx5_wq_ll_update_db_record(struct mlx5_wq_ll *wq)
 {
 	*wq->db = cpu_to_be32(wq->wqe_ctr);
+}
+
+static inline u16 mlx5_wq_ll_get_head(struct mlx5_wq_ll *wq)
+{
+	return wq->head;
+}
+
+static inline u16 mlx5_wq_ll_get_counter(struct mlx5_wq_ll *wq)
+{
+	return wq->wqe_ctr;
 }
 
 #endif /* __MLX5_WQ_H__ */

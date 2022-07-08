@@ -4,6 +4,7 @@
  * Author: Paul Burton <paul.burton@mips.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/errno.h>
 #include <linux/percpu.h>
 #include <linux/of.h>
@@ -78,7 +79,7 @@ int mips_cpc_probe(void)
 	if (!addr)
 		return -ENODEV;
 
-	mips_cpc_base = ioremap_nocache(addr, 0x8000);
+	mips_cpc_base = ioremap(addr, 0x8000);
 	if (!mips_cpc_base)
 		return -ENXIO;
 
@@ -97,7 +98,7 @@ void mips_cpc_lock_other(unsigned int core)
 	curr_core = cpu_core(&current_cpu_data);
 	spin_lock_irqsave(&per_cpu(cpc_core_lock, curr_core),
 			  per_cpu(cpc_core_lock_flags, curr_core));
-	write_cpc_cl_other(core << __ffs(CPC_Cx_OTHER_CORENUM));
+	write_cpc_cl_other(FIELD_PREP(CPC_Cx_OTHER_CORENUM, core));
 
 	/*
 	 * Ensure the core-other region reflects the appropriate core &

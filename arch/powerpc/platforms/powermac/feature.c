@@ -1465,7 +1465,7 @@ static long g5_i2s_enable(struct device_node *node, long param, long value)
 	case 2:
 		if (macio->type == macio_shasta)
 			break;
-		/* fall through */
+		fallthrough;
 	default:
 		return -ENODEV;
 	}
@@ -1530,7 +1530,7 @@ static long g5_reset_cpu(struct device_node *node, long param, long value)
  * This takes the second CPU off the bus on dual CPU machines
  * running UP
  */
-void g5_phy_disable_cpu1(void)
+void __init g5_phy_disable_cpu1(void)
 {
 	if (uninorth_maj == 3)
 		UN_OUT(U3_API_PHY_CONFIG_1, 0);

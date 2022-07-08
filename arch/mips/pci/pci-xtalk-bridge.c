@@ -13,6 +13,7 @@
 #include <linux/platform_data/xtalk-bridge.h>
 #include <linux/nvmem-consumer.h>
 #include <linux/crc16.h>
+#include <linux/irqdomain.h>
 
 #include <asm/pci/bridge.h>
 #include <asm/paccess.h>
@@ -25,7 +26,7 @@
 /*
  * Common phys<->dma mapping for platforms using pci xtalk bridge
  */
-dma_addr_t __phys_to_dma(struct device *dev, phys_addr_t paddr)
+dma_addr_t phys_to_dma(struct device *dev, phys_addr_t paddr)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct bridge_controller *bc = BRIDGE_CONTROLLER(pdev->bus);
@@ -33,7 +34,7 @@ dma_addr_t __phys_to_dma(struct device *dev, phys_addr_t paddr)
 	return bc->baddr + paddr;
 }
 
-phys_addr_t __dma_to_phys(struct device *dev, dma_addr_t dma_addr)
+phys_addr_t dma_to_phys(struct device *dev, dma_addr_t dma_addr)
 {
 	return dma_addr & ~(0xffUL << 56);
 }
@@ -385,7 +386,7 @@ static int bridge_domain_activate(struct irq_domain *domain,
 	bridge_set(bc, b_int_enable, 0x7ffffe00); /* more stuff in int_enable */
 
 	/*
-	 * Enable sending of an interrupt clear packt to the hub on a high to
+	 * Enable sending of an interrupt clear packet to the hub on a high to
 	 * low transition of the interrupt pin.
 	 *
 	 * IRIX sets additional bits in the address which are documented as
@@ -437,17 +438,28 @@ static int bridge_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 	struct irq_alloc_info info;
 	int irq;
 
-	irq = bc->pci_int[slot];
+	switch (pin) {
+	case PCI_INTERRUPT_UNKNOWN:
+	case PCI_INTERRUPT_INTA:
+	case PCI_INTERRUPT_INTC:
+		pin = 0;
+		break;
+	case PCI_INTERRUPT_INTB:
+	case PCI_INTERRUPT_INTD:
+		pin = 1;
+	}
+
+	irq = bc->pci_int[slot][pin];
 	if (irq == -1) {
 		info.ctrl = bc;
 		info.nasid = bc->nasid;
-		info.pin = slot;
+		info.pin = bc->int_mapping[slot][pin];
 
 		irq = irq_domain_alloc_irqs(bc->domain, 1, bc->nasid, &info);
 		if (irq < 0)
 			return irq;
 
-		bc->pci_int[slot] = irq;
+		bc->pci_int[slot][pin] = irq;
 	}
 	return irq;
 }
@@ -458,21 +470,26 @@ static void bridge_setup_ip27_baseio6g(struct bridge_controller *bc)
 {
 	bc->ioc3_sid[2] = IOC3_SID(IOC3_SUBSYS_IP27_BASEIO6G);
 	bc->ioc3_sid[6] = IOC3_SID(IOC3_SUBSYS_IP27_MIO);
+	bc->int_mapping[2][1] = 4;
+	bc->int_mapping[6][1] = 6;
 }
 
 static void bridge_setup_ip27_baseio(struct bridge_controller *bc)
 {
 	bc->ioc3_sid[2] = IOC3_SID(IOC3_SUBSYS_IP27_BASEIO);
+	bc->int_mapping[2][1] = 4;
 }
 
 static void bridge_setup_ip29_baseio(struct bridge_controller *bc)
 {
 	bc->ioc3_sid[2] = IOC3_SID(IOC3_SUBSYS_IP29_SYSBOARD);
+	bc->int_mapping[2][1] = 3;
 }
 
 static void bridge_setup_ip30_sysboard(struct bridge_controller *bc)
 {
 	bc->ioc3_sid[2] = IOC3_SID(IOC3_SUBSYS_IP30_SYSBOARD);
+	bc->int_mapping[2][1] = 4;
 }
 
 static void bridge_setup_menet(struct bridge_controller *bc)
@@ -481,6 +498,26 @@ static void bridge_setup_menet(struct bridge_controller *bc)
 	bc->ioc3_sid[1] = IOC3_SID(IOC3_SUBSYS_MENET);
 	bc->ioc3_sid[2] = IOC3_SID(IOC3_SUBSYS_MENET);
 	bc->ioc3_sid[3] = IOC3_SID(IOC3_SUBSYS_MENET4);
+}
+
+static void bridge_setup_io7(struct bridge_controller *bc)
+{
+	bc->ioc3_sid[4] = IOC3_SID(IOC3_SUBSYS_IO7);
+}
+
+static void bridge_setup_io8(struct bridge_controller *bc)
+{
+	bc->ioc3_sid[4] = IOC3_SID(IOC3_SUBSYS_IO8);
+}
+
+static void bridge_setup_io9(struct bridge_controller *bc)
+{
+	bc->ioc3_sid[1] = IOC3_SID(IOC3_SUBSYS_IO9);
+}
+
+static void bridge_setup_ip34_fuel_sysboard(struct bridge_controller *bc)
+{
+	bc->ioc3_sid[4] = IOC3_SID(IOC3_SUBSYS_IP34_SYSBOARD);
 }
 
 #define BRIDGE_BOARD_SETUP(_partno, _setup)	\
@@ -500,6 +537,10 @@ static const struct {
 	BRIDGE_BOARD_SETUP("030-0887-", bridge_setup_ip30_sysboard),
 	BRIDGE_BOARD_SETUP("030-1467-", bridge_setup_ip30_sysboard),
 	BRIDGE_BOARD_SETUP("030-0873-", bridge_setup_menet),
+	BRIDGE_BOARD_SETUP("030-1557-", bridge_setup_io7),
+	BRIDGE_BOARD_SETUP("030-1673-", bridge_setup_io8),
+	BRIDGE_BOARD_SETUP("030-1771-", bridge_setup_io9),
+	BRIDGE_BOARD_SETUP("030-1707-", bridge_setup_ip34_fuel_sysboard),
 };
 
 static void bridge_setup_board(struct bridge_controller *bc, char *partnum)
@@ -587,9 +628,10 @@ static int bridge_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	domain = irq_domain_create_hierarchy(parent, 0, 8, fn,
 					     &bridge_domain_ops, NULL);
-	irq_domain_free_fwnode(fn);
-	if (!domain)
+	if (!domain) {
+		irq_domain_free_fwnode(fn);
 		return -ENOMEM;
+	}
 
 	pci_set_flags(PCI_PROBE_ONLY);
 
@@ -655,7 +697,11 @@ static int bridge_probe(struct platform_device *pdev)
 
 	for (slot = 0; slot < 8; slot++) {
 		bridge_set(bc, b_device[slot].reg, BRIDGE_DEV_SWAP_DIR);
-		bc->pci_int[slot] = -1;
+		bc->pci_int[slot][0] = -1;
+		bc->pci_int[slot][1] = -1;
+		/* default interrupt pin mapping */
+		bc->int_mapping[slot][0] = slot;
+		bc->int_mapping[slot][1] = slot ^ 4;
 	}
 	bridge_read(bc, b_wid_tflush);	  /* wait until Bridge PIO complete */
 
@@ -683,6 +729,7 @@ err_free_resource:
 	pci_free_resource_list(&host->windows);
 err_remove_domain:
 	irq_domain_remove(domain);
+	irq_domain_free_fwnode(fn);
 	return err;
 }
 
@@ -690,8 +737,10 @@ static int bridge_remove(struct platform_device *pdev)
 {
 	struct pci_bus *bus = platform_get_drvdata(pdev);
 	struct bridge_controller *bc = BRIDGE_CONTROLLER(bus);
+	struct fwnode_handle *fn = bc->domain->fwnode;
 
 	irq_domain_remove(bc->domain);
+	irq_domain_free_fwnode(fn);
 	pci_lock_rescan_remove();
 	pci_stop_root_bus(bus);
 	pci_remove_root_bus(bus);

@@ -137,6 +137,9 @@ static const unsigned short normal_i2c[] = {
 #define CAT34TS04_DEVID		0x2200
 #define CAT34TS04_DEVID_MASK	0xfff0
 
+#define N34TS04_DEVID		0x2230
+#define N34TS04_DEVID_MASK	0xfff0
+
 /* ST Microelectronics */
 #define STTS424_DEVID		0x0101
 #define STTS424_DEVID_MASK	0xffff
@@ -181,6 +184,7 @@ static struct jc42_chips jc42_chips[] = {
 	{ ONS_MANID, CAT6095_DEVID, CAT6095_DEVID_MASK },
 	{ ONS_MANID, CAT34TS02C_DEVID, CAT34TS02C_DEVID_MASK },
 	{ ONS_MANID, CAT34TS04_DEVID, CAT34TS04_DEVID_MASK },
+	{ ONS_MANID, N34TS04_DEVID, N34TS04_DEVID_MASK },
 	{ NXP_MANID, SE98_DEVID, SE98_DEVID_MASK },
 	{ STM_MANID, STTS424_DEVID, STTS424_DEVID_MASK },
 	{ STM_MANID, STTS424E_DEVID, STTS424E_DEVID_MASK },
@@ -458,7 +462,7 @@ static const struct hwmon_chip_info jc42_chip_info = {
 	.info = jc42_info,
 };
 
-static int jc42_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int jc42_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct device *hwmon_dev;
@@ -506,7 +510,7 @@ static int jc42_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	}
 	data->config = config;
 
-	hwmon_dev = devm_hwmon_device_register_with_info(dev, client->name,
+	hwmon_dev = devm_hwmon_device_register_with_info(dev, "jc42",
 							 data, &jc42_chip_info,
 							 NULL);
 	return PTR_ERR_OR_ZERO(hwmon_dev);
@@ -581,7 +585,7 @@ static struct i2c_driver jc42_driver = {
 		.pm = JC42_DEV_PM_OPS,
 		.of_match_table = of_match_ptr(jc42_of_ids),
 	},
-	.probe		= jc42_probe,
+	.probe_new	= jc42_probe,
 	.remove		= jc42_remove,
 	.id_table	= jc42_id,
 	.detect		= jc42_detect,

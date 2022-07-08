@@ -31,7 +31,13 @@
 #include <linux/dma-buf.h>
 #include <linux/vfio.h>
 
+#include <drm/drm_fourcc.h>
+#include <drm/drm_plane.h>
+
+#include "gem/i915_gem_dmabuf.h"
+
 #include "i915_drv.h"
+#include "i915_reg.h"
 #include "gvt.h"
 
 #define GEN8_DECODE_PTE(pte) (pte & GENMASK_ULL(63, 12))
@@ -67,11 +73,11 @@ static int vgpu_gem_get_pages(
 	u32 page_num;
 
 	fb_info = (struct intel_vgpu_fb_info *)obj->gvt_info;
-	if (WARN_ON(!fb_info))
+	if (drm_WARN_ON(&dev_priv->drm, !fb_info))
 		return -ENODEV;
 
 	vgpu = fb_info->obj->vgpu;
-	if (WARN_ON(!vgpu))
+	if (drm_WARN_ON(&dev_priv->drm, !vgpu))
 		return -ENODEV;
 
 	st = kmalloc(sizeof(*st), GFP_KERNEL);
@@ -84,7 +90,7 @@ static int vgpu_gem_get_pages(
 		kfree(st);
 		return ret;
 	}
-	gtt_entries = (gen8_pte_t __iomem *)dev_priv->ggtt.gsm +
+	gtt_entries = (gen8_pte_t __iomem *)to_gt(dev_priv)->ggtt->gsm +
 		(fb_info->start >> PAGE_SHIFT);
 	for_each_sg(st->sgl, sg, page_num, i) {
 		dma_addr_t dma_addr =
@@ -148,15 +154,14 @@ static void dmabuf_gem_object_free(struct kref *kref)
 
 	if (vgpu && vgpu->active && !list_empty(&vgpu->dmabuf_obj_list_head)) {
 		list_for_each(pos, &vgpu->dmabuf_obj_list_head) {
-			dmabuf_obj = container_of(pos,
-					struct intel_vgpu_dmabuf_obj, list);
+			dmabuf_obj = list_entry(pos, struct intel_vgpu_dmabuf_obj, list);
 			if (dmabuf_obj == obj) {
+				list_del(pos);
 				intel_gvt_hypervisor_put_vfio_device(vgpu);
 				idr_remove(&vgpu->object_idr,
 					   dmabuf_obj->dmabuf_id);
 				kfree(dmabuf_obj->info);
 				kfree(dmabuf_obj);
-				list_del(pos);
 				break;
 			}
 		}
@@ -198,6 +203,7 @@ static void vgpu_gem_release(struct drm_i915_gem_object *gem_obj)
 }
 
 static const struct drm_i915_gem_object_ops intel_vgpu_gem_ops = {
+	.name = "i915_gem_object_vgpu",
 	.flags = I915_GEM_OBJECT_IS_PROXY,
 	.get_pages = vgpu_gem_get_pages,
 	.put_pages = vgpu_gem_put_pages,
@@ -217,12 +223,12 @@ static struct drm_i915_gem_object *vgpu_create_gem(struct drm_device *dev,
 
 	drm_gem_private_object_init(dev, &obj->base,
 		roundup(info->size, PAGE_SIZE));
-	i915_gem_object_init(obj, &intel_vgpu_gem_ops, &lock_class);
+	i915_gem_object_init(obj, &intel_vgpu_gem_ops, &lock_class, 0);
 	i915_gem_object_set_readonly(obj);
 
 	obj->read_domains = I915_GEM_DOMAIN_GTT;
 	obj->write_domain = 0;
-	if (INTEL_GEN(dev_priv) >= 9) {
+	if (GRAPHICS_VER(dev_priv) >= 9) {
 		unsigned int tiling_mode = 0;
 		unsigned int stride = 0;
 
@@ -356,10 +362,8 @@ pick_dmabuf_by_info(struct intel_vgpu *vgpu,
 	struct intel_vgpu_dmabuf_obj *ret = NULL;
 
 	list_for_each(pos, &vgpu->dmabuf_obj_list_head) {
-		dmabuf_obj = container_of(pos, struct intel_vgpu_dmabuf_obj,
-						list);
-		if ((dmabuf_obj == NULL) ||
-		    (dmabuf_obj->info == NULL))
+		dmabuf_obj = list_entry(pos, struct intel_vgpu_dmabuf_obj, list);
+		if (!dmabuf_obj->info)
 			continue;
 
 		fb_info = (struct intel_vgpu_fb_info *)dmabuf_obj->info;
@@ -386,11 +390,7 @@ pick_dmabuf_by_num(struct intel_vgpu *vgpu, u32 id)
 	struct intel_vgpu_dmabuf_obj *ret = NULL;
 
 	list_for_each(pos, &vgpu->dmabuf_obj_list_head) {
-		dmabuf_obj = container_of(pos, struct intel_vgpu_dmabuf_obj,
-						list);
-		if (!dmabuf_obj)
-			continue;
-
+		dmabuf_obj = list_entry(pos, struct intel_vgpu_dmabuf_obj, list);
 		if (dmabuf_obj->dmabuf_id == id) {
 			ret = dmabuf_obj;
 			break;
@@ -417,7 +417,7 @@ static void update_fb_info(struct vfio_device_gfx_plane_info *gvt_dmabuf,
 
 int intel_vgpu_query_plane(struct intel_vgpu *vgpu, void *args)
 {
-	struct drm_device *dev = &vgpu->gvt->dev_priv->drm;
+	struct drm_device *dev = &vgpu->gvt->gt->i915->drm;
 	struct vfio_device_gfx_plane_info *gfx_plane_info = args;
 	struct intel_vgpu_dmabuf_obj *dmabuf_obj;
 	struct intel_vgpu_fb_info fb_info;
@@ -523,7 +523,7 @@ out:
 /* To associate an exposed dmabuf with the dmabuf_obj */
 int intel_vgpu_get_dmabuf(struct intel_vgpu *vgpu, unsigned int dmabuf_id)
 {
-	struct drm_device *dev = &vgpu->gvt->dev_priv->drm;
+	struct drm_device *dev = &vgpu->gvt->gt->i915->drm;
 	struct intel_vgpu_dmabuf_obj *dmabuf_obj;
 	struct drm_i915_gem_object *obj;
 	struct dma_buf *dmabuf;
@@ -599,8 +599,7 @@ void intel_vgpu_dmabuf_cleanup(struct intel_vgpu *vgpu)
 
 	mutex_lock(&vgpu->dmabuf_lock);
 	list_for_each_safe(pos, n, &vgpu->dmabuf_obj_list_head) {
-		dmabuf_obj = container_of(pos, struct intel_vgpu_dmabuf_obj,
-						list);
+		dmabuf_obj = list_entry(pos, struct intel_vgpu_dmabuf_obj, list);
 		dmabuf_obj->vgpu = NULL;
 
 		idr_remove(&vgpu->object_idr, dmabuf_obj->dmabuf_id);

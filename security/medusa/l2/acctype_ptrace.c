@@ -1,8 +1,7 @@
-#include <linux/medusa/l3/registry.h>
-#include <linux/init.h>
-#include <linux/mm.h>
-#include "kobject_process.h"
-#include <linux/medusa/l1/task.h>
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 /* let's define the 'ptrace' access type, with object=task and subject=task. */
 
@@ -17,23 +16,20 @@ MED_ATTRS(ptrace_access) {
 MED_ACCTYPE(ptrace_access, "ptrace", process_kobject, "tracer",
 		process_kobject, "tracee");
 
-int __init ptrace_acctype_init(void) {
+int __init ptrace_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(ptrace_access,
 		/* to object or not to object? now THAT is a question ;). */
 			MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 
-medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * tracee)
+enum medusa_answer_t medusa_ptrace(struct task_struct *tracer, struct task_struct *tracee)
 {
 	struct ptrace_access access;
 	struct process_kobject tracer_p;
 	struct process_kobject tracee_p;
-	medusa_answer_t retval;
-
-        memset(&access, '\0', sizeof(struct ptrace_access));
-        /* process_kobject tracer_p is zeroed by process_kern2kobj function */
-        /* process_kobject tracee_p is zeroed by process_kern2kobj function */
+	enum medusa_answer_t retval;
 
 	if (!is_med_magic_valid(&(task_security(tracer)->med_object)) &&
 		process_kobj_validate_task(tracer) <= 0)
@@ -54,4 +50,5 @@ medusa_answer_t medusa_ptrace(struct task_struct * tracer, struct task_struct * 
 	}
 	return MED_ALLOW;
 }
-__initcall(ptrace_acctype_init);
+
+device_initcall(ptrace_acctype_init);

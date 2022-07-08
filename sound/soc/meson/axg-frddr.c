@@ -11,6 +11,7 @@
 #include <linux/regmap.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
+#include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/soc-dai.h>
 
@@ -46,11 +47,28 @@ static int g12a_frddr_dai_prepare(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+static int axg_frddr_dai_hw_params(struct snd_pcm_substream *substream,
+				   struct snd_pcm_hw_params *params,
+				   struct snd_soc_dai *dai)
+{
+	struct axg_fifo *fifo = snd_soc_dai_get_drvdata(dai);
+	unsigned int period, depth, val;
+
+	period = params_period_bytes(params);
+
+	/* Trim the FIFO depth if the period is small to improve latency */
+	depth = min(period, fifo->depth);
+	val = (depth / AXG_FIFO_BURST) - 1;
+	regmap_update_bits(fifo->map, FIFO_CTRL1, CTRL1_FRDDR_DEPTH_MASK,
+			   CTRL1_FRDDR_DEPTH(val));
+
+	return 0;
+}
+
 static int axg_frddr_dai_startup(struct snd_pcm_substream *substream,
 				 struct snd_soc_dai *dai)
 {
 	struct axg_fifo *fifo = snd_soc_dai_get_drvdata(dai);
-	unsigned int fifo_depth, fifo_threshold;
 	int ret;
 
 	/* Enable pclk to access registers and clock the fifo ip */
@@ -60,19 +78,6 @@ static int axg_frddr_dai_startup(struct snd_pcm_substream *substream,
 
 	/* Apply single buffer mode to the interface */
 	regmap_update_bits(fifo->map, FIFO_CTRL0, CTRL0_FRDDR_PP_MODE, 0);
-
-	/*
-	 * TODO: We could adapt the fifo depth and the fifo threshold
-	 * depending on the expected memory throughput and lantencies
-	 * For now, we'll just use the same values as the vendor kernel
-	 * Depth and threshold are zero based.
-	 */
-	fifo_depth = AXG_FIFO_MIN_CNT - 1;
-	fifo_threshold = (AXG_FIFO_MIN_CNT / 2) - 1;
-	regmap_update_bits(fifo->map, FIFO_CTRL1,
-			   CTRL1_FRDDR_DEPTH_MASK | CTRL1_THRESHOLD_MASK,
-			   CTRL1_FRDDR_DEPTH(fifo_depth) |
-			   CTRL1_THRESHOLD(fifo_threshold));
 
 	return 0;
 }
@@ -92,6 +97,7 @@ static int axg_frddr_pcm_new(struct snd_soc_pcm_runtime *rtd,
 }
 
 static const struct snd_soc_dai_ops axg_frddr_ops = {
+	.hw_params	= axg_frddr_dai_hw_params,
 	.startup	= axg_frddr_dai_startup,
 	.shutdown	= axg_frddr_dai_shutdown,
 };
@@ -151,7 +157,6 @@ static const struct snd_soc_component_driver axg_frddr_component_drv = {
 	.num_dapm_routes	= ARRAY_SIZE(axg_frddr_dapm_routes),
 	.open			= axg_fifo_pcm_open,
 	.close			= axg_fifo_pcm_close,
-	.ioctl			= snd_soc_pcm_lib_ioctl,
 	.hw_params		= axg_fifo_pcm_hw_params,
 	.hw_free		= axg_fifo_pcm_hw_free,
 	.pointer		= axg_fifo_pcm_pointer,
@@ -159,12 +164,14 @@ static const struct snd_soc_component_driver axg_frddr_component_drv = {
 };
 
 static const struct axg_fifo_match_data axg_frddr_match_data = {
-	.component_drv	= &axg_frddr_component_drv,
-	.dai_drv	= &axg_frddr_dai_drv
+	.field_threshold	= REG_FIELD(FIFO_CTRL1, 16, 23),
+	.component_drv		= &axg_frddr_component_drv,
+	.dai_drv		= &axg_frddr_dai_drv
 };
 
 static const struct snd_soc_dai_ops g12a_frddr_ops = {
 	.prepare	= g12a_frddr_dai_prepare,
+	.hw_params	= axg_frddr_dai_hw_params,
 	.startup	= axg_frddr_dai_startup,
 	.shutdown	= axg_frddr_dai_shutdown,
 };
@@ -275,7 +282,6 @@ static const struct snd_soc_component_driver g12a_frddr_component_drv = {
 	.num_dapm_routes	= ARRAY_SIZE(g12a_frddr_dapm_routes),
 	.open			= axg_fifo_pcm_open,
 	.close			= axg_fifo_pcm_close,
-	.ioctl			= snd_soc_pcm_lib_ioctl,
 	.hw_params		= g12a_fifo_pcm_hw_params,
 	.hw_free		= axg_fifo_pcm_hw_free,
 	.pointer		= axg_fifo_pcm_pointer,
@@ -283,8 +289,9 @@ static const struct snd_soc_component_driver g12a_frddr_component_drv = {
 };
 
 static const struct axg_fifo_match_data g12a_frddr_match_data = {
-	.component_drv	= &g12a_frddr_component_drv,
-	.dai_drv	= &g12a_frddr_dai_drv
+	.field_threshold	= REG_FIELD(FIFO_CTRL1, 16, 23),
+	.component_drv		= &g12a_frddr_component_drv,
+	.dai_drv		= &g12a_frddr_dai_drv
 };
 
 /* On SM1, the output selection in on CTRL2 */
@@ -345,7 +352,6 @@ static const struct snd_soc_component_driver sm1_frddr_component_drv = {
 	.num_dapm_routes	= ARRAY_SIZE(g12a_frddr_dapm_routes),
 	.open			= axg_fifo_pcm_open,
 	.close			= axg_fifo_pcm_close,
-	.ioctl			= snd_soc_pcm_lib_ioctl,
 	.hw_params		= g12a_fifo_pcm_hw_params,
 	.hw_free		= axg_fifo_pcm_hw_free,
 	.pointer		= axg_fifo_pcm_pointer,
@@ -353,8 +359,9 @@ static const struct snd_soc_component_driver sm1_frddr_component_drv = {
 };
 
 static const struct axg_fifo_match_data sm1_frddr_match_data = {
-	.component_drv	= &sm1_frddr_component_drv,
-	.dai_drv	= &g12a_frddr_dai_drv
+	.field_threshold	= REG_FIELD(FIFO_CTRL1, 16, 23),
+	.component_drv		= &sm1_frddr_component_drv,
+	.dai_drv		= &g12a_frddr_dai_drv
 };
 
 static const struct of_device_id axg_frddr_of_match[] = {

@@ -18,6 +18,9 @@ etc.
    devices
    sysctl/index
 
+   abi
+   features
+
 This section describes CPU vulnerabilities and their mitigations.
 
 .. toctree::
@@ -31,7 +34,8 @@ problems and bugs in particular.
 .. toctree::
    :maxdepth: 1
 
-   reporting-bugs
+   reporting-issues
+   reporting-regressions
    security-bugs
    bug-hunting
    bug-bisect
@@ -41,6 +45,7 @@ problems and bugs in particular.
    init
    kdump/index
    perf/index
+   pstore-blk
 
 This is the beginning of a section with information of interest to
 application developers.  Documents covering various aspects of the kernel
@@ -64,6 +69,7 @@ configure specific aspects of kernel behavior to your liking.
    binderfs
    binfmt-misc
    blockdev/index
+   bootconfig
    braille-console
    btmrvl
    cgroup-v1/index
@@ -74,8 +80,11 @@ configure specific aspects of kernel behavior to your liking.
    cputopology
    dell_rbu
    device-mapper/index
+   edid
    efi-stub
    ext4
+   filesystem-monitoring
+   nfs/index
    gpio/index
    highuid
    hw_random
@@ -90,6 +99,7 @@ configure specific aspects of kernel behavior to your liking.
    lockup-watchdogs
    LSM/index
    md
+   media/index
    mm/index
    module-signing
    mono
@@ -104,13 +114,13 @@ configure specific aspects of kernel behavior to your liking.
    rtc
    serial-console
    svga
+   syscall-user-dispatch
    sysrq
    thunderbolt
    ufs
    unicode
    vga-softcursor
    video-output
-   wimax/index
    xfs
 
 .. only::  subproject and html

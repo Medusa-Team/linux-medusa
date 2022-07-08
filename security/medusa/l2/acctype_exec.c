@@ -1,11 +1,8 @@
-#include <linux/medusa/l3/registry.h>
-#include <linux/dcache.h>
-#include <linux/init.h>
-#include <linux/mm.h>
+// SPDX-License-Identifier: GPL-2.0
 
-#include "kobject_process.h"
-#include "kobject_file.h"
-#include <linux/medusa/l1/file_handlers.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_file.h"
 
 /* let's define the 'exec' access type, with subj=task and obj=inode */
 
@@ -23,11 +20,11 @@ struct exec_paccess {
 };
 
 MED_ATTRS(exec_faccess) {
-	MED_ATTR_RO (exec_faccess, filename, "filename", MED_STRING),
+	MED_ATTR_RO(exec_faccess, filename, "filename", MED_STRING),
 	MED_ATTR_END
 };
 MED_ATTRS(exec_paccess) {
-	MED_ATTR_RO (exec_paccess, filename, "filename", MED_STRING),
+	MED_ATTR_RO(exec_paccess, filename, "filename", MED_STRING),
 	MED_ATTR_END
 };
 
@@ -36,17 +33,53 @@ MED_ACCTYPE(exec_faccess, "fexec", process_kobject, "process",
 MED_ACCTYPE(exec_paccess, "pexec", process_kobject, "process",
 		file_kobject, "file");
 
-int __init exec_acctype_init(void) {
+int __init exec_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(exec_faccess, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	MED_REGISTER_ACCTYPE(exec_paccess, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 
-static medusa_answer_t medusa_do_fexec(struct dentry * dentry);
-static medusa_answer_t medusa_do_pexec(struct dentry * dentry);
-medusa_answer_t medusa_exec(struct dentry ** dentryp)
+/* XXX Don't try to inline this. GCC tries to be too smart about stack. */
+static enum medusa_answer_t medusa_do_fexec(struct dentry *dentry)
 {
-	medusa_answer_t retval;
+	struct exec_faccess access;
+	struct process_kobject process;
+	struct file_kobject file;
+	enum medusa_answer_t retval;
+
+	file_kobj_dentry2string(dentry, access.filename);
+	process_kern2kobj(&process, current);
+	file_kern2kobj(&file, dentry->d_inode);
+	file_kobj_live_add(dentry->d_inode);
+	retval = MED_DECIDE(exec_faccess, &access, &process, &file);
+	file_kobj_live_remove(dentry->d_inode);
+	if (retval != MED_ERR)
+		return retval;
+	return MED_ALLOW;
+}
+
+static enum medusa_answer_t medusa_do_pexec(struct dentry *dentry)
+{
+	struct exec_paccess access;
+	struct process_kobject process;
+	struct file_kobject file;
+	enum medusa_answer_t retval;
+
+	file_kobj_dentry2string(dentry, access.filename);
+	process_kern2kobj(&process, current);
+	file_kern2kobj(&file, dentry->d_inode);
+	file_kobj_live_add(dentry->d_inode);
+	retval = MED_DECIDE(exec_paccess, &access, &process, &file);
+	file_kobj_live_remove(dentry->d_inode);
+	if (retval == MED_ERR)
+		retval = MED_ALLOW;
+	return retval;
+}
+
+enum medusa_answer_t medusa_exec(struct dentry **dentryp)
+{
+	enum medusa_answer_t retval;
 
 	if (!*dentryp || IS_ERR(*dentryp) || !(*dentryp)->d_inode)
 		return MED_ALLOW;
@@ -55,11 +88,10 @@ medusa_answer_t medusa_exec(struct dentry ** dentryp)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security((*dentryp)->d_inode)->med_object)) &&
-
-			file_kobj_validate_dentry(*dentryp,NULL) <= 0)
+		file_kobj_validate_dentry(*dentryp, NULL, NULL) <= 0)
 		return MED_ALLOW;
-	if (!vs_intersects(VSS(task_security(current)),VS(inode_security((*dentryp)->d_inode))) ||
-		!vs_intersects(VSR(task_security(current)),VS(inode_security((*dentryp)->d_inode)))
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security((*dentryp)->d_inode))) ||
+		!vs_intersects(VSR(task_security(current)), VS(inode_security((*dentryp)->d_inode)))
 	)
 		return MED_DENY;
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current))) {
@@ -74,45 +106,6 @@ medusa_answer_t medusa_exec(struct dentry ** dentryp)
 	return MED_ALLOW;
 }
 
-/* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static medusa_answer_t medusa_do_fexec(struct dentry * dentry)
-{
-	struct exec_faccess access;
-	struct process_kobject process;
-	struct file_kobject file;
-	medusa_answer_t retval;
-
-        memset(&access, '\0', sizeof(struct exec_faccess));
-        /* process_kobject process is zeroed by process_kern2kobj function */
-        /* process_kobject file is zeroed by file_kern2kobj function */
-
-	file_kobj_dentry2string(dentry, access.filename);
-	process_kern2kobj(&process, current);
-	file_kern2kobj(&file, dentry->d_inode);
-	file_kobj_live_add(dentry->d_inode);
-	retval = MED_DECIDE(exec_faccess, &access, &process, &file);
-	file_kobj_live_remove(dentry->d_inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
-}
-static medusa_answer_t medusa_do_pexec(struct dentry *dentry)
-{
-	struct exec_paccess access;
-	struct process_kobject process;
-	struct file_kobject file;
-	medusa_answer_t retval;
-
-	file_kobj_dentry2string(dentry, access.filename);
-	process_kern2kobj(&process, current);
-	file_kern2kobj(&file, dentry->d_inode);
-	file_kobj_live_add(dentry->d_inode);
-	retval = MED_DECIDE(exec_paccess, &access, &process, &file);
-	file_kobj_live_remove(dentry->d_inode);
-	if (retval == MED_ERR)
-		retval = MED_ALLOW;
-	return retval;
-}
 int medusa_monitored_pexec(void)
 {
 	return MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current));
@@ -125,4 +118,5 @@ void medusa_monitor_pexec(int flag)
 	else
 		MEDUSA_UNMONITOR_ACCESS_S(exec_paccess, task_security(current));
 }
-__initcall(exec_acctype_init);
+
+device_initcall(exec_acctype_init);

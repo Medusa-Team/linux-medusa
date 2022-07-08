@@ -13,7 +13,7 @@
 #include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/list.h>
-#include <linux/genhd.h>
+#include <linux/blkdev.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <uapi/linux/sed-opal.h>
@@ -1056,7 +1056,7 @@ static int start_opal_session_cont(struct opal_dev *dev)
 	hsn = response_get_u64(&dev->parsed, 4);
 	tsn = response_get_u64(&dev->parsed, 5);
 
-	if (hsn == 0 && tsn == 0) {
+	if (hsn != GENERIC_HOST_SESSION_NUM || tsn < FIRST_TPER_SESSION_NUM) {
 		pr_debug("Couldn't authenticate session\n");
 		return -EPERM;
 	}

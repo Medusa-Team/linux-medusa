@@ -1,5 +1,8 @@
-#include "kobject_socket.h"
-#include "kobject_process.h"
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_socket.h"
 
 struct socket_create_access {
 	MEDUSA_ACCESS_HEADER;
@@ -9,21 +12,22 @@ struct socket_create_access {
 };
 
 MED_ATTRS(socket_create_access) {
-	MED_ATTR_RO (socket_create_access, family, "family", MED_UNSIGNED),
-	MED_ATTR_RO (socket_create_access, type, "type", MED_UNSIGNED),
-	MED_ATTR_RO (socket_create_access, protocol, "protocol", MED_UNSIGNED),
+	MED_ATTR_RO(socket_create_access, family, "family", MED_UNSIGNED),
+	MED_ATTR_RO(socket_create_access, type, "type", MED_UNSIGNED),
+	MED_ATTR_RO(socket_create_access, protocol, "protocol", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
 // acctype - subject - object
 MED_ACCTYPE(socket_create_access, "socket_create", process_kobject, "process", process_kobject, "process");
 
-int __init socket_create_acctype_init(void) {
+int __init socket_create_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(socket_create_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
 }
 
-medusa_answer_t medusa_socket_create(int family, int type, int protocol)
+enum medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 {
 	struct socket_create_access access;
 	struct process_kobject process;
@@ -34,7 +38,6 @@ medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 	if (MEDUSA_MONITORED_ACCESS_S(socket_create_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 
-		memset(&access, '\0', sizeof(struct socket_create_access));
 		access.family = family;
 		access.type = type;
 		access.protocol = protocol;
@@ -44,4 +47,4 @@ medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 	return MED_ALLOW;
 }
 
-__initcall(socket_create_acctype_init);
+device_initcall(socket_create_acctype_init);

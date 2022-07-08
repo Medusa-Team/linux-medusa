@@ -1,12 +1,11 @@
-/* setresuid_acctype.c, (C) 2002 Milan Pikula
+// SPDX-License-Identifier: GPL-2.0-only
+
+/* (C) 2002 Milan Pikula
  *
  * This file defines the 'setresuid' access type, with object=subject=process.
  */
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l1/task.h>
-#include "kobject_process.h"
-#include <linux/init.h>
-#include <linux/mm.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 struct setresuid {
 	MEDUSA_ACCESS_HEADER;
@@ -16,27 +15,25 @@ struct setresuid {
 };
 
 MED_ATTRS(setresuid) {
-	MED_ATTR_RO (setresuid, ruid, "ruid", MED_SIGNED),
-	MED_ATTR_RO (setresuid, euid, "euid", MED_SIGNED),
-	MED_ATTR_RO (setresuid, suid, "suid", MED_SIGNED),
+	MED_ATTR_RO(setresuid, ruid, "ruid", MED_SIGNED),
+	MED_ATTR_RO(setresuid, euid, "euid", MED_SIGNED),
+	MED_ATTR_RO(setresuid, suid, "suid", MED_SIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(setresuid, "setresuid", process_kobject, "process", process_kobject, "process");
 
-int __init setresuid_acctype_init(void) {
+int __init setresuid_acctype_init(void)
+{
 	MED_REGISTER_ACCTYPE(setresuid, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 
-medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 {
 	struct setresuid access;
 	struct process_kobject process;
-	medusa_answer_t retval = MED_ALLOW;
-
-        memset(&access, '\0', sizeof(struct setresuid));
-        /* process_kobject process is zeroed by process_kern2kobj function */
+	enum medusa_answer_t retval = MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
@@ -52,4 +49,5 @@ medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 
 	return retval;
 }
-__initcall(setresuid_acctype_init);
+
+device_initcall(setresuid_acctype_init);

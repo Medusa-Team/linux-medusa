@@ -29,8 +29,8 @@
 #include "i2caux_interface.h"
 #include "inc/hw/aux_engine.h"
 
+enum aux_return_code_type;
 
-#ifdef CONFIG_DRM_AMD_DC_DCN2_0
 #define AUX_COMMON_REG_LIST0(id)\
 	SRI(AUX_CONTROL, DP_AUX, id), \
 	SRI(AUX_ARB_CONTROL, DP_AUX, id), \
@@ -39,7 +39,6 @@
 	SRI(AUX_INTERRUPT_CONTROL, DP_AUX, id), \
 	SRI(AUX_DPHY_RX_CONTROL1, DP_AUX, id), \
 	SRI(AUX_SW_STATUS, DP_AUX, id)
-#endif
 
 #define AUX_COMMON_REG_LIST(id)\
 	SRI(AUX_CONTROL, DP_AUX, id), \
@@ -101,7 +100,6 @@ struct dce110_aux_registers {
 	AUX_SF(AUX_SW_CONTROL, AUX_SW_GO, mask_sh),\
 	AUX_SF(AUX_SW_DATA, AUX_SW_AUTOINCREMENT_DISABLE, mask_sh),\
 	AUX_SF(AUX_SW_DATA, AUX_SW_DATA_RW, mask_sh),\
-	AUX_SF(AUX_SW_DATA, AUX_SW_AUTOINCREMENT_DISABLE, mask_sh),\
 	AUX_SF(AUX_SW_DATA, AUX_SW_INDEX, mask_sh),\
 	AUX_SF(AUX_SW_DATA, AUX_SW_DATA, mask_sh),\
 	AUX_SF(AUX_SW_STATUS, AUX_SW_REPLY_BYTE_COUNT, mask_sh),\
@@ -126,7 +124,6 @@ struct dce110_aux_registers {
 	AUX_SF(AUX_SW_CONTROL, AUX_SW_GO, mask_sh),\
 	AUX_SF(AUX_SW_DATA, AUX_SW_AUTOINCREMENT_DISABLE, mask_sh),\
 	AUX_SF(AUX_SW_DATA, AUX_SW_DATA_RW, mask_sh),\
-	AUX_SF(AUX_SW_DATA, AUX_SW_AUTOINCREMENT_DISABLE, mask_sh),\
 	AUX_SF(AUX_SW_DATA, AUX_SW_INDEX, mask_sh),\
 	AUX_SF(AUX_SW_DATA, AUX_SW_DATA, mask_sh),\
 	AUX_SF(AUX_SW_STATUS, AUX_SW_REPLY_BYTE_COUNT, mask_sh),\
@@ -305,13 +302,16 @@ bool dce110_aux_engine_acquire(
 
 int dce_aux_transfer_raw(struct ddc_service *ddc,
 		struct aux_payload *cmd,
-		enum aux_channel_operation_result *operation_result);
+		enum aux_return_code_type *operation_result);
 
+int dce_aux_transfer_dmub_raw(struct ddc_service *ddc,
+		struct aux_payload *payload,
+		enum aux_return_code_type *operation_result);
 bool dce_aux_transfer_with_retries(struct ddc_service *ddc,
 		struct aux_payload *cmd);
 
 struct dce_aux_funcs {
-	bool (*configure_timeout)
+	uint32_t (*configure_timeout)
 		(struct ddc_service *ddc,
 		 uint32_t timeout);
 	void (*destroy)

@@ -185,7 +185,7 @@ static irqreturn_t iproc_gpio_irq_handler(int irq, void *data)
 		int_bits = level | event;
 
 		for_each_set_bit(bit, &int_bits, gc->ngpio)
-			generic_handle_irq(irq_linear_revmap(gc->irq.domain, bit));
+			generic_handle_domain_irq(gc->irq.domain, bit);
 	}
 
 	return int_bits ? IRQ_HANDLED : IRQ_NONE;
@@ -224,7 +224,7 @@ static int iproc_gpio_probe(struct platform_device *pdev)
 	}
 
 	chip->gc.label = dev_name(dev);
-	if (of_property_read_u32(dn, "ngpios", &num_gpios))
+	if (!of_property_read_u32(dn, "ngpios", &num_gpios))
 		chip->gc.ngpio = num_gpios;
 
 	irq = platform_get_irq(pdev, 0);
@@ -251,8 +251,7 @@ static int iproc_gpio_probe(struct platform_device *pdev)
 
 		/*
 		 * Directly request the irq here instead of passing
-		 * a flow-handler to gpiochip_set_chained_irqchip,
-		 * because the irq is shared.
+		 * a flow-handler because the irq is shared.
 		 */
 		ret = devm_request_irq(dev, irq, iproc_gpio_irq_handler,
 				       IRQF_SHARED, chip->gc.label, &chip->gc);

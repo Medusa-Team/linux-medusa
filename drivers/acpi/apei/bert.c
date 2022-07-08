@@ -29,6 +29,7 @@
 
 #undef pr_fmt
 #define pr_fmt(fmt) "BERT: " fmt
+#define ACPI_BERT_PRINT_MAX_LEN 1024
 
 static int bert_disable;
 
@@ -58,8 +59,11 @@ static void __init bert_print_all(struct acpi_bert_region *region,
 		}
 
 		pr_info_once("Error records from previous boot:\n");
-
-		cper_estatus_print(KERN_INFO HW_ERR, estatus);
+		if (region_len < ACPI_BERT_PRINT_MAX_LEN)
+			cper_estatus_print(KERN_INFO HW_ERR, estatus);
+		else
+			pr_info_once("Max print length exceeded, table data is available at:\n"
+				     "/sys/firmware/acpi/tables/data/BERT");
 
 		/*
 		 * Because the boot error source is "one-time polled" type,
@@ -77,7 +81,7 @@ static int __init setup_bert_disable(char *str)
 {
 	bert_disable = 1;
 
-	return 0;
+	return 1;
 }
 __setup("bert_disable", setup_bert_disable);
 
@@ -119,7 +123,7 @@ static int __init bert_init(void)
 	rc = bert_check_table(bert_tab);
 	if (rc) {
 		pr_err(FW_BUG "table invalid.\n");
-		return rc;
+		goto out_put_bert_tab;
 	}
 
 	region_len = bert_tab->region_length;
@@ -127,7 +131,7 @@ static int __init bert_init(void)
 	rc = apei_resources_add(&bert_resources, bert_tab->address,
 				region_len, true);
 	if (rc)
-		return rc;
+		goto out_put_bert_tab;
 	rc = apei_resources_request(&bert_resources, "APEI BERT");
 	if (rc)
 		goto out_fini;
@@ -142,6 +146,8 @@ static int __init bert_init(void)
 	apei_resources_release(&bert_resources);
 out_fini:
 	apei_resources_fini(&bert_resources);
+out_put_bert_tab:
+	acpi_put_table((struct acpi_table_header *)bert_tab);
 
 	return rc;
 }

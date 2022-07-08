@@ -14,22 +14,6 @@
 #include <media/media-entity.h>
 #include <media/media-device.h>
 
-static inline const char *gobj_type(enum media_gobj_type type)
-{
-	switch (type) {
-	case MEDIA_GRAPH_ENTITY:
-		return "entity";
-	case MEDIA_GRAPH_PAD:
-		return "pad";
-	case MEDIA_GRAPH_LINK:
-		return "link";
-	case MEDIA_GRAPH_INTF_DEVNODE:
-		return "intf-devnode";
-	default:
-		return "unknown";
-	}
-}
-
 static inline const char *intf_type(struct media_interface *intf)
 {
 	switch (intf->type) {
@@ -64,12 +48,10 @@ __must_check int __media_entity_enum_init(struct media_entity_enum *ent_enum,
 					  int idx_max)
 {
 	idx_max = ALIGN(idx_max, BITS_PER_LONG);
-	ent_enum->bmap = kcalloc(idx_max / BITS_PER_LONG, sizeof(long),
-				 GFP_KERNEL);
+	ent_enum->bmap = bitmap_zalloc(idx_max, GFP_KERNEL);
 	if (!ent_enum->bmap)
 		return -ENOMEM;
 
-	bitmap_zero(ent_enum->bmap, idx_max);
 	ent_enum->idx_max = idx_max;
 
 	return 0;
@@ -78,7 +60,7 @@ EXPORT_SYMBOL_GPL(__media_entity_enum_init);
 
 void media_entity_enum_cleanup(struct media_entity_enum *ent_enum)
 {
-	kfree(ent_enum->bmap);
+	bitmap_free(ent_enum->bmap);
 }
 EXPORT_SYMBOL_GPL(media_entity_enum_cleanup);
 
@@ -323,7 +305,7 @@ static void media_graph_walk_iter(struct media_graph *graph)
 		return;
 	}
 
-	/* Get the entity in the other end of the link . */
+	/* Get the entity at the other end of the link. */
 	next = media_entity_other(entity, link);
 
 	/* Has the entity already been visited? */
@@ -340,6 +322,7 @@ static void media_graph_walk_iter(struct media_graph *graph)
 	stack_push(graph, next);
 	dev_dbg(entity->graph_obj.mdev->dev, "walk: pushing '%s' on stack\n",
 		next->name);
+	lockdep_assert_held(&entity->graph_obj.mdev->graph_mutex);
 }
 
 struct media_entity *media_graph_walk_next(struct media_graph *graph)
@@ -386,7 +369,7 @@ int media_entity_get_fwnode_pad(struct media_entity *entity,
 	if (ret)
 		return ret;
 
-	ret = entity->ops->get_fwnode_pad(&endpoint);
+	ret = entity->ops->get_fwnode_pad(entity, &endpoint);
 	if (ret < 0)
 		return ret;
 
@@ -413,19 +396,20 @@ __must_check int __media_pipeline_start(struct media_entity *entity,
 	struct media_link *link;
 	int ret;
 
-	if (!pipe->streaming_count++) {
-		ret = media_graph_walk_init(&pipe->graph, mdev);
-		if (ret)
-			goto error_graph_walk_start;
+	if (pipe->streaming_count) {
+		pipe->streaming_count++;
+		return 0;
 	}
+
+	ret = media_graph_walk_init(&pipe->graph, mdev);
+	if (ret)
+		return ret;
 
 	media_graph_walk_start(&pipe->graph, entity);
 
 	while ((entity = media_graph_walk_next(graph))) {
 		DECLARE_BITMAP(active, MEDIA_ENTITY_MAX_PADS);
 		DECLARE_BITMAP(has_no_links, MEDIA_ENTITY_MAX_PADS);
-
-		entity->stream_count++;
 
 		if (entity->pipe && entity->pipe != pipe) {
 			pr_err("Pipe active for %s. Can't start for %s\n",
@@ -435,11 +419,11 @@ __must_check int __media_pipeline_start(struct media_entity *entity,
 			goto error;
 		}
 
-		entity->pipe = pipe;
-
 		/* Already streaming --- no need to check. */
-		if (entity->stream_count > 1)
+		if (entity->pipe)
 			continue;
+
+		entity->pipe = pipe;
 
 		if (!entity->ops || !entity->ops->link_validate)
 			continue;
@@ -496,6 +480,8 @@ __must_check int __media_pipeline_start(struct media_entity *entity,
 		}
 	}
 
+	pipe->streaming_count++;
+
 	return 0;
 
 error:
@@ -506,24 +492,17 @@ error:
 	media_graph_walk_start(graph, entity_err);
 
 	while ((entity_err = media_graph_walk_next(graph))) {
-		/* Sanity check for negative stream_count */
-		if (!WARN_ON_ONCE(entity_err->stream_count <= 0)) {
-			entity_err->stream_count--;
-			if (entity_err->stream_count == 0)
-				entity_err->pipe = NULL;
-		}
+		entity_err->pipe = NULL;
 
 		/*
-		 * We haven't increased stream_count further than this
-		 * so we quit here.
+		 * We haven't started entities further than this so we quit
+		 * here.
 		 */
 		if (entity_err == entity)
 			break;
 	}
 
-error_graph_walk_start:
-	if (!--pipe->streaming_count)
-		media_graph_walk_cleanup(graph);
+	media_graph_walk_cleanup(graph);
 
 	return ret;
 }
@@ -554,19 +533,15 @@ void __media_pipeline_stop(struct media_entity *entity)
 	if (WARN_ON(!pipe))
 		return;
 
+	if (--pipe->streaming_count)
+		return;
+
 	media_graph_walk_start(graph, entity);
 
-	while ((entity = media_graph_walk_next(graph))) {
-		/* Sanity check for negative stream_count */
-		if (!WARN_ON_ONCE(entity->stream_count <= 0)) {
-			entity->stream_count--;
-			if (entity->stream_count == 0)
-				entity->pipe = NULL;
-		}
-	}
+	while ((entity = media_graph_walk_next(graph)))
+		entity->pipe = NULL;
 
-	if (!--pipe->streaming_count)
-		media_graph_walk_cleanup(graph);
+	media_graph_walk_cleanup(graph);
 
 }
 EXPORT_SYMBOL_GPL(__media_pipeline_stop);
@@ -639,9 +614,9 @@ int media_get_pad_index(struct media_entity *entity, bool is_sink,
 		return -EINVAL;
 
 	for (i = 0; i < entity->num_pads; i++) {
-		if (entity->pads[i].flags == MEDIA_PAD_FL_SINK)
+		if (entity->pads[i].flags & MEDIA_PAD_FL_SINK)
 			pad_is_sink = true;
-		else if (entity->pads[i].flags == MEDIA_PAD_FL_SOURCE)
+		else if (entity->pads[i].flags & MEDIA_PAD_FL_SOURCE)
 			pad_is_sink = false;
 		else
 			continue;	/* This is an error! */
@@ -662,9 +637,14 @@ media_create_pad_link(struct media_entity *source, u16 source_pad,
 	struct media_link *link;
 	struct media_link *backlink;
 
-	BUG_ON(source == NULL || sink == NULL);
-	BUG_ON(source_pad >= source->num_pads);
-	BUG_ON(sink_pad >= sink->num_pads);
+	if (WARN_ON(!source || !sink) ||
+	    WARN_ON(source_pad >= source->num_pads) ||
+	    WARN_ON(sink_pad >= sink->num_pads))
+		return -EINVAL;
+	if (WARN_ON(!(source->pads[source_pad].flags & MEDIA_PAD_FL_SOURCE)))
+		return -EINVAL;
+	if (WARN_ON(!(sink->pads[sink_pad].flags & MEDIA_PAD_FL_SINK)))
+		return -EINVAL;
 
 	link = media_add_link(&source->links);
 	if (link == NULL)
@@ -846,7 +826,8 @@ int __media_entity_setup_link(struct media_link *link, u32 flags)
 	sink = link->sink->entity;
 
 	if (!(link->flags & MEDIA_LNK_FL_DYNAMIC) &&
-	    (source->stream_count || sink->stream_count))
+	    (media_entity_is_streaming(source) ||
+	     media_entity_is_streaming(sink)))
 		return -EBUSY;
 
 	mdev = source->graph_obj.mdev;

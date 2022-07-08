@@ -218,7 +218,7 @@ static int pcm_open(struct snd_pcm_substream *substream)
 
 		if (frames_per_period > 0) {
 			// For double_pcm_frame quirk.
-			if (rate > 96000) {
+			if (rate > 96000 && !dice->disable_double_pcm_frames) {
 				frames_per_period *= 2;
 				frames_per_buffer *= 2;
 			}
@@ -264,11 +264,7 @@ static int pcm_hw_params(struct snd_pcm_substream *substream,
 			 struct snd_pcm_hw_params *hw_params)
 {
 	struct snd_dice *dice = substream->private_data;
-	int err;
-
-	err = snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(hw_params));
-	if (err < 0)
-		return err;
+	int err = 0;
 
 	if (substream->runtime->status->state == SNDRV_PCM_STATE_OPEN) {
 		unsigned int rate = params_rate(hw_params);
@@ -277,7 +273,7 @@ static int pcm_hw_params(struct snd_pcm_substream *substream,
 
 		mutex_lock(&dice->mutex);
 		// For double_pcm_frame quirk.
-		if (rate > 96000) {
+		if (rate > 96000 && !dice->disable_double_pcm_frames) {
 			events_per_period /= 2;
 			events_per_buffer /= 2;
 		}
@@ -304,7 +300,7 @@ static int pcm_hw_free(struct snd_pcm_substream *substream)
 
 	mutex_unlock(&dice->mutex);
 
-	return snd_pcm_lib_free_pages(substream);
+	return 0;
 }
 
 static int capture_prepare(struct snd_pcm_substream *substream)
@@ -409,7 +405,6 @@ int snd_dice_create_pcm(struct snd_dice *dice)
 	static const struct snd_pcm_ops capture_ops = {
 		.open      = pcm_open,
 		.close     = pcm_close,
-		.ioctl     = snd_pcm_lib_ioctl,
 		.hw_params = pcm_hw_params,
 		.hw_free   = pcm_hw_free,
 		.prepare   = capture_prepare,
@@ -420,7 +415,6 @@ int snd_dice_create_pcm(struct snd_dice *dice)
 	static const struct snd_pcm_ops playback_ops = {
 		.open      = pcm_open,
 		.close     = pcm_close,
-		.ioctl     = snd_pcm_lib_ioctl,
 		.hw_params = pcm_hw_params,
 		.hw_free   = pcm_hw_free,
 		.prepare   = playback_prepare,
@@ -457,9 +451,8 @@ int snd_dice_create_pcm(struct snd_dice *dice)
 			snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK,
 					&playback_ops);
 
-		snd_pcm_lib_preallocate_pages_for_all(pcm,
-						      SNDRV_DMA_TYPE_VMALLOC,
-						      NULL, 0, 0);
+		snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_VMALLOC,
+					       NULL, 0, 0);
 	}
 
 	return 0;

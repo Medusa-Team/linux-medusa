@@ -82,7 +82,7 @@ static int nsim_dev_dummy_fmsg_put(struct devlink_fmsg *fmsg, u32 binary_len)
 	if (err)
 		return err;
 
-	binary = kmalloc(binary_len, GFP_KERNEL);
+	binary = kmalloc(binary_len, GFP_KERNEL | __GFP_NOWARN);
 	if (!binary)
 		return -ENOMEM;
 	get_random_bytes(binary, binary_len);
@@ -110,26 +110,6 @@ static int nsim_dev_dummy_fmsg_put(struct devlink_fmsg *fmsg, u32 binary_len)
 	if (err)
 		return err;
 
-	err = devlink_fmsg_arr_pair_nest_start(fmsg, "test_bool_array");
-	if (err)
-		return err;
-	for (i = 0; i < 10; i++) {
-		err = devlink_fmsg_bool_put(fmsg, true);
-		if (err)
-			return err;
-	}
-	err = devlink_fmsg_arr_pair_nest_end(fmsg);
-	if (err)
-		return err;
-
-	err = devlink_fmsg_arr_pair_nest_start(fmsg, "test_u8_array");
-	if (err)
-		return err;
-	for (i = 0; i < 10; i++) {
-		err = devlink_fmsg_u8_put(fmsg, i);
-		if (err)
-			return err;
-	}
 	err = devlink_fmsg_arr_pair_nest_end(fmsg);
 	if (err)
 		return err;
@@ -139,18 +119,6 @@ static int nsim_dev_dummy_fmsg_put(struct devlink_fmsg *fmsg, u32 binary_len)
 		return err;
 	for (i = 0; i < 10; i++) {
 		err = devlink_fmsg_u32_put(fmsg, i);
-		if (err)
-			return err;
-	}
-	err = devlink_fmsg_arr_pair_nest_end(fmsg);
-	if (err)
-		return err;
-
-	err = devlink_fmsg_arr_pair_nest_start(fmsg, "test_u64_array");
-	if (err)
-		return err;
-	for (i = 0; i < 10; i++) {
-		err = devlink_fmsg_u64_put(fmsg, i);
 		if (err)
 			return err;
 	}
@@ -235,15 +203,10 @@ static ssize_t nsim_dev_health_break_write(struct file *file,
 	char *break_msg;
 	int err;
 
-	break_msg = kmalloc(count + 1, GFP_KERNEL);
-	if (!break_msg)
-		return -ENOMEM;
+	break_msg = memdup_user_nul(data, count);
+	if (IS_ERR(break_msg))
+		return PTR_ERR(break_msg);
 
-	if (copy_from_user(break_msg, data, count)) {
-		err = -EFAULT;
-		goto out;
-	}
-	break_msg[count] = '\0';
 	if (break_msg[count - 1] == '\n')
 		break_msg[count - 1] = '\0';
 
@@ -261,6 +224,7 @@ static const struct file_operations nsim_dev_health_break_fops = {
 	.open = simple_open,
 	.write = nsim_dev_health_break_write,
 	.llseek = generic_file_llseek,
+	.owner = THIS_MODULE,
 };
 
 int nsim_dev_health_init(struct nsim_dev *nsim_dev, struct devlink *devlink)
@@ -271,22 +235,22 @@ int nsim_dev_health_init(struct nsim_dev *nsim_dev, struct devlink *devlink)
 	health->empty_reporter =
 		devlink_health_reporter_create(devlink,
 					       &nsim_dev_empty_reporter_ops,
-					       0, false, health);
+					       0, health);
 	if (IS_ERR(health->empty_reporter))
 		return PTR_ERR(health->empty_reporter);
 
 	health->dummy_reporter =
 		devlink_health_reporter_create(devlink,
 					       &nsim_dev_dummy_reporter_ops,
-					       0, false, health);
+					       0, health);
 	if (IS_ERR(health->dummy_reporter)) {
 		err = PTR_ERR(health->dummy_reporter);
 		goto err_empty_reporter_destroy;
 	}
 
 	health->ddir = debugfs_create_dir("health", nsim_dev->ddir);
-	if (IS_ERR_OR_NULL(health->ddir)) {
-		err = PTR_ERR_OR_ZERO(health->ddir) ?: -EINVAL;
+	if (IS_ERR(health->ddir)) {
+		err = PTR_ERR(health->ddir);
 		goto err_dummy_reporter_destroy;
 	}
 

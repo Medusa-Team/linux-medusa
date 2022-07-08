@@ -27,18 +27,18 @@
 	BPF_JMP_IMM(BPF_JLT, BPF_REG_2, 8, 1),
 	BPF_EXIT_INSN(),
 
-	BPF_ALU64_IMM(BPF_ADD, BPF_REG_2, 1), /* R2=inv(umin=1, umax=8) */
+	BPF_ALU64_IMM(BPF_ADD, BPF_REG_2, 1), /* R2=scalar(umin=1, umax=8) */
 	BPF_MOV64_REG(BPF_REG_1, BPF_REG_FP),
 	BPF_ALU64_IMM(BPF_ADD, BPF_REG_1, -8),
 	BPF_MOV64_IMM(BPF_REG_3, 0),
-	BPF_EMIT_CALL(BPF_FUNC_probe_read),
+	BPF_EMIT_CALL(BPF_FUNC_probe_read_kernel),
 	BPF_EXIT_INSN(),
 	},
 	.prog_type = BPF_PROG_TYPE_TRACEPOINT,
 	.fixup_map_array_48b = { 1 },
 	.result = VERBOSE_ACCEPT,
 	.errstr =
-	"26: (85) call bpf_probe_read#4\
+	"26: (85) call bpf_probe_read_kernel#113\
 	last_idx 26 first_idx 20\
 	regs=4 stack=0 before 25\
 	regs=4 stack=0 before 24\
@@ -87,11 +87,11 @@
 	BPF_JMP_IMM(BPF_JLT, BPF_REG_2, 8, 1),
 	BPF_EXIT_INSN(),
 
-	BPF_ALU64_IMM(BPF_ADD, BPF_REG_2, 1), /* R2=inv(umin=1, umax=8) */
+	BPF_ALU64_IMM(BPF_ADD, BPF_REG_2, 1), /* R2=scalar(umin=1, umax=8) */
 	BPF_MOV64_REG(BPF_REG_1, BPF_REG_FP),
 	BPF_ALU64_IMM(BPF_ADD, BPF_REG_1, -8),
 	BPF_MOV64_IMM(BPF_REG_3, 0),
-	BPF_EMIT_CALL(BPF_FUNC_probe_read),
+	BPF_EMIT_CALL(BPF_FUNC_probe_read_kernel),
 	BPF_EXIT_INSN(),
 	},
 	.prog_type = BPF_PROG_TYPE_TRACEPOINT,
@@ -99,7 +99,7 @@
 	.result = VERBOSE_ACCEPT,
 	.flags = BPF_F_TEST_STATE_FREQ,
 	.errstr =
-	"26: (85) call bpf_probe_read#4\
+	"26: (85) call bpf_probe_read_kernel#113\
 	last_idx 26 first_idx 22\
 	regs=4 stack=0 before 25\
 	regs=4 stack=0 before 24\

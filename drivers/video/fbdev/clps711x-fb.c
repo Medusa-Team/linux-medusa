@@ -153,7 +153,7 @@ static int clps711x_fb_blank(int blank, struct fb_info *info)
 	return 0;
 }
 
-static struct fb_ops clps711x_fb_ops = {
+static const struct fb_ops clps711x_fb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_setcolreg	= clps711x_fb_setcolreg,
 	.fb_check_var	= clps711x_fb_check_var,
@@ -268,8 +268,7 @@ static int clps711x_fb_probe(struct platform_device *pdev)
 		goto out_fb_release;
 	}
 
-	cfb->syscon =
-		syscon_regmap_lookup_by_compatible("cirrus,ep7209-syscon1");
+	cfb->syscon = syscon_regmap_lookup_by_phandle(np, "syscon");
 	if (IS_ERR(cfb->syscon)) {
 		ret = PTR_ERR(cfb->syscon);
 		goto out_fb_release;

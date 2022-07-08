@@ -20,7 +20,7 @@ struct nitrox_cipher {
 	enum flexi_cipher value;
 };
 
-/**
+/*
  * supported cipher list
  */
 static const struct nitrox_cipher flexi_cipher_table[] = {
@@ -200,10 +200,8 @@ static int nitrox_aes_setkey(struct crypto_skcipher *cipher, const u8 *key,
 	int aes_keylen;
 
 	aes_keylen = flexi_aes_keylen(keylen);
-	if (aes_keylen < 0) {
-		crypto_skcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
+	if (aes_keylen < 0)
 		return -EINVAL;
-	}
 	return nitrox_skcipher_setkey(cipher, aes_keylen, key, keylen);
 }
 
@@ -351,10 +349,8 @@ static int nitrox_aes_xts_setkey(struct crypto_skcipher *cipher,
 	keylen /= 2;
 
 	aes_keylen = flexi_aes_keylen(keylen);
-	if (aes_keylen < 0) {
-		crypto_skcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
+	if (aes_keylen < 0)
 		return -EINVAL;
-	}
 
 	fctx = nctx->u.fctx;
 	/* copy KEY2 */
@@ -382,10 +378,8 @@ static int nitrox_aes_ctr_rfc3686_setkey(struct crypto_skcipher *cipher,
 	keylen -= CTR_RFC3686_NONCE_SIZE;
 
 	aes_keylen = flexi_aes_keylen(keylen);
-	if (aes_keylen < 0) {
-		crypto_skcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
+	if (aes_keylen < 0)
 		return -EINVAL;
-	}
 	return nitrox_skcipher_setkey(cipher, aes_keylen, key, keylen);
 }
 
@@ -394,7 +388,7 @@ static struct skcipher_alg nitrox_skciphers[] = { {
 		.cra_name = "cbc(aes)",
 		.cra_driver_name = "n5_cbc(aes)",
 		.cra_priority = PRIO,
-		.cra_flags = CRYPTO_ALG_ASYNC,
+		.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY,
 		.cra_blocksize = AES_BLOCK_SIZE,
 		.cra_ctxsize = sizeof(struct nitrox_crypto_ctx),
 		.cra_alignmask = 0,
@@ -413,7 +407,7 @@ static struct skcipher_alg nitrox_skciphers[] = { {
 		.cra_name = "ecb(aes)",
 		.cra_driver_name = "n5_ecb(aes)",
 		.cra_priority = PRIO,
-		.cra_flags = CRYPTO_ALG_ASYNC,
+		.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY,
 		.cra_blocksize = AES_BLOCK_SIZE,
 		.cra_ctxsize = sizeof(struct nitrox_crypto_ctx),
 		.cra_alignmask = 0,
@@ -432,7 +426,7 @@ static struct skcipher_alg nitrox_skciphers[] = { {
 		.cra_name = "cfb(aes)",
 		.cra_driver_name = "n5_cfb(aes)",
 		.cra_priority = PRIO,
-		.cra_flags = CRYPTO_ALG_ASYNC,
+		.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY,
 		.cra_blocksize = AES_BLOCK_SIZE,
 		.cra_ctxsize = sizeof(struct nitrox_crypto_ctx),
 		.cra_alignmask = 0,
@@ -451,7 +445,7 @@ static struct skcipher_alg nitrox_skciphers[] = { {
 		.cra_name = "xts(aes)",
 		.cra_driver_name = "n5_xts(aes)",
 		.cra_priority = PRIO,
-		.cra_flags = CRYPTO_ALG_ASYNC,
+		.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY,
 		.cra_blocksize = AES_BLOCK_SIZE,
 		.cra_ctxsize = sizeof(struct nitrox_crypto_ctx),
 		.cra_alignmask = 0,
@@ -470,7 +464,7 @@ static struct skcipher_alg nitrox_skciphers[] = { {
 		.cra_name = "rfc3686(ctr(aes))",
 		.cra_driver_name = "n5_rfc3686(ctr(aes))",
 		.cra_priority = PRIO,
-		.cra_flags = CRYPTO_ALG_ASYNC,
+		.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY,
 		.cra_blocksize = 1,
 		.cra_ctxsize = sizeof(struct nitrox_crypto_ctx),
 		.cra_alignmask = 0,
@@ -489,7 +483,7 @@ static struct skcipher_alg nitrox_skciphers[] = { {
 		.cra_name = "cts(cbc(aes))",
 		.cra_driver_name = "n5_cts(cbc(aes))",
 		.cra_priority = PRIO,
-		.cra_flags = CRYPTO_ALG_ASYNC,
+		.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY,
 		.cra_blocksize = AES_BLOCK_SIZE,
 		.cra_ctxsize = sizeof(struct nitrox_crypto_ctx),
 		.cra_alignmask = 0,
@@ -508,7 +502,7 @@ static struct skcipher_alg nitrox_skciphers[] = { {
 		.cra_name = "cbc(des3_ede)",
 		.cra_driver_name = "n5_cbc(des3_ede)",
 		.cra_priority = PRIO,
-		.cra_flags = CRYPTO_ALG_ASYNC,
+		.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY,
 		.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 		.cra_ctxsize = sizeof(struct nitrox_crypto_ctx),
 		.cra_alignmask = 0,
@@ -527,7 +521,7 @@ static struct skcipher_alg nitrox_skciphers[] = { {
 		.cra_name = "ecb(des3_ede)",
 		.cra_driver_name = "n5_ecb(des3_ede)",
 		.cra_priority = PRIO,
-		.cra_flags = CRYPTO_ALG_ASYNC,
+		.cra_flags = CRYPTO_ALG_ASYNC | CRYPTO_ALG_ALLOCATES_MEMORY,
 		.cra_blocksize = DES3_EDE_BLOCK_SIZE,
 		.cra_ctxsize = sizeof(struct nitrox_crypto_ctx),
 		.cra_alignmask = 0,

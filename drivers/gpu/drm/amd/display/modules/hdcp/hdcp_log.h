@@ -27,7 +27,7 @@
 #define MOD_HDCP_LOG_H_
 
 #ifdef CONFIG_DRM_AMD_DC_HDCP
-#define HDCP_LOG_ERR(hdcp, ...) DRM_ERROR(__VA_ARGS__)
+#define HDCP_LOG_ERR(hdcp, ...) DRM_DEBUG_KMS(__VA_ARGS__)
 #define HDCP_LOG_VER(hdcp, ...) DRM_DEBUG_KMS(__VA_ARGS__)
 #define HDCP_LOG_FSM(hdcp, ...) DRM_DEBUG_KMS(__VA_ARGS__)
 #define HDCP_LOG_TOP(hdcp, ...) pr_debug("[HDCP_TOP]:"__VA_ARGS__)
@@ -37,14 +37,28 @@
 /* default logs */
 #define HDCP_ERROR_TRACE(hdcp, status) \
 		HDCP_LOG_ERR(hdcp, \
-			"[Link %d] ERROR %s IN STATE %s", \
+			"[Link %d] WARNING %s IN STATE %s STAY COUNT %d", \
 			hdcp->config.index, \
 			mod_hdcp_status_to_str(status), \
-			mod_hdcp_state_id_to_str(hdcp->state.id))
+			mod_hdcp_state_id_to_str(hdcp->state.id), \
+			hdcp->state.stay_count)
 #define HDCP_HDCP1_ENABLED_TRACE(hdcp, displayIndex) \
 		HDCP_LOG_VER(hdcp, \
 			"[Link %d] HDCP 1.4 enabled on display %d", \
 			hdcp->config.index, displayIndex)
+#define HDCP_HDCP2_ENABLED_TRACE(hdcp, displayIndex) \
+		HDCP_LOG_VER(hdcp, \
+			"[Link %d] HDCP 2.2 enabled on display %d", \
+			hdcp->config.index, displayIndex)
+#define HDCP_HDCP1_DISABLED_TRACE(hdcp, displayIndex) \
+		HDCP_LOG_VER(hdcp, \
+			"[Link %d] HDCP 1.4 disabled on display %d", \
+			hdcp->config.index, displayIndex)
+#define HDCP_HDCP2_DISABLED_TRACE(hdcp, displayIndex) \
+		HDCP_LOG_VER(hdcp, \
+			"[Link %d] HDCP 2.2 disabled on display %d", \
+			hdcp->config.index, displayIndex)
+
 /* state machine logs */
 #define HDCP_REMOVE_DISPLAY_TRACE(hdcp, displayIndex) \
 		HDCP_LOG_FSM(hdcp, \
@@ -92,28 +106,6 @@
 				hdcp->config.index, msg_name,\
 				hdcp->buf); \
 } while (0)
-#define HDCP_FULL_DDC_TRACE(hdcp) do { \
-	HDCP_DDC_READ_TRACE(hdcp, "BKSV", hdcp->auth.msg.hdcp1.bksv, \
-			sizeof(hdcp->auth.msg.hdcp1.bksv)); \
-	HDCP_DDC_READ_TRACE(hdcp, "BCAPS", &hdcp->auth.msg.hdcp1.bcaps, \
-			sizeof(hdcp->auth.msg.hdcp1.bcaps)); \
-	HDCP_DDC_WRITE_TRACE(hdcp, "AN", hdcp->auth.msg.hdcp1.an, \
-			sizeof(hdcp->auth.msg.hdcp1.an)); \
-	HDCP_DDC_WRITE_TRACE(hdcp, "AKSV", hdcp->auth.msg.hdcp1.aksv, \
-			sizeof(hdcp->auth.msg.hdcp1.aksv)); \
-	HDCP_DDC_WRITE_TRACE(hdcp, "AINFO", &hdcp->auth.msg.hdcp1.ainfo, \
-			sizeof(hdcp->auth.msg.hdcp1.ainfo)); \
-	HDCP_DDC_READ_TRACE(hdcp, "RI' / R0'", \
-			(uint8_t *)&hdcp->auth.msg.hdcp1.r0p, \
-			sizeof(hdcp->auth.msg.hdcp1.r0p)); \
-	HDCP_DDC_READ_TRACE(hdcp, "BINFO", \
-			(uint8_t *)&hdcp->auth.msg.hdcp1.binfo_dp, \
-			sizeof(hdcp->auth.msg.hdcp1.binfo_dp)); \
-	HDCP_DDC_READ_TRACE(hdcp, "KSVLIST", hdcp->auth.msg.hdcp1.ksvlist, \
-			hdcp->auth.msg.hdcp1.ksvlist_size); \
-	HDCP_DDC_READ_TRACE(hdcp, "V'", hdcp->auth.msg.hdcp1.vp, \
-			sizeof(hdcp->auth.msg.hdcp1.vp)); \
-} while (0)
 #define HDCP_TOP_ADD_DISPLAY_TRACE(hdcp, i) \
 		HDCP_LOG_TOP(hdcp, "[Link %d]\tadd display %d", \
 				hdcp->config.index, i)
@@ -122,6 +114,9 @@
 				hdcp->config.index, i)
 #define HDCP_TOP_HDCP1_DESTROY_SESSION_TRACE(hdcp) \
 		HDCP_LOG_TOP(hdcp, "[Link %d]\tdestroy hdcp1 session", \
+				hdcp->config.index)
+#define HDCP_TOP_HDCP2_DESTROY_SESSION_TRACE(hdcp) \
+		HDCP_LOG_TOP(hdcp, "[Link %d]\tdestroy hdcp2 session", \
 				hdcp->config.index)
 #define HDCP_TOP_RESET_AUTH_TRACE(hdcp) \
 		HDCP_LOG_TOP(hdcp, "[Link %d]\treset authentication", hdcp->config.index)

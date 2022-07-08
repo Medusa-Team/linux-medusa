@@ -589,7 +589,7 @@ static const char * const blsp_uart5_groups[] = {
 static const char * const qdss_traceclk_a_groups[] = {
 	"gpio46",
 };
-const char * const m_voc_groups[] = {
+static const char * const m_voc_groups[] = {
 	"gpio123", "gpio124",
 };
 static const char * const blsp_i2c5_groups[] = {
@@ -797,9 +797,6 @@ static const char * const pa_indicator_groups[] = {
 	"gpio92",
 };
 static const char * const modem_tsync_groups[] = {
-	"gpio93",
-};
-static const char * const nav_tsync_groups[] = {
 	"gpio93",
 };
 static const char * const ssbi_wtr1_groups[] = {

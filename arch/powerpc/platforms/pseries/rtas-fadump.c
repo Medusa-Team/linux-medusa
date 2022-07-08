@@ -39,7 +39,7 @@ static void rtas_fadump_update_config(struct fw_dump *fadump_conf,
  * This function is called in the capture kernel to get configuration details
  * setup in the first kernel and passed to the f/w.
  */
-static void rtas_fadump_get_config(struct fw_dump *fadump_conf,
+static void __init rtas_fadump_get_config(struct fw_dump *fadump_conf,
 				   const struct rtas_fadump_mem_struct *fdm)
 {
 	fadump_conf->boot_mem_addr[0] =
@@ -247,7 +247,7 @@ static inline int rtas_fadump_gpr_index(u64 id)
 	return i;
 }
 
-void rtas_fadump_set_regval(struct pt_regs *regs, u64 reg_id, u64 reg_val)
+static void __init rtas_fadump_set_regval(struct pt_regs *regs, u64 reg_id, u64 reg_val)
 {
 	int i;
 
@@ -272,7 +272,7 @@ void rtas_fadump_set_regval(struct pt_regs *regs, u64 reg_id, u64 reg_val)
 		regs->dsisr = (unsigned long)reg_val;
 }
 
-static struct rtas_fadump_reg_entry*
+static struct rtas_fadump_reg_entry* __init
 rtas_fadump_read_regs(struct rtas_fadump_reg_entry *reg_entry,
 		      struct pt_regs *regs)
 {
@@ -506,7 +506,7 @@ void __init rtas_fadump_dt_scan(struct fw_dump *fadump_conf, u64 node)
 	fadump_conf->fadump_supported	= 1;
 
 	/* Firmware supports 64-bit value for size, align it to pagesize. */
-	fadump_conf->max_copy_size = _ALIGN_DOWN(U64_MAX, PAGE_SIZE);
+	fadump_conf->max_copy_size = ALIGN_DOWN(U64_MAX, PAGE_SIZE);
 
 	/*
 	 * The 'ibm,kernel-dump' rtas node is present only if there is

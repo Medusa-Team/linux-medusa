@@ -32,12 +32,12 @@ probe_likely_condition(struct ftrace_likely_data *f, int val, int expect)
 {
 	struct trace_event_call *call = &event_branch;
 	struct trace_array *tr = branch_tracer;
+	struct trace_buffer *buffer;
 	struct trace_array_cpu *data;
 	struct ring_buffer_event *event;
 	struct trace_branch *entry;
-	struct ring_buffer *buffer;
 	unsigned long flags;
-	int pc;
+	unsigned int trace_ctx;
 	const char *p;
 
 	if (current->trace_recursion & TRACE_BRANCH_BIT)
@@ -55,14 +55,14 @@ probe_likely_condition(struct ftrace_likely_data *f, int val, int expect)
 
 	raw_local_irq_save(flags);
 	current->trace_recursion |= TRACE_BRANCH_BIT;
-	data = this_cpu_ptr(tr->trace_buffer.data);
+	data = this_cpu_ptr(tr->array_buffer.data);
 	if (atomic_read(&data->disabled))
 		goto out;
 
-	pc = preempt_count();
-	buffer = tr->trace_buffer.buffer;
+	trace_ctx = tracing_gen_ctx_flags(flags);
+	buffer = tr->array_buffer.buffer;
 	event = trace_buffer_lock_reserve(buffer, TRACE_BRANCH,
-					  sizeof(*entry), flags, pc);
+					  sizeof(*entry), trace_ctx);
 	if (!event)
 		goto out;
 

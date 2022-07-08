@@ -19,13 +19,14 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
+#include <linux/jhash.h>
 #include <net/netlabel.h>
 #include "ebitmap.h"
 #include "policydb.h"
 
 #define BITS_PER_U64	(sizeof(u64) * 8)
 
-static struct kmem_cache *ebitmap_node_cachep;
+static struct kmem_cache *ebitmap_node_cachep __ro_after_init;
 
 int ebitmap_cmp(struct ebitmap *e1, struct ebitmap *e2)
 {
@@ -358,7 +359,6 @@ void ebitmap_destroy(struct ebitmap *e)
 
 	e->highbit = 0;
 	e->node = NULL;
-	return;
 }
 
 int ebitmap_read(struct ebitmap *e, void *fp)
@@ -540,6 +540,19 @@ int ebitmap_write(struct ebitmap *e, void *fp)
 			return rc;
 	}
 	return 0;
+}
+
+u32 ebitmap_hash(const struct ebitmap *e, u32 hash)
+{
+	struct ebitmap_node *node;
+
+	/* need to change hash even if ebitmap is empty */
+	hash = jhash_1word(e->highbit, hash);
+	for (node = e->node; node; node = node->next) {
+		hash = jhash_1word(node->startbit, hash);
+		hash = jhash(node->maps, sizeof(node->maps), hash);
+	}
+	return hash;
 }
 
 void __init ebitmap_cache_init(void)

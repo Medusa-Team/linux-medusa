@@ -36,7 +36,6 @@
 #include "pxa3xx-gcu.h"
 
 #define DRV_NAME	"pxa3xx-gcu"
-#define MISCDEV_MINOR	197
 
 #define REG_GCCR	0x00
 #define GCCR_SYNC_CLR	(1 << 9)
@@ -595,7 +594,7 @@ static int pxa3xx_gcu_probe(struct platform_device *pdev)
 	 * container_of(). This isn't really necessary as we have a fixed minor
 	 * number anyway, but this is to avoid statics. */
 
-	priv->misc_dev.minor	= MISCDEV_MINOR,
+	priv->misc_dev.minor	= PXA3XX_GCU_MINOR,
 	priv->misc_dev.name	= DRV_NAME,
 	priv->misc_dev.fops	= &pxa3xx_gcu_miscdev_fops;
 
@@ -607,17 +606,13 @@ static int pxa3xx_gcu_probe(struct platform_device *pdev)
 
 	/* enable the clock */
 	priv->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(priv->clk)) {
-		dev_err(dev, "failed to get clock\n");
-		return PTR_ERR(priv->clk);
-	}
+	if (IS_ERR(priv->clk))
+		return dev_err_probe(dev, PTR_ERR(priv->clk), "failed to get clock\n");
 
 	/* request the IRQ */
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(dev, "no IRQ defined: %d\n", irq);
+	if (irq < 0)
 		return irq;
-	}
 
 	ret = devm_request_irq(dev, irq, pxa3xx_gcu_handle_irq,
 			       0, DRV_NAME, priv);
@@ -638,7 +633,7 @@ static int pxa3xx_gcu_probe(struct platform_device *pdev)
 	ret = misc_register(&priv->misc_dev);
 	if (ret < 0) {
 		dev_err(dev, "misc_register() for minor %d failed\n",
-			MISCDEV_MINOR);
+			PXA3XX_GCU_MINOR);
 		goto err_free_dma;
 	}
 
@@ -714,7 +709,7 @@ module_platform_driver(pxa3xx_gcu_driver);
 
 MODULE_DESCRIPTION("PXA3xx graphics controller unit driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(MISCDEV_MINOR);
+MODULE_ALIAS_MISCDEV(PXA3XX_GCU_MINOR);
 MODULE_AUTHOR("Janine Kropp <nin@directfb.org>, "
 		"Denis Oliver Kropp <dok@directfb.org>, "
 		"Daniel Mack <daniel@caiaq.de>");

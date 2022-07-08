@@ -34,9 +34,7 @@
 #include <linux/gfp.h>
 
 #include <asm/setup.h>
-#include <asm/segment.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/sections.h>
 
 /*
@@ -72,21 +70,16 @@ void __init paging_init(void)
 		panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
 		      __func__, PAGE_SIZE, PAGE_SIZE);
 
-	/*
-	 * Set up SFC/DFC registers (user data space).
-	 */
-	set_fs(USER_DS);
-
 	pr_debug("before free_area_init\n");
 
 	pr_debug("free_area_init -> start_mem is %#lx\nvirtual_end is %#lx\n",
 		 start_mem, end_mem);
 
 	{
-		unsigned long zones_size[MAX_NR_ZONES] = {0, };
+		unsigned long max_zone_pfn[MAX_NR_ZONES] = {0, };
 
-		zones_size[ZONE_NORMAL] = (end_mem - PAGE_OFFSET) >> PAGE_SHIFT;
-		free_area_init(zones_size);
+		max_zone_pfn[ZONE_NORMAL] = end_mem >> PAGE_SHIFT;
+		free_area_init(max_zone_pfn);
 	}
 }
 
@@ -99,6 +92,4 @@ void __init mem_init(void)
 
 	/* this will put all low memory onto the freelists */
 	memblock_free_all();
-
-	mem_init_print_info(NULL);
 }

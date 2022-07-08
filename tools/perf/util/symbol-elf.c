@@ -12,6 +12,7 @@
 #include "maps.h"
 #include "symbol.h"
 #include "symsrc.h"
+#include "demangle-ocaml.h"
 #include "demangle-java.h"
 #include "demangle-rust.h"
 #include "machine.h"
@@ -50,6 +51,10 @@ typedef Elf64_Nhdr GElf_Nhdr;
 #define DMGL_ANSI        (1 << 1)       /* Include const, volatile, etc */
 #endif
 
+#ifdef HAVE_LIBBFD_SUPPORT
+#define PACKAGE 'perf'
+#include <bfd.h>
+#else
 #ifdef HAVE_CPLUS_DEMANGLE_SUPPORT
 extern char *cplus_demangle(const char *, int);
 
@@ -65,9 +70,7 @@ static inline char *bfd_demangle(void __maybe_unused *v,
 {
 	return NULL;
 }
-#else
-#define PACKAGE 'perf'
-#include <bfd.h>
+#endif
 #endif
 #endif
 
@@ -249,8 +252,12 @@ static char *demangle_sym(struct dso *dso, int kmodule, const char *elf_name)
 	    return demangled;
 
 	demangled = bfd_demangle(NULL, elf_name, demangle_flags);
-	if (demangled == NULL)
-		demangled = java_demangle_sym(elf_name, JAVA_DEMANGLE_NORET);
+	if (demangled == NULL) {
+		demangled = ocaml_demangle_sym(elf_name);
+		if (demangled == NULL) {
+			demangled = java_demangle_sym(elf_name, JAVA_DEMANGLE_NORET);
+		}
+	}
 	else if (rust_is_mangled(demangled))
 		/*
 		    * Input to Rust demangling is the BFD-demangled
@@ -530,8 +537,40 @@ out:
 	return err;
 }
 
-int filename__read_build_id(const char *filename, void *bf, size_t size)
+#ifdef HAVE_LIBBFD_BUILDID_SUPPORT
+
+static int read_build_id(const char *filename, struct build_id *bid)
 {
+	size_t size = sizeof(bid->data);
+	int err = -1;
+	bfd *abfd;
+
+	abfd = bfd_openr(filename, NULL);
+	if (!abfd)
+		return -1;
+
+	if (!bfd_check_format(abfd, bfd_object)) {
+		pr_debug2("%s: cannot read %s bfd file.\n", __func__, filename);
+		goto out_close;
+	}
+
+	if (!abfd->build_id || abfd->build_id->size > size)
+		goto out_close;
+
+	memcpy(bid->data, abfd->build_id->data, abfd->build_id->size);
+	memset(bid->data + abfd->build_id->size, 0, size - abfd->build_id->size);
+	err = bid->size = abfd->build_id->size;
+
+out_close:
+	bfd_close(abfd);
+	return err;
+}
+
+#else // HAVE_LIBBFD_BUILDID_SUPPORT
+
+static int read_build_id(const char *filename, struct build_id *bid)
+{
+	size_t size = sizeof(bid->data);
 	int fd, err = -1;
 	Elf *elf;
 
@@ -548,7 +587,9 @@ int filename__read_build_id(const char *filename, void *bf, size_t size)
 		goto out_close;
 	}
 
-	err = elf_read_build_id(elf, bf, size);
+	err = elf_read_build_id(elf, bid->data, size);
+	if (err > 0)
+		bid->size = err;
 
 	elf_end(elf);
 out_close:
@@ -557,12 +598,45 @@ out:
 	return err;
 }
 
-int sysfs__read_build_id(const char *filename, void *build_id, size_t size)
-{
-	int fd, err = -1;
+#endif // HAVE_LIBBFD_BUILDID_SUPPORT
 
-	if (size < BUILD_ID_SIZE)
-		goto out;
+int filename__read_build_id(const char *filename, struct build_id *bid)
+{
+	struct kmod_path m = { .name = NULL, };
+	char path[PATH_MAX];
+	int err;
+
+	if (!filename)
+		return -EFAULT;
+
+	err = kmod_path__parse(&m, filename);
+	if (err)
+		return -1;
+
+	if (m.comp) {
+		int error = 0, fd;
+
+		fd = filename__decompress(filename, path, sizeof(path), m.comp, &error);
+		if (fd < 0) {
+			pr_debug("Failed to decompress (error %d) %s\n",
+				 error, filename);
+			return -1;
+		}
+		close(fd);
+		filename = path;
+	}
+
+	err = read_build_id(filename, bid);
+
+	if (m.comp)
+		unlink(filename);
+	return err;
+}
+
+int sysfs__read_build_id(const char *filename, struct build_id *bid)
+{
+	size_t size = sizeof(bid->data);
+	int fd, err = -1;
 
 	fd = open(filename, O_RDONLY);
 	if (fd < 0)
@@ -584,8 +658,9 @@ int sysfs__read_build_id(const char *filename, void *build_id, size_t size)
 				break;
 			if (memcmp(bf, "GNU", sizeof("GNU")) == 0) {
 				size_t sz = min(descsz, size);
-				if (read(fd, build_id, sz) == (ssize_t)sz) {
-					memset(build_id + sz, 0, size - sz);
+				if (read(fd, bid->data, sz) == (ssize_t)sz) {
+					memset(bid->data + sz, 0, size - sz);
+					bid->size = sz;
 					err = 0;
 					break;
 				}
@@ -607,6 +682,44 @@ int sysfs__read_build_id(const char *filename, void *build_id, size_t size)
 out:
 	return err;
 }
+
+#ifdef HAVE_LIBBFD_SUPPORT
+
+int filename__read_debuglink(const char *filename, char *debuglink,
+			     size_t size)
+{
+	int err = -1;
+	asection *section;
+	bfd *abfd;
+
+	abfd = bfd_openr(filename, NULL);
+	if (!abfd)
+		return -1;
+
+	if (!bfd_check_format(abfd, bfd_object)) {
+		pr_debug2("%s: cannot read %s bfd file.\n", __func__, filename);
+		goto out_close;
+	}
+
+	section = bfd_get_section_by_name(abfd, ".gnu_debuglink");
+	if (!section)
+		goto out_close;
+
+	if (section->size > size)
+		goto out_close;
+
+	if (!bfd_get_section_contents(abfd, section, debuglink, 0,
+				      section->size))
+		goto out_close;
+
+	err = 0;
+
+out_close:
+	bfd_close(abfd);
+	return err;
+}
+
+#else
 
 int filename__read_debuglink(const char *filename, char *debuglink,
 			     size_t size)
@@ -660,6 +773,8 @@ out:
 	return err;
 }
 
+#endif
+
 static int dso__swap_init(struct dso *dso, unsigned char eidata)
 {
 	static unsigned int const endian = 1;
@@ -704,9 +819,15 @@ void symsrc__destroy(struct symsrc *ss)
 	close(ss->fd);
 }
 
-bool __weak elf__needs_adjust_symbols(GElf_Ehdr ehdr)
+bool elf__needs_adjust_symbols(GElf_Ehdr ehdr)
 {
-	return ehdr.e_type == ET_EXEC || ehdr.e_type == ET_REL;
+	/*
+	 * Usually vmlinux is an ELF file with type ET_EXEC for most
+	 * architectures; except Arm64 kernel is linked with option
+	 * '-share', so need to check type ET_DYN.
+	 */
+	return ehdr.e_type == ET_EXEC || ehdr.e_type == ET_REL ||
+	       ehdr.e_type == ET_DYN;
 }
 
 int symsrc__init(struct symsrc *ss, struct dso *dso, const char *name,
@@ -751,13 +872,17 @@ int symsrc__init(struct symsrc *ss, struct dso *dso, const char *name,
 	/* Always reject images with a mismatched build-id: */
 	if (dso->has_build_id && !symbol_conf.ignore_vmlinux_buildid) {
 		u8 build_id[BUILD_ID_SIZE];
+		struct build_id bid;
+		int size;
 
-		if (elf_read_build_id(elf, build_id, BUILD_ID_SIZE) < 0) {
+		size = elf_read_build_id(elf, build_id, BUILD_ID_SIZE);
+		if (size <= 0) {
 			dso->load_errno = DSO_LOAD_ERRNO__CANNOT_READ_BUILDID;
 			goto out_elf_end;
 		}
 
-		if (!dso__build_id_equal(dso, build_id)) {
+		build_id__init(&bid, build_id, size);
+		if (!dso__build_id_equal(dso, &bid)) {
 			pr_debug("%s: build id mismatch for %s.\n", __func__, name);
 			dso->load_errno = DSO_LOAD_ERRNO__MISMATCHING_BUILDID;
 			goto out_elf_end;
@@ -783,7 +908,7 @@ int symsrc__init(struct symsrc *ss, struct dso *dso, const char *name,
 	if (ss->opdshdr.sh_type != SHT_PROGBITS)
 		ss->opdsec = NULL;
 
-	if (dso->kernel == DSO_TYPE_USER)
+	if (dso->kernel == DSO_SPACE__USER)
 		ss->adjust_symbols = true;
 	else
 		ss->adjust_symbols = elf__needs_adjust_symbols(ehdr);
@@ -866,7 +991,7 @@ static int dso__process_kernel_symbol(struct dso *dso, struct map *map,
 		 * kallsyms and identity maps.  Overwrite it to
 		 * map to the kernel dso.
 		 */
-		if (*remap_kernel && dso->kernel) {
+		if (*remap_kernel && dso->kernel && !kmodule) {
 			*remap_kernel = false;
 			map->start = shdr->sh_addr + ref_reloc(kmap);
 			map->end = map->start + shdr->sh_size;
@@ -933,7 +1058,7 @@ static int dso__process_kernel_symbol(struct dso *dso, struct map *map,
 		curr_dso->symtab_type = dso->symtab_type;
 		maps__insert(kmaps, curr_map);
 		/*
-		 * Add it before we drop the referece to curr_map, i.e. while
+		 * Add it before we drop the reference to curr_map, i.e. while
 		 * we still are sure to have a reference to this DSO via
 		 * *curr_map->dso.
 		 */
@@ -949,14 +1074,15 @@ static int dso__process_kernel_symbol(struct dso *dso, struct map *map,
 	return 0;
 }
 
-int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
-		  struct symsrc *runtime_ss, int kmodule)
+static int
+dso__load_sym_internal(struct dso *dso, struct map *map, struct symsrc *syms_ss,
+		       struct symsrc *runtime_ss, int kmodule, int dynsym)
 {
 	struct kmap *kmap = dso->kernel ? map__kmap(map) : NULL;
 	struct maps *kmaps = kmap ? map__kmaps(map) : NULL;
 	struct map *curr_map = map;
 	struct dso *curr_dso = dso;
-	Elf_Data *symstrs, *secstrs;
+	Elf_Data *symstrs, *secstrs, *secstrs_run, *secstrs_sym;
 	uint32_t nr_syms;
 	int err = -1;
 	uint32_t idx;
@@ -973,34 +1099,15 @@ int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 	if (kmap && !kmaps)
 		return -1;
 
-	dso->symtab_type = syms_ss->type;
-	dso->is_64_bit = syms_ss->is_64_bit;
-	dso->rel = syms_ss->ehdr.e_type == ET_REL;
-
-	/*
-	 * Modules may already have symbols from kallsyms, but those symbols
-	 * have the wrong values for the dso maps, so remove them.
-	 */
-	if (kmodule && syms_ss->symtab)
-		symbols__delete(&dso->symbols);
-
-	if (!syms_ss->symtab) {
-		/*
-		 * If the vmlinux is stripped, fail so we will fall back
-		 * to using kallsyms. The vmlinux runtime symbols aren't
-		 * of much use.
-		 */
-		if (dso->kernel)
-			goto out_elf_end;
-
-		syms_ss->symtab  = syms_ss->dynsym;
-		syms_ss->symshdr = syms_ss->dynshdr;
-	}
-
 	elf = syms_ss->elf;
 	ehdr = syms_ss->ehdr;
-	sec = syms_ss->symtab;
-	shdr = syms_ss->symshdr;
+	if (dynsym) {
+		sec  = syms_ss->dynsym;
+		shdr = syms_ss->dynshdr;
+	} else {
+		sec =  syms_ss->symtab;
+		shdr = syms_ss->symshdr;
+	}
 
 	if (elf_section_by_name(runtime_ss->elf, &runtime_ss->ehdr, &tshdr,
 				".text", NULL))
@@ -1025,8 +1132,16 @@ int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 	if (sec_strndx == NULL)
 		goto out_elf_end;
 
-	secstrs = elf_getdata(sec_strndx, NULL);
-	if (secstrs == NULL)
+	secstrs_run = elf_getdata(sec_strndx, NULL);
+	if (secstrs_run == NULL)
+		goto out_elf_end;
+
+	sec_strndx = elf_getscn(elf, ehdr.e_shstrndx);
+	if (sec_strndx == NULL)
+		goto out_elf_end;
+
+	secstrs_sym = elf_getdata(sec_strndx, NULL);
+	if (secstrs_sym == NULL)
 		goto out_elf_end;
 
 	nr_syms = shdr.sh_size / shdr.sh_entsize;
@@ -1062,7 +1177,7 @@ int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 	 * Initial kernel and module mappings do not map to the dso.
 	 * Flag the fixups.
 	 */
-	if (dso->kernel || kmodule) {
+	if (dso->kernel) {
 		remap_kernel = true;
 		adjust_kernel_syms = dso->adjust_symbols;
 	}
@@ -1106,11 +1221,28 @@ int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 		if (sym.st_shndx == SHN_ABS)
 			continue;
 
-		sec = elf_getscn(runtime_ss->elf, sym.st_shndx);
+		sec = elf_getscn(syms_ss->elf, sym.st_shndx);
 		if (!sec)
 			goto out_elf_end;
 
 		gelf_getshdr(sec, &shdr);
+
+		secstrs = secstrs_sym;
+
+		/*
+		 * We have to fallback to runtime when syms' section header has
+		 * NOBITS set. NOBITS results in file offset (sh_offset) not
+		 * being incremented. So sh_offset used below has different
+		 * values for syms (invalid) and runtime (valid).
+		 */
+		if (shdr.sh_type == SHT_NOBITS) {
+			sec = elf_getscn(runtime_ss->elf, sym.st_shndx);
+			if (!sec)
+				goto out_elf_end;
+
+			gelf_getshdr(sec, &shdr);
+			secstrs = secstrs_run;
+		}
 
 		if (is_label && !elf_sec__filter(&shdr, secstrs))
 			continue;
@@ -1124,7 +1256,7 @@ int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 		    (sym.st_value & 1))
 			--sym.st_value;
 
-		if (dso->kernel || kmodule) {
+		if (dso->kernel) {
 			if (dso__process_kernel_symbol(dso, map, &sym, &shdr, kmaps, kmap, &curr_dso, &curr_map,
 						       section_name, adjust_kernel_syms, kmodule, &remap_kernel))
 				goto out_elf_end;
@@ -1158,7 +1290,7 @@ int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 	 * For misannotated, zeroed, ASM function sizes.
 	 */
 	if (nr > 0) {
-		symbols__fixup_end(&dso->symbols);
+		symbols__fixup_end(&dso->symbols, false);
 		symbols__fixup_duplicate(&dso->symbols);
 		if (kmap) {
 			/*
@@ -1170,6 +1302,50 @@ int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
 	}
 	err = nr;
 out_elf_end:
+	return err;
+}
+
+int dso__load_sym(struct dso *dso, struct map *map, struct symsrc *syms_ss,
+		  struct symsrc *runtime_ss, int kmodule)
+{
+	int nr = 0;
+	int err = -1;
+
+	dso->symtab_type = syms_ss->type;
+	dso->is_64_bit = syms_ss->is_64_bit;
+	dso->rel = syms_ss->ehdr.e_type == ET_REL;
+
+	/*
+	 * Modules may already have symbols from kallsyms, but those symbols
+	 * have the wrong values for the dso maps, so remove them.
+	 */
+	if (kmodule && syms_ss->symtab)
+		symbols__delete(&dso->symbols);
+
+	if (!syms_ss->symtab) {
+		/*
+		 * If the vmlinux is stripped, fail so we will fall back
+		 * to using kallsyms. The vmlinux runtime symbols aren't
+		 * of much use.
+		 */
+		if (dso->kernel)
+			return err;
+	} else  {
+		err = dso__load_sym_internal(dso, map, syms_ss, runtime_ss,
+					     kmodule, 0);
+		if (err < 0)
+			return err;
+		nr = err;
+	}
+
+	if (syms_ss->dynsym) {
+		err = dso__load_sym_internal(dso, map, syms_ss, runtime_ss,
+					     kmodule, 1);
+		if (err < 0)
+			return err;
+		err += nr;
+	}
+
 	return err;
 }
 
@@ -1452,6 +1628,7 @@ struct kcore_copy_info {
 	u64 first_symbol;
 	u64 last_symbol;
 	u64 first_module;
+	u64 first_module_symbol;
 	u64 last_module_symbol;
 	size_t phnum;
 	struct list_head phdrs;
@@ -1528,6 +1705,8 @@ static int kcore_copy__process_kallsyms(void *arg, const char *name, char type,
 		return 0;
 
 	if (strchr(name, '[')) {
+		if (!kci->first_module_symbol || start < kci->first_module_symbol)
+			kci->first_module_symbol = start;
 		if (start > kci->last_module_symbol)
 			kci->last_module_symbol = start;
 		return 0;
@@ -1724,6 +1903,10 @@ static int kcore_copy__calc_maps(struct kcore_copy_info *kci, const char *dir,
 		kci->etext = round_up(kci->last_symbol, page_size);
 		kci->etext += page_size;
 	}
+
+	if (kci->first_module_symbol &&
+	    (!kci->first_module || kci->first_module_symbol < kci->first_module))
+		kci->first_module = kci->first_module_symbol;
 
 	kci->first_module = round_down(kci->first_module, page_size);
 
@@ -2266,6 +2449,7 @@ int cleanup_sdt_note_list(struct list_head *sdt_notes)
 
 	list_for_each_entry_safe(pos, tmp, sdt_notes, note_list) {
 		list_del_init(&pos->note_list);
+		zfree(&pos->args);
 		zfree(&pos->name);
 		zfree(&pos->provider);
 		free(pos);

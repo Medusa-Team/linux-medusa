@@ -18,6 +18,8 @@
 #include <linux/interrupt.h>
 #include <linux/pci.h>
 #if defined(CONFIG_OF)
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include <linux/of_platform.h>
 #endif
 #include "mb862xxfb.h"
@@ -194,6 +196,8 @@ static int mb862xxfb_check_var(struct fb_var_screeninfo *var,
 	return 0;
 }
 
+static struct fb_ops mb862xxfb_ops;
+
 /*
  * set display parameters
  */
@@ -204,7 +208,7 @@ static int mb862xxfb_set_par(struct fb_info *fbi)
 
 	dev_dbg(par->dev, "%s\n", __func__);
 	if (par->type == BT_CORALP)
-		mb862xxfb_init_accel(fbi, fbi->var.xres);
+		mb862xxfb_init_accel(fbi, &mb862xxfb_ops, fbi->var.xres);
 
 	if (par->pre_init)
 		return 0;
@@ -540,8 +544,8 @@ static int mb862xxfb_init_fbinfo(struct fb_info *fbi)
 /*
  * show some display controller and cursor registers
  */
-static ssize_t mb862xxfb_show_dispregs(struct device *dev,
-				       struct device_attribute *attr, char *buf)
+static ssize_t dispregs_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
 {
 	struct fb_info *fbi = dev_get_drvdata(dev);
 	struct mb862xxfb_par *par = fbi->par;
@@ -575,7 +579,7 @@ static ssize_t mb862xxfb_show_dispregs(struct device *dev,
 	return ptr - buf;
 }
 
-static DEVICE_ATTR(dispregs, 0444, mb862xxfb_show_dispregs, NULL);
+static DEVICE_ATTR_RO(dispregs);
 
 static irqreturn_t mb862xx_intr(int irq, void *dev_id)
 {

@@ -5,7 +5,10 @@
  *	(c) 1999 Martin Mares <mj@ucw.cz>
  */
 
+#include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/ioport.h>
+#include <linux/spinlock.h>
 
 #undef DEBUG
 
@@ -87,7 +90,7 @@ struct irq_routing_table {
 	u32 miniport_data;		/* Crap */
 	u8 rfu[11];
 	u8 checksum;			/* Modulo 256 checksum must give 0 */
-	struct irq_info slots[0];
+	struct irq_info slots[];
 } __attribute__((packed));
 
 extern unsigned int pcibios_irq_mask;
@@ -114,9 +117,20 @@ extern const struct pci_raw_ops pci_direct_conf1;
 extern bool port_cf9_safe;
 
 /* arch_initcall level */
+#ifdef CONFIG_PCI_DIRECT
 extern int pci_direct_probe(void);
 extern void pci_direct_init(int type);
+#else
+static inline int pci_direct_probe(void) { return -1; }
+static inline  void pci_direct_init(int type) { }
+#endif
+
+#ifdef CONFIG_PCI_BIOS
 extern void pci_pcbios_init(void);
+#else
+static inline void pci_pcbios_init(void) { }
+#endif
+
 extern void __init dmi_check_pciprobe(void);
 extern void __init dmi_check_skip_isa_align(void);
 

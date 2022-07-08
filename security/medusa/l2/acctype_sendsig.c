@@ -1,13 +1,7 @@
-#include <linux/sched.h>
-#include <linux/sched/signal.h> /* SEND_SIG_PRIV */
-#include <linux/signal.h>
-#include <linux/interrupt.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/med_model.h>
-#include "kobject_process.h"
-#include <linux/medusa/l1/task.h>
-#include <linux/init.h>
-#include <linux/mm.h>
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
 
 /* let's define the 'kill' access type, with object=task and subject=task. */
 
@@ -17,21 +11,22 @@ struct send_signal {
 };
 
 MED_ATTRS(send_signal) {
-	MED_ATTR_RO (send_signal, signal_number, "signal_number", MED_SIGNED),
+	MED_ATTR_RO(send_signal, signal_number, "signal_number", MED_SIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(send_signal, "kill", process_kobject, "sender", process_kobject, "receiver");
 
-int __init sendsig_acctype_init(void) {
-	MED_REGISTER_ACCTYPE(send_signal,MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
+int __init sendsig_acctype_init(void)
+{
+	MED_REGISTER_ACCTYPE(send_signal, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 /* TODO: add the same type, triggered at OBJECT */
 
-medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task_struct *p)
+enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task_struct *p)
 {
-	medusa_answer_t retval;
+	enum medusa_answer_t retval;
 	struct send_signal access;
 	struct process_kobject sender;
 	struct process_kobject receiver;
@@ -39,26 +34,22 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
 	if (!sig)
 		return 0; /* null signal; existence test */
 
-        memset(&access, '\0', sizeof(struct send_signal));
-        /* process_kobject sender is zeroed by process_kern2kobj function */
-        /* process_kobject receiver is zeroed by process_kern2kobj function */
-
-	if (in_interrupt())
+	if (!in_task())
 		return MED_ALLOW;
 	/* always allow signals coming from kernel - see kernel/signal.c:send_signalnal() */
 	if (info == SEND_SIG_PRIV)
 		return MED_ALLOW;
 	/*
-	if (info) switch (info->si_code) {
-		case CLD_TRAPPED:
-		case CLD_STOPPED:
-		case CLD_DUMPED:
-		case CLD_KILLED:
-		case CLD_EXITED:
-		case SI_KERNEL:
-			return MED_ALLOW;
-	}
-	*/
+	 * if (info) switch (info->si_code) {
+	 *	case CLD_TRAPPED:
+	 *	case CLD_STOPPED:
+	 *	case CLD_DUMPED:
+	 *	case CLD_KILLED:
+	 *	case CLD_EXITED:
+	 *	case SI_KERNEL:
+	 *		return MED_ALLOW;
+	 * }
+	 */
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
@@ -81,4 +72,4 @@ medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task
 	return MED_ALLOW;
 }
 
-__initcall(sendsig_acctype_init);
+device_initcall(sendsig_acctype_init);

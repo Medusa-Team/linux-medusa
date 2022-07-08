@@ -30,16 +30,26 @@
 
 #include <drm/drm_drv.h>
 
+#include "i915_utils.h"
+
 struct drm_i915_private;
 
 #ifdef CONFIG_DRM_I915_DEBUG_GEM
 
-#define GEM_SHOW_DEBUG() (drm_debug & DRM_UT_DRIVER)
+#define GEM_SHOW_DEBUG() drm_debug_enabled(DRM_UT_DRIVER)
+
+#ifdef CONFIG_DRM_I915_DEBUG_GEM_ONCE
+#define __GEM_BUG(cond) BUG()
+#else
+#define __GEM_BUG(cond) \
+	WARN(1, "%s:%d GEM_BUG_ON(%s)\n", __func__, __LINE__, __stringify(cond))
+#endif
 
 #define GEM_BUG_ON(condition) do { if (unlikely((condition))) {	\
 		GEM_TRACE_ERR("%s:%d GEM_BUG_ON(%s)\n", \
 			      __func__, __LINE__, __stringify(condition)); \
-		BUG(); \
+		GEM_TRACE_DUMP(); \
+		__GEM_BUG(condition); \
 		} \
 	} while(0)
 #define GEM_WARN_ON(expr) WARN_ON(expr)
@@ -68,9 +78,10 @@ struct drm_i915_private;
 	pr_err(__VA_ARGS__);						\
 	trace_printk(__VA_ARGS__);					\
 } while (0)
-#define GEM_TRACE_DUMP() ftrace_dump(DUMP_ALL)
+#define GEM_TRACE_DUMP() \
+	do { ftrace_dump(DUMP_ALL); __add_taint_for_CI(TAINT_WARN); } while (0)
 #define GEM_TRACE_DUMP_ON(expr) \
-	do { if (expr) ftrace_dump(DUMP_ALL); } while (0)
+	do { if (expr) GEM_TRACE_DUMP(); } while (0)
 #else
 #define GEM_TRACE(...) do { } while (0)
 #define GEM_TRACE_ERR(...) do { } while (0)
@@ -94,7 +105,7 @@ static inline bool tasklet_is_locked(const struct tasklet_struct *t)
 static inline void __tasklet_disable_sync_once(struct tasklet_struct *t)
 {
 	if (!atomic_fetch_inc(&t->count))
-		tasklet_unlock_wait(t);
+		tasklet_unlock_spin_wait(t);
 }
 
 static inline bool __tasklet_is_enabled(const struct tasklet_struct *t)

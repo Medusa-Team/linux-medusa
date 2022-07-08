@@ -125,14 +125,15 @@ static enum spectre_v2_state get_sysfs_state(void)
 #define PM_BR_PRED_PCACHE	0x048a0	// P9 only
 #define PM_BR_MPRED_PCACHE	0x048b0	// P9 only
 
-#define SPRN_PVR 287
-
 int spectre_v2_test(void)
 {
 	enum spectre_v2_state state;
 	struct event events[4];
 	s64 miss_percent;
 	bool is_p9;
+
+	// The PMU events we use only work on Power8 or later
+	SKIP_IF(!have_hwcap2(PPC_FEATURE2_ARCH_2_07));
 
 	state = get_sysfs_state();
 	if (state == UNKNOWN) {
@@ -183,6 +184,16 @@ int spectre_v2_test(void)
 		if (miss_percent > 15) {
 			printf("Branch misses > 15%% unexpected in this configuration!\n");
 			printf("Possible mis-match between reported & actual mitigation\n");
+			/*
+			 * Such a mismatch may be caused by a guest system
+			 * reporting as vulnerable when the host is mitigated.
+			 * Return skip code to avoid detecting this as an error.
+			 * We are not vulnerable and reporting otherwise, so
+			 * missing such a mismatch is safe.
+			 */
+			if (miss_percent > 95)
+				return 4;
+
 			return 1;
 		}
 		break;

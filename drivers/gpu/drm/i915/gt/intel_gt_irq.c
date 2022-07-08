@@ -1,6 +1,5 @@
+// SPDX-License-Identifier: MIT
 /*
- * SPDX-License-Identifier: MIT
- *
  * Copyright © 2019 Intel Corporation
  */
 
@@ -8,32 +7,18 @@
 
 #include "i915_drv.h"
 #include "i915_irq.h"
+#include "intel_breadcrumbs.h"
 #include "intel_gt.h"
 #include "intel_gt_irq.h"
+#include "intel_gt_regs.h"
 #include "intel_uncore.h"
 #include "intel_rps.h"
+#include "pxp/intel_pxp_irq.h"
 
 static void guc_irq_handler(struct intel_guc *guc, u16 iir)
 {
 	if (iir & GUC_INTR_GUC2HOST)
 		intel_guc_to_host_event_handler(guc);
-}
-
-static void
-cs_irq_handler(struct intel_engine_cs *engine, u32 iir)
-{
-	bool tasklet = false;
-
-	if (iir & GT_CONTEXT_SWITCH_INTERRUPT)
-		tasklet = true;
-
-	if (iir & GT_RENDER_USER_INTERRUPT) {
-		intel_engine_breadcrumbs_irq(engine);
-		tasklet |= intel_engine_needs_breadcrumb_tasklet(engine);
-	}
-
-	if (tasklet)
-		tasklet_hi_schedule(&engine->execlists.tasklet);
 }
 
 static u32
@@ -80,6 +65,9 @@ gen11_other_irq_handler(struct intel_gt *gt, const u8 instance,
 	if (instance == OTHER_GTPM_INSTANCE)
 		return gen11_rps_irq_handler(&gt->rps, iir);
 
+	if (instance == OTHER_KCR_INSTANCE)
+		return intel_pxp_irq_handler(&gt->pxp, iir);
+
 	WARN_ONCE(1, "unhandled other interrupt instance=0x%x, iir=0x%x\n",
 		  instance, iir);
 }
@@ -96,7 +84,7 @@ gen11_engine_irq_handler(struct intel_gt *gt, const u8 class,
 		engine = NULL;
 
 	if (likely(engine))
-		return cs_irq_handler(engine, iir);
+		return intel_engine_cs_irq(engine, iir);
 
 	WARN_ONCE(1, "unhandled engine interrupt class=0x%x, instance=0x%x\n",
 		  class, instance);
@@ -112,7 +100,7 @@ gen11_gt_identity_handler(struct intel_gt *gt, const u32 identity)
 	if (unlikely(!intr))
 		return;
 
-	if (class <= COPY_ENGINE_CLASS)
+	if (class <= COPY_ENGINE_CLASS || class == COMPUTE_CLASS)
 		return gen11_engine_irq_handler(gt, class, instance, intr);
 
 	if (class == OTHER_CLASS)
@@ -194,39 +182,74 @@ void gen11_gt_irq_reset(struct intel_gt *gt)
 	/* Disable RCS, BCS, VCS and VECS class engines. */
 	intel_uncore_write(uncore, GEN11_RENDER_COPY_INTR_ENABLE, 0);
 	intel_uncore_write(uncore, GEN11_VCS_VECS_INTR_ENABLE,	  0);
+	if (CCS_MASK(gt))
+		intel_uncore_write(uncore, GEN12_CCS_RSVD_INTR_ENABLE, 0);
 
 	/* Restore masks irqs on RCS, BCS, VCS and VECS engines. */
 	intel_uncore_write(uncore, GEN11_RCS0_RSVD_INTR_MASK,	~0);
 	intel_uncore_write(uncore, GEN11_BCS_RSVD_INTR_MASK,	~0);
 	intel_uncore_write(uncore, GEN11_VCS0_VCS1_INTR_MASK,	~0);
 	intel_uncore_write(uncore, GEN11_VCS2_VCS3_INTR_MASK,	~0);
+	if (HAS_ENGINE(gt, VCS4) || HAS_ENGINE(gt, VCS5))
+		intel_uncore_write(uncore, GEN12_VCS4_VCS5_INTR_MASK,   ~0);
+	if (HAS_ENGINE(gt, VCS6) || HAS_ENGINE(gt, VCS7))
+		intel_uncore_write(uncore, GEN12_VCS6_VCS7_INTR_MASK,   ~0);
 	intel_uncore_write(uncore, GEN11_VECS0_VECS1_INTR_MASK,	~0);
+	if (HAS_ENGINE(gt, VECS2) || HAS_ENGINE(gt, VECS3))
+		intel_uncore_write(uncore, GEN12_VECS2_VECS3_INTR_MASK, ~0);
+	if (HAS_ENGINE(gt, CCS0) || HAS_ENGINE(gt, CCS1))
+		intel_uncore_write(uncore, GEN12_CCS0_CCS1_INTR_MASK, ~0);
+	if (HAS_ENGINE(gt, CCS2) || HAS_ENGINE(gt, CCS3))
+		intel_uncore_write(uncore, GEN12_CCS2_CCS3_INTR_MASK, ~0);
 
 	intel_uncore_write(uncore, GEN11_GPM_WGBOXPERF_INTR_ENABLE, 0);
 	intel_uncore_write(uncore, GEN11_GPM_WGBOXPERF_INTR_MASK,  ~0);
 	intel_uncore_write(uncore, GEN11_GUC_SG_INTR_ENABLE, 0);
 	intel_uncore_write(uncore, GEN11_GUC_SG_INTR_MASK,  ~0);
+
+	intel_uncore_write(uncore, GEN11_CRYPTO_RSVD_INTR_ENABLE, 0);
+	intel_uncore_write(uncore, GEN11_CRYPTO_RSVD_INTR_MASK,  ~0);
 }
 
 void gen11_gt_irq_postinstall(struct intel_gt *gt)
 {
-	const u32 irqs = GT_RENDER_USER_INTERRUPT | GT_CONTEXT_SWITCH_INTERRUPT;
 	struct intel_uncore *uncore = gt->uncore;
-	const u32 dmask = irqs << 16 | irqs;
-	const u32 smask = irqs << 16;
+	u32 irqs = GT_RENDER_USER_INTERRUPT;
+	u32 dmask;
+	u32 smask;
+
+	if (!intel_uc_wants_guc_submission(&gt->uc))
+		irqs |= GT_CS_MASTER_ERROR_INTERRUPT |
+			GT_CONTEXT_SWITCH_INTERRUPT |
+			GT_WAIT_SEMAPHORE_INTERRUPT;
+
+	dmask = irqs << 16 | irqs;
+	smask = irqs << 16;
 
 	BUILD_BUG_ON(irqs & 0xffff0000);
 
 	/* Enable RCS, BCS, VCS and VECS class interrupts. */
 	intel_uncore_write(uncore, GEN11_RENDER_COPY_INTR_ENABLE, dmask);
 	intel_uncore_write(uncore, GEN11_VCS_VECS_INTR_ENABLE, dmask);
+	if (CCS_MASK(gt))
+		intel_uncore_write(uncore, GEN12_CCS_RSVD_INTR_ENABLE, smask);
 
 	/* Unmask irqs on RCS, BCS, VCS and VECS engines. */
 	intel_uncore_write(uncore, GEN11_RCS0_RSVD_INTR_MASK, ~smask);
 	intel_uncore_write(uncore, GEN11_BCS_RSVD_INTR_MASK, ~smask);
 	intel_uncore_write(uncore, GEN11_VCS0_VCS1_INTR_MASK, ~dmask);
 	intel_uncore_write(uncore, GEN11_VCS2_VCS3_INTR_MASK, ~dmask);
+	if (HAS_ENGINE(gt, VCS4) || HAS_ENGINE(gt, VCS5))
+		intel_uncore_write(uncore, GEN12_VCS4_VCS5_INTR_MASK, ~dmask);
+	if (HAS_ENGINE(gt, VCS6) || HAS_ENGINE(gt, VCS7))
+		intel_uncore_write(uncore, GEN12_VCS6_VCS7_INTR_MASK, ~dmask);
 	intel_uncore_write(uncore, GEN11_VECS0_VECS1_INTR_MASK, ~dmask);
+	if (HAS_ENGINE(gt, VECS2) || HAS_ENGINE(gt, VECS3))
+		intel_uncore_write(uncore, GEN12_VECS2_VECS3_INTR_MASK, ~dmask);
+	if (HAS_ENGINE(gt, CCS0) || HAS_ENGINE(gt, CCS1))
+		intel_uncore_write(uncore, GEN12_CCS0_CCS1_INTR_MASK, ~dmask);
+	if (HAS_ENGINE(gt, CCS2) || HAS_ENGINE(gt, CCS3))
+		intel_uncore_write(uncore, GEN12_CCS2_CCS3_INTR_MASK, ~dmask);
 
 	/*
 	 * RPS interrupts will get enabled/disabled on demand when RPS itself
@@ -245,9 +268,12 @@ void gen11_gt_irq_postinstall(struct intel_gt *gt)
 void gen5_gt_irq_handler(struct intel_gt *gt, u32 gt_iir)
 {
 	if (gt_iir & GT_RENDER_USER_INTERRUPT)
-		intel_engine_breadcrumbs_irq(gt->engine_class[RENDER_CLASS][0]);
+		intel_engine_cs_irq(gt->engine_class[RENDER_CLASS][0],
+				    gt_iir);
+
 	if (gt_iir & ILK_BSD_USER_INTERRUPT)
-		intel_engine_breadcrumbs_irq(gt->engine_class[VIDEO_DECODE_CLASS][0]);
+		intel_engine_cs_irq(gt->engine_class[VIDEO_DECODE_CLASS][0],
+				    gt_iir);
 }
 
 static void gen7_parity_error_irq_handler(struct intel_gt *gt, u32 iir)
@@ -271,74 +297,69 @@ static void gen7_parity_error_irq_handler(struct intel_gt *gt, u32 iir)
 void gen6_gt_irq_handler(struct intel_gt *gt, u32 gt_iir)
 {
 	if (gt_iir & GT_RENDER_USER_INTERRUPT)
-		intel_engine_breadcrumbs_irq(gt->engine_class[RENDER_CLASS][0]);
+		intel_engine_cs_irq(gt->engine_class[RENDER_CLASS][0],
+				    gt_iir);
+
 	if (gt_iir & GT_BSD_USER_INTERRUPT)
-		intel_engine_breadcrumbs_irq(gt->engine_class[VIDEO_DECODE_CLASS][0]);
+		intel_engine_cs_irq(gt->engine_class[VIDEO_DECODE_CLASS][0],
+				    gt_iir >> 12);
+
 	if (gt_iir & GT_BLT_USER_INTERRUPT)
-		intel_engine_breadcrumbs_irq(gt->engine_class[COPY_ENGINE_CLASS][0]);
+		intel_engine_cs_irq(gt->engine_class[COPY_ENGINE_CLASS][0],
+				    gt_iir >> 22);
 
 	if (gt_iir & (GT_BLT_CS_ERROR_INTERRUPT |
 		      GT_BSD_CS_ERROR_INTERRUPT |
-		      GT_RENDER_CS_MASTER_ERROR_INTERRUPT))
+		      GT_CS_MASTER_ERROR_INTERRUPT))
 		DRM_DEBUG("Command parser error, gt_iir 0x%08x\n", gt_iir);
 
 	if (gt_iir & GT_PARITY_ERROR(gt->i915))
 		gen7_parity_error_irq_handler(gt, gt_iir);
 }
 
-void gen8_gt_irq_ack(struct intel_gt *gt, u32 master_ctl, u32 gt_iir[4])
+void gen8_gt_irq_handler(struct intel_gt *gt, u32 master_ctl)
 {
 	void __iomem * const regs = gt->uncore->regs;
+	u32 iir;
 
 	if (master_ctl & (GEN8_GT_RCS_IRQ | GEN8_GT_BCS_IRQ)) {
-		gt_iir[0] = raw_reg_read(regs, GEN8_GT_IIR(0));
-		if (likely(gt_iir[0]))
-			raw_reg_write(regs, GEN8_GT_IIR(0), gt_iir[0]);
+		iir = raw_reg_read(regs, GEN8_GT_IIR(0));
+		if (likely(iir)) {
+			intel_engine_cs_irq(gt->engine_class[RENDER_CLASS][0],
+					    iir >> GEN8_RCS_IRQ_SHIFT);
+			intel_engine_cs_irq(gt->engine_class[COPY_ENGINE_CLASS][0],
+					    iir >> GEN8_BCS_IRQ_SHIFT);
+			raw_reg_write(regs, GEN8_GT_IIR(0), iir);
+		}
 	}
 
 	if (master_ctl & (GEN8_GT_VCS0_IRQ | GEN8_GT_VCS1_IRQ)) {
-		gt_iir[1] = raw_reg_read(regs, GEN8_GT_IIR(1));
-		if (likely(gt_iir[1]))
-			raw_reg_write(regs, GEN8_GT_IIR(1), gt_iir[1]);
-	}
-
-	if (master_ctl & (GEN8_GT_PM_IRQ | GEN8_GT_GUC_IRQ)) {
-		gt_iir[2] = raw_reg_read(regs, GEN8_GT_IIR(2));
-		if (likely(gt_iir[2]))
-			raw_reg_write(regs, GEN8_GT_IIR(2), gt_iir[2]);
-	}
-
-	if (master_ctl & GEN8_GT_VECS_IRQ) {
-		gt_iir[3] = raw_reg_read(regs, GEN8_GT_IIR(3));
-		if (likely(gt_iir[3]))
-			raw_reg_write(regs, GEN8_GT_IIR(3), gt_iir[3]);
-	}
-}
-
-void gen8_gt_irq_handler(struct intel_gt *gt, u32 master_ctl, u32 gt_iir[4])
-{
-	if (master_ctl & (GEN8_GT_RCS_IRQ | GEN8_GT_BCS_IRQ)) {
-		cs_irq_handler(gt->engine_class[RENDER_CLASS][0],
-			       gt_iir[0] >> GEN8_RCS_IRQ_SHIFT);
-		cs_irq_handler(gt->engine_class[COPY_ENGINE_CLASS][0],
-			       gt_iir[0] >> GEN8_BCS_IRQ_SHIFT);
-	}
-
-	if (master_ctl & (GEN8_GT_VCS0_IRQ | GEN8_GT_VCS1_IRQ)) {
-		cs_irq_handler(gt->engine_class[VIDEO_DECODE_CLASS][0],
-			       gt_iir[1] >> GEN8_VCS0_IRQ_SHIFT);
-		cs_irq_handler(gt->engine_class[VIDEO_DECODE_CLASS][1],
-			       gt_iir[1] >> GEN8_VCS1_IRQ_SHIFT);
+		iir = raw_reg_read(regs, GEN8_GT_IIR(1));
+		if (likely(iir)) {
+			intel_engine_cs_irq(gt->engine_class[VIDEO_DECODE_CLASS][0],
+					    iir >> GEN8_VCS0_IRQ_SHIFT);
+			intel_engine_cs_irq(gt->engine_class[VIDEO_DECODE_CLASS][1],
+					    iir >> GEN8_VCS1_IRQ_SHIFT);
+			raw_reg_write(regs, GEN8_GT_IIR(1), iir);
+		}
 	}
 
 	if (master_ctl & GEN8_GT_VECS_IRQ) {
-		cs_irq_handler(gt->engine_class[VIDEO_ENHANCEMENT_CLASS][0],
-			       gt_iir[3] >> GEN8_VECS_IRQ_SHIFT);
+		iir = raw_reg_read(regs, GEN8_GT_IIR(3));
+		if (likely(iir)) {
+			intel_engine_cs_irq(gt->engine_class[VIDEO_ENHANCEMENT_CLASS][0],
+					    iir >> GEN8_VECS_IRQ_SHIFT);
+			raw_reg_write(regs, GEN8_GT_IIR(3), iir);
+		}
 	}
 
 	if (master_ctl & (GEN8_GT_PM_IRQ | GEN8_GT_GUC_IRQ)) {
-		gen6_rps_irq_handler(&gt->rps, gt_iir[2]);
-		guc_irq_handler(&gt->uc.guc, gt_iir[2] >> 16);
+		iir = raw_reg_read(regs, GEN8_GT_IIR(2));
+		if (likely(iir)) {
+			gen6_rps_irq_handler(&gt->rps, iir);
+			guc_irq_handler(&gt->uc.guc, iir >> 16);
+			raw_reg_write(regs, GEN8_GT_IIR(2), iir);
+		}
 	}
 }
 
@@ -354,25 +375,19 @@ void gen8_gt_irq_reset(struct intel_gt *gt)
 
 void gen8_gt_irq_postinstall(struct intel_gt *gt)
 {
-	struct intel_uncore *uncore = gt->uncore;
-
 	/* These are interrupts we'll toggle with the ring mask register */
-	u32 gt_interrupts[] = {
-		(GT_RENDER_USER_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
-		 GT_CONTEXT_SWITCH_INTERRUPT << GEN8_RCS_IRQ_SHIFT |
-		 GT_RENDER_USER_INTERRUPT << GEN8_BCS_IRQ_SHIFT |
-		 GT_CONTEXT_SWITCH_INTERRUPT << GEN8_BCS_IRQ_SHIFT),
-
-		(GT_RENDER_USER_INTERRUPT << GEN8_VCS0_IRQ_SHIFT |
-		 GT_CONTEXT_SWITCH_INTERRUPT << GEN8_VCS0_IRQ_SHIFT |
-		 GT_RENDER_USER_INTERRUPT << GEN8_VCS1_IRQ_SHIFT |
-		 GT_CONTEXT_SWITCH_INTERRUPT << GEN8_VCS1_IRQ_SHIFT),
-
+	const u32 irqs =
+		GT_CS_MASTER_ERROR_INTERRUPT |
+		GT_RENDER_USER_INTERRUPT |
+		GT_CONTEXT_SWITCH_INTERRUPT |
+		GT_WAIT_SEMAPHORE_INTERRUPT;
+	const u32 gt_interrupts[] = {
+		irqs << GEN8_RCS_IRQ_SHIFT | irqs << GEN8_BCS_IRQ_SHIFT,
+		irqs << GEN8_VCS0_IRQ_SHIFT | irqs << GEN8_VCS1_IRQ_SHIFT,
 		0,
-
-		(GT_RENDER_USER_INTERRUPT << GEN8_VECS_IRQ_SHIFT |
-		 GT_CONTEXT_SWITCH_INTERRUPT << GEN8_VECS_IRQ_SHIFT)
+		irqs << GEN8_VECS_IRQ_SHIFT,
 	};
+	struct intel_uncore *uncore = gt->uncore;
 
 	gt->pm_ier = 0x0;
 	gt->pm_imr = ~gt->pm_ier;
@@ -415,7 +430,7 @@ void gen5_gt_irq_reset(struct intel_gt *gt)
 	struct intel_uncore *uncore = gt->uncore;
 
 	GEN3_IRQ_RESET(uncore, GT);
-	if (INTEL_GEN(gt->i915) >= 6)
+	if (GRAPHICS_VER(gt->i915) >= 6)
 		GEN3_IRQ_RESET(uncore, GEN6_PM);
 }
 
@@ -433,19 +448,19 @@ void gen5_gt_irq_postinstall(struct intel_gt *gt)
 	}
 
 	gt_irqs |= GT_RENDER_USER_INTERRUPT;
-	if (IS_GEN(gt->i915, 5))
+	if (GRAPHICS_VER(gt->i915) == 5)
 		gt_irqs |= ILK_BSD_USER_INTERRUPT;
 	else
 		gt_irqs |= GT_BLT_USER_INTERRUPT | GT_BSD_USER_INTERRUPT;
 
 	GEN3_IRQ_INIT(uncore, GT, gt->gt_imr, gt_irqs);
 
-	if (INTEL_GEN(gt->i915) >= 6) {
+	if (GRAPHICS_VER(gt->i915) >= 6) {
 		/*
 		 * RPS interrupts will get enabled/disabled on demand when RPS
 		 * itself is enabled/disabled.
 		 */
-		if (HAS_ENGINE(gt->i915, VECS0)) {
+		if (HAS_ENGINE(gt, VECS0)) {
 			pm_irqs |= PM_VEBOX_USER_INTERRUPT;
 			gt->pm_ier |= PM_VEBOX_USER_INTERRUPT;
 		}

@@ -30,6 +30,20 @@
 #include "mod_freesync.h"
 #include "dc.h"
 
+enum vsc_packet_revision {
+	vsc_packet_undefined = 0,
+	//01h = VSC SDP supports only 3D stereo.
+	vsc_packet_rev1 = 1,
+	//02h = 3D stereo + PSR.
+	vsc_packet_rev2 = 2,
+	//03h = 3D stereo + PSR2.
+	vsc_packet_rev3 = 3,
+	//04h = 3D stereo + PSR/PSR2 + Y-coordinate.
+	vsc_packet_rev4 = 4,
+	//05h = 3D stereo + PSR/PSR2 + Y-coordinate + Pixel Encoding/Colorimetry Format
+	vsc_packet_rev5 = 5,
+};
+
 #define HDMI_INFOFRAME_TYPE_VENDOR 0x81
 #define HF_VSIF_VERSION 1
 
@@ -86,7 +100,8 @@
 //PB7 = MD0
 #define MASK_VTEM_MD0__VRR_EN         0x01
 #define MASK_VTEM_MD0__M_CONST        0x02
-#define MASK_VTEM_MD0__RESERVED2      0x0C
+#define MASK_VTEM_MD0__QMS_EN         0x04
+#define MASK_VTEM_MD0__RESERVED2      0x08
 #define MASK_VTEM_MD0__FVA_FACTOR_M1  0xF0
 
 //MD1
@@ -95,7 +110,7 @@
 //MD2
 #define MASK_VTEM_MD2__BASE_REFRESH_RATE_98  0x03
 #define MASK_VTEM_MD2__RB                    0x04
-#define MASK_VTEM_MD2__RESERVED3             0xF8
+#define MASK_VTEM_MD2__NEXT_TFR              0xF8
 
 //MD3
 #define MASK_VTEM_MD3__BASE_REFRESH_RATE_07  0xFF
@@ -116,35 +131,35 @@ enum ColorimetryYCCDP {
 };
 
 void mod_build_vsc_infopacket(const struct dc_stream_state *stream,
-		struct dc_info_packet *info_packet)
+		struct dc_info_packet *info_packet,
+		enum dc_color_space cs)
 {
-	unsigned int vscPacketRevision = 0;
+	unsigned int vsc_packet_revision = vsc_packet_undefined;
 	unsigned int i;
 	unsigned int pixelEncoding = 0;
 	unsigned int colorimetryFormat = 0;
 	bool stereo3dSupport = false;
 
 	if (stream->timing.timing_3d_format != TIMING_3D_FORMAT_NONE && stream->view_format != VIEW_3D_FORMAT_NONE) {
-		vscPacketRevision = 1;
+		vsc_packet_revision = vsc_packet_rev1;
 		stereo3dSupport = true;
 	}
 
 	/*VSC packet set to 2 when DP revision >= 1.2*/
-	if (stream->psr_version != 0)
-		vscPacketRevision = 2;
+	if (stream->link->psr_settings.psr_version != DC_PSR_VERSION_UNSUPPORTED)
+		vsc_packet_revision = vsc_packet_rev2;
 
-	/* Update to revision 5 for extended colorimetry support for DPCD 1.4+ */
-	if (stream->link->dpcd_caps.dpcd_rev.raw >= 0x14 &&
-			stream->link->dpcd_caps.dprx_feature.bits.VSC_SDP_COLORIMETRY_SUPPORTED)
-		vscPacketRevision = 5;
+	/* Update to revision 5 for extended colorimetry support */
+	if (stream->use_vsc_sdp_for_colorimetry)
+		vsc_packet_revision = vsc_packet_rev5;
 
 	/* VSC packet not needed based on the features
 	 * supported by this DP display
 	 */
-	if (vscPacketRevision == 0)
+	if (vsc_packet_revision == vsc_packet_undefined)
 		return;
 
-	if (vscPacketRevision == 0x2) {
+	if (vsc_packet_revision == vsc_packet_rev2) {
 		/* Secondary-data Packet ID = 0*/
 		info_packet->hb0 = 0x00;
 		/* 07h - Packet Type Value indicating Video
@@ -166,7 +181,7 @@ void mod_build_vsc_infopacket(const struct dc_stream_state *stream,
 		info_packet->valid = true;
 	}
 
-	if (vscPacketRevision == 0x1) {
+	if (vsc_packet_revision == vsc_packet_rev1) {
 
 		info_packet->hb0 = 0x00;	// Secondary-data Packet ID = 0
 		info_packet->hb1 = 0x07;	// 07h = Packet Type Value indicating Video Stream Configuration packet
@@ -237,7 +252,7 @@ void mod_build_vsc_infopacket(const struct dc_stream_state *stream,
 	 *   the Pixel Encoding/Colorimetry Format and that a Sink device must ignore MISC1, bit 7, and
 	 *   MISC0, bits 7:1 (MISC1, bit 7. and MISC0, bits 7:1 become "don't care").)
 	 */
-	if (vscPacketRevision == 0x5) {
+	if (vsc_packet_revision == vsc_packet_rev5) {
 		/* Secondary-data Packet ID = 0 */
 		info_packet->hb0 = 0x00;
 		/* 07h - Packet Type Value indicating Video Stream Configuration packet */
@@ -318,13 +333,13 @@ void mod_build_vsc_infopacket(const struct dc_stream_state *stream,
 		/* Set Colorimetry format based on pixel encoding */
 		switch (stream->timing.pixel_encoding) {
 		case PIXEL_ENCODING_RGB:
-			if ((stream->output_color_space == COLOR_SPACE_SRGB) ||
-					(stream->output_color_space == COLOR_SPACE_SRGB_LIMITED))
+			if ((cs == COLOR_SPACE_SRGB) ||
+					(cs == COLOR_SPACE_SRGB_LIMITED))
 				colorimetryFormat = ColorimetryRGB_DP_sRGB;
-			else if (stream->output_color_space == COLOR_SPACE_ADOBERGB)
+			else if (cs == COLOR_SPACE_ADOBERGB)
 				colorimetryFormat = ColorimetryRGB_DP_AdobeRGB;
-			else if ((stream->output_color_space == COLOR_SPACE_2020_RGB_FULLRANGE) ||
-					(stream->output_color_space == COLOR_SPACE_2020_RGB_LIMITEDRANGE))
+			else if ((cs == COLOR_SPACE_2020_RGB_FULLRANGE) ||
+					(cs == COLOR_SPACE_2020_RGB_LIMITEDRANGE))
 				colorimetryFormat = ColorimetryRGB_DP_ITU_R_BT2020RGB;
 			break;
 
@@ -334,13 +349,13 @@ void mod_build_vsc_infopacket(const struct dc_stream_state *stream,
 			/* Note: xvYCC probably not supported correctly here on DP since colorspace translation
 			 * loses distinction between BT601 vs xvYCC601 in translation
 			 */
-			if (stream->output_color_space == COLOR_SPACE_YCBCR601)
+			if (cs == COLOR_SPACE_YCBCR601)
 				colorimetryFormat = ColorimetryYCC_DP_ITU601;
-			else if (stream->output_color_space == COLOR_SPACE_YCBCR709)
+			else if (cs == COLOR_SPACE_YCBCR709)
 				colorimetryFormat = ColorimetryYCC_DP_ITU709;
-			else if (stream->output_color_space == COLOR_SPACE_ADOBERGB)
+			else if (cs == COLOR_SPACE_ADOBERGB)
 				colorimetryFormat = ColorimetryYCC_DP_AdobeYCC;
-			else if (stream->output_color_space == COLOR_SPACE_2020_YCBCR)
+			else if (cs == COLOR_SPACE_2020_YCBCR)
 				colorimetryFormat = ColorimetryYCC_DP_ITU2020YCbCr;
 			break;
 
@@ -378,8 +393,8 @@ void mod_build_vsc_infopacket(const struct dc_stream_state *stream,
 		}
 
 		/* all YCbCr are always limited range */
-		if ((stream->output_color_space == COLOR_SPACE_SRGB_LIMITED) ||
-				(stream->output_color_space == COLOR_SPACE_2020_RGB_LIMITEDRANGE) ||
+		if ((cs == COLOR_SPACE_SRGB_LIMITED) ||
+				(cs == COLOR_SPACE_2020_RGB_LIMITEDRANGE) ||
 				(pixelEncoding != 0x0)) {
 			info_packet->sb[17] |= 0x80; /* DB17 bit 7 set to 1 for CEA timing. */
 		}
@@ -393,31 +408,23 @@ void mod_build_vsc_infopacket(const struct dc_stream_state *stream,
 		 */
 		info_packet->sb[18] = 0;
 	}
-
 }
 
 /**
- *****************************************************************************
- *  Function: mod_build_hf_vsif_infopacket
+ *  mod_build_hf_vsif_infopacket - Prepare HDMI Vendor Specific info frame.
+ *                                 Follows HDMI Spec to build up Vendor Specific info frame
  *
- *  @brief
- *     Prepare HDMI Vendor Specific info frame.
- *     Follows HDMI Spec to build up Vendor Specific info frame
- *
- *  @param [in] stream: contains data we may need to construct VSIF (i.e. timing_3d_format, etc.)
- *  @param [out] info_packet:   output structure where to store VSIF
- *****************************************************************************
+ *  @stream:      contains data we may need to construct VSIF (i.e. timing_3d_format, etc.)
+ *  @info_packet: output structure where to store VSIF
  */
 void mod_build_hf_vsif_infopacket(const struct dc_stream_state *stream,
-		struct dc_info_packet *info_packet, int ALLMEnabled, int ALLMValue)
+		struct dc_info_packet *info_packet)
 {
 		unsigned int length = 5;
 		bool hdmi_vic_mode = false;
 		uint8_t checksum = 0;
 		uint32_t i = 0;
 		enum dc_timing_3d_format format;
-		bool bALLM = (bool)ALLMEnabled;
-		bool bALLMVal = (bool)ALLMValue;
 
 		info_packet->valid = false;
 		format = stream->timing.timing_3d_format;
@@ -430,19 +437,12 @@ void mod_build_hf_vsif_infopacket(const struct dc_stream_state *stream,
 				&& format == TIMING_3D_FORMAT_NONE)
 			hdmi_vic_mode = true;
 
-		if ((format == TIMING_3D_FORMAT_NONE) && !hdmi_vic_mode && !bALLM)
+		if ((format == TIMING_3D_FORMAT_NONE) && !hdmi_vic_mode)
 			return;
 
 		info_packet->sb[1] = 0x03;
 		info_packet->sb[2] = 0x0C;
 		info_packet->sb[3] = 0x00;
-
-		if (bALLM) {
-			info_packet->sb[1] = 0xD8;
-			info_packet->sb[2] = 0x5D;
-			info_packet->sb[3] = 0xC4;
-			info_packet->sb[4] = HF_VSIF_VERSION;
-		}
 
 		if (format != TIMING_3D_FORMAT_NONE)
 			info_packet->sb[4] = (2 << 5);
@@ -477,9 +477,6 @@ void mod_build_hf_vsif_infopacket(const struct dc_stream_state *stream,
 		info_packet->hb0 = HDMI_INFOFRAME_TYPE_VENDOR;
 		info_packet->hb1 = 0x01;
 		info_packet->hb2 = (uint8_t) (length);
-
-		if (bALLM)
-			info_packet->sb[5] = (info_packet->sb[5] & ~0x02) | (bALLMVal << 1);
 
 		checksum += info_packet->hb0;
 		checksum += info_packet->hb1;

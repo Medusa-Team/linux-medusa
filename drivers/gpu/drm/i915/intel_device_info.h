@@ -27,6 +27,8 @@
 
 #include <uapi/drm/i915_drm.h>
 
+#include "intel_step.h"
+
 #include "display/intel_display.h"
 
 #include "gt/intel_engine_types.h"
@@ -73,13 +75,19 @@ enum intel_platform {
 	INTEL_KABYLAKE,
 	INTEL_GEMINILAKE,
 	INTEL_COFFEELAKE,
-	/* gen10 */
-	INTEL_CANNONLAKE,
+	INTEL_COMETLAKE,
 	/* gen11 */
 	INTEL_ICELAKE,
 	INTEL_ELKHARTLAKE,
+	INTEL_JASPERLAKE,
 	/* gen12 */
 	INTEL_TIGERLAKE,
+	INTEL_ROCKETLAKE,
+	INTEL_DG1,
+	INTEL_ALDERLAKE_S,
+	INTEL_ALDERLAKE_P,
+	INTEL_XEHPSDV,
+	INTEL_DG2,
 	INTEL_MAX_PLATFORMS
 };
 
@@ -89,13 +97,28 @@ enum intel_platform {
  */
 
 #define INTEL_SUBPLATFORM_BITS (3)
+#define INTEL_SUBPLATFORM_MASK (BIT(INTEL_SUBPLATFORM_BITS) - 1)
 
 /* HSW/BDW/SKL/KBL/CFL */
 #define INTEL_SUBPLATFORM_ULT	(0)
 #define INTEL_SUBPLATFORM_ULX	(1)
 
-/* CNL/ICL */
+/* ICL */
 #define INTEL_SUBPLATFORM_PORTF	(0)
+
+/* TGL */
+#define INTEL_SUBPLATFORM_UY	(0)
+
+/* DG2 */
+#define INTEL_SUBPLATFORM_G10	0
+#define INTEL_SUBPLATFORM_G11	1
+#define INTEL_SUBPLATFORM_G12	2
+
+/* ADL-S */
+#define INTEL_SUBPLATFORM_RPL_S	0
+
+/* ADL-P */
+#define INTEL_SUBPLATFORM_N    0
 
 enum intel_ppgtt_type {
 	INTEL_PPGTT_NONE = I915_GEM_PPGTT_NONE,
@@ -110,17 +133,21 @@ enum intel_ppgtt_type {
 	func(is_dgfx); \
 	/* Keep has_* in alphabetical order */ \
 	func(has_64bit_reloc); \
+	func(has_64k_pages); \
+	func(needs_compact_pt); \
 	func(gpu_reset_clobbers_display); \
 	func(has_reset_engine); \
-	func(has_fpga_dbg); \
+	func(has_flat_ccs); \
 	func(has_global_mocs); \
 	func(has_gt_uc); \
+	func(has_guc_deprivilege); \
 	func(has_l3_dpf); \
 	func(has_llc); \
 	func(has_logical_ring_contexts); \
 	func(has_logical_ring_elsq); \
-	func(has_logical_ring_preemption); \
+	func(has_mslices); \
 	func(has_pooled_eu); \
+	func(has_pxp); \
 	func(has_rc6); \
 	func(has_rc6p); \
 	func(has_rps); \
@@ -133,30 +160,39 @@ enum intel_ppgtt_type {
 #define DEV_INFO_DISPLAY_FOR_EACH_FLAG(func) \
 	/* Keep in alphabetical order */ \
 	func(cursor_needs_physical); \
-	func(has_csr); \
+	func(has_cdclk_crawl); \
+	func(has_dmc); \
 	func(has_ddi); \
 	func(has_dp_mst); \
 	func(has_dsb); \
 	func(has_dsc); \
-	func(has_fbc); \
+	func(has_fpga_dbg); \
 	func(has_gmch); \
 	func(has_hdcp); \
 	func(has_hotplug); \
+	func(has_hti); \
 	func(has_ipc); \
 	func(has_modular_fia); \
 	func(has_overlay); \
 	func(has_psr); \
+	func(has_psr_hw_tracking); \
 	func(overlay_needs_physical); \
 	func(supports_tv);
 
-struct intel_device_info {
-	u16 gen_mask;
+struct ip_version {
+	u8 ver;
+	u8 rel;
+};
 
-	u8 gen;
-	u8 gt; /* GT number, 0 if undefined */
-	intel_engine_mask_t engine_mask; /* Engines supported by the HW */
+struct intel_device_info {
+	struct ip_version graphics;
+	struct ip_version media;
+
+	intel_engine_mask_t platform_engine_mask; /* Engines supported by the HW */
 
 	enum intel_platform platform;
+
+	unsigned int dma_mask_size; /* available DMA address bits */
 
 	enum intel_ppgtt_type ppgtt_type;
 	unsigned int ppgtt_size; /* log2, e.g. 31/32/48 bits */
@@ -167,19 +203,30 @@ struct intel_device_info {
 
 	u32 display_mmio_offset;
 
-	u8 pipe_mask;
+	u8 gt; /* GT number, 0 if undefined */
 
 #define DEFINE_FLAG(name) u8 name:1
 	DEV_INFO_FOR_EACH_FLAG(DEFINE_FLAG);
 #undef DEFINE_FLAG
 
 	struct {
+		u8 ver;
+		u8 rel;
+
+		u8 pipe_mask;
+		u8 cpu_transcoder_mask;
+		u8 fbc_mask;
+		u8 abox_mask;
+
 #define DEFINE_FLAG(name) u8 name:1
 		DEV_INFO_DISPLAY_FOR_EACH_FLAG(DEFINE_FLAG);
 #undef DEFINE_FLAG
 	} display;
 
-	u16 ddb_size; /* in blocks */
+	struct {
+		u16 size; /* in blocks */
+		u8 slice_mask;
+	} dbuf;
 
 	/* Register offsets for the various display pipes and transcoders */
 	int pipe_offsets[I915_MAX_TRANSCODERS];
@@ -210,15 +257,9 @@ struct intel_runtime_info {
 	u8 num_sprites[I915_MAX_PIPES];
 	u8 num_scalers[I915_MAX_PIPES];
 
-	u8 num_engines;
+	u32 rawclk_freq;
 
-	/* Slice/subslice/EU info */
-	struct sseu_dev_info sseu;
-
-	u32 cs_timestamp_frequency_khz;
-
-	/* Media engine access to SFC per instance */
-	u8 vdbox_sfc_access;
+	struct intel_step_info step;
 };
 
 struct intel_driver_caps {
@@ -230,14 +271,11 @@ const char *intel_platform_name(enum intel_platform platform);
 
 void intel_device_info_subplatform_init(struct drm_i915_private *dev_priv);
 void intel_device_info_runtime_init(struct drm_i915_private *dev_priv);
-void intel_device_info_dump_flags(const struct intel_device_info *info,
-				  struct drm_printer *p);
-void intel_device_info_dump_runtime(const struct intel_runtime_info *info,
-				    struct drm_printer *p);
-void intel_device_info_dump_topology(const struct sseu_dev_info *sseu,
-				     struct drm_printer *p);
 
-void intel_device_info_init_mmio(struct drm_i915_private *dev_priv);
+void intel_device_info_print_static(const struct intel_device_info *info,
+				    struct drm_printer *p);
+void intel_device_info_print_runtime(const struct intel_runtime_info *info,
+				     struct drm_printer *p);
 
 void intel_driver_caps_print(const struct intel_driver_caps *caps,
 			     struct drm_printer *p);

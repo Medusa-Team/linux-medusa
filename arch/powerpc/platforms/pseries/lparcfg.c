@@ -136,6 +136,39 @@ static unsigned int h_get_ppp(struct hvcall_ppp_data *ppp_data)
 	return rc;
 }
 
+static void show_gpci_data(struct seq_file *m)
+{
+	struct hv_gpci_request_buffer *buf;
+	unsigned int affinity_score;
+	long ret;
+
+	buf = kmalloc(sizeof(*buf), GFP_KERNEL);
+	if (buf == NULL)
+		return;
+
+	/*
+	 * Show the local LPAR's affinity score.
+	 *
+	 * 0xB1 selects the Affinity_Domain_Info_By_Partition subcall.
+	 * The score is at byte 0xB in the output buffer.
+	 */
+	memset(&buf->params, 0, sizeof(buf->params));
+	buf->params.counter_request = cpu_to_be32(0xB1);
+	buf->params.starting_index = cpu_to_be32(-1);	/* local LPAR */
+	buf->params.counter_info_version_in = 0x5;	/* v5+ for score */
+	ret = plpar_hcall_norets(H_GET_PERF_COUNTER_INFO, virt_to_phys(buf),
+				 sizeof(*buf));
+	if (ret != H_SUCCESS) {
+		pr_debug("hcall failed: H_GET_PERF_COUNTER_INFO: %ld, %x\n",
+			 ret, be32_to_cpu(buf->params.detail_rc));
+		goto out;
+	}
+	affinity_score = buf->bytes[0xB];
+	seq_printf(m, "partition_affinity_score=%u\n", affinity_score);
+out:
+	kfree(buf);
+}
+
 static unsigned h_pic(unsigned long *pool_idle_time,
 		      unsigned long *num_procs)
 {
@@ -276,6 +309,92 @@ static void parse_mpp_x_data(struct seq_file *m)
 		seq_printf(m, "coalesce_pool_purr=%ld\n", mpp_x_data.pool_purr_cycles);
 	if (mpp_x_data.pool_spurr_cycles)
 		seq_printf(m, "coalesce_pool_spurr=%ld\n", mpp_x_data.pool_spurr_cycles);
+}
+
+/*
+ * PAPR defines, in section "7.3.16 System Parameters Option", the token 55 to
+ * read the LPAR name, and the largest output data to 4000 + 2 bytes length.
+ */
+#define SPLPAR_LPAR_NAME_TOKEN	55
+#define GET_SYS_PARM_BUF_SIZE	4002
+#if GET_SYS_PARM_BUF_SIZE > RTAS_DATA_BUF_SIZE
+#error "GET_SYS_PARM_BUF_SIZE is larger than RTAS_DATA_BUF_SIZE"
+#endif
+
+/*
+ * Read the lpar name using the RTAS ibm,get-system-parameter call.
+ *
+ * The name read through this call is updated if changes are made by the end
+ * user on the hypervisor side.
+ *
+ * Some hypervisor (like Qemu) may not provide this value. In that case, a non
+ * null value is returned.
+ */
+static int read_rtas_lpar_name(struct seq_file *m)
+{
+	int rc, len, token;
+	union {
+		char raw_buffer[GET_SYS_PARM_BUF_SIZE];
+		struct {
+			__be16 len;
+			char name[GET_SYS_PARM_BUF_SIZE-2];
+		};
+	} *local_buffer;
+
+	token = rtas_token("ibm,get-system-parameter");
+	if (token == RTAS_UNKNOWN_SERVICE)
+		return -EINVAL;
+
+	local_buffer = kmalloc(sizeof(*local_buffer), GFP_KERNEL);
+	if (!local_buffer)
+		return -ENOMEM;
+
+	do {
+		spin_lock(&rtas_data_buf_lock);
+		memset(rtas_data_buf, 0, sizeof(*local_buffer));
+		rc = rtas_call(token, 3, 1, NULL, SPLPAR_LPAR_NAME_TOKEN,
+			       __pa(rtas_data_buf), sizeof(*local_buffer));
+		if (!rc)
+			memcpy(local_buffer->raw_buffer, rtas_data_buf,
+			       sizeof(local_buffer->raw_buffer));
+		spin_unlock(&rtas_data_buf_lock);
+	} while (rtas_busy_delay(rc));
+
+	if (!rc) {
+		/* Force end of string */
+		len = min((int) be16_to_cpu(local_buffer->len),
+			  (int) sizeof(local_buffer->name)-1);
+		local_buffer->name[len] = '\0';
+
+		seq_printf(m, "partition_name=%s\n", local_buffer->name);
+	} else
+		rc = -ENODATA;
+
+	kfree(local_buffer);
+	return rc;
+}
+
+/*
+ * Read the LPAR name from the Device Tree.
+ *
+ * The value read in the DT is not updated if the end-user is touching the LPAR
+ * name on the hypervisor side.
+ */
+static int read_dt_lpar_name(struct seq_file *m)
+{
+	const char *name;
+
+	if (of_property_read_string(of_root, "ibm,partition-name", &name))
+		return -ENOENT;
+
+	seq_printf(m, "partition_name=%s\n", name);
+	return 0;
+}
+
+static void read_lpar_name(struct seq_file *m)
+{
+	if (read_rtas_lpar_name(m) && read_dt_lpar_name(m))
+		pr_err_once("Error can't get the LPAR name");
 }
 
 #define SPLPAR_CHARACTERISTICS_TOKEN 20
@@ -435,10 +554,10 @@ static void maxmem_data(struct seq_file *m)
 {
 	unsigned long maxmem = 0;
 
-	maxmem += drmem_info->n_lmbs * drmem_info->lmb_size;
+	maxmem += (unsigned long)drmem_info->n_lmbs * drmem_info->lmb_size;
 	maxmem += hugetlb_total_pages() * PAGE_SIZE;
 
-	seq_printf(m, "MaxMem=%ld\n", maxmem);
+	seq_printf(m, "MaxMem=%lu\n", maxmem);
 }
 
 static int pseries_lparcfg_data(struct seq_file *m, void *v)
@@ -463,6 +582,7 @@ static int pseries_lparcfg_data(struct seq_file *m, void *v)
 
 	if (firmware_has_feature(FW_FEATURE_SPLPAR)) {
 		/* this call handles the ibm,get-system-parameter contents */
+		read_lpar_name(m);
 		parse_system_parameter_string(m);
 		parse_ppp_data(m);
 		parse_mpp_data(m);
@@ -487,6 +607,8 @@ static int pseries_lparcfg_data(struct seq_file *m, void *v)
 			   partition_active_processors * 100);
 	}
 
+	show_gpci_data(m);
+
 	seq_printf(m, "partition_active_processors=%d\n",
 		   partition_active_processors);
 
@@ -496,11 +618,14 @@ static int pseries_lparcfg_data(struct seq_file *m, void *v)
 	seq_printf(m, "shared_processor_mode=%d\n",
 		   lppaca_shared_proc(get_lppaca()));
 
-#ifdef CONFIG_PPC_BOOK3S_64
-	seq_printf(m, "slb_size=%d\n", mmu_slb_size);
+#ifdef CONFIG_PPC_64S_HASH_MMU
+	if (!radix_enabled())
+		seq_printf(m, "slb_size=%d\n", mmu_slb_size);
 #endif
 	parse_em_data(m);
 	maxmem_data(m);
+
+	seq_printf(m, "security_flavor=%u\n", pseries_security_flavor);
 
 	return 0;
 }
@@ -698,12 +823,12 @@ static int lparcfg_open(struct inode *inode, struct file *file)
 	return single_open(file, lparcfg_data, NULL);
 }
 
-static const struct file_operations lparcfg_fops = {
-	.read		= seq_read,
-	.write		= lparcfg_write,
-	.open		= lparcfg_open,
-	.release	= single_release,
-	.llseek		= seq_lseek,
+static const struct proc_ops lparcfg_proc_ops = {
+	.proc_read	= seq_read,
+	.proc_write	= lparcfg_write,
+	.proc_open	= lparcfg_open,
+	.proc_release	= single_release,
+	.proc_lseek	= seq_lseek,
 };
 
 static int __init lparcfg_init(void)
@@ -714,7 +839,7 @@ static int __init lparcfg_init(void)
 	if (firmware_has_feature(FW_FEATURE_SPLPAR))
 		mode |= 0200;
 
-	if (!proc_create("powerpc/lparcfg", mode, NULL, &lparcfg_fops)) {
+	if (!proc_create("powerpc/lparcfg", mode, NULL, &lparcfg_proc_ops)) {
 		printk(KERN_ERR "Failed to create powerpc/lparcfg\n");
 		return -EIO;
 	}

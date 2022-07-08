@@ -2,7 +2,7 @@
 /*
  * ALSA SoC TLV320AIC31xx CODEC Driver Definitions
  *
- * Copyright (C) 2014-2017 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2014-2017 Texas Instruments Incorporated - https://www.ti.com/
  */
 
 #ifndef _TLV320AIC31XX_H
@@ -118,7 +118,7 @@ struct aic31xx_pdata {
 #define AIC31XX_PLL_CLKIN_MASK		GENMASK(3, 2)
 #define AIC31XX_PLL_CLKIN_SHIFT		(2)
 #define AIC31XX_PLL_CLKIN_MCLK		0x00
-#define AIC31XX_PLL_CLKIN_BCKL		0x01
+#define AIC31XX_PLL_CLKIN_BCLK		0x01
 #define AIC31XX_PLL_CLKIN_GPIO1		0x02
 #define AIC31XX_PLL_CLKIN_DIN		0x03
 #define AIC31XX_CODEC_CLKIN_MASK	GENMASK(1, 0)
@@ -151,8 +151,8 @@ struct aic31xx_pdata {
 #define AIC31XX_WORD_LEN_24BITS		0x02
 #define AIC31XX_WORD_LEN_32BITS		0x03
 #define AIC31XX_IFACE1_MASTER_MASK	GENMASK(3, 2)
-#define AIC31XX_BCLK_MASTER		BIT(2)
-#define AIC31XX_WCLK_MASTER		BIT(3)
+#define AIC31XX_BCLK_MASTER		BIT(3)
+#define AIC31XX_WCLK_MASTER		BIT(2)
 
 /* AIC31XX_DATA_OFFSET */
 #define AIC31XX_DATA_OFFSET_MASK	GENMASK(7, 0)
@@ -217,9 +217,6 @@ struct aic31xx_pdata {
 #define AIC31XX_GPIO1_SWCLK		0x09
 #define AIC31XX_GPIO1_ADC_MOD_CLK	0x10
 #define AIC31XX_GPIO1_SDOUT		0x11
-
-/* AIC31XX_DACSETUP */
-#define AIC31XX_SOFTSTEP_MASK		GENMASK(1, 0)
 
 /* AIC31XX_DACMUTE */
 #define AIC31XX_DACMUTE_MASK		GENMASK(3, 2)

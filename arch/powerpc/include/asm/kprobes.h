@@ -43,7 +43,7 @@ extern kprobe_opcode_t optprobe_template_ret[];
 extern kprobe_opcode_t optprobe_template_end[];
 
 /* Fixed instruction size for powerpc */
-#define MAX_INSN_SIZE		1
+#define MAX_INSN_SIZE		2
 #define MAX_OPTIMIZED_LENGTH	sizeof(kprobe_opcode_t)	/* 4 bytes */
 #define MAX_OPTINSN_SIZE	(optprobe_template_end - optprobe_template_entry)
 #define RELATIVEJUMP_SIZE	sizeof(kprobe_opcode_t)	/* 4 bytes */
@@ -51,7 +51,7 @@ extern kprobe_opcode_t optprobe_template_end[];
 #define flush_insn_slot(p)	do { } while (0)
 #define kretprobe_blacklist_size 0
 
-void kretprobe_trampoline(void);
+void __kretprobe_trampoline(void);
 extern void arch_remove_kprobe(struct kprobe *p);
 
 /* Architecture specific copy of original instruction */

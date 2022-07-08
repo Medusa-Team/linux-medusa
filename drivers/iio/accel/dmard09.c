@@ -116,7 +116,6 @@ static int dmard09_probe(struct i2c_client *client,
 	}
 
 	i2c_set_clientdata(client, indio_dev);
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->name = DMARD09_DRV_NAME;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = dmard09_channels;
@@ -127,7 +126,7 @@ static int dmard09_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id dmard09_id[] = {
-	{ "dmard09", 0},
+	{ "dmard09", 0 },
 	{ },
 };
 

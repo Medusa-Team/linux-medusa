@@ -22,6 +22,7 @@
 #include <drm/drm_panel.h>
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
+#include <drm/drm_simple_kms_helper.h>
 
 #include "sun4i_backend.h"
 #include "sun4i_crtc.h"
@@ -204,10 +205,6 @@ static const struct drm_encoder_helper_funcs sun4i_hdmi_helper_funcs = {
 	.mode_valid	= sun4i_hdmi_mode_valid,
 };
 
-static const struct drm_encoder_funcs sun4i_hdmi_funcs = {
-	.destroy	= drm_encoder_cleanup,
-};
-
 static int sun4i_hdmi_get_modes(struct drm_connector *connector)
 {
 	struct sun4i_hdmi *hdmi = drm_connector_to_sun4i_hdmi(connector);
@@ -262,9 +259,8 @@ sun4i_hdmi_connector_detect(struct drm_connector *connector, bool force)
 	struct sun4i_hdmi *hdmi = drm_connector_to_sun4i_hdmi(connector);
 	unsigned long reg;
 
-	if (readl_poll_timeout(hdmi->base + SUN4I_HDMI_HPD_REG, reg,
-			       reg & SUN4I_HDMI_HPD_HIGH,
-			       0, 500000)) {
+	reg = readl(hdmi->base + SUN4I_HDMI_HPD_REG);
+	if (!(reg & SUN4I_HDMI_HPD_HIGH)) {
 		cec_phys_addr_invalidate(hdmi->cec_adap);
 		return connector_status_disconnected;
 	}
@@ -282,7 +278,7 @@ static const struct drm_connector_funcs sun4i_hdmi_connector_funcs = {
 };
 
 #ifdef CONFIG_DRM_SUN4I_HDMI_CEC
-static bool sun4i_hdmi_cec_pin_read(struct cec_adapter *adap)
+static int sun4i_hdmi_cec_pin_read(struct cec_adapter *adap)
 {
 	struct sun4i_hdmi *hdmi = cec_get_drvdata(adap);
 
@@ -493,7 +489,6 @@ static int sun4i_hdmi_bind(struct device *dev, struct device *master,
 	struct cec_connector_info conn_info;
 	struct sun4i_drv *drv = drm->dev_private;
 	struct sun4i_hdmi *hdmi;
-	struct resource *res;
 	u32 reg;
 	int ret;
 
@@ -508,8 +503,7 @@ static int sun4i_hdmi_bind(struct device *dev, struct device *master,
 	if (!hdmi->variant)
 		return -EINVAL;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hdmi->base = devm_ioremap_resource(dev, res);
+	hdmi->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(hdmi->base)) {
 		dev_err(dev, "Couldn't map the HDMI encoder registers\n");
 		return PTR_ERR(hdmi->base);
@@ -611,11 +605,8 @@ static int sun4i_hdmi_bind(struct device *dev, struct device *master,
 
 	drm_encoder_helper_add(&hdmi->encoder,
 			       &sun4i_hdmi_helper_funcs);
-	ret = drm_encoder_init(drm,
-			       &hdmi->encoder,
-			       &sun4i_hdmi_funcs,
-			       DRM_MODE_ENCODER_TMDS,
-			       NULL);
+	ret = drm_simple_encoder_init(drm, &hdmi->encoder,
+				      DRM_MODE_ENCODER_TMDS);
 	if (ret) {
 		dev_err(dev, "Couldn't initialise the HDMI encoder\n");
 		goto err_put_ddc_i2c;

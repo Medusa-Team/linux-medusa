@@ -36,7 +36,7 @@ all_dirs="$all_dirs $dir_list"
 #
 # When Kconfig regenerates include/generated/autoconf.h, its timestamp is
 # updated, but the contents might be still the same. When any CONFIG option is
-# changed, Kconfig touches the corresponding timestamp file include/config/*.h.
+# changed, Kconfig touches the corresponding timestamp file include/config/*.
 # Hence, the md5sum detects the configuration change anyway. We do not need to
 # check include/generated/autoconf.h explicitly.
 #
@@ -56,9 +56,7 @@ if [ -f kernel/kheaders.md5 ] &&
 		exit
 fi
 
-if [ "${quiet}" != "silent_" ]; then
-       echo "  GEN     $tarfile"
-fi
+echo "  GEN     $tarfile"
 
 rm -rf $cpio_dir
 mkdir $cpio_dir
@@ -88,7 +86,7 @@ find $cpio_dir -type f -print0 |
 find $cpio_dir -printf "./%P\n" | LC_ALL=C sort | \
     tar "${KBUILD_BUILD_TIMESTAMP:+--mtime=$KBUILD_BUILD_TIMESTAMP}" \
     --owner=0 --group=0 --numeric-owner --no-recursion \
-    -Jcf $tarfile -C $cpio_dir/ -T - > /dev/null
+    -I $XZ -cf $tarfile -C $cpio_dir/ -T - > /dev/null
 
 echo $headers_md5 > kernel/kheaders.md5
 echo "$this_file_md5" >> kernel/kheaders.md5

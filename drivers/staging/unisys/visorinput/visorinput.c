@@ -111,7 +111,7 @@ struct visorinput_devdata {
 	/* size of following array */
 	unsigned int keycode_table_bytes;
 	/* for keyboard devices: visorkbd_keycode[] + visorkbd_ext_keycode[] */
-	unsigned char keycode_table[0];
+	unsigned char keycode_table[];
 };
 
 static const guid_t visor_keyboard_channel_guid = VISOR_KEYBOARD_CHANNEL_GUID;
@@ -406,7 +406,8 @@ static struct visorinput_devdata *devdata_create(struct visor_device *dev,
 	if (dtype == visorinput_keyboard)
 		/* allocate room for devdata->keycode_table, filled in below */
 		extra_bytes = KEYCODE_TABLE_BYTES * 2;
-	devdata = kzalloc(sizeof(*devdata) + extra_bytes, GFP_KERNEL);
+	devdata = kzalloc(struct_size(devdata, keycode_table, extra_bytes),
+			  GFP_KERNEL);
 	if (!devdata)
 		return NULL;
 	mutex_init(&devdata->lock_visor_dev);
@@ -556,7 +557,6 @@ static void handle_locking_key(struct input_dev *visorinput_dev, int keycode,
 		led = LED_NUML;
 		break;
 	default:
-		led = -1;
 		return;
 	}
 	if (test_bit(led, visorinput_dev->led) != desired_state) {

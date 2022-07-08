@@ -111,9 +111,9 @@ static void ep93xx_i2s_enable(struct ep93xx_i2s_info *info, int stream)
 	if ((ep93xx_i2s_read_reg(info, EP93XX_I2S_TX0EN) & 0x1) == 0 &&
 	    (ep93xx_i2s_read_reg(info, EP93XX_I2S_RX0EN) & 0x1) == 0) {
 		/* Enable clocks */
-		clk_enable(info->mclk);
-		clk_enable(info->sclk);
-		clk_enable(info->lrclk);
+		clk_prepare_enable(info->mclk);
+		clk_prepare_enable(info->sclk);
+		clk_prepare_enable(info->lrclk);
 
 		/* Enable i2s */
 		ep93xx_i2s_write_reg(info, EP93XX_I2S_GLCTRL, 1);
@@ -156,9 +156,9 @@ static void ep93xx_i2s_disable(struct ep93xx_i2s_info *info, int stream)
 		ep93xx_i2s_write_reg(info, EP93XX_I2S_GLCTRL, 0);
 
 		/* Disable clocks */
-		clk_disable(info->lrclk);
-		clk_disable(info->sclk);
-		clk_disable(info->mclk);
+		clk_disable_unprepare(info->lrclk);
+		clk_disable_unprepare(info->sclk);
+		clk_disable_unprepare(info->mclk);
 	}
 }
 
@@ -245,14 +245,14 @@ static int ep93xx_i2s_set_dai_fmt(struct snd_soc_dai *cpu_dai,
 		return -EINVAL;
 	}
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
-		/* CPU is master */
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBC_CFC:
+		/* CPU is provider */
 		clk_cfg |= EP93XX_I2S_CLKCFG_MASTER;
 		break;
 
-	case SND_SOC_DAIFMT_CBM_CFM:
-		/* Codec is master */
+	case SND_SOC_DAIFMT_CBP_CFP:
+		/* Codec is provider */
 		clk_cfg &= ~EP93XX_I2S_CLKCFG_MASTER;
 		break;
 
@@ -364,11 +364,11 @@ static int ep93xx_i2s_set_sysclk(struct snd_soc_dai *cpu_dai, int clk_id,
 }
 
 #ifdef CONFIG_PM
-static int ep93xx_i2s_suspend(struct snd_soc_dai *dai)
+static int ep93xx_i2s_suspend(struct snd_soc_component *component)
 {
-	struct ep93xx_i2s_info *info = snd_soc_dai_get_drvdata(dai);
+	struct ep93xx_i2s_info *info = snd_soc_component_get_drvdata(component);
 
-	if (!dai->active)
+	if (!snd_soc_component_active(component))
 		return 0;
 
 	ep93xx_i2s_disable(info, SNDRV_PCM_STREAM_PLAYBACK);
@@ -377,11 +377,11 @@ static int ep93xx_i2s_suspend(struct snd_soc_dai *dai)
 	return 0;
 }
 
-static int ep93xx_i2s_resume(struct snd_soc_dai *dai)
+static int ep93xx_i2s_resume(struct snd_soc_component *component)
 {
-	struct ep93xx_i2s_info *info = snd_soc_dai_get_drvdata(dai);
+	struct ep93xx_i2s_info *info = snd_soc_component_get_drvdata(component);
 
-	if (!dai->active)
+	if (!snd_soc_component_active(component))
 		return 0;
 
 	ep93xx_i2s_enable(info, SNDRV_PCM_STREAM_PLAYBACK);
@@ -404,10 +404,8 @@ static const struct snd_soc_dai_ops ep93xx_i2s_dai_ops = {
 #define EP93XX_I2S_FORMATS (SNDRV_PCM_FMTBIT_S32_LE)
 
 static struct snd_soc_dai_driver ep93xx_i2s_dai = {
-	.symmetric_rates= 1,
+	.symmetric_rate	= 1,
 	.probe		= ep93xx_i2s_dai_probe,
-	.suspend	= ep93xx_i2s_suspend,
-	.resume		= ep93xx_i2s_resume,
 	.playback	= {
 		.channels_min	= 2,
 		.channels_max	= 2,
@@ -425,6 +423,8 @@ static struct snd_soc_dai_driver ep93xx_i2s_dai = {
 
 static const struct snd_soc_component_driver ep93xx_i2s_component = {
 	.name		= "ep93xx-i2s",
+	.suspend	= ep93xx_i2s_suspend,
+	.resume		= ep93xx_i2s_resume,
 };
 
 static int ep93xx_i2s_probe(struct platform_device *pdev)

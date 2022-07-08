@@ -6,6 +6,7 @@
 #include <linux/debugfs.h>
 #include <linux/pm_runtime.h>
 #include <linux/seq_file.h>
+#include <linux/string_helpers.h>
 
 #include <drm/drm_debugfs.h>
 
@@ -132,7 +133,7 @@ static int v3d_v3d_debugfs_ident(struct seq_file *m, void *unused)
 	u32 ident0, ident1, ident2, ident3, cores;
 	int ret, core;
 
-	ret = pm_runtime_get_sync(v3d->dev);
+	ret = pm_runtime_get_sync(v3d->drm.dev);
 	if (ret < 0)
 		return ret;
 
@@ -148,15 +149,15 @@ static int v3d_v3d_debugfs_ident(struct seq_file *m, void *unused)
 		   V3D_GET_FIELD(ident3, V3D_HUB_IDENT3_IPREV),
 		   V3D_GET_FIELD(ident3, V3D_HUB_IDENT3_IPIDX));
 	seq_printf(m, "MMU:        %s\n",
-		   (ident2 & V3D_HUB_IDENT2_WITH_MMU) ? "yes" : "no");
+		   str_yes_no(ident2 & V3D_HUB_IDENT2_WITH_MMU));
 	seq_printf(m, "TFU:        %s\n",
-		   (ident1 & V3D_HUB_IDENT1_WITH_TFU) ? "yes" : "no");
+		   str_yes_no(ident1 & V3D_HUB_IDENT1_WITH_TFU));
 	seq_printf(m, "TSY:        %s\n",
-		   (ident1 & V3D_HUB_IDENT1_WITH_TSY) ? "yes" : "no");
+		   str_yes_no(ident1 & V3D_HUB_IDENT1_WITH_TSY));
 	seq_printf(m, "MSO:        %s\n",
-		   (ident1 & V3D_HUB_IDENT1_WITH_MSO) ? "yes" : "no");
+		   str_yes_no(ident1 & V3D_HUB_IDENT1_WITH_MSO));
 	seq_printf(m, "L3C:        %s (%dkb)\n",
-		   (ident1 & V3D_HUB_IDENT1_WITH_L3C) ? "yes" : "no",
+		   str_yes_no(ident1 & V3D_HUB_IDENT1_WITH_L3C),
 		   V3D_GET_FIELD(ident2, V3D_HUB_IDENT2_L3C_NKB));
 
 	for (core = 0; core < cores; core++) {
@@ -187,8 +188,8 @@ static int v3d_v3d_debugfs_ident(struct seq_file *m, void *unused)
 			   (misccfg & V3D_MISCCFG_OVRTMUOUT) != 0);
 	}
 
-	pm_runtime_mark_last_busy(v3d->dev);
-	pm_runtime_put_autosuspend(v3d->dev);
+	pm_runtime_mark_last_busy(v3d->drm.dev);
+	pm_runtime_put_autosuspend(v3d->drm.dev);
 
 	return 0;
 }
@@ -219,7 +220,7 @@ static int v3d_measure_clock(struct seq_file *m, void *unused)
 	int measure_ms = 1000;
 	int ret;
 
-	ret = pm_runtime_get_sync(v3d->dev);
+	ret = pm_runtime_get_sync(v3d->drm.dev);
 	if (ret < 0)
 		return ret;
 
@@ -245,8 +246,8 @@ static int v3d_measure_clock(struct seq_file *m, void *unused)
 		   cycles / (measure_ms * 1000),
 		   (cycles / (measure_ms * 100)) % 10);
 
-	pm_runtime_mark_last_busy(v3d->dev);
-	pm_runtime_put_autosuspend(v3d->dev);
+	pm_runtime_mark_last_busy(v3d->drm.dev);
+	pm_runtime_put_autosuspend(v3d->drm.dev);
 
 	return 0;
 }
@@ -258,10 +259,10 @@ static const struct drm_info_list v3d_debugfs_list[] = {
 	{"bo_stats", v3d_debugfs_bo_stats, 0},
 };
 
-int
+void
 v3d_debugfs_init(struct drm_minor *minor)
 {
-	return drm_debugfs_create_files(v3d_debugfs_list,
-					ARRAY_SIZE(v3d_debugfs_list),
-					minor->debugfs_root, minor);
+	drm_debugfs_create_files(v3d_debugfs_list,
+				 ARRAY_SIZE(v3d_debugfs_list),
+				 minor->debugfs_root, minor);
 }

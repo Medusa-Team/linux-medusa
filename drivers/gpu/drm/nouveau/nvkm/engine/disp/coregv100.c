@@ -106,6 +106,8 @@ gv100_disp_core_mthd_head = {
 		{ 0x20a4, 0x6820a4 },
 		{ 0x20a8, 0x6820a8 },
 		{ 0x20ac, 0x6820ac },
+		{ 0x2180, 0x682180 },
+		{ 0x2184, 0x682184 },
 		{ 0x218c, 0x68218c },
 		{ 0x2194, 0x682194 },
 		{ 0x2198, 0x682198 },
@@ -167,6 +169,7 @@ gv100_disp_core_fini(struct nv50_disp_chan *chan)
 	nvkm_mask(device, 0x6104e0, 0x00000010, 0x00000000);
 	gv100_disp_core_idle(chan);
 	nvkm_mask(device, 0x6104e0, 0x00000002, 0x00000000);
+	chan->suspend_put = nvkm_rd32(device, 0x680000);
 }
 
 static int
@@ -181,7 +184,7 @@ gv100_disp_core_init(struct nv50_disp_chan *chan)
 	nvkm_wr32(device, 0x610b2c, 0x00000040);
 
 	nvkm_mask(device, 0x6104e0, 0x00000010, 0x00000010);
-	nvkm_wr32(device, 0x680000, 0x00000000);
+	nvkm_wr32(device, 0x680000, chan->suspend_put);
 	nvkm_wr32(device, 0x6104e0, 0x00000013);
 	return gv100_disp_core_idle(chan);
 }

@@ -43,7 +43,11 @@ static unsigned long rng_whiten(struct powernv_rng *rng, unsigned long val)
 	unsigned long parity;
 
 	/* Calculate the parity of the value */
-	asm ("popcntd %0,%1" : "=r" (parity) : "r" (val));
+	asm (".machine push;   \
+	      .machine power7; \
+	      popcntd %0,%1;   \
+	      .machine pop;"
+	     : "=r" (parity) : "r" (val));
 
 	/* xor our value with the previous mask */
 	val ^= rng->mask;
@@ -65,7 +69,7 @@ int powernv_get_random_real_mode(unsigned long *v)
 	return 1;
 }
 
-int powernv_get_random_darn(unsigned long *v)
+static int powernv_get_random_darn(unsigned long *v)
 {
 	unsigned long val;
 
@@ -80,7 +84,7 @@ int powernv_get_random_darn(unsigned long *v)
 	return 1;
 }
 
-static int initialise_darn(void)
+static int __init initialise_darn(void)
 {
 	unsigned long val;
 	int i;

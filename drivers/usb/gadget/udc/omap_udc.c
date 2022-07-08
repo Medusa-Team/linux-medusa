@@ -1003,7 +1003,7 @@ irq_wait:
 static int omap_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 {
 	struct omap_ep	*ep = container_of(_ep, struct omap_ep, ep);
-	struct omap_req	*req;
+	struct omap_req	*req = NULL, *iter;
 	unsigned long	flags;
 
 	if (!_ep || !_req)
@@ -1012,11 +1012,13 @@ static int omap_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	spin_lock_irqsave(&ep->udc->lock, flags);
 
 	/* make sure it's actually queued on this endpoint */
-	list_for_each_entry(req, &ep->queue, queue) {
-		if (&req->req == _req)
-			break;
+	list_for_each_entry(iter, &ep->queue, queue) {
+		if (&iter->req != _req)
+			continue;
+		req = iter;
+		break;
 	}
-	if (&req->req != _req) {
+	if (!req) {
 		spin_unlock_irqrestore(&ep->udc->lock, flags);
 		return -EINVAL;
 	}
@@ -2576,7 +2578,7 @@ omap_ep_setup(char *name, u8 addr, u8 type,
 	case USB_ENDPOINT_XFER_INT:
 		ep->ep.caps.type_int = true;
 		break;
-	};
+	}
 
 	if (addr & USB_DIR_IN)
 		ep->ep.caps.dir_in = true;
@@ -2757,7 +2759,7 @@ static int omap_udc_probe(struct platform_device *pdev)
 
 	/* NOTE:  "knows" the order of the resources! */
 	if (!request_mem_region(pdev->resource[0].start,
-			pdev->resource[0].end - pdev->resource[0].start + 1,
+			resource_size(&pdev->resource[0]),
 			driver_name)) {
 		DBG("request_mem_region failed\n");
 		return -EBUSY;
@@ -2831,7 +2833,7 @@ static int omap_udc_probe(struct platform_device *pdev)
 				type = "integrated";
 				break;
 			}
-			/* FALL THROUGH */
+			fallthrough;
 		case 3:
 		case 11:
 		case 16:
@@ -2848,7 +2850,7 @@ static int omap_udc_probe(struct platform_device *pdev)
 		case 14:			/* transceiverless */
 			if (cpu_is_omap1710())
 				goto bad_on_1710;
-			/* FALL THROUGH */
+			fallthrough;
 		case 13:
 		case 15:
 			type = "no";
@@ -2934,7 +2936,7 @@ cleanup0:
 	}
 
 	release_mem_region(pdev->resource[0].start,
-			pdev->resource[0].end - pdev->resource[0].start + 1);
+			   resource_size(&pdev->resource[0]));
 
 	return status;
 }
@@ -2950,7 +2952,7 @@ static int omap_udc_remove(struct platform_device *pdev)
 	wait_for_completion(&done);
 
 	release_mem_region(pdev->resource[0].start,
-			pdev->resource[0].end - pdev->resource[0].start + 1);
+			   resource_size(&pdev->resource[0]));
 
 	return 0;
 }
@@ -3001,7 +3003,7 @@ static struct platform_driver udc_driver = {
 	.suspend	= omap_udc_suspend,
 	.resume		= omap_udc_resume,
 	.driver		= {
-		.name	= (char *) driver_name,
+		.name	= driver_name,
 	},
 };
 

@@ -33,7 +33,7 @@ struct firmware_fallback_config {
 #ifdef CONFIG_FW_LOADER_USER_HELPER
 int firmware_fallback_sysfs(struct firmware *fw, const char *name,
 			    struct device *device,
-			    enum fw_opt opt_flags,
+			    u32 opt_flags,
 			    int ret);
 void kill_pending_fw_fallback_reqs(bool only_kill_custom);
 
@@ -42,10 +42,21 @@ void fw_fallback_set_default_timeout(void);
 
 int register_sysfs_loader(void);
 void unregister_sysfs_loader(void);
+#ifdef CONFIG_SYSCTL
+extern int register_firmware_config_sysctl(void);
+extern void unregister_firmware_config_sysctl(void);
+#else
+static inline int register_firmware_config_sysctl(void)
+{
+	return 0;
+}
+static inline void unregister_firmware_config_sysctl(void) { }
+#endif /* CONFIG_SYSCTL */
+
 #else /* CONFIG_FW_LOADER_USER_HELPER */
 static inline int firmware_fallback_sysfs(struct firmware *fw, const char *name,
 					  struct device *device,
-					  enum fw_opt opt_flags,
+					  u32 opt_flags,
 					  int ret)
 {
 	/* Keep carrying over the same error */
@@ -65,5 +76,14 @@ static inline void unregister_sysfs_loader(void)
 {
 }
 #endif /* CONFIG_FW_LOADER_USER_HELPER */
+
+#ifdef CONFIG_EFI_EMBEDDED_FIRMWARE
+int firmware_fallback_platform(struct fw_priv *fw_priv);
+#else
+static inline int firmware_fallback_platform(struct fw_priv *fw_priv)
+{
+	return -ENOENT;
+}
+#endif
 
 #endif /* __FIRMWARE_FALLBACK_H */

@@ -15,9 +15,7 @@
 
 extern bool hugetlb_disabled;
 
-void hugetlbpage_init_default(void);
-
-void flush_dcache_icache_hugepage(struct page *page);
+void __init hugetlbpage_init_defaultsize(void);
 
 int slice_is_hugepage_only_range(struct mm_struct *mm, unsigned long addr,
 			   unsigned long len);
@@ -30,6 +28,7 @@ static inline int is_hugepage_only_range(struct mm_struct *mm,
 		return slice_is_hugepage_only_range(mm, addr, len);
 	return 0;
 }
+#define is_hugepage_only_range is_hugepage_only_range
 
 #define __HAVE_ARCH_HUGETLB_FREE_PGD_RANGE
 void hugetlb_free_pgd_range(struct mmu_gather *tlb, unsigned long addr,
@@ -40,11 +39,7 @@ void hugetlb_free_pgd_range(struct mmu_gather *tlb, unsigned long addr,
 static inline pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
 					    unsigned long addr, pte_t *ptep)
 {
-#ifdef CONFIG_PPC64
 	return __pte(pte_update(mm, addr, ptep, ~0UL, 0, 1));
-#else
-	return __pte(pte_update(ptep, ~0UL, 0));
-#endif
 }
 
 #define __HAVE_ARCH_HUGE_PTEP_CLEAR_FLUSH
@@ -60,10 +55,7 @@ int huge_ptep_set_access_flags(struct vm_area_struct *vma,
 			       unsigned long addr, pte_t *ptep,
 			       pte_t pte, int dirty);
 
-static inline void arch_clear_hugepage_flags(struct page *page)
-{
-}
-
+void gigantic_hugetlb_cma_reserve(void) __init;
 #include <asm-generic/hugetlb.h>
 
 #else /* ! CONFIG_HUGETLB_PAGE */
@@ -77,6 +69,15 @@ static inline pte_t *hugepte_offset(hugepd_t hpd, unsigned long addr,
 				    unsigned pdshift)
 {
 	return NULL;
+}
+
+
+static inline void __init gigantic_hugetlb_cma_reserve(void)
+{
+}
+
+static inline void __init hugetlbpage_init_defaultsize(void)
+{
 }
 #endif /* CONFIG_HUGETLB_PAGE */
 

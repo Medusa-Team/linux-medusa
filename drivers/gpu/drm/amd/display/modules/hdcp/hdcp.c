@@ -37,24 +37,55 @@ static void push_error_status(struct mod_hdcp *hdcp,
 		HDCP_ERROR_TRACE(hdcp, status);
 	}
 
-	hdcp->connection.hdcp1_retry_count++;
+	if (is_hdcp1(hdcp)) {
+		hdcp->connection.hdcp1_retry_count++;
+		if (hdcp->connection.hdcp1_retry_count == MAX_NUM_OF_ATTEMPTS)
+			hdcp->connection.link.adjust.hdcp1.disable = 1;
+	} else if (is_hdcp2(hdcp)) {
+		hdcp->connection.hdcp2_retry_count++;
+		if (hdcp->connection.hdcp2_retry_count == MAX_NUM_OF_ATTEMPTS)
+			hdcp->connection.link.adjust.hdcp2.disable = 1;
+	}
 }
 
 static uint8_t is_cp_desired_hdcp1(struct mod_hdcp *hdcp)
 {
-	int i, display_enabled = 0;
+	int i, is_auth_needed = 0;
 
-	/* if all displays on the link are disabled, hdcp is not desired */
+	/* if all displays on the link don't need authentication,
+	 * hdcp is not desired
+	 */
 	for (i = 0; i < MAX_NUM_OF_DISPLAYS; i++) {
-		if (hdcp->connection.displays[i].state != MOD_HDCP_DISPLAY_INACTIVE &&
-				!hdcp->connection.displays[i].adjust.disable) {
-			display_enabled = 1;
+		if (hdcp->displays[i].state != MOD_HDCP_DISPLAY_INACTIVE &&
+				hdcp->displays[i].adjust.disable != MOD_HDCP_DISPLAY_DISABLE_AUTHENTICATION) {
+			is_auth_needed = 1;
 			break;
 		}
 	}
 
-	return (hdcp->connection.hdcp1_retry_count < MAX_NUM_OF_ATTEMPTS) &&
-			display_enabled && !hdcp->connection.link.adjust.hdcp1.disable;
+	return is_auth_needed &&
+			!hdcp->connection.link.adjust.hdcp1.disable &&
+			!hdcp->connection.is_hdcp1_revoked;
+}
+
+static uint8_t is_cp_desired_hdcp2(struct mod_hdcp *hdcp)
+{
+	int i, is_auth_needed = 0;
+
+	/* if all displays on the link don't need authentication,
+	 * hdcp is not desired
+	 */
+	for (i = 0; i < MAX_NUM_OF_DISPLAYS; i++) {
+		if (hdcp->displays[i].state != MOD_HDCP_DISPLAY_INACTIVE &&
+				hdcp->displays[i].adjust.disable != MOD_HDCP_DISPLAY_DISABLE_AUTHENTICATION) {
+			is_auth_needed = 1;
+			break;
+		}
+	}
+
+	return is_auth_needed &&
+			!hdcp->connection.link.adjust.hdcp2.disable &&
+			!hdcp->connection.is_hdcp2_revoked;
 }
 
 static enum mod_hdcp_status execution(struct mod_hdcp *hdcp,
@@ -75,13 +106,19 @@ static enum mod_hdcp_status execution(struct mod_hdcp *hdcp,
 			event_ctx->unexpected_event = 1;
 			goto out;
 		}
-		/* update topology event if hdcp is not desired */
-		status = mod_hdcp_add_display_topology(hdcp);
 	} else if (is_in_hdcp1_states(hdcp)) {
 		status = mod_hdcp_hdcp1_execution(hdcp, event_ctx, &input->hdcp1);
 	} else if (is_in_hdcp1_dp_states(hdcp)) {
 		status = mod_hdcp_hdcp1_dp_execution(hdcp,
 				event_ctx, &input->hdcp1);
+	} else if (is_in_hdcp2_states(hdcp)) {
+		status = mod_hdcp_hdcp2_execution(hdcp, event_ctx, &input->hdcp2);
+	} else if (is_in_hdcp2_dp_states(hdcp)) {
+		status = mod_hdcp_hdcp2_dp_execution(hdcp,
+				event_ctx, &input->hdcp2);
+	} else {
+		event_ctx->unexpected_event = 1;
+		goto out;
 	}
 out:
 	return status;
@@ -99,24 +136,33 @@ static enum mod_hdcp_status transition(struct mod_hdcp *hdcp,
 
 	if (is_in_initialized_state(hdcp)) {
 		if (is_dp_hdcp(hdcp))
-			if (is_cp_desired_hdcp1(hdcp)) {
+			if (is_cp_desired_hdcp2(hdcp)) {
+				callback_in_ms(0, output);
+				set_state_id(hdcp, output, D2_A0_DETERMINE_RX_HDCP_CAPABLE);
+			} else if (is_cp_desired_hdcp1(hdcp)) {
 				callback_in_ms(0, output);
 				set_state_id(hdcp, output, D1_A0_DETERMINE_RX_HDCP_CAPABLE);
 			} else {
 				callback_in_ms(0, output);
 				set_state_id(hdcp, output, HDCP_CP_NOT_DESIRED);
+				set_auth_complete(hdcp, output);
 			}
 		else if (is_hdmi_dvi_sl_hdcp(hdcp))
-			if (is_cp_desired_hdcp1(hdcp)) {
+			if (is_cp_desired_hdcp2(hdcp)) {
+				callback_in_ms(0, output);
+				set_state_id(hdcp, output, H2_A0_KNOWN_HDCP2_CAPABLE_RX);
+			} else if (is_cp_desired_hdcp1(hdcp)) {
 				callback_in_ms(0, output);
 				set_state_id(hdcp, output, H1_A0_WAIT_FOR_ACTIVE_RX);
 			} else {
 				callback_in_ms(0, output);
 				set_state_id(hdcp, output, HDCP_CP_NOT_DESIRED);
+				set_auth_complete(hdcp, output);
 			}
 		else {
 			callback_in_ms(0, output);
 			set_state_id(hdcp, output, HDCP_CP_NOT_DESIRED);
+			set_auth_complete(hdcp, output);
 		}
 	} else if (is_in_cp_not_desired_state(hdcp)) {
 		increment_stay_counter(hdcp);
@@ -126,6 +172,12 @@ static enum mod_hdcp_status transition(struct mod_hdcp *hdcp,
 	} else if (is_in_hdcp1_dp_states(hdcp)) {
 		status = mod_hdcp_hdcp1_dp_transition(hdcp,
 				event_ctx, &input->hdcp1, output);
+	} else if (is_in_hdcp2_states(hdcp)) {
+		status = mod_hdcp_hdcp2_transition(hdcp,
+				event_ctx, &input->hdcp2, output);
+	} else if (is_in_hdcp2_dp_states(hdcp)) {
+		status = mod_hdcp_hdcp2_dp_transition(hdcp,
+				event_ctx, &input->hdcp2, output);
 	} else {
 		status = MOD_HDCP_STATUS_INVALID_STATE;
 	}
@@ -139,28 +191,33 @@ static enum mod_hdcp_status reset_authentication(struct mod_hdcp *hdcp,
 	enum mod_hdcp_status status = MOD_HDCP_STATUS_SUCCESS;
 
 	if (is_hdcp1(hdcp)) {
-		if (hdcp->auth.trans_input.hdcp1.create_session != UNKNOWN)
+		if (hdcp->auth.trans_input.hdcp1.create_session != UNKNOWN) {
+			/* TODO - update psp to unify create session failure
+			 * recovery between hdcp1 and 2.
+			 */
 			mod_hdcp_hdcp1_destroy_session(hdcp);
 
-		if (hdcp->auth.trans_input.hdcp1.add_topology == PASS) {
-			status = mod_hdcp_remove_display_topology(hdcp);
+		}
+
+		HDCP_TOP_RESET_AUTH_TRACE(hdcp);
+		memset(&hdcp->auth, 0, sizeof(struct mod_hdcp_authentication));
+		memset(&hdcp->state, 0, sizeof(struct mod_hdcp_state));
+		set_state_id(hdcp, output, HDCP_INITIALIZED);
+	} else if (is_hdcp2(hdcp)) {
+		if (hdcp->auth.trans_input.hdcp2.create_session == PASS) {
+			status = mod_hdcp_hdcp2_destroy_session(hdcp);
 			if (status != MOD_HDCP_STATUS_SUCCESS) {
 				output->callback_needed = 0;
 				output->watchdog_timer_needed = 0;
 				goto out;
 			}
 		}
+
 		HDCP_TOP_RESET_AUTH_TRACE(hdcp);
 		memset(&hdcp->auth, 0, sizeof(struct mod_hdcp_authentication));
 		memset(&hdcp->state, 0, sizeof(struct mod_hdcp_state));
 		set_state_id(hdcp, output, HDCP_INITIALIZED);
 	} else if (is_in_cp_not_desired_state(hdcp)) {
-		status = mod_hdcp_remove_display_topology(hdcp);
-		if (status != MOD_HDCP_STATUS_SUCCESS) {
-			output->callback_needed = 0;
-			output->watchdog_timer_needed = 0;
-			goto out;
-		}
 		HDCP_TOP_RESET_AUTH_TRACE(hdcp);
 		memset(&hdcp->auth, 0, sizeof(struct mod_hdcp_authentication));
 		memset(&hdcp->state, 0, sizeof(struct mod_hdcp_state));
@@ -208,7 +265,6 @@ enum mod_hdcp_status mod_hdcp_setup(struct mod_hdcp *hdcp,
 	struct mod_hdcp_output output;
 	enum mod_hdcp_status status = MOD_HDCP_STATUS_SUCCESS;
 
-	memset(hdcp, 0, sizeof(struct mod_hdcp));
 	memset(&output, 0, sizeof(output));
 	hdcp->config = *config;
 	HDCP_TOP_INTERFACE_TRACE(hdcp);
@@ -267,15 +323,19 @@ enum mod_hdcp_status mod_hdcp_add_display(struct mod_hdcp *hdcp,
 	if (status != MOD_HDCP_STATUS_SUCCESS)
 		goto out;
 
-	/* add display to connection */
-	hdcp->connection.link = *link;
-	*display_container = *display;
-
 	/* reset retry counters */
 	reset_retry_counts(hdcp);
 
 	/* reset error trace */
 	memset(&hdcp->connection.trace, 0, sizeof(hdcp->connection.trace));
+
+	/* add display to connection */
+	hdcp->connection.link = *link;
+	*display_container = *display;
+	status = mod_hdcp_add_display_to_topology(hdcp, display_container);
+
+	if (status != MOD_HDCP_STATUS_SUCCESS)
+		goto out;
 
 	/* request authentication */
 	if (current_state(hdcp) != HDCP_INITIALIZED)
@@ -309,8 +369,60 @@ enum mod_hdcp_status mod_hdcp_remove_display(struct mod_hdcp *hdcp,
 	if (status != MOD_HDCP_STATUS_SUCCESS)
 		goto out;
 
+	/* clear retry counters */
+	reset_retry_counts(hdcp);
+
+	/* reset error trace */
+	memset(&hdcp->connection.trace, 0, sizeof(hdcp->connection.trace));
+
 	/* remove display */
-	display->state = MOD_HDCP_DISPLAY_INACTIVE;
+	status = mod_hdcp_remove_display_from_topology(hdcp, index);
+	if (status != MOD_HDCP_STATUS_SUCCESS)
+		goto out;
+	memset(display, 0, sizeof(struct mod_hdcp_display));
+
+	/* request authentication when connection is not reset */
+	if (current_state(hdcp) != HDCP_UNINITIALIZED)
+		callback_in_ms(hdcp->connection.link.adjust.auth_delay * 1000,
+				output);
+out:
+	if (status != MOD_HDCP_STATUS_SUCCESS)
+		push_error_status(hdcp, status);
+	return status;
+}
+
+enum mod_hdcp_status mod_hdcp_update_authentication(struct mod_hdcp *hdcp,
+		uint8_t index,
+		struct mod_hdcp_link_adjustment *link_adjust,
+		struct mod_hdcp_display_adjustment *display_adjust,
+		struct mod_hdcp_output *output)
+{
+	enum mod_hdcp_status status = MOD_HDCP_STATUS_SUCCESS;
+	struct mod_hdcp_display *display = NULL;
+
+	HDCP_TOP_INTERFACE_TRACE_WITH_INDEX(hdcp, index);
+	memset(output, 0, sizeof(struct mod_hdcp_output));
+
+	/* find display in connection */
+	display = get_active_display_at_index(hdcp, index);
+	if (!display) {
+		status = MOD_HDCP_STATUS_DISPLAY_NOT_FOUND;
+		goto out;
+	}
+
+	/* skip if no changes */
+	if (memcmp(link_adjust, &hdcp->connection.link.adjust,
+			sizeof(struct mod_hdcp_link_adjustment)) == 0 &&
+			memcmp(display_adjust, &display->adjust,
+					sizeof(struct mod_hdcp_display_adjustment)) == 0) {
+		status = MOD_HDCP_STATUS_SUCCESS;
+		goto out;
+	}
+
+	/* stop current authentication */
+	status = reset_authentication(hdcp, output);
+	if (status != MOD_HDCP_STATUS_SUCCESS)
+		goto out;
 
 	/* clear retry counters */
 	reset_retry_counts(hdcp);
@@ -318,10 +430,15 @@ enum mod_hdcp_status mod_hdcp_remove_display(struct mod_hdcp *hdcp,
 	/* reset error trace */
 	memset(&hdcp->connection.trace, 0, sizeof(hdcp->connection.trace));
 
-	/* request authentication for remaining displays*/
-	if (get_active_display_count(hdcp) > 0)
-		callback_in_ms(hdcp->connection.link.adjust.auth_delay * 1000,
-				output);
+	/* set new adjustment */
+	hdcp->connection.link.adjust = *link_adjust;
+	display->adjust = *display_adjust;
+
+	/* request authentication when connection is not reset */
+	if (current_state(hdcp) != HDCP_UNINITIALIZED)
+		/* wait 100ms to debounce simultaneous updates for different indices */
+		callback_in_ms(100, output);
+
 out:
 	if (status != MOD_HDCP_STATUS_SUCCESS)
 		push_error_status(hdcp, status);
@@ -347,7 +464,20 @@ enum mod_hdcp_status mod_hdcp_query_display(struct mod_hdcp *hdcp,
 	query->trace = &hdcp->connection.trace;
 	query->encryption_status = MOD_HDCP_ENCRYPTION_STATUS_HDCP_OFF;
 
-	mod_hdcp_hdcp1_get_link_encryption_status(hdcp, &query->encryption_status);
+	if (is_display_encryption_enabled(display)) {
+		if (is_hdcp1(hdcp)) {
+			query->encryption_status = MOD_HDCP_ENCRYPTION_STATUS_HDCP1_ON;
+		} else if (is_hdcp2(hdcp)) {
+			if (query->link->adjust.hdcp2.force_type == MOD_HDCP_FORCE_TYPE_0)
+				query->encryption_status = MOD_HDCP_ENCRYPTION_STATUS_HDCP2_TYPE0_ON;
+			else if (query->link->adjust.hdcp2.force_type == MOD_HDCP_FORCE_TYPE_1)
+				query->encryption_status = MOD_HDCP_ENCRYPTION_STATUS_HDCP2_TYPE1_ON;
+			else
+				query->encryption_status = MOD_HDCP_ENCRYPTION_STATUS_HDCP2_ON;
+		}
+	} else {
+		query->encryption_status = MOD_HDCP_ENCRYPTION_STATUS_HDCP_OFF;
+	}
 
 out:
 	return status;
@@ -393,11 +523,19 @@ enum mod_hdcp_status mod_hdcp_process_event(struct mod_hdcp *hdcp,
 
 	/* reset authentication if needed */
 	if (trans_status == MOD_HDCP_STATUS_RESET_NEEDED) {
-		HDCP_FULL_DDC_TRACE(hdcp);
+		mod_hdcp_log_ddc_trace(hdcp);
 		reset_status = reset_authentication(hdcp, output);
 		if (reset_status != MOD_HDCP_STATUS_SUCCESS)
 			push_error_status(hdcp, reset_status);
 	}
+
+	/* Clear CP_IRQ status if needed */
+	if (event_ctx.event == MOD_HDCP_EVENT_CPIRQ) {
+		status = mod_hdcp_clear_cp_irq_status(hdcp);
+		if (status != MOD_HDCP_STATUS_SUCCESS)
+			push_error_status(hdcp, status);
+	}
+
 	return status;
 }
 
@@ -413,14 +551,12 @@ enum mod_hdcp_operation_mode mod_hdcp_signal_type_to_operation_mode(
 		break;
 	case SIGNAL_TYPE_EDP:
 	case SIGNAL_TYPE_DISPLAY_PORT:
-		mode = MOD_HDCP_MODE_DP;
-		break;
 	case SIGNAL_TYPE_DISPLAY_PORT_MST:
-		mode = MOD_HDCP_MODE_DP_MST;
+		mode = MOD_HDCP_MODE_DP;
 		break;
 	default:
 		break;
-	};
+	}
 
 	return mode;
 }

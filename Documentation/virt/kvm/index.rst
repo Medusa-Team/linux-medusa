@@ -7,6 +7,14 @@ KVM
 .. toctree::
    :maxdepth: 2
 
-   amd-memory-encryption
-   cpuid
+   api
+   devices/index
+
+   arm/index
+   s390/index
+   ppc-pv
+   x86/index
+
+   locking
    vcpu-requests
+   review-checklist

@@ -349,7 +349,7 @@ static void cpsw_rx_handler(void *token, int len, int status)
 	struct cpsw_common	*cpsw = ndev_to_cpsw(xmeta->ndev);
 	int			pkt_size = cpsw->rx_packet_max;
 	int			ret = 0, port, ch = xmeta->ch;
-	int			headroom = CPSW_HEADROOM;
+	int			headroom = CPSW_HEADROOM_NA;
 	struct net_device	*ndev = xmeta->ndev;
 	struct cpsw_priv	*priv;
 	struct page_pool	*pool;
@@ -392,28 +392,21 @@ static void cpsw_rx_handler(void *token, int len, int status)
 	}
 
 	if (priv->xdp_prog) {
+		int size = len;
+
+		xdp_init_buff(&xdp, PAGE_SIZE, &priv->xdp_rxq[ch]);
 		if (status & CPDMA_RX_VLAN_ENCAP) {
-			xdp.data = pa + CPSW_HEADROOM +
-				   CPSW_RX_VLAN_ENCAP_HDR_SIZE;
-			xdp.data_end = xdp.data + len -
-				       CPSW_RX_VLAN_ENCAP_HDR_SIZE;
-		} else {
-			xdp.data = pa + CPSW_HEADROOM;
-			xdp.data_end = xdp.data + len;
+			headroom += CPSW_RX_VLAN_ENCAP_HDR_SIZE;
+			size -= CPSW_RX_VLAN_ENCAP_HDR_SIZE;
 		}
 
-		xdp_set_data_meta_invalid(&xdp);
-
-		xdp.data_hard_start = pa;
-		xdp.rxq = &priv->xdp_rxq[ch];
+		xdp_prepare_buff(&xdp, pa, headroom, size, false);
 
 		port = priv->emac_port + cpsw->data.dual_emac;
-		ret = cpsw_run_xdp(priv, ch, &xdp, page, port);
+		ret = cpsw_run_xdp(priv, ch, &xdp, page, port, &len);
 		if (ret != CPSW_XDP_PASS)
 			goto requeue;
 
-		/* XDP prog might have changed packet data and boundaries */
-		len = xdp.data_end - xdp.data;
 		headroom = xdp.data - xdp.data_hard_start;
 
 		/* XDP prog can modify vlan tag, so can't use encap header */
@@ -437,8 +430,8 @@ static void cpsw_rx_handler(void *token, int len, int status)
 		cpts_rx_timestamp(cpsw->cpts, skb);
 	skb->protocol = eth_type_trans(skb, ndev);
 
-	/* unmap page as no netstack skb page recycling */
-	page_pool_release_page(pool, page);
+	/* mark skb for recycling */
+	skb_mark_for_recycle(skb);
 	netif_receive_skb(skb);
 
 	ndev->stats.rx_bytes += len;
@@ -449,7 +442,7 @@ requeue:
 	xmeta->ndev = ndev;
 	xmeta->ch = ch;
 
-	dma = page_pool_get_dma_addr(new_page) + CPSW_HEADROOM;
+	dma = page_pool_get_dma_addr(new_page) + CPSW_HEADROOM_NA;
 	ret = cpdma_chan_submit_mapped(cpsw->rxv[ch].ch, new_page, dma,
 				       pkt_size, 0);
 	if (ret < 0) {
@@ -837,9 +830,12 @@ static int cpsw_ndo_open(struct net_device *ndev)
 		if (ret < 0)
 			goto err_cleanup;
 
-		if (cpts_register(cpsw->cpts))
-			dev_err(priv->dev, "error registering cpts device\n");
-
+		if (cpsw->cpts) {
+			if (cpts_register(cpsw->cpts))
+				dev_err(priv->dev, "error registering cpts device\n");
+			else
+				writel(0x10, &cpsw->wr_regs->misc_en);
+		}
 	}
 
 	cpsw_restore(priv);
@@ -849,7 +845,7 @@ static int cpsw_ndo_open(struct net_device *ndev)
 		struct ethtool_coalesce coal;
 
 		coal.rx_coalesce_usecs = cpsw->coal_intvl;
-		cpsw_set_coalesce(ndev, &coal);
+		cpsw_set_coalesce(ndev, &coal, NULL, NULL);
 	}
 
 	cpdma_ctlr_start(cpsw->dma);
@@ -909,7 +905,7 @@ static netdev_tx_t cpsw_ndo_start_xmit(struct sk_buff *skb,
 	struct cpdma_chan *txch;
 	int ret, q_idx;
 
-	if (skb_padto(skb, CPSW_MIN_PACKET_SIZE)) {
+	if (skb_put_padto(skb, CPSW_MIN_PACKET_SIZE)) {
 		cpsw_err(priv, tx_err, "packet pad failed\n");
 		ndev->stats.tx_dropped++;
 		return NET_XMIT_DROP;
@@ -989,7 +985,7 @@ static int cpsw_ndo_set_mac_address(struct net_device *ndev, void *p)
 			   flags, vid);
 
 	memcpy(priv->mac_addr, addr->sa_data, ETH_ALEN);
-	memcpy(ndev->dev_addr, priv->mac_addr, ETH_ALEN);
+	eth_hw_addr_set(ndev, priv->mac_addr);
 	for_each_slave(priv, cpsw_set_slave_mac, priv);
 
 	pm_runtime_put(cpsw->dev);
@@ -1115,7 +1111,7 @@ static int cpsw_ndo_vlan_rx_kill_vid(struct net_device *ndev,
 				  HOST_PORT_NUM, ALE_VLAN, vid);
 	ret |= cpsw_ale_del_mcast(cpsw->ale, priv->ndev->broadcast,
 				  0, ALE_VLAN, vid);
-	ret |= cpsw_ale_flush_multicast(cpsw->ale, 0, vid);
+	ret |= cpsw_ale_flush_multicast(cpsw->ale, ALE_PORT_HOST, vid);
 err:
 	pm_runtime_put(cpsw->dev);
 	return ret;
@@ -1127,25 +1123,23 @@ static int cpsw_ndo_xdp_xmit(struct net_device *ndev, int n,
 	struct cpsw_priv *priv = netdev_priv(ndev);
 	struct cpsw_common *cpsw = priv->cpsw;
 	struct xdp_frame *xdpf;
-	int i, drops = 0, port;
+	int i, nxmit = 0, port;
 
 	if (unlikely(flags & ~XDP_XMIT_FLAGS_MASK))
 		return -EINVAL;
 
 	for (i = 0; i < n; i++) {
 		xdpf = frames[i];
-		if (xdpf->len < CPSW_MIN_PACKET_SIZE) {
-			xdp_return_frame_rx_napi(xdpf);
-			drops++;
-			continue;
-		}
+		if (xdpf->len < CPSW_MIN_PACKET_SIZE)
+			break;
 
 		port = priv->emac_port + cpsw->data.dual_emac;
 		if (cpsw_xdp_tx_frame(priv, xdpf, NULL, port))
-			drops++;
+			break;
+		nxmit++;
 	}
 
-	return n - drops;
+	return nxmit;
 }
 
 #ifdef CONFIG_NET_POLL_CONTROLLER
@@ -1165,7 +1159,7 @@ static const struct net_device_ops cpsw_netdev_ops = {
 	.ndo_stop		= cpsw_ndo_stop,
 	.ndo_start_xmit		= cpsw_ndo_start_xmit,
 	.ndo_set_mac_address	= cpsw_ndo_set_mac_address,
-	.ndo_do_ioctl		= cpsw_ndo_ioctl,
+	.ndo_eth_ioctl		= cpsw_ndo_ioctl,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_tx_timeout		= cpsw_ndo_tx_timeout,
 	.ndo_set_rx_mode	= cpsw_ndo_set_rx_mode,
@@ -1211,6 +1205,7 @@ static int cpsw_set_channels(struct net_device *ndev,
 }
 
 static const struct ethtool_ops cpsw_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_RX_USECS,
 	.get_drvinfo	= cpsw_get_drvinfo,
 	.get_msglevel	= cpsw_get_msglevel,
 	.set_msglevel	= cpsw_set_msglevel,
@@ -1276,12 +1271,6 @@ static int cpsw_probe_dt(struct cpsw_platform_data *data,
 	}
 	data->channels = prop;
 
-	if (of_property_read_u32(node, "ale_entries", &prop)) {
-		dev_err(&pdev->dev, "Missing ale_entries property in the DT.\n");
-		return -EINVAL;
-	}
-	data->ale_entries = prop;
-
 	if (of_property_read_u32(node, "bd_ram_size", &prop)) {
 		dev_err(&pdev->dev, "Missing bd_ram_size property in the DT.\n");
 		return -EINVAL;
@@ -1295,7 +1284,7 @@ static int cpsw_probe_dt(struct cpsw_platform_data *data,
 	data->mac_control = prop;
 
 	if (of_property_read_bool(node, "dual_emac"))
-		data->dual_emac = 1;
+		data->dual_emac = true;
 
 	/*
 	 * Populate all the child nodes here...
@@ -1307,7 +1296,6 @@ static int cpsw_probe_dt(struct cpsw_platform_data *data,
 
 	for_each_available_child_of_node(node, slave_node) {
 		struct cpsw_slave_data *slave_data = data->slave_data + i;
-		const void *mac_addr = NULL;
 		int lenp;
 		const __be32 *parp;
 
@@ -1379,10 +1367,8 @@ static int cpsw_probe_dt(struct cpsw_platform_data *data,
 		}
 
 no_phy_slave:
-		mac_addr = of_get_mac_address(slave_node);
-		if (!IS_ERR(mac_addr)) {
-			ether_addr_copy(slave_data->mac_addr, mac_addr);
-		} else {
+		ret = of_get_mac_address(slave_node, slave_data->mac_addr);
+		if (ret) {
 			ret = ti_cm_get_macid(&pdev->dev, i,
 					      slave_data->mac_addr);
 			if (ret)
@@ -1474,7 +1460,7 @@ static int cpsw_probe_dual_emac(struct cpsw_priv *priv)
 		dev_info(cpsw->dev, "cpsw: Random MACID = %pM\n",
 			 priv_sl2->mac_addr);
 	}
-	memcpy(ndev->dev_addr, priv_sl2->mac_addr, ETH_ALEN);
+	eth_hw_addr_set(ndev, priv_sl2->mac_addr);
 
 	priv_sl2->emac_port = 1;
 	cpsw->slaves[1].ndev = ndev;
@@ -1546,8 +1532,7 @@ static int cpsw_probe(struct platform_device *pdev)
 	}
 	cpsw->bus_freq_mhz = clk_get_rate(clk) / 1000000;
 
-	ss_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ss_regs = devm_ioremap_resource(dev, ss_res);
+	ss_regs = devm_platform_get_and_ioremap_resource(pdev, 0, &ss_res);
 	if (IS_ERR(ss_regs))
 		return PTR_ERR(ss_regs);
 	cpsw->regs = ss_regs;
@@ -1567,6 +1552,12 @@ static int cpsw_probe(struct platform_device *pdev)
 	if (irq < 0)
 		return irq;
 	cpsw->irqs_table[1] = irq;
+
+	/* get misc irq*/
+	irq = platform_get_irq(pdev, 3);
+	if (irq <= 0)
+		return irq;
+	cpsw->misc_irq = irq;
 
 	/*
 	 * This may be required here for child devices.
@@ -1588,7 +1579,7 @@ static int cpsw_probe(struct platform_device *pdev)
 
 	soc = soc_device_match(cpsw_soc_devices);
 	if (soc)
-		cpsw->quirk_irq = 1;
+		cpsw->quirk_irq = true;
 
 	data = &cpsw->data;
 	cpsw->slaves = devm_kcalloc(dev,
@@ -1629,6 +1620,7 @@ static int cpsw_probe(struct platform_device *pdev)
 				       CPSW_MAX_QUEUES, CPSW_MAX_QUEUES);
 	if (!ndev) {
 		dev_err(dev, "error allocating net_device\n");
+		ret = -ENOMEM;
 		goto clean_cpts;
 	}
 
@@ -1647,7 +1639,7 @@ static int cpsw_probe(struct platform_device *pdev)
 		dev_info(dev, "Random MACID = %pM\n", priv->mac_addr);
 	}
 
-	memcpy(ndev->dev_addr, priv->mac_addr, ETH_ALEN);
+	eth_hw_addr_set(ndev, priv->mac_addr);
 
 	cpsw->slaves[0].ndev = ndev;
 
@@ -1702,6 +1694,20 @@ static int cpsw_probe(struct platform_device *pdev)
 		goto clean_unregister_netdev_ret;
 	}
 
+	if (!cpsw->cpts)
+		goto skip_cpts;
+
+	ret = devm_request_irq(&pdev->dev, cpsw->misc_irq, cpsw_misc_interrupt,
+			       0, dev_name(&pdev->dev), cpsw);
+	if (ret < 0) {
+		dev_err(dev, "error attaching misc irq (%d)\n", ret);
+		goto clean_unregister_netdev_ret;
+	}
+
+	/* Enable misc CPTS evnt_pend IRQ */
+	cpts_set_irqpoll(cpsw->cpts, false);
+
+skip_cpts:
 	cpsw_notice(priv, probe,
 		    "initialized device (regs %pa, irq %d, pool size %d)\n",
 		    &ss_res->start, cpsw->irqs_table[0], descs_pool_size);
@@ -1752,10 +1758,14 @@ static int cpsw_suspend(struct device *dev)
 	struct cpsw_common *cpsw = dev_get_drvdata(dev);
 	int i;
 
+	rtnl_lock();
+
 	for (i = 0; i < cpsw->data.slaves; i++)
 		if (cpsw->slaves[i].ndev)
 			if (netif_running(cpsw->slaves[i].ndev))
 				cpsw_ndo_stop(cpsw->slaves[i].ndev);
+
+	rtnl_unlock();
 
 	/* Select sleep pin state */
 	pinctrl_pm_select_sleep_state(dev);

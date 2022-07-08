@@ -36,8 +36,7 @@
 #include <linux/mfd/abx500/ab8500.h>
 #include <linux/regulator/db8500-prcmu.h>
 #include <linux/regulator/machine.h>
-#include <linux/platform_data/ux500_wdt.h>
-#include "dbx500-prcmu-regs.h"
+#include "db8500-prcmu-regs.h"
 
 /* Index of different voltages to be used when accessing AVSData */
 #define PRCM_AVS_BASE		0x2FC
@@ -542,102 +541,6 @@ static struct dsiescclk dsiescclk[3] = {
 	}
 };
 
-
-/*
-* Used by MCDE to setup all necessary PRCMU registers
-*/
-#define PRCMU_RESET_DSIPLL		0x00004000
-#define PRCMU_UNCLAMP_DSIPLL		0x00400800
-
-#define PRCMU_CLK_PLL_DIV_SHIFT		0
-#define PRCMU_CLK_PLL_SW_SHIFT		5
-#define PRCMU_CLK_38			(1 << 9)
-#define PRCMU_CLK_38_SRC		(1 << 10)
-#define PRCMU_CLK_38_DIV		(1 << 11)
-
-/* PLLDIV=12, PLLSW=4 (PLLDDR) */
-#define PRCMU_DSI_CLOCK_SETTING		0x0000008C
-
-/* DPI 50000000 Hz */
-#define PRCMU_DPI_CLOCK_SETTING		((1 << PRCMU_CLK_PLL_SW_SHIFT) | \
-					  (16 << PRCMU_CLK_PLL_DIV_SHIFT))
-#define PRCMU_DSI_LP_CLOCK_SETTING	0x00000E00
-
-/* D=101, N=1, R=4, SELDIV2=0 */
-#define PRCMU_PLLDSI_FREQ_SETTING	0x00040165
-
-#define PRCMU_ENABLE_PLLDSI		0x00000001
-#define PRCMU_DISABLE_PLLDSI		0x00000000
-#define PRCMU_RELEASE_RESET_DSS		0x0000400C
-#define PRCMU_DSI_PLLOUT_SEL_SETTING	0x00000202
-/* ESC clk, div0=1, div1=1, div2=3 */
-#define PRCMU_ENABLE_ESCAPE_CLOCK_DIV	0x07030101
-#define PRCMU_DISABLE_ESCAPE_CLOCK_DIV	0x00030101
-#define PRCMU_DSI_RESET_SW		0x00000007
-
-#define PRCMU_PLLDSI_LOCKP_LOCKED	0x3
-
-int db8500_prcmu_enable_dsipll(void)
-{
-	int i;
-
-	/* Clear DSIPLL_RESETN */
-	writel(PRCMU_RESET_DSIPLL, PRCM_APE_RESETN_CLR);
-	/* Unclamp DSIPLL in/out */
-	writel(PRCMU_UNCLAMP_DSIPLL, PRCM_MMIP_LS_CLAMP_CLR);
-
-	/* Set DSI PLL FREQ */
-	writel(PRCMU_PLLDSI_FREQ_SETTING, PRCM_PLLDSI_FREQ);
-	writel(PRCMU_DSI_PLLOUT_SEL_SETTING, PRCM_DSI_PLLOUT_SEL);
-	/* Enable Escape clocks */
-	writel(PRCMU_ENABLE_ESCAPE_CLOCK_DIV, PRCM_DSITVCLK_DIV);
-
-	/* Start DSI PLL */
-	writel(PRCMU_ENABLE_PLLDSI, PRCM_PLLDSI_ENABLE);
-	/* Reset DSI PLL */
-	writel(PRCMU_DSI_RESET_SW, PRCM_DSI_SW_RESET);
-	for (i = 0; i < 10; i++) {
-		if ((readl(PRCM_PLLDSI_LOCKP) & PRCMU_PLLDSI_LOCKP_LOCKED)
-					== PRCMU_PLLDSI_LOCKP_LOCKED)
-			break;
-		udelay(100);
-	}
-	/* Set DSIPLL_RESETN */
-	writel(PRCMU_RESET_DSIPLL, PRCM_APE_RESETN_SET);
-	return 0;
-}
-
-int db8500_prcmu_disable_dsipll(void)
-{
-	/* Disable dsi pll */
-	writel(PRCMU_DISABLE_PLLDSI, PRCM_PLLDSI_ENABLE);
-	/* Disable  escapeclock */
-	writel(PRCMU_DISABLE_ESCAPE_CLOCK_DIV, PRCM_DSITVCLK_DIV);
-	return 0;
-}
-
-int db8500_prcmu_set_display_clocks(void)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&clk_mgt_lock, flags);
-
-	/* Grab the HW semaphore. */
-	while ((readl(PRCM_SEM) & PRCM_SEM_PRCM_SEM) != 0)
-		cpu_relax();
-
-	writel(PRCMU_DSI_CLOCK_SETTING, prcmu_base + PRCM_HDMICLK_MGT);
-	writel(PRCMU_DSI_LP_CLOCK_SETTING, prcmu_base + PRCM_TVCLK_MGT);
-	writel(PRCMU_DPI_CLOCK_SETTING, prcmu_base + PRCM_LCDCLK_MGT);
-
-	/* Release the HW semaphore. */
-	writel(0, PRCM_SEM);
-
-	spin_unlock_irqrestore(&clk_mgt_lock, flags);
-
-	return 0;
-}
-
 u32 db8500_prcmu_read(unsigned int reg)
 {
 	return readl(prcmu_base + reg);
@@ -712,7 +615,7 @@ enum romcode_read prcmu_get_rc_p2a(void)
 }
 
 /**
- * prcmu_get_current_mode - Return the current XP70 power mode
+ * prcmu_get_xp70_current_state - Return the current XP70 power mode
  * Returns: Returns the current AP(ARM) power mode: init,
  * apBoot, apExecute, apDeepSleep, apSleep, apIdle, apReset
  */
@@ -994,7 +897,7 @@ unlock_and_return:
 }
 
 /**
- * db8500_set_ape_opp - set the appropriate APE OPP
+ * db8500_prcmu_set_ape_opp - set the appropriate APE OPP
  * @opp: The new APE operating point to which transition is to be made
  * Returns: 0 on success, non-zero on failure
  *
@@ -1611,10 +1514,10 @@ static unsigned long dsiclk_rate(u8 n)
 	switch (divsel) {
 	case PRCM_DSI_PLLOUT_SEL_PHI_4:
 		div *= 2;
-		/* Fall through */
+		fallthrough;
 	case PRCM_DSI_PLLOUT_SEL_PHI_2:
 		div *= 2;
-		/* Fall through */
+		fallthrough;
 	case PRCM_DSI_PLLOUT_SEL_PHI:
 		return pll_rate(PRCM_PLLDSI_FREQ, clock_rate(PRCMU_HDMICLK),
 			PLL_RAW) / div;
@@ -1718,21 +1621,19 @@ static long round_clock_rate(u8 clock, unsigned long rate)
 }
 
 static const unsigned long db8500_armss_freqs[] = {
-	200000000,
-	400000000,
-	800000000,
+	199680000,
+	399360000,
+	798720000,
 	998400000
 };
 
 /* The DB8520 has slightly higher ARMSS max frequency */
 static const unsigned long db8520_armss_freqs[] = {
-	200000000,
-	400000000,
-	800000000,
+	199680000,
+	399360000,
+	798720000,
 	1152000000
 };
-
-
 
 static long round_armss_rate(unsigned long rate)
 {
@@ -2372,6 +2273,8 @@ bool db8500_prcmu_is_ac_wake_requested(void)
  *
  * Saves the reset reason code and then sets the APE_SOFTRST register which
  * fires interrupt to fw
+ *
+ * @reset_code: The reason for system reset
  */
 void db8500_prcmu_system_reset(u16 reset_code)
 {
@@ -2391,7 +2294,7 @@ u16 db8500_prcmu_get_reset_code(void)
 }
 
 /**
- * db8500_prcmu_reset_modem - ask the PRCMU to reset modem
+ * db8500_prcmu_modem_reset - ask the PRCMU to reset modem
  */
 void db8500_prcmu_modem_reset(void)
 {
@@ -2458,7 +2361,7 @@ static bool read_mailbox_0(void)
 
 		for (n = 0; n < NUM_PRCMU_WAKEUPS; n++) {
 			if (ev & prcmu_irq_bit[n])
-				generic_handle_irq(irq_find_mapping(db8500_irq_domain, n));
+				generic_handle_domain_irq(db8500_irq_domain, n);
 		}
 		r = true;
 		break;
@@ -2661,14 +2564,16 @@ static char *fw_project_name(u32 project)
 		return "U8500 C4";
 	case PRCMU_FW_PROJECT_U9500_MBL:
 		return "U9500 MBL";
-	case PRCMU_FW_PROJECT_U8500_MBL:
-		return "U8500 MBL";
+	case PRCMU_FW_PROJECT_U8500_SSG1:
+		return "U8500 Samsung 1";
 	case PRCMU_FW_PROJECT_U8500_MBL2:
 		return "U8500 MBL2";
 	case PRCMU_FW_PROJECT_U8520:
 		return "U8520 MBL";
 	case PRCMU_FW_PROJECT_U8420:
 		return "U8420";
+	case PRCMU_FW_PROJECT_U8500_SSG2:
+		return "U8500 Samsung 2";
 	case PRCMU_FW_PROJECT_U8420_SYSCLK:
 		return "U8420-sysclk";
 	case PRCMU_FW_PROJECT_U9540:
@@ -3033,63 +2938,62 @@ static struct regulator_init_data db8500_regulators[DB8500_NUM_REGULATORS] = {
 	},
 };
 
-static struct ux500_wdt_data db8500_wdt_pdata = {
-	.timeout = 600, /* 10 minutes */
-	.has_28_bits_resolution = true,
-};
-
 static const struct mfd_cell common_prcmu_devs[] = {
-	{
-		.name = "ux500_wdt",
-		.platform_data = &db8500_wdt_pdata,
-		.pdata_size = sizeof(db8500_wdt_pdata),
-		.id = -1,
-	},
+	MFD_CELL_NAME("db8500_wdt"),
+	MFD_CELL_NAME("db8500-cpuidle"),
 };
 
 static const struct mfd_cell db8500_prcmu_devs[] = {
-	OF_MFD_CELL("db8500-prcmu-regulators", NULL,
+	MFD_CELL_OF("db8500-prcmu-regulators", NULL,
 		    &db8500_regulators, sizeof(db8500_regulators), 0,
 		    "stericsson,db8500-prcmu-regulator"),
-	OF_MFD_CELL("cpuidle-dbx500",
-		    NULL, NULL, 0, 0, "stericsson,cpuidle-dbx500"),
-	OF_MFD_CELL("db8500-thermal",
+	MFD_CELL_OF("db8500-thermal",
 		    NULL, NULL, 0, 0, "stericsson,db8500-thermal"),
 };
 
 static int db8500_prcmu_register_ab8500(struct device *parent)
 {
 	struct device_node *np;
-	struct resource ab8500_resource;
+	struct resource ab850x_resource;
 	const struct mfd_cell ab8500_cell = {
 		.name = "ab8500-core",
 		.of_compatible = "stericsson,ab8500",
 		.id = AB8500_VERSION_AB8500,
-		.resources = &ab8500_resource,
+		.resources = &ab850x_resource,
 		.num_resources = 1,
 	};
+	const struct mfd_cell ab8505_cell = {
+		.name = "ab8505-core",
+		.of_compatible = "stericsson,ab8505",
+		.id = AB8500_VERSION_AB8505,
+		.resources = &ab850x_resource,
+		.num_resources = 1,
+	};
+	const struct mfd_cell *ab850x_cell;
 
 	if (!parent->of_node)
 		return -ENODEV;
 
 	/* Look up the device node, sneak the IRQ out of it */
 	for_each_child_of_node(parent->of_node, np) {
-		if (of_device_is_compatible(np, ab8500_cell.of_compatible))
+		if (of_device_is_compatible(np, ab8500_cell.of_compatible)) {
+			ab850x_cell = &ab8500_cell;
 			break;
+		}
+		if (of_device_is_compatible(np, ab8505_cell.of_compatible)) {
+			ab850x_cell = &ab8505_cell;
+			break;
+		}
 	}
 	if (!np) {
-		dev_info(parent, "could not find AB8500 node in the device tree\n");
+		dev_info(parent, "could not find AB850X node in the device tree\n");
 		return -ENODEV;
 	}
-	of_irq_to_resource_table(np, &ab8500_resource, 1);
+	of_irq_to_resource_table(np, &ab850x_resource, 1);
 
-	return mfd_add_devices(parent, 0, &ab8500_cell, 1, NULL, 0, NULL);
+	return mfd_add_devices(parent, 0, ab850x_cell, 1, NULL, 0, NULL);
 }
 
-/**
- * prcmu_fw_init - arch init call for the Linux PRCMU fw init logic
- *
- */
 static int db8500_prcmu_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;

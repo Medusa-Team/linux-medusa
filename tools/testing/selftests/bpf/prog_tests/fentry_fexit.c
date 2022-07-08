@@ -1,90 +1,45 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright (c) 2019 Facebook */
 #include <test_progs.h>
+#include "fentry_test.lskel.h"
+#include "fexit_test.lskel.h"
 
 void test_fentry_fexit(void)
 {
-	struct bpf_prog_load_attr attr_fentry = {
-		.file = "./fentry_test.o",
-	};
-	struct bpf_prog_load_attr attr_fexit = {
-		.file = "./fexit_test.o",
-	};
+	struct fentry_test_lskel *fentry_skel = NULL;
+	struct fexit_test_lskel *fexit_skel = NULL;
+	__u64 *fentry_res, *fexit_res;
+	int err, prog_fd, i;
+	LIBBPF_OPTS(bpf_test_run_opts, topts);
 
-	struct bpf_object *obj_fentry = NULL, *obj_fexit = NULL, *pkt_obj;
-	struct bpf_map *data_map_fentry, *data_map_fexit;
-	char fentry_name[] = "fentry/bpf_fentry_testX";
-	char fexit_name[] = "fexit/bpf_fentry_testX";
-	int err, pkt_fd, kfree_skb_fd, i;
-	struct bpf_link *link[12] = {};
-	struct bpf_program *prog[12];
-	__u32 duration, retval;
-	const int zero = 0;
-	u64 result[12];
-
-	err = bpf_prog_load("./test_pkt_access.o", BPF_PROG_TYPE_SCHED_CLS,
-			    &pkt_obj, &pkt_fd);
-	if (CHECK(err, "prog_load sched cls", "err %d errno %d\n", err, errno))
-		return;
-	err = bpf_prog_load_xattr(&attr_fentry, &obj_fentry, &kfree_skb_fd);
-	if (CHECK(err, "prog_load fail", "err %d errno %d\n", err, errno))
+	fentry_skel = fentry_test_lskel__open_and_load();
+	if (!ASSERT_OK_PTR(fentry_skel, "fentry_skel_load"))
 		goto close_prog;
-	err = bpf_prog_load_xattr(&attr_fexit, &obj_fexit, &kfree_skb_fd);
-	if (CHECK(err, "prog_load fail", "err %d errno %d\n", err, errno))
+	fexit_skel = fexit_test_lskel__open_and_load();
+	if (!ASSERT_OK_PTR(fexit_skel, "fexit_skel_load"))
 		goto close_prog;
 
-	for (i = 0; i < 6; i++) {
-		fentry_name[sizeof(fentry_name) - 2] = '1' + i;
-		prog[i] = bpf_object__find_program_by_title(obj_fentry, fentry_name);
-		if (CHECK(!prog[i], "find_prog", "prog %s not found\n", fentry_name))
-			goto close_prog;
-		link[i] = bpf_program__attach_trace(prog[i]);
-		if (CHECK(IS_ERR(link[i]), "attach_trace", "failed to link\n"))
-			goto close_prog;
+	err = fentry_test_lskel__attach(fentry_skel);
+	if (!ASSERT_OK(err, "fentry_attach"))
+		goto close_prog;
+	err = fexit_test_lskel__attach(fexit_skel);
+	if (!ASSERT_OK(err, "fexit_attach"))
+		goto close_prog;
+
+	prog_fd = fexit_skel->progs.test1.prog_fd;
+	err = bpf_prog_test_run_opts(prog_fd, &topts);
+	ASSERT_OK(err, "ipv6 test_run");
+	ASSERT_OK(topts.retval, "ipv6 test retval");
+
+	fentry_res = (__u64 *)fentry_skel->bss;
+	fexit_res = (__u64 *)fexit_skel->bss;
+	printf("%lld\n", fentry_skel->bss->test1_result);
+	for (i = 0; i < 8; i++) {
+		ASSERT_EQ(fentry_res[i], 1, "fentry result");
+		ASSERT_EQ(fexit_res[i], 1, "fexit result");
 	}
-	data_map_fentry = bpf_object__find_map_by_name(obj_fentry, "fentry_t.bss");
-	if (CHECK(!data_map_fentry, "find_data_map", "data map not found\n"))
-		goto close_prog;
-
-	for (i = 6; i < 12; i++) {
-		fexit_name[sizeof(fexit_name) - 2] = '1' + i - 6;
-		prog[i] = bpf_object__find_program_by_title(obj_fexit, fexit_name);
-		if (CHECK(!prog[i], "find_prog", "prog %s not found\n", fexit_name))
-			goto close_prog;
-		link[i] = bpf_program__attach_trace(prog[i]);
-		if (CHECK(IS_ERR(link[i]), "attach_trace", "failed to link\n"))
-			goto close_prog;
-	}
-	data_map_fexit = bpf_object__find_map_by_name(obj_fexit, "fexit_te.bss");
-	if (CHECK(!data_map_fexit, "find_data_map", "data map not found\n"))
-		goto close_prog;
-
-	err = bpf_prog_test_run(pkt_fd, 1, &pkt_v6, sizeof(pkt_v6),
-				NULL, NULL, &retval, &duration);
-	CHECK(err || retval, "ipv6",
-	      "err %d errno %d retval %d duration %d\n",
-	      err, errno, retval, duration);
-
-	err = bpf_map_lookup_elem(bpf_map__fd(data_map_fentry), &zero, &result);
-	if (CHECK(err, "get_result",
-		  "failed to get output data: %d\n", err))
-		goto close_prog;
-
-	err = bpf_map_lookup_elem(bpf_map__fd(data_map_fexit), &zero, result + 6);
-	if (CHECK(err, "get_result",
-		  "failed to get output data: %d\n", err))
-		goto close_prog;
-
-	for (i = 0; i < 12; i++)
-		if (CHECK(result[i] != 1, "result", "bpf_fentry_test%d failed err %ld\n",
-			  i % 6 + 1, result[i]))
-			goto close_prog;
 
 close_prog:
-	for (i = 0; i < 12; i++)
-		if (!IS_ERR_OR_NULL(link[i]))
-			bpf_link__destroy(link[i]);
-	bpf_object__close(obj_fentry);
-	bpf_object__close(obj_fexit);
-	bpf_object__close(pkt_obj);
+	fentry_test_lskel__destroy(fentry_skel);
+	fexit_test_lskel__destroy(fexit_skel);
 }

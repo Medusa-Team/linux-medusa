@@ -6,7 +6,7 @@
 menuconfig MELLANOX_PLATFORM
 	bool "Platform support for Mellanox hardware"
 	depends on X86 || ARM || ARM64 || COMPILE_TEST
-	---help---
+	help
 	  Say Y here to get to see options for platform support for
 	  Mellanox systems. This option alone does not add any kernel code.
 
@@ -19,7 +19,7 @@ config MLXREG_HOTPLUG
 	depends on REGMAP
 	depends on HWMON
 	depends on I2C
-	---help---
+	help
 	  This driver handles hot-plug events for the power suppliers, power
 	  cables and fans on the wide range Mellanox IB and Ethernet systems.
 
@@ -33,6 +33,18 @@ config MLXREG_IO
 	  are defined per system type bases and include the registers related
 	  to system resets operation, system reset causes monitoring and some
 	  kinds of mux selection.
+
+config MLXREG_LC
+	tristate "Mellanox line card platform driver support"
+	depends on REGMAP
+	depends on HWMON
+	depends on I2C
+	help
+	  This driver provides support for the Mellanox MSN4800-XX line cards,
+	  which are the part of MSN4800 Ethernet modular switch systems
+	  providing a high performance switching solution for Enterprise Data
+	  Centers (EDC) for building Ethernet based clusters, High-Performance
+	  Computing (HPC) and embedded environments.
 
 config MLXBF_TMFIFO
 	tristate "Mellanox BlueField SoC TmFifo platform driver"
@@ -55,5 +67,15 @@ config MLXBF_BOOTCTL
 	  does not boot up correctly. This driver provides sysfs access
 	  to the userspace tools, to be used in conjunction with the eMMC
 	  device driver to do necessary initial swap of the boot partition.
+
+config MLXBF_PMC
+	tristate "Mellanox BlueField Performance Monitoring Counters driver"
+	depends on ARM64
+	depends on HWMON
+	depends on ACPI
+	help
+	  Say y here to enable PMC support. The PMC driver provides access
+	  to performance monitoring counters within various blocks in the
+	  Mellanox BlueField SoC via a sysfs interface.
 
 endif # MELLANOX_PLATFORM

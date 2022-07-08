@@ -94,6 +94,7 @@ struct mixer_context {
 	struct platform_device *pdev;
 	struct device		*dev;
 	struct drm_device	*drm_dev;
+	void			*dma_priv;
 	struct exynos_drm_crtc	*crtc;
 	struct exynos_drm_plane	planes[MIXER_WIN_NR];
 	unsigned long		flags;
@@ -808,19 +809,17 @@ static int mixer_resources_init(struct mixer_context *mixer_ctx)
 		return -ENXIO;
 	}
 
-	res = platform_get_resource(mixer_ctx->pdev, IORESOURCE_IRQ, 0);
-	if (res == NULL) {
-		dev_err(dev, "get interrupt resource failed.\n");
-		return -ENXIO;
-	}
+	ret = platform_get_irq(mixer_ctx->pdev, 0);
+	if (ret < 0)
+		return ret;
+	mixer_ctx->irq = ret;
 
-	ret = devm_request_irq(dev, res->start, mixer_irq_handler,
-						0, "drm_mixer", mixer_ctx);
+	ret = devm_request_irq(dev, mixer_ctx->irq, mixer_irq_handler,
+			       0, "drm_mixer", mixer_ctx);
 	if (ret) {
 		dev_err(dev, "request interrupt failed.\n");
 		return ret;
 	}
-	mixer_ctx->irq = res->start;
 
 	return 0;
 }
@@ -894,12 +893,14 @@ static int mixer_initialize(struct mixer_context *mixer_ctx,
 		}
 	}
 
-	return exynos_drm_register_dma(drm_dev, mixer_ctx->dev);
+	return exynos_drm_register_dma(drm_dev, mixer_ctx->dev,
+				       &mixer_ctx->dma_priv);
 }
 
 static void mixer_ctx_remove(struct mixer_context *mixer_ctx)
 {
-	exynos_drm_unregister_dma(mixer_ctx->drm_dev, mixer_ctx->dev);
+	exynos_drm_unregister_dma(mixer_ctx->drm_dev, mixer_ctx->dev,
+				  &mixer_ctx->dma_priv);
 }
 
 static int mixer_enable_vblank(struct exynos_drm_crtc *crtc)
@@ -986,14 +987,19 @@ static void mixer_atomic_flush(struct exynos_drm_crtc *crtc)
 	exynos_crtc_handle_event(crtc);
 }
 
-static void mixer_enable(struct exynos_drm_crtc *crtc)
+static void mixer_atomic_enable(struct exynos_drm_crtc *crtc)
 {
 	struct mixer_context *ctx = crtc->ctx;
+	int ret;
 
 	if (test_bit(MXR_BIT_POWERED, &ctx->flags))
 		return;
 
-	pm_runtime_get_sync(ctx->dev);
+	ret = pm_runtime_resume_and_get(ctx->dev);
+	if (ret < 0) {
+		dev_err(ctx->dev, "failed to enable MIXER device.\n");
+		return;
+	}
 
 	exynos_drm_pipe_clk_enable(crtc, true);
 
@@ -1015,7 +1021,7 @@ static void mixer_enable(struct exynos_drm_crtc *crtc)
 	set_bit(MXR_BIT_POWERED, &ctx->flags);
 }
 
-static void mixer_disable(struct exynos_drm_crtc *crtc)
+static void mixer_atomic_disable(struct exynos_drm_crtc *crtc)
 {
 	struct mixer_context *ctx = crtc->ctx;
 	int i;
@@ -1043,7 +1049,7 @@ static int mixer_mode_valid(struct exynos_drm_crtc *crtc,
 	u32 w = mode->hdisplay, h = mode->vdisplay;
 
 	DRM_DEV_DEBUG_KMS(ctx->dev, "xres=%d, yres=%d, refresh=%d, intl=%d\n",
-			  w, h, mode->vrefresh,
+			  w, h, drm_mode_vrefresh(mode),
 			  !!(mode->flags & DRM_MODE_FLAG_INTERLACE));
 
 	if (ctx->mxr_ver == MXR_VER_128_0_0_184)
@@ -1109,8 +1115,8 @@ static bool mixer_mode_fixup(struct exynos_drm_crtc *crtc,
 }
 
 static const struct exynos_drm_crtc_ops mixer_crtc_ops = {
-	.enable			= mixer_enable,
-	.disable		= mixer_disable,
+	.atomic_enable		= mixer_atomic_enable,
+	.atomic_disable		= mixer_atomic_disable,
 	.enable_vblank		= mixer_enable_vblank,
 	.disable_vblank		= mixer_disable_vblank,
 	.atomic_begin		= mixer_atomic_begin,
@@ -1241,9 +1247,11 @@ static int mixer_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, ctx);
 
+	pm_runtime_enable(dev);
+
 	ret = component_add(&pdev->dev, &mixer_component_ops);
-	if (!ret)
-		pm_runtime_enable(dev);
+	if (ret)
+		pm_runtime_disable(dev);
 
 	return ret;
 }

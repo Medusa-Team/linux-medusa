@@ -81,8 +81,8 @@ static int ak4104_set_dai_fmt(struct snd_soc_dai *codec_dai,
 		return -EINVAL;
 	}
 
-	/* This device can only be slave */
-	if ((format & SND_SOC_DAIFMT_MASTER_MASK) != SND_SOC_DAIFMT_CBS_CFS)
+	/* This device can only be consumer */
+	if ((format & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) != SND_SOC_DAIFMT_CBC_CFC)
 		return -EINVAL;
 
 	ret = regmap_update_bits(ak4104->regmap, AK4104_REG_CONTROL1,
@@ -295,8 +295,7 @@ static int ak4104_spi_probe(struct spi_device *spi)
 
 	reset_gpiod = devm_gpiod_get_optional(&spi->dev, "reset",
 					      GPIOD_OUT_HIGH);
-	if (IS_ERR(reset_gpiod) &&
-	    PTR_ERR(reset_gpiod) == -EPROBE_DEFER)
+	if (PTR_ERR(reset_gpiod) == -EPROBE_DEFER)
 		return -EPROBE_DEFER;
 
 	/* read the 'reserved' register - according to the datasheet, it

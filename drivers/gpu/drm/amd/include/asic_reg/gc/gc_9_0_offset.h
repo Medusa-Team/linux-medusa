@@ -21,7 +21,12 @@
 #ifndef _gc_9_0_OFFSET_HEADER
 #define _gc_9_0_OFFSET_HEADER
 
-
+#define mmSQ_DEBUG_STS_GLOBAL                                                                          0x0309
+#define mmSQ_DEBUG_STS_GLOBAL_BASE_IDX                                                                 0
+#define mmSQ_DEBUG_STS_GLOBAL2                                                                         0x0310
+#define mmSQ_DEBUG_STS_GLOBAL2_BASE_IDX                                                                0
+#define mmSQ_DEBUG_STS_GLOBAL3                                                                         0x0311
+#define mmSQ_DEBUG_STS_GLOBAL3_BASE_IDX                                                                0
 
 // addressBlock: gc_grbmdec
 // base address: 0x8000
@@ -2224,6 +2229,14 @@
 #define mmCOMPUTE_STATIC_THREAD_MGMT_SE2_BASE_IDX                                                      0
 #define mmCOMPUTE_STATIC_THREAD_MGMT_SE3                                                               0x0e1a
 #define mmCOMPUTE_STATIC_THREAD_MGMT_SE3_BASE_IDX                                                      0
+#define mmCOMPUTE_STATIC_THREAD_MGMT_SE4                                                               0x0e25
+#define mmCOMPUTE_STATIC_THREAD_MGMT_SE4_BASE_IDX                                                      0
+#define mmCOMPUTE_STATIC_THREAD_MGMT_SE5                                                               0x0e26
+#define mmCOMPUTE_STATIC_THREAD_MGMT_SE5_BASE_IDX                                                      0
+#define mmCOMPUTE_STATIC_THREAD_MGMT_SE6                                                               0x0e27
+#define mmCOMPUTE_STATIC_THREAD_MGMT_SE6_BASE_IDX                                                      0
+#define mmCOMPUTE_STATIC_THREAD_MGMT_SE7                                                               0x0e28
+#define mmCOMPUTE_STATIC_THREAD_MGMT_SE7_BASE_IDX                                                      0
 #define mmCOMPUTE_RESTART_X                                                                            0x0e1b
 #define mmCOMPUTE_RESTART_X_BASE_IDX                                                                   0
 #define mmCOMPUTE_RESTART_Y                                                                            0x0e1c
@@ -7080,6 +7093,7 @@
 
 // addressBlock: sqind
 // base address: 0x0
+#define ixSQ_DEBUG_STS_LOCAL                                                                           0x0008
 #define ixSQ_WAVE_MODE                                                                                 0x0011
 #define ixSQ_WAVE_STATUS                                                                               0x0012
 #define ixSQ_WAVE_TRAPSTS                                                                              0x0013

@@ -31,11 +31,35 @@ static inline u32 disr_to_esr(u64 disr)
 	return esr;
 }
 
-asmlinkage void enter_from_user_mode(void);
-void do_mem_abort(unsigned long addr, unsigned int esr, struct pt_regs *regs);
-void do_sp_pc_abort(unsigned long addr, unsigned int esr, struct pt_regs *regs);
+asmlinkage void handle_bad_stack(struct pt_regs *regs);
+
+asmlinkage void el1t_64_sync_handler(struct pt_regs *regs);
+asmlinkage void el1t_64_irq_handler(struct pt_regs *regs);
+asmlinkage void el1t_64_fiq_handler(struct pt_regs *regs);
+asmlinkage void el1t_64_error_handler(struct pt_regs *regs);
+
+asmlinkage void el1h_64_sync_handler(struct pt_regs *regs);
+asmlinkage void el1h_64_irq_handler(struct pt_regs *regs);
+asmlinkage void el1h_64_fiq_handler(struct pt_regs *regs);
+asmlinkage void el1h_64_error_handler(struct pt_regs *regs);
+
+asmlinkage void el0t_64_sync_handler(struct pt_regs *regs);
+asmlinkage void el0t_64_irq_handler(struct pt_regs *regs);
+asmlinkage void el0t_64_fiq_handler(struct pt_regs *regs);
+asmlinkage void el0t_64_error_handler(struct pt_regs *regs);
+
+asmlinkage void el0t_32_sync_handler(struct pt_regs *regs);
+asmlinkage void el0t_32_irq_handler(struct pt_regs *regs);
+asmlinkage void el0t_32_fiq_handler(struct pt_regs *regs);
+asmlinkage void el0t_32_error_handler(struct pt_regs *regs);
+
+asmlinkage void call_on_irq_stack(struct pt_regs *regs,
+				  void (*func)(struct pt_regs *));
+asmlinkage void asm_exit_to_user_mode(struct pt_regs *regs);
+
+void do_mem_abort(unsigned long far, unsigned int esr, struct pt_regs *regs);
 void do_undefinstr(struct pt_regs *regs);
-asmlinkage void bad_mode(struct pt_regs *regs, int reason, unsigned int esr);
+void do_bti(struct pt_regs *regs);
 void do_debug_exception(unsigned long addr_if_watchpoint, unsigned int esr,
 			struct pt_regs *regs);
 void do_fpsimd_acc(unsigned int esr, struct pt_regs *regs);
@@ -45,9 +69,11 @@ void do_sysinstr(unsigned int esr, struct pt_regs *regs);
 void do_sp_pc_abort(unsigned long addr, unsigned int esr, struct pt_regs *regs);
 void bad_el0_sync(struct pt_regs *regs, int reason, unsigned int esr);
 void do_cp15instr(unsigned int esr, struct pt_regs *regs);
-void el0_svc_handler(struct pt_regs *regs);
-void el0_svc_compat_handler(struct pt_regs *regs);
-void do_el0_ia_bp_hardening(unsigned long addr,  unsigned int esr,
-			    struct pt_regs *regs);
+void do_el0_svc(struct pt_regs *regs);
+void do_el0_svc_compat(struct pt_regs *regs);
+void do_ptrauth_fault(struct pt_regs *regs, unsigned int esr);
+void do_serror(struct pt_regs *regs, unsigned int esr);
+void do_notify_resume(struct pt_regs *regs, unsigned long thread_flags);
 
+void panic_bad_stack(struct pt_regs *regs, unsigned int esr, unsigned long far);
 #endif	/* __ASM_EXCEPTION_H */

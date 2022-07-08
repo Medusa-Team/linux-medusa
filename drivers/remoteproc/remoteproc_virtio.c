@@ -9,7 +9,7 @@
  * Brian Swetland <swetland@google.com>
  */
 
-#include <linux/dma-mapping.h>
+#include <linux/dma-map-ops.h>
 #include <linux/export.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/remoteproc.h>
@@ -22,6 +22,18 @@
 #include <linux/slab.h>
 
 #include "remoteproc_internal.h"
+
+static struct rproc_vdev *vdev_to_rvdev(struct virtio_device *vdev)
+{
+	return container_of(vdev->dev.parent, struct rproc_vdev, dev);
+}
+
+static  struct rproc *vdev_to_rproc(struct virtio_device *vdev)
+{
+	struct rproc_vdev *rvdev = vdev_to_rvdev(vdev);
+
+	return rvdev->rproc;
+}
 
 /* kick the remote processor, and let it know which virtqueue to poke at */
 static bool rproc_virtio_notify(struct virtqueue *vq)
@@ -45,7 +57,7 @@ static bool rproc_virtio_notify(struct virtqueue *vq)
  * when the remote processor signals that a specific virtqueue has pending
  * messages available.
  *
- * Returns IRQ_NONE if no message was found in the @notifyid virtqueue,
+ * Return: IRQ_NONE if no message was found in the @notifyid virtqueue,
  * and otherwise returns IRQ_HANDLED.
  */
 irqreturn_t rproc_vq_interrupt(struct rproc *rproc, int notifyid)
@@ -320,11 +332,12 @@ static void rproc_virtio_dev_release(struct device *dev)
 /**
  * rproc_add_virtio_dev() - register an rproc-induced virtio device
  * @rvdev: the remote vdev
+ * @id: the device type identification (used to match it with a driver).
  *
  * This function registers a virtio device. This vdev's partent is
  * the rproc device.
  *
- * Returns 0 on success or an appropriate error value otherwise.
+ * Return: 0 on success or an appropriate error value otherwise
  */
 int rproc_add_virtio_dev(struct rproc_vdev *rvdev, int id)
 {
@@ -333,6 +346,12 @@ int rproc_add_virtio_dev(struct rproc_vdev *rvdev, int id)
 	struct virtio_device *vdev;
 	struct rproc_mem_entry *mem;
 	int ret;
+
+	if (rproc->ops->kick == NULL) {
+		ret = -EINVAL;
+		dev_err(dev, ".kick method not defined for %s\n", rproc->name);
+		goto out;
+	}
 
 	/* Try to find dedicated vdev buffer carveout */
 	mem = rproc_find_carveout_by_name(rproc, "vdev%dbuffer", rvdev->index);
@@ -368,6 +387,18 @@ int rproc_add_virtio_dev(struct rproc_vdev *rvdev, int id)
 				goto out;
 			}
 		}
+	} else {
+		struct device_node *np = rproc->dev.parent->of_node;
+
+		/*
+		 * If we don't have dedicated buffer, just attempt to re-assign
+		 * the reserved memory from our parent. A default memory-region
+		 * at index 0 from the parent's memory-regions is assigned for
+		 * the rvdev dev to allocate from. Failure is non-critical and
+		 * the allocations will fall back to global pools, so don't
+		 * check return value either.
+		 */
+		of_reserved_mem_device_init_by_idx(dev, np, 0);
 	}
 
 	/* Allocate virtio device */
@@ -413,6 +444,8 @@ out:
  * @data: must be null
  *
  * This function unregisters an existing virtio device.
+ *
+ * Return: 0
  */
 int rproc_remove_virtio_dev(struct device *dev, void *data)
 {

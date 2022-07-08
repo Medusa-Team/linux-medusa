@@ -39,6 +39,7 @@ struct rcar_du_vsp;
  * @vblank_wait: wait queue used to signal vertical blanking
  * @vblank_count: number of vertical blanking interrupts to wait for
  * @group: CRTC group this CRTC belongs to
+ * @cmm: CMM associated with this CRTC
  * @vsp: VSP feeding video to this CRTC
  * @vsp_pipe: index of the VSP pipeline feeding video to this CRTC
  * @writeback: the writeback connector
@@ -64,6 +65,7 @@ struct rcar_du_crtc {
 	unsigned int vblank_count;
 
 	struct rcar_du_group *group;
+	struct platform_device *cmm;
 	struct rcar_du_vsp *vsp;
 	unsigned int vsp_pipe;
 
@@ -90,17 +92,6 @@ struct rcar_du_crtc_state {
 };
 
 #define to_rcar_crtc_state(s) container_of(s, struct rcar_du_crtc_state, state)
-
-enum rcar_du_output {
-	RCAR_DU_OUTPUT_DPAD0,
-	RCAR_DU_OUTPUT_DPAD1,
-	RCAR_DU_OUTPUT_LVDS0,
-	RCAR_DU_OUTPUT_LVDS1,
-	RCAR_DU_OUTPUT_HDMI0,
-	RCAR_DU_OUTPUT_HDMI1,
-	RCAR_DU_OUTPUT_TCON,
-	RCAR_DU_OUTPUT_MAX,
-};
 
 int rcar_du_crtc_create(struct rcar_du_group *rgrp, unsigned int swindex,
 			unsigned int hwindex);

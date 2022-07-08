@@ -1044,7 +1044,9 @@ static int d71_merger_init(struct d71_dev *d71,
 static void d71_improc_update(struct komeda_component *c,
 			      struct komeda_component_state *state)
 {
+	struct drm_crtc_state *crtc_st = state->crtc->state;
 	struct komeda_improc_state *st = to_improc_st(state);
+	struct d71_pipeline *pipe = to_d71_pipeline(c->pipeline);
 	u32 __iomem *reg = c->reg;
 	u32 index, mask = 0, ctrl = 0;
 
@@ -1055,14 +1057,32 @@ static void d71_improc_update(struct komeda_component *c,
 	malidp_write32(reg, BLK_SIZE, HV_SIZE(st->hsize, st->vsize));
 	malidp_write32(reg, IPS_DEPTH, st->color_depth);
 
+	if (crtc_st->color_mgmt_changed) {
+		mask |= IPS_CTRL_FT | IPS_CTRL_RGB;
+
+		if (crtc_st->gamma_lut) {
+			malidp_write_group(pipe->dou_ft_coeff_addr, FT_COEFF0,
+					   KOMEDA_N_GAMMA_COEFFS,
+					   st->fgamma_coeffs);
+			ctrl |= IPS_CTRL_FT; /* enable gamma */
+		}
+
+		if (crtc_st->ctm) {
+			malidp_write_group(reg, IPS_RGB_RGB_COEFF0,
+					   KOMEDA_N_CTM_COEFFS,
+					   st->ctm_coeffs);
+			ctrl |= IPS_CTRL_RGB; /* enable gamut */
+		}
+	}
+
 	mask |= IPS_CTRL_YUV | IPS_CTRL_CHD422 | IPS_CTRL_CHD420;
 
 	/* config color format */
-	if (st->color_format == DRM_COLOR_FORMAT_YCRCB420)
+	if (st->color_format == DRM_COLOR_FORMAT_YCBCR420)
 		ctrl |= IPS_CTRL_YUV | IPS_CTRL_CHD422 | IPS_CTRL_CHD420;
-	else if (st->color_format == DRM_COLOR_FORMAT_YCRCB422)
+	else if (st->color_format == DRM_COLOR_FORMAT_YCBCR422)
 		ctrl |= IPS_CTRL_YUV | IPS_CTRL_CHD422;
-	else if (st->color_format == DRM_COLOR_FORMAT_YCRCB444)
+	else if (st->color_format == DRM_COLOR_FORMAT_YCBCR444)
 		ctrl |= IPS_CTRL_YUV;
 
 	malidp_write32_mask(reg, BLK_CONTROL, mask, ctrl);
@@ -1124,11 +1144,11 @@ static int d71_improc_init(struct d71_dev *d71,
 	improc = to_improc(c);
 	improc->supported_color_depths = BIT(8) | BIT(10);
 	improc->supported_color_formats = DRM_COLOR_FORMAT_RGB444 |
-					  DRM_COLOR_FORMAT_YCRCB444 |
-					  DRM_COLOR_FORMAT_YCRCB422;
+					  DRM_COLOR_FORMAT_YCBCR444 |
+					  DRM_COLOR_FORMAT_YCBCR422;
 	value = malidp_read32(reg, BLK_INFO);
 	if (value & IPS_INFO_CHD420)
-		improc->supported_color_formats |= DRM_COLOR_FORMAT_YCRCB420;
+		improc->supported_color_formats |= DRM_COLOR_FORMAT_YCBCR420;
 
 	improc->supports_csc = true;
 	improc->supports_gamma = true;
@@ -1250,7 +1270,7 @@ static int d71_timing_ctrlr_init(struct d71_dev *d71,
 
 	ctrlr = to_ctrlr(c);
 
-	ctrlr->supports_dual_link = true;
+	ctrlr->supports_dual_link = d71->supports_dual_link;
 
 	return 0;
 }

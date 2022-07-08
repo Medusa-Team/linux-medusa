@@ -7,6 +7,7 @@
 
 #include "gt/intel_gt.h"
 #include "i915_drv.h"
+#include "i915_irq.h"
 #include "i915_memcpy.h"
 #include "intel_guc_log.h"
 
@@ -53,25 +54,6 @@ static int guc_action_control_log(struct intel_guc *guc, bool enable,
 	GEM_BUG_ON(verbosity > GUC_LOG_VERBOSITY_MAX);
 
 	return intel_guc_send(guc, action, ARRAY_SIZE(action));
-}
-
-static inline struct intel_guc *log_to_guc(struct intel_guc_log *log)
-{
-	return container_of(log, struct intel_guc, log);
-}
-
-static void guc_log_enable_flush_events(struct intel_guc_log *log)
-{
-	intel_guc_enable_msg(log_to_guc(log),
-			     INTEL_GUC_RECV_MSG_FLUSH_LOG_BUFFER |
-			     INTEL_GUC_RECV_MSG_CRASH_DUMP_POSTED);
-}
-
-static void guc_log_disable_flush_events(struct intel_guc_log *log)
-{
-	intel_guc_disable_msg(log_to_guc(log),
-			      INTEL_GUC_RECV_MSG_FLUSH_LOG_BUFFER |
-			      INTEL_GUC_RECV_MSG_CRASH_DUMP_POSTED);
 }
 
 /*
@@ -139,7 +121,7 @@ static int remove_buf_file_callback(struct dentry *dentry)
 }
 
 /* relay channel callbacks */
-static struct rchan_callbacks relay_callbacks = {
+static const struct rchan_callbacks relay_callbacks = {
 	.subbuf_start = subbuf_start_callback,
 	.create_buf_file = create_buf_file_callback,
 	.remove_buf_file = remove_buf_file_callback,
@@ -202,12 +184,12 @@ static bool guc_check_log_buf_overflow(struct intel_guc_log *log,
 static unsigned int guc_get_log_buffer_size(enum guc_log_buffer_type type)
 {
 	switch (type) {
-	case GUC_ISR_LOG_BUFFER:
-		return ISR_BUFFER_SIZE;
-	case GUC_DPC_LOG_BUFFER:
-		return DPC_BUFFER_SIZE;
+	case GUC_DEBUG_LOG_BUFFER:
+		return DEBUG_BUFFER_SIZE;
 	case GUC_CRASH_DUMP_LOG_BUFFER:
 		return CRASH_BUFFER_SIZE;
+	case GUC_CAPTURE_LOG_BUFFER:
+		return CAPTURE_BUFFER_SIZE;
 	default:
 		MISSING_CASE(type);
 	}
@@ -250,7 +232,7 @@ static void guc_read_update_log_buffer(struct intel_guc_log *log)
 	src_data += PAGE_SIZE;
 	dst_data += PAGE_SIZE;
 
-	for (type = GUC_ISR_LOG_BUFFER; type < GUC_MAX_LOG_BUFFER; type++) {
+	for (type = GUC_DEBUG_LOG_BUFFER; type < GUC_MAX_LOG_BUFFER; type++) {
 		/*
 		 * Make a copy of the state structure, inside GuC log buffer
 		 * (which is uncached mapped), on the stack to avoid reading
@@ -340,7 +322,7 @@ static int guc_log_map(struct intel_guc_log *log)
 	 * buffer pages, so that we can directly get the data
 	 * (up-to-date) from memory.
 	 */
-	vaddr = i915_gem_object_pin_map(log->vma->obj, I915_MAP_WC);
+	vaddr = i915_gem_object_pin_map_unlocked(log->vma->obj, I915_MAP_WC);
 	if (IS_ERR(vaddr))
 		return PTR_ERR(vaddr);
 
@@ -429,25 +411,28 @@ static void guc_log_capture_logs(struct intel_guc_log *log)
 
 static u32 __get_default_log_level(struct intel_guc_log *log)
 {
+	struct intel_guc *guc = log_to_guc(log);
+	struct drm_i915_private *i915 = guc_to_gt(guc)->i915;
+
 	/* A negative value means "use platform/config default" */
-	if (i915_modparams.guc_log_level < 0) {
+	if (i915->params.guc_log_level < 0) {
 		return (IS_ENABLED(CONFIG_DRM_I915_DEBUG) ||
 			IS_ENABLED(CONFIG_DRM_I915_DEBUG_GEM)) ?
 			GUC_LOG_LEVEL_MAX : GUC_LOG_LEVEL_NON_VERBOSE;
 	}
 
-	if (i915_modparams.guc_log_level > GUC_LOG_LEVEL_MAX) {
+	if (i915->params.guc_log_level > GUC_LOG_LEVEL_MAX) {
 		DRM_WARN("Incompatible option detected: %s=%d, %s!\n",
-			 "guc_log_level", i915_modparams.guc_log_level,
+			 "guc_log_level", i915->params.guc_log_level,
 			 "verbosity too high");
 		return (IS_ENABLED(CONFIG_DRM_I915_DEBUG) ||
 			IS_ENABLED(CONFIG_DRM_I915_DEBUG_GEM)) ?
 			GUC_LOG_LEVEL_MAX : GUC_LOG_LEVEL_DISABLED;
 	}
 
-	GEM_BUG_ON(i915_modparams.guc_log_level < GUC_LOG_LEVEL_DISABLED);
-	GEM_BUG_ON(i915_modparams.guc_log_level > GUC_LOG_LEVEL_MAX);
-	return i915_modparams.guc_log_level;
+	GEM_BUG_ON(i915->params.guc_log_level < GUC_LOG_LEVEL_DISABLED);
+	GEM_BUG_ON(i915->params.guc_log_level > GUC_LOG_LEVEL_MAX);
+	return i915->params.guc_log_level;
 }
 
 int intel_guc_log_create(struct intel_guc_log *log)
@@ -465,21 +450,21 @@ int intel_guc_log_create(struct intel_guc_log *log)
 	 *  +===============================+ 00B
 	 *  |    Crash dump state header    |
 	 *  +-------------------------------+ 32B
-	 *  |       DPC state header        |
+	 *  |      Debug state header       |
 	 *  +-------------------------------+ 64B
-	 *  |       ISR state header        |
+	 *  |     Capture state header      |
 	 *  +-------------------------------+ 96B
 	 *  |                               |
 	 *  +===============================+ PAGE_SIZE (4KB)
 	 *  |        Crash Dump logs        |
 	 *  +===============================+ + CRASH_SIZE
-	 *  |           DPC logs            |
-	 *  +===============================+ + DPC_SIZE
-	 *  |           ISR logs            |
-	 *  +===============================+ + ISR_SIZE
+	 *  |          Debug logs           |
+	 *  +===============================+ + DEBUG_SIZE
+	 *  |         Capture logs          |
+	 *  +===============================+ + CAPTURE_SIZE
 	 */
-	guc_log_size = PAGE_SIZE + CRASH_BUFFER_SIZE + DPC_BUFFER_SIZE +
-			ISR_BUFFER_SIZE;
+	guc_log_size = PAGE_SIZE + CRASH_BUFFER_SIZE + DEBUG_BUFFER_SIZE +
+		       CAPTURE_BUFFER_SIZE;
 
 	vma = intel_guc_allocate_vma(guc, guc_log_size);
 	if (IS_ERR(vma)) {
@@ -601,8 +586,6 @@ int intel_guc_log_relay_start(struct intel_guc_log *log)
 	if (log->relay.started)
 		return -EEXIST;
 
-	guc_log_enable_flush_events(log);
-
 	/*
 	 * When GuC is logging without us relaying to userspace, we're ignoring
 	 * the flush notification. This means that we need to unconditionally
@@ -649,7 +632,6 @@ static void guc_log_relay_stop(struct intel_guc_log *log)
 	if (!log->relay.started)
 		return;
 
-	guc_log_disable_flush_events(log);
 	intel_synchronize_irq(i915);
 
 	flush_work(&log->relay.flush_work);
@@ -670,5 +652,98 @@ void intel_guc_log_relay_close(struct intel_guc_log *log)
 
 void intel_guc_log_handle_flush_event(struct intel_guc_log *log)
 {
-	queue_work(system_highpri_wq, &log->relay.flush_work);
+	if (log->relay.started)
+		queue_work(system_highpri_wq, &log->relay.flush_work);
+}
+
+static const char *
+stringify_guc_log_type(enum guc_log_buffer_type type)
+{
+	switch (type) {
+	case GUC_DEBUG_LOG_BUFFER:
+		return "DEBUG";
+	case GUC_CRASH_DUMP_LOG_BUFFER:
+		return "CRASH";
+	case GUC_CAPTURE_LOG_BUFFER:
+		return "CAPTURE";
+	default:
+		MISSING_CASE(type);
+	}
+
+	return "";
+}
+
+/**
+ * intel_guc_log_info - dump information about GuC log relay
+ * @log: the GuC log
+ * @p: the &drm_printer
+ *
+ * Pretty printer for GuC log info
+ */
+void intel_guc_log_info(struct intel_guc_log *log, struct drm_printer *p)
+{
+	enum guc_log_buffer_type type;
+
+	if (!intel_guc_log_relay_created(log)) {
+		drm_puts(p, "GuC log relay not created\n");
+		return;
+	}
+
+	drm_puts(p, "GuC logging stats:\n");
+
+	drm_printf(p, "\tRelay full count: %u\n", log->relay.full_count);
+
+	for (type = GUC_DEBUG_LOG_BUFFER; type < GUC_MAX_LOG_BUFFER; type++) {
+		drm_printf(p, "\t%s:\tflush count %10u, overflow count %10u\n",
+			   stringify_guc_log_type(type),
+			   log->stats[type].flush,
+			   log->stats[type].sampled_overflow);
+	}
+}
+
+/**
+ * intel_guc_log_dump - dump the contents of the GuC log
+ * @log: the GuC log
+ * @p: the &drm_printer
+ * @dump_load_err: dump the log saved on GuC load error
+ *
+ * Pretty printer for the GuC log
+ */
+int intel_guc_log_dump(struct intel_guc_log *log, struct drm_printer *p,
+		       bool dump_load_err)
+{
+	struct intel_guc *guc = log_to_guc(log);
+	struct intel_uc *uc = container_of(guc, struct intel_uc, guc);
+	struct drm_i915_gem_object *obj = NULL;
+	u32 *map;
+	int i = 0;
+
+	if (!intel_guc_is_supported(guc))
+		return -ENODEV;
+
+	if (dump_load_err)
+		obj = uc->load_err_log;
+	else if (guc->log.vma)
+		obj = guc->log.vma->obj;
+
+	if (!obj)
+		return 0;
+
+	map = i915_gem_object_pin_map_unlocked(obj, I915_MAP_WC);
+	if (IS_ERR(map)) {
+		DRM_DEBUG("Failed to pin object\n");
+		drm_puts(p, "(log data unaccessible)\n");
+		return PTR_ERR(map);
+	}
+
+	for (i = 0; i < obj->base.size / sizeof(u32); i += 4)
+		drm_printf(p, "0x%08x 0x%08x 0x%08x 0x%08x\n",
+			   *(map + i), *(map + i + 1),
+			   *(map + i + 2), *(map + i + 3));
+
+	drm_puts(p, "\n");
+
+	i915_gem_object_unpin_map(obj);
+
+	return 0;
 }

@@ -27,8 +27,12 @@
 
 static inline enum mod_hdcp_status validate_bksv(struct mod_hdcp *hdcp)
 {
-	uint64_t n = *(uint64_t *)hdcp->auth.msg.hdcp1.bksv;
+	uint64_t n = 0;
 	uint8_t count = 0;
+	u8 bksv[sizeof(n)] = { };
+
+	memcpy(bksv, hdcp->auth.msg.hdcp1.bksv, sizeof(hdcp->auth.msg.hdcp1.bksv));
+	n = *(uint64_t *)bksv;
 
 	while (n) {
 		count++;
@@ -41,17 +45,17 @@ static inline enum mod_hdcp_status validate_bksv(struct mod_hdcp *hdcp)
 static inline enum mod_hdcp_status check_ksv_ready(struct mod_hdcp *hdcp)
 {
 	if (is_dp_hdcp(hdcp))
-		return (hdcp->auth.msg.hdcp1.bstatus & BSTATUS_READY_MASK_DP) ?
+		return (hdcp->auth.msg.hdcp1.bstatus & DP_BSTATUS_READY) ?
 				MOD_HDCP_STATUS_SUCCESS :
 				MOD_HDCP_STATUS_HDCP1_KSV_LIST_NOT_READY;
-	return (hdcp->auth.msg.hdcp1.bcaps & BCAPS_READY_MASK) ?
+	return (hdcp->auth.msg.hdcp1.bcaps & DRM_HDCP_DDC_BCAPS_KSV_FIFO_READY) ?
 			MOD_HDCP_STATUS_SUCCESS :
 			MOD_HDCP_STATUS_HDCP1_KSV_LIST_NOT_READY;
 }
 
 static inline enum mod_hdcp_status check_hdcp_capable_dp(struct mod_hdcp *hdcp)
 {
-	return (hdcp->auth.msg.hdcp1.bcaps & BCAPS_HDCP_CAPABLE_MASK_DP) ?
+	return (hdcp->auth.msg.hdcp1.bcaps & DP_BCAPS_HDCP_CAPABLE) ?
 			MOD_HDCP_STATUS_SUCCESS :
 			MOD_HDCP_STATUS_HDCP1_NOT_CAPABLE;
 }
@@ -61,7 +65,7 @@ static inline enum mod_hdcp_status check_r0p_available_dp(struct mod_hdcp *hdcp)
 	enum mod_hdcp_status status;
 	if (is_dp_hdcp(hdcp)) {
 		status = (hdcp->auth.msg.hdcp1.bstatus &
-				BSTATUS_R0_P_AVAILABLE_MASK_DP) ?
+				DP_BSTATUS_R0_PRIME_READY) ?
 			MOD_HDCP_STATUS_SUCCESS :
 			MOD_HDCP_STATUS_HDCP1_R0_PRIME_PENDING;
 	} else {
@@ -74,7 +78,7 @@ static inline enum mod_hdcp_status check_link_integrity_dp(
 		struct mod_hdcp *hdcp)
 {
 	return (hdcp->auth.msg.hdcp1.bstatus &
-			BSTATUS_LINK_INTEGRITY_FAILURE_MASK_DP) ?
+			DP_BSTATUS_LINK_FAILURE) ?
 			MOD_HDCP_STATUS_HDCP1_LINK_INTEGRITY_FAILURE :
 			MOD_HDCP_STATUS_SUCCESS;
 }
@@ -82,7 +86,7 @@ static inline enum mod_hdcp_status check_link_integrity_dp(
 static inline enum mod_hdcp_status check_no_reauthentication_request_dp(
 		struct mod_hdcp *hdcp)
 {
-	return (hdcp->auth.msg.hdcp1.bstatus & BSTATUS_REAUTH_REQUEST_MASK_DP) ?
+	return (hdcp->auth.msg.hdcp1.bstatus & DP_BSTATUS_REAUTH_REQ) ?
 			MOD_HDCP_STATUS_HDCP1_REAUTH_REQUEST_ISSUED :
 			MOD_HDCP_STATUS_SUCCESS;
 }
@@ -92,15 +96,13 @@ static inline enum mod_hdcp_status check_no_max_cascade(struct mod_hdcp *hdcp)
 	enum mod_hdcp_status status;
 
 	if (is_dp_hdcp(hdcp))
-		status = (hdcp->auth.msg.hdcp1.binfo_dp &
-				BINFO_MAX_CASCADE_EXCEEDED_MASK_DP) ?
-			MOD_HDCP_STATUS_HDCP1_MAX_CASCADE_EXCEEDED_FAILURE :
-			MOD_HDCP_STATUS_SUCCESS;
+		status = DRM_HDCP_MAX_CASCADE_EXCEEDED(hdcp->auth.msg.hdcp1.binfo_dp >> 8)
+				 ? MOD_HDCP_STATUS_HDCP1_MAX_CASCADE_EXCEEDED_FAILURE
+				 : MOD_HDCP_STATUS_SUCCESS;
 	else
-		status = (hdcp->auth.msg.hdcp1.bstatus &
-				BSTATUS_MAX_CASCADE_EXCEEDED_MASK) ?
-				MOD_HDCP_STATUS_HDCP1_MAX_CASCADE_EXCEEDED_FAILURE :
-				MOD_HDCP_STATUS_SUCCESS;
+		status = DRM_HDCP_MAX_CASCADE_EXCEEDED(hdcp->auth.msg.hdcp1.bstatus >> 8)
+				 ? MOD_HDCP_STATUS_HDCP1_MAX_CASCADE_EXCEEDED_FAILURE
+				 : MOD_HDCP_STATUS_SUCCESS;
 	return status;
 }
 
@@ -109,13 +111,11 @@ static inline enum mod_hdcp_status check_no_max_devs(struct mod_hdcp *hdcp)
 	enum mod_hdcp_status status;
 
 	if (is_dp_hdcp(hdcp))
-		status = (hdcp->auth.msg.hdcp1.binfo_dp &
-				BINFO_MAX_DEVS_EXCEEDED_MASK_DP) ?
+		status = DRM_HDCP_MAX_DEVICE_EXCEEDED(hdcp->auth.msg.hdcp1.binfo_dp) ?
 				MOD_HDCP_STATUS_HDCP1_MAX_DEVS_EXCEEDED_FAILURE :
 				MOD_HDCP_STATUS_SUCCESS;
 	else
-		status = (hdcp->auth.msg.hdcp1.bstatus &
-				BSTATUS_MAX_DEVS_EXCEEDED_MASK) ?
+		status = DRM_HDCP_MAX_DEVICE_EXCEEDED(hdcp->auth.msg.hdcp1.bstatus) ?
 				MOD_HDCP_STATUS_HDCP1_MAX_DEVS_EXCEEDED_FAILURE :
 				MOD_HDCP_STATUS_SUCCESS;
 	return status;
@@ -124,14 +124,23 @@ static inline enum mod_hdcp_status check_no_max_devs(struct mod_hdcp *hdcp)
 static inline uint8_t get_device_count(struct mod_hdcp *hdcp)
 {
 	return is_dp_hdcp(hdcp) ?
-			(hdcp->auth.msg.hdcp1.binfo_dp & BINFO_DEVICE_COUNT_MASK_DP) :
-			(hdcp->auth.msg.hdcp1.bstatus & BSTATUS_DEVICE_COUNT_MASK);
+			DRM_HDCP_NUM_DOWNSTREAM(hdcp->auth.msg.hdcp1.binfo_dp) :
+			DRM_HDCP_NUM_DOWNSTREAM(hdcp->auth.msg.hdcp1.bstatus);
 }
 
 static inline enum mod_hdcp_status check_device_count(struct mod_hdcp *hdcp)
 {
-	/* device count must be greater than or equal to tracked hdcp displays */
-	return (get_device_count(hdcp) < get_added_display_count(hdcp)) ?
+	/* Avoid device count == 0 to do authentication */
+	if (0 == get_device_count(hdcp)) {
+		return MOD_HDCP_STATUS_HDCP1_DEVICE_COUNT_MISMATCH_FAILURE;
+	}
+
+	/* Some MST display may choose to report the internal panel as an HDCP RX.
+	 * To update this condition with 1(because the immediate repeater's internal
+	 * panel is possibly not included in DEVICE_COUNT) + get_device_count(hdcp).
+	 * Device count must be greater than or equal to tracked hdcp displays.
+	 */
+	return ((1 + get_device_count(hdcp)) < get_active_display_count(hdcp)) ?
 			MOD_HDCP_STATUS_HDCP1_DEVICE_COUNT_MISMATCH_FAILURE :
 			MOD_HDCP_STATUS_SUCCESS;
 }
@@ -170,10 +179,6 @@ static enum mod_hdcp_status exchange_ksvs(struct mod_hdcp *hdcp,
 		goto out;
 	}
 
-	if (!mod_hdcp_execute_and_set(mod_hdcp_add_display_topology,
-			&input->add_topology, &status,
-			hdcp, "add_topology"))
-		goto out;
 	if (!mod_hdcp_execute_and_set(mod_hdcp_hdcp1_create_session,
 			&input->create_session, &status,
 			hdcp, "create_session"))
@@ -258,10 +263,9 @@ static enum mod_hdcp_status authenticated(struct mod_hdcp *hdcp,
 		goto out;
 	}
 
-	if (!mod_hdcp_execute_and_set(mod_hdcp_hdcp1_link_maintenance,
+	mod_hdcp_execute_and_set(mod_hdcp_hdcp1_link_maintenance,
 			&input->link_maintenance, &status,
-			hdcp, "link_maintenance"))
-		goto out;
+			hdcp, "link_maintenance");
 out:
 	return status;
 }
@@ -285,8 +289,8 @@ static enum mod_hdcp_status wait_for_ready(struct mod_hdcp *hdcp,
 				hdcp, "bstatus_read"))
 			goto out;
 		if (!mod_hdcp_execute_and_set(check_link_integrity_dp,
-				&input->link_integiry_check, &status,
-				hdcp, "link_integiry_check"))
+				&input->link_integrity_check, &status,
+				hdcp, "link_integrity_check"))
 			goto out;
 		if (!mod_hdcp_execute_and_set(check_no_reauthentication_request_dp,
 				&input->reauth_request_check, &status,
@@ -428,18 +432,18 @@ static enum mod_hdcp_status authenticated_dp(struct mod_hdcp *hdcp,
 		goto out;
 	}
 
-	if (!mod_hdcp_execute_and_set(mod_hdcp_read_bstatus,
-			&input->bstatus_read, &status,
-			hdcp, "bstatus_read"))
-		goto out;
-	if (!mod_hdcp_execute_and_set(check_link_integrity_dp,
-			&input->link_integiry_check, &status,
-			hdcp, "link_integiry_check"))
-		goto out;
-	if (!mod_hdcp_execute_and_set(check_no_reauthentication_request_dp,
-			&input->reauth_request_check, &status,
-			hdcp, "reauth_request_check"))
-		goto out;
+	if (status == MOD_HDCP_STATUS_SUCCESS)
+		mod_hdcp_execute_and_set(mod_hdcp_read_bstatus,
+				&input->bstatus_read, &status,
+				hdcp, "bstatus_read");
+	if (status == MOD_HDCP_STATUS_SUCCESS)
+		mod_hdcp_execute_and_set(check_link_integrity_dp,
+				&input->link_integrity_check, &status,
+				hdcp, "link_integrity_check");
+	if (status == MOD_HDCP_STATUS_SUCCESS)
+		mod_hdcp_execute_and_set(check_no_reauthentication_request_dp,
+				&input->reauth_request_check, &status,
+				hdcp, "reauth_request_check");
 out:
 	return status;
 }

@@ -14,6 +14,7 @@
 #include <linux/percpu.h>
 #include <linux/timex.h>
 #include <linux/static_key.h>
+#include <linux/static_call.h>
 
 #include <asm/hpet.h>
 #include <asm/timer.h>
@@ -41,6 +42,7 @@ EXPORT_SYMBOL(tsc_khz);
  * TSC can be unstable due to cpufreq or due to unsynced TSCs
  */
 static int __read_mostly tsc_unstable;
+static unsigned int __initdata tsc_early_khz;
 
 static DEFINE_STATIC_KEY_FALSE(__use_tsc);
 
@@ -53,11 +55,17 @@ struct clocksource *art_related_clocksource;
 
 struct cyc2ns {
 	struct cyc2ns_data data[2];	/*  0 + 2*16 = 32 */
-	seqcount_t	   seq;		/* 32 + 4    = 36 */
+	seqcount_latch_t   seq;		/* 32 + 4    = 36 */
 
 }; /* fits one cacheline */
 
 static DEFINE_PER_CPU_ALIGNED(struct cyc2ns, cyc2ns);
+
+static int __init tsc_early_khz_setup(char *buf)
+{
+	return kstrtouint(buf, 0, &tsc_early_khz);
+}
+early_param("tsc_early_khz", tsc_early_khz_setup);
 
 __always_inline void cyc2ns_read_begin(struct cyc2ns_data *data)
 {
@@ -66,14 +74,14 @@ __always_inline void cyc2ns_read_begin(struct cyc2ns_data *data)
 	preempt_disable_notrace();
 
 	do {
-		seq = this_cpu_read(cyc2ns.seq.sequence);
+		seq = this_cpu_read(cyc2ns.seq.seqcount.sequence);
 		idx = seq & 1;
 
 		data->cyc2ns_offset = this_cpu_read(cyc2ns.data[idx].cyc2ns_offset);
 		data->cyc2ns_mul    = this_cpu_read(cyc2ns.data[idx].cyc2ns_mul);
 		data->cyc2ns_shift  = this_cpu_read(cyc2ns.data[idx].cyc2ns_shift);
 
-	} while (unlikely(seq != this_cpu_read(cyc2ns.seq.sequence)));
+	} while (unlikely(seq != this_cpu_read(cyc2ns.seq.seqcount.sequence)));
 }
 
 __always_inline void cyc2ns_read_end(void)
@@ -179,7 +187,7 @@ static void __init cyc2ns_init_boot_cpu(void)
 {
 	struct cyc2ns *c2n = this_cpu_ptr(&cyc2ns);
 
-	seqcount_init(&c2n->seq);
+	seqcount_latch_init(&c2n->seq);
 	__set_cyc2ns_scale(tsc_khz, smp_processor_id(), rdtsc());
 }
 
@@ -196,7 +204,7 @@ static void __init cyc2ns_init_secondary_cpus(void)
 
 	for_each_possible_cpu(cpu) {
 		if (cpu != this_cpu) {
-			seqcount_init(&c2n->seq);
+			seqcount_latch_init(&c2n->seq);
 			c2n = per_cpu_ptr(&cyc2ns, cpu);
 			c2n->data[0] = data[0];
 			c2n->data[1] = data[1];
@@ -247,7 +255,7 @@ unsigned long long sched_clock(void)
 
 bool using_native_sched_clock(void)
 {
-	return pv_ops.time.sched_clock == native_sched_clock;
+	return static_call_query(pv_sched_clock) == native_sched_clock;
 }
 #else
 unsigned long long
@@ -477,7 +485,7 @@ static unsigned long pit_calibrate_tsc(u32 latch, unsigned long ms, int loopmin)
  * transition from one expected value to another with a fairly
  * high accuracy, and we didn't miss any events. We can thus
  * use the TSC value at the transitions to calculate a pretty
- * good value for the TSC frequencty.
+ * good value for the TSC frequency.
  */
 static inline int pit_verify_msb(unsigned char val)
 {
@@ -732,7 +740,7 @@ static unsigned long pit_hpet_ptimer_calibrate_cpu(void)
 	 * 2) Reference counter. If available we use the HPET or the
 	 * PMTIMER as a reference to check the sanity of that value.
 	 * We use separate TSC readouts and check inside of the
-	 * reference read for any possible disturbance. We dicard
+	 * reference read for any possible disturbance. We discard
 	 * disturbed values here as well. We do that around the PIT
 	 * calibration delay loop as we have to wait for a certain
 	 * amount of time anyway.
@@ -1072,7 +1080,7 @@ static void tsc_resume(struct clocksource *cs)
  * very small window right after one CPU updated cycle_last under
  * xtime/vsyscall_gtod lock and the other CPU reads a TSC value which
  * is smaller than the cycle_last reference value due to a TSC which
- * is slighty behind. This delta is nowhere else observable, but in
+ * is slightly behind. This delta is nowhere else observable, but in
  * that case it results in a forward time jump in the range of hours
  * due to the unsigned delta calculation of the time keeping core
  * code, which is necessary to support wrapping clocksources like pm
@@ -1108,17 +1116,25 @@ static void tsc_cs_tick_stable(struct clocksource *cs)
 		sched_clock_tick_stable();
 }
 
+static int tsc_cs_enable(struct clocksource *cs)
+{
+	vclocks_set_used(VDSO_CLOCKMODE_TSC);
+	return 0;
+}
+
 /*
  * .mask MUST be CLOCKSOURCE_MASK(64). See comment above read_tsc()
  */
 static struct clocksource clocksource_tsc_early = {
-	.name                   = "tsc-early",
-	.rating                 = 299,
-	.read                   = read_tsc,
-	.mask                   = CLOCKSOURCE_MASK(64),
-	.flags                  = CLOCK_SOURCE_IS_CONTINUOUS |
+	.name			= "tsc-early",
+	.rating			= 299,
+	.uncertainty_margin	= 32 * NSEC_PER_MSEC,
+	.read			= read_tsc,
+	.mask			= CLOCKSOURCE_MASK(64),
+	.flags			= CLOCK_SOURCE_IS_CONTINUOUS |
 				  CLOCK_SOURCE_MUST_VERIFY,
-	.archdata               = { .vclock_mode = VCLOCK_TSC },
+	.vdso_clock_mode	= VDSO_CLOCKMODE_TSC,
+	.enable			= tsc_cs_enable,
 	.resume			= tsc_resume,
 	.mark_unstable		= tsc_cs_mark_unstable,
 	.tick_stable		= tsc_cs_tick_stable,
@@ -1131,14 +1147,16 @@ static struct clocksource clocksource_tsc_early = {
  * been found good.
  */
 static struct clocksource clocksource_tsc = {
-	.name                   = "tsc",
-	.rating                 = 300,
-	.read                   = read_tsc,
-	.mask                   = CLOCKSOURCE_MASK(64),
-	.flags                  = CLOCK_SOURCE_IS_CONTINUOUS |
+	.name			= "tsc",
+	.rating			= 300,
+	.read			= read_tsc,
+	.mask			= CLOCKSOURCE_MASK(64),
+	.flags			= CLOCK_SOURCE_IS_CONTINUOUS |
 				  CLOCK_SOURCE_VALID_FOR_HRES |
-				  CLOCK_SOURCE_MUST_VERIFY,
-	.archdata               = { .vclock_mode = VCLOCK_TSC },
+				  CLOCK_SOURCE_MUST_VERIFY |
+				  CLOCK_SOURCE_VERIFY_PERCPU,
+	.vdso_clock_mode	= VDSO_CLOCKMODE_TSC,
+	.enable			= tsc_cs_enable,
 	.resume			= tsc_resume,
 	.mark_unstable		= tsc_cs_mark_unstable,
 	.tick_stable		= tsc_cs_tick_stable,
@@ -1162,6 +1180,12 @@ void mark_tsc_unstable(char *reason)
 
 EXPORT_SYMBOL_GPL(mark_tsc_unstable);
 
+static void __init tsc_disable_clocksource_watchdog(void)
+{
+	clocksource_tsc_early.flags &= ~CLOCK_SOURCE_MUST_VERIFY;
+	clocksource_tsc.flags &= ~CLOCK_SOURCE_MUST_VERIFY;
+}
+
 static void __init check_system_tsc_reliable(void)
 {
 #if defined(CONFIG_MGEODEGX1) || defined(CONFIG_MGEODE_LX) || defined(CONFIG_X86_GENERIC)
@@ -1178,6 +1202,23 @@ static void __init check_system_tsc_reliable(void)
 #endif
 	if (boot_cpu_has(X86_FEATURE_TSC_RELIABLE))
 		tsc_clocksource_reliable = 1;
+
+	/*
+	 * Disable the clocksource watchdog when the system has:
+	 *  - TSC running at constant frequency
+	 *  - TSC which does not stop in C-States
+	 *  - the TSC_ADJUST register which allows to detect even minimal
+	 *    modifications
+	 *  - not more than two sockets. As the number of sockets cannot be
+	 *    evaluated at the early boot stage where this has to be
+	 *    invoked, check the number of online memory nodes as a
+	 *    fallback solution which is an reasonable estimate.
+	 */
+	if (boot_cpu_has(X86_FEATURE_CONSTANT_TSC) &&
+	    boot_cpu_has(X86_FEATURE_NONSTOP_TSC) &&
+	    boot_cpu_has(X86_FEATURE_TSC_ADJUST) &&
+	    nr_online_nodes <= 2)
+		tsc_disable_clocksource_watchdog();
 }
 
 /*
@@ -1249,7 +1290,7 @@ EXPORT_SYMBOL(convert_art_to_tsc);
  *	corresponding clocksource
  *	@cycles:	System counter value
  *	@cs:		Clocksource corresponding to system counter value. Used
- *			by timekeeping code to verify comparibility of two cycle
+ *			by timekeeping code to verify comparability of two cycle
  *			values.
  */
 
@@ -1369,9 +1410,6 @@ static int __init init_tsc_clocksource(void)
 	if (tsc_unstable)
 		goto unreg;
 
-	if (tsc_clocksource_reliable || no_tsc_watchdog)
-		clocksource_tsc.flags &= ~CLOCK_SOURCE_MUST_VERIFY;
-
 	if (boot_cpu_has(X86_FEATURE_NONSTOP_TSC_S3))
 		clocksource_tsc.flags |= CLOCK_SOURCE_SUSPEND_NONSTOP;
 
@@ -1404,7 +1442,10 @@ static bool __init determine_cpu_tsc_frequencies(bool early)
 
 	if (early) {
 		cpu_khz = x86_platform.calibrate_cpu();
-		tsc_khz = x86_platform.calibrate_tsc();
+		if (tsc_early_khz)
+			tsc_khz = tsc_early_khz;
+		else
+			tsc_khz = x86_platform.calibrate_tsc();
 	} else {
 		/* We should not be here with non-native cpu calibration */
 		WARN_ON(x86_platform.calibrate_cpu != native_calibrate_cpu);
@@ -1446,6 +1487,9 @@ static unsigned long __init get_loops_per_jiffy(void)
 
 static void __init tsc_enable_sched_clock(void)
 {
+	loops_per_jiffy = get_loops_per_jiffy();
+	use_tsc_delay();
+
 	/* Sanitize TSC ADJUST before cyc2ns gets initialized */
 	tsc_store_and_check_tsc_adjust(true);
 	cyc2ns_init_boot_cpu();
@@ -1461,8 +1505,6 @@ void __init tsc_early_init(void)
 		return;
 	if (!determine_cpu_tsc_frequencies(true))
 		return;
-	loops_per_jiffy = get_loops_per_jiffy();
-
 	tsc_enable_sched_clock();
 }
 
@@ -1496,7 +1538,6 @@ void __init tsc_init(void)
 		enable_sched_clock_irqtime();
 
 	lpj_fine = get_loops_per_jiffy();
-	use_tsc_delay();
 
 	check_system_tsc_reliable();
 
@@ -1506,7 +1547,7 @@ void __init tsc_init(void)
 	}
 
 	if (tsc_clocksource_reliable || no_tsc_watchdog)
-		clocksource_tsc_early.flags &= ~CLOCK_SOURCE_MUST_VERIFY;
+		tsc_disable_clocksource_watchdog();
 
 	clocksource_register_khz(&clocksource_tsc_early, tsc_khz);
 	detect_art();

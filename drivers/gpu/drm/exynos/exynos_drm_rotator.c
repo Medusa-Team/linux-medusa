@@ -56,6 +56,7 @@ struct rot_variant {
 struct rot_context {
 	struct exynos_drm_ipp ipp;
 	struct drm_device *drm_dev;
+	void		*dma_priv;
 	struct device	*dev;
 	void __iomem	*regs;
 	struct clk	*clock;
@@ -218,8 +219,13 @@ static int rotator_commit(struct exynos_drm_ipp *ipp,
 {
 	struct rot_context *rot =
 			container_of(ipp, struct rot_context, ipp);
+	int ret;
 
-	pm_runtime_get_sync(rot->dev);
+	ret = pm_runtime_resume_and_get(rot->dev);
+	if (ret < 0) {
+		dev_err(rot->dev, "failed to enable ROTATOR device.\n");
+		return ret;
+	}
 	rot->task = task;
 
 	rotator_src_set_fmt(rot, task->src.buf.fourcc);
@@ -243,7 +249,7 @@ static int rotator_bind(struct device *dev, struct device *master, void *data)
 
 	rot->drm_dev = drm_dev;
 	ipp->drm_dev = drm_dev;
-	exynos_drm_register_dma(drm_dev, dev);
+	exynos_drm_register_dma(drm_dev, dev, &rot->dma_priv);
 
 	exynos_drm_ipp_register(dev, ipp, &ipp_funcs,
 			   DRM_EXYNOS_IPP_CAP_CROP | DRM_EXYNOS_IPP_CAP_ROTATE,
@@ -261,7 +267,7 @@ static void rotator_unbind(struct device *dev, struct device *master,
 	struct exynos_drm_ipp *ipp = &rot->ipp;
 
 	exynos_drm_ipp_unregister(dev, ipp);
-	exynos_drm_unregister_dma(rot->drm_dev, rot->dev);
+	exynos_drm_unregister_dma(rot->drm_dev, rot->dev, &rot->dma_priv);
 }
 
 static const struct component_ops rotator_component_ops = {
@@ -272,7 +278,6 @@ static const struct component_ops rotator_component_ops = {
 static int rotator_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct resource	*regs_res;
 	struct rot_context *rot;
 	const struct rot_variant *variant;
 	int irq;
@@ -286,16 +291,13 @@ static int rotator_probe(struct platform_device *pdev)
 	rot->formats = variant->formats;
 	rot->num_formats = variant->num_formats;
 	rot->dev = dev;
-	regs_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rot->regs = devm_ioremap_resource(dev, regs_res);
+	rot->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rot->regs))
 		return PTR_ERR(rot->regs);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(dev, "failed to get irq\n");
+	if (irq < 0)
 		return irq;
-	}
 
 	ret = devm_request_irq(dev, irq, rotator_irq_handler, 0, dev_name(dev),
 			       rot);

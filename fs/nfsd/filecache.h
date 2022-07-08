@@ -19,7 +19,7 @@
  */
 struct nfsd_file_mark {
 	struct fsnotify_mark	nfm_mark;
-	atomic_t		nfm_ref;
+	refcount_t		nfm_ref;
 };
 
 /*
@@ -43,7 +43,7 @@ struct nfsd_file {
 	unsigned long		nf_flags;
 	struct inode		*nf_inode;
 	unsigned int		nf_hashval;
-	atomic_t		nf_ref;
+	refcount_t		nf_ref;
 	unsigned char		nf_may;
 	struct nfsd_file_mark	*nf_mark;
 };
@@ -51,6 +51,8 @@ struct nfsd_file {
 int nfsd_file_cache_init(void);
 void nfsd_file_cache_purge(struct net *);
 void nfsd_file_cache_shutdown(void);
+int nfsd_file_cache_start_net(struct net *net);
+void nfsd_file_cache_shutdown_net(struct net *net);
 void nfsd_file_put(struct nfsd_file *nf);
 struct nfsd_file *nfsd_file_get(struct nfsd_file *nf);
 void nfsd_file_close_inode_sync(struct inode *inode);

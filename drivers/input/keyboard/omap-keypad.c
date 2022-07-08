@@ -46,7 +46,7 @@ struct omap_kp {
 	unsigned short keymap[];
 };
 
-static DECLARE_TASKLET_DISABLED(kp_tasklet, omap_kp_tasklet, 0);
+static DECLARE_TASKLET_DISABLED_OLD(kp_tasklet, omap_kp_tasklet);
 
 static unsigned int *row_gpios;
 static unsigned int *col_gpios;
@@ -190,8 +190,7 @@ static int omap_kp_probe(struct platform_device *pdev)
 	row_shift = get_count_order(pdata->cols);
 	keycodemax = pdata->rows << row_shift;
 
-	omap_kp = kzalloc(sizeof(struct omap_kp) +
-			keycodemax * sizeof(unsigned short), GFP_KERNEL);
+	omap_kp = kzalloc(struct_size(omap_kp, keymap, keycodemax), GFP_KERNEL);
 	input_dev = input_allocate_device();
 	if (!omap_kp || !input_dev) {
 		kfree(omap_kp);

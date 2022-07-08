@@ -1377,7 +1377,7 @@ static void dfll_debug_init(struct tegra_dfll *td)
 }
 
 #else
-static void inline dfll_debug_init(struct tegra_dfll *td) { }
+static inline void dfll_debug_init(struct tegra_dfll *td) { }
 #endif /* CONFIG_DEBUG_FS */
 
 /*
@@ -1487,7 +1487,6 @@ static int dfll_init(struct tegra_dfll *td)
 	td->last_unrounded_rate = 0;
 
 	pm_runtime_enable(td->dev);
-	pm_runtime_irq_safe(td->dev);
 	pm_runtime_get_sync(td->dev);
 
 	dfll_set_mode(td, DFLL_DISABLED);
@@ -1516,7 +1515,7 @@ di_err1:
 
 /**
  * tegra_dfll_suspend - check DFLL is disabled
- * @dev: DFLL device *
+ * @dev: DFLL instance
  *
  * DFLL clock should be disabled by the CPUFreq driver. So, make
  * sure it is disabled and disable all clocks needed by the DFLL.
@@ -1857,13 +1856,13 @@ static int dfll_fetch_pwm_params(struct tegra_dfll *td)
 			    &td->reg_init_uV);
 	if (!ret) {
 		dev_err(td->dev, "couldn't get initialized voltage\n");
-		return ret;
+		return -EINVAL;
 	}
 
 	ret = read_dt_param(td, "nvidia,pwm-period-nanoseconds", &pwm_period);
 	if (!ret) {
 		dev_err(td->dev, "couldn't get PWM period\n");
-		return ret;
+		return -EINVAL;
 	}
 	td->pwm_rate = (NSEC_PER_SEC / pwm_period) * (MAX_DFLL_VOLTAGES - 1);
 

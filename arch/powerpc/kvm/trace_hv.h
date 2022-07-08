@@ -89,7 +89,7 @@
 	{H_CREATE_RPT,			"H_CREATE_RPT"}, \
 	{H_REMOVE_RPT,			"H_REMOVE_RPT"}, \
 	{H_REGISTER_RPAGES,		"H_REGISTER_RPAGES"}, \
-	{H_DISABLE_AND_GETC,		"H_DISABLE_AND_GETC"}, \
+	{H_DISABLE_AND_GET,		"H_DISABLE_AND_GET"}, \
 	{H_ERROR_DATA,			"H_ERROR_DATA"}, \
 	{H_GET_HCA_INFO,		"H_GET_HCA_INFO"}, \
 	{H_GET_PERF_COUNT,		"H_GET_PERF_COUNT"}, \
@@ -115,6 +115,7 @@
 	{H_VASI_STATE,			"H_VASI_STATE"}, \
 	{H_ENABLE_CRQ,			"H_ENABLE_CRQ"}, \
 	{H_GET_EM_PARMS,		"H_GET_EM_PARMS"}, \
+	{H_GET_ENERGY_SCALE_INFO,	"H_GET_ENERGY_SCALE_INFO"}, \
 	{H_SET_MPP,			"H_SET_MPP"}, \
 	{H_GET_MPP,			"H_GET_MPP"}, \
 	{H_HOME_NODE_ASSOCIATIVITY,	"H_HOME_NODE_ASSOCIATIVITY"}, \
@@ -472,9 +473,9 @@ TRACE_EVENT(kvmppc_run_vcpu_enter,
 );
 
 TRACE_EVENT(kvmppc_run_vcpu_exit,
-	TP_PROTO(struct kvm_vcpu *vcpu, struct kvm_run *run),
+	TP_PROTO(struct kvm_vcpu *vcpu),
 
-	TP_ARGS(vcpu, run),
+	TP_ARGS(vcpu),
 
 	TP_STRUCT__entry(
 		__field(int,		vcpu_id)
@@ -484,7 +485,7 @@ TRACE_EVENT(kvmppc_run_vcpu_exit,
 
 	TP_fast_assign(
 		__entry->vcpu_id  = vcpu->vcpu_id;
-		__entry->exit     = run->exit_reason;
+		__entry->exit     = vcpu->run->exit_reason;
 		__entry->ret      = vcpu->arch.ret;
 	),
 

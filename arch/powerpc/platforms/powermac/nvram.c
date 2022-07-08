@@ -55,7 +55,7 @@ struct chrp_header {
   u8		cksum;
   u16		len;
   char          name[12];
-  u8		data[0];
+  u8		data[];
 };
 
 struct core99_header {
@@ -258,7 +258,7 @@ static u32 core99_calc_adler(u8 *buffer)
 	return (high << 16) | low;
 }
 
-static u32 core99_check(u8* datas)
+static u32 __init core99_check(u8 *datas)
 {
 	struct core99_header* hdr99 = (struct core99_header*)datas;
 

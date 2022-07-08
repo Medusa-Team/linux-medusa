@@ -3,10 +3,6 @@
  * Copyright (C) 2018 Socionext Inc.
  */
 
-#if defined(CONFIG_SERIAL_MILBEAUT_USIO_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
-
 #include <linux/clk.h>
 #include <linux/console.h>
 #include <linux/module.h>
@@ -404,7 +400,7 @@ static const struct uart_ops mlb_usio_ops = {
 
 #ifdef CONFIG_SERIAL_MILBEAUT_USIO_CONSOLE
 
-static void mlb_usio_console_putchar(struct uart_port *port, int c)
+static void mlb_usio_console_putchar(struct uart_port *port, unsigned char c)
 {
 	while (!(readb(port->membase + MLB_USIO_REG_SSR) & MLB_USIO_SSR_TDRE))
 		cpu_relax();
@@ -537,6 +533,7 @@ static int mlb_usio_probe(struct platform_device *pdev)
 	port->irq = mlb_usio_irq[index][RX];
 	port->uartclk = clk_get_rate(clk);
 	port->fifosize = 128;
+	port->has_sysrq = IS_ENABLED(CONFIG_SERIAL_MILBEAUT_USIO_CONSOLE);
 	port->iotype = UPIO_MEM32;
 	port->flags = UPF_BOOT_AUTOCONF | UPF_SPD_VHI;
 	port->line = index;

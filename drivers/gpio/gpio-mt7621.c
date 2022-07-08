@@ -95,9 +95,7 @@ mediatek_gpio_irq_handler(int irq, void *data)
 	pending = mtk_gpio_r32(rg, GPIO_REG_STAT);
 
 	for_each_set_bit(bit, &pending, MTK_BANK_WIDTH) {
-		u32 map = irq_find_mapping(gc->irq.domain, bit);
-
-		generic_handle_irq(map);
+		generic_handle_domain_irq(gc->irq.domain, bit);
 		mtk_gpio_w32(rg, GPIO_REG_STAT, BIT(bit));
 		ret |= IRQ_HANDLED;
 	}
@@ -207,8 +205,7 @@ mediatek_gpio_xlate(struct gpio_chip *chip,
 }
 
 static int
-mediatek_gpio_bank_probe(struct device *dev,
-			 struct device_node *node, int bank)
+mediatek_gpio_bank_probe(struct device *dev, int bank)
 {
 	struct mtk *mtk = dev_get_drvdata(dev);
 	struct mtk_gc *rg;
@@ -219,7 +216,6 @@ mediatek_gpio_bank_probe(struct device *dev,
 	memset(rg, 0, sizeof(*rg));
 
 	spin_lock_init(&rg->lock);
-	rg->chip.of_node = node;
 	rg->bank = bank;
 
 	dat = mtk->base + GPIO_REG_DATA + (rg->bank * GPIO_BANK_STRIDE);
@@ -227,8 +223,8 @@ mediatek_gpio_bank_probe(struct device *dev,
 	ctrl = mtk->base + GPIO_REG_DCLR + (rg->bank * GPIO_BANK_STRIDE);
 	diro = mtk->base + GPIO_REG_CTRL + (rg->bank * GPIO_BANK_STRIDE);
 
-	ret = bgpio_init(&rg->chip, dev, 4,
-			 dat, set, ctrl, diro, NULL, 0);
+	ret = bgpio_init(&rg->chip, dev, 4, dat, set, ctrl, diro, NULL,
+			 BGPIOF_NO_SET_ON_INPUT);
 	if (ret) {
 		dev_err(dev, "bgpio_init() failed\n");
 		return ret;
@@ -241,8 +237,8 @@ mediatek_gpio_bank_probe(struct device *dev,
 	if (!rg->chip.label)
 		return -ENOMEM;
 
+	rg->chip.offset = bank * MTK_BANK_WIDTH;
 	rg->irq_chip.name = dev_name(dev);
-	rg->irq_chip.parent_device = dev;
 	rg->irq_chip.irq_unmask = mediatek_gpio_irq_unmask;
 	rg->irq_chip.irq_mask = mediatek_gpio_irq_mask;
 	rg->irq_chip.irq_mask_ack = mediatek_gpio_irq_mask;
@@ -253,8 +249,7 @@ mediatek_gpio_bank_probe(struct device *dev,
 
 		/*
 		 * Directly request the irq here instead of passing
-		 * a flow-handler to gpiochip_set_chained_irqchip,
-		 * because the irq is shared.
+		 * a flow-handler because the irq is shared.
 		 */
 		ret = devm_request_irq(dev, mtk->gpio_irq,
 				       mediatek_gpio_irq_handler, IRQF_SHARED,
@@ -313,7 +308,7 @@ mediatek_gpio_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, mtk);
 
 	for (i = 0; i < MTK_BANK_CNT; i++) {
-		ret = mediatek_gpio_bank_probe(dev, np, i);
+		ret = mediatek_gpio_bank_probe(dev, i);
 		if (ret)
 			return ret;
 	}

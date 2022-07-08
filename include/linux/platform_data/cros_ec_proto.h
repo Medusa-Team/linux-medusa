@@ -12,7 +12,6 @@
 #include <linux/mutex.h>
 #include <linux/notifier.h>
 
-#include <linux/mfd/cros_ec.h>
 #include <linux/platform_data/cros_ec_commands.h>
 
 #define CROS_EC_DEV_NAME	"cros_ec"
@@ -70,7 +69,7 @@ struct cros_ec_command {
 	uint32_t outsize;
 	uint32_t insize;
 	uint32_t result;
-	uint8_t data[0];
+	uint8_t data[];
 };
 
 /**
@@ -126,6 +125,9 @@ struct cros_ec_command {
  * @host_event_wake_mask: Mask of host events that cause wake from suspend.
  * @last_event_time: exact time from the hard irq when we got notified of
  *     a new event.
+ * @notifier_ready: The notifier_block to let the kernel re-query EC
+ *		    communication protocol when the EC sends
+ *		    EC_HOST_EVENT_INTERFACE_READY.
  * @ec: The platform_device used by the mfd driver to interface with the
  *      main EC.
  * @pd: The platform_device used by the mfd driver to interface with the
@@ -167,6 +169,7 @@ struct cros_ec_device {
 	u32 host_event_wake_mask;
 	u32 last_resume_result;
 	ktime_t last_event_time;
+	struct notifier_block notifier_ready;
 
 	/* The platform devices used by the mfd driver */
 	struct platform_device *ec;
@@ -185,9 +188,27 @@ struct cros_ec_platform {
 	u16 cmd_offset;
 };
 
-int cros_ec_suspend(struct cros_ec_device *ec_dev);
+/**
+ * struct cros_ec_dev - ChromeOS EC device entry point.
+ * @class_dev: Device structure used in sysfs.
+ * @ec_dev: cros_ec_device structure to talk to the physical device.
+ * @dev: Pointer to the platform device.
+ * @debug_info: cros_ec_debugfs structure for debugging information.
+ * @has_kb_wake_angle: True if at least 2 accelerometer are connected to the EC.
+ * @cmd_offset: Offset to apply for each command.
+ * @features: Features supported by the EC.
+ */
+struct cros_ec_dev {
+	struct device class_dev;
+	struct cros_ec_device *ec_dev;
+	struct device *dev;
+	struct cros_ec_debugfs *debug_info;
+	bool has_kb_wake_angle;
+	u16 cmd_offset;
+	struct ec_response_get_features features;
+};
 
-int cros_ec_resume(struct cros_ec_device *ec_dev);
+#define to_cros_ec_dev(dev)  container_of(dev, struct cros_ec_dev, class_dev)
 
 int cros_ec_prepare_tx(struct cros_ec_device *ec_dev,
 		       struct cros_ec_command *msg);
@@ -195,15 +216,8 @@ int cros_ec_prepare_tx(struct cros_ec_device *ec_dev,
 int cros_ec_check_result(struct cros_ec_device *ec_dev,
 			 struct cros_ec_command *msg);
 
-int cros_ec_cmd_xfer(struct cros_ec_device *ec_dev,
-		     struct cros_ec_command *msg);
-
 int cros_ec_cmd_xfer_status(struct cros_ec_device *ec_dev,
 			    struct cros_ec_command *msg);
-
-int cros_ec_register(struct cros_ec_device *ec_dev);
-
-int cros_ec_unregister(struct cros_ec_device *ec_dev);
 
 int cros_ec_query_all(struct cros_ec_device *ec_dev);
 
@@ -213,11 +227,12 @@ int cros_ec_get_next_event(struct cros_ec_device *ec_dev,
 
 u32 cros_ec_get_host_event(struct cros_ec_device *ec_dev);
 
-int cros_ec_check_features(struct cros_ec_dev *ec, int feature);
+bool cros_ec_check_features(struct cros_ec_dev *ec, int feature);
 
 int cros_ec_get_sensor_count(struct cros_ec_dev *ec);
 
-bool cros_ec_handle_event(struct cros_ec_device *ec_dev);
+int cros_ec_command(struct cros_ec_device *ec_dev, unsigned int version, int command, void *outdata,
+		    int outsize, void *indata, int insize);
 
 /**
  * cros_ec_get_time_ns() - Return time in ns.

@@ -63,10 +63,11 @@ static void mop500_of_node_put(void)
 {
 	int i;
 
-	for (i = 0; i < 2; i++) {
+	for (i = 0; i < 2; i++)
 		of_node_put(mop500_dai_links[i].cpus->of_node);
-		of_node_put(mop500_dai_links[i].codecs->of_node);
-	}
+
+	/* Both links use the same codec, which is refcounted only once */
+	of_node_put(mop500_dai_links[0].codecs->of_node);
 }
 
 static int mop500_of_probe(struct platform_device *pdev,
@@ -81,7 +82,9 @@ static int mop500_of_probe(struct platform_device *pdev,
 
 	if (!(msp_np[0] && msp_np[1] && codec_np)) {
 		dev_err(&pdev->dev, "Phandle missing or invalid\n");
-		mop500_of_node_put();
+		for (i = 0; i < 2; i++)
+			of_node_put(msp_np[i]);
+		of_node_put(codec_np);
 		return -EINVAL;
 	}
 
@@ -137,12 +140,12 @@ static int mop500_probe(struct platform_device *pdev)
 
 static int mop500_remove(struct platform_device *pdev)
 {
-	struct snd_soc_card *mop500_card = platform_get_drvdata(pdev);
+	struct snd_soc_card *card = platform_get_drvdata(pdev);
 
 	pr_debug("%s: Enter.\n", __func__);
 
-	snd_soc_unregister_card(mop500_card);
-	mop500_ab8500_remove(mop500_card);
+	snd_soc_unregister_card(card);
+	mop500_ab8500_remove(card);
 	mop500_of_node_put();
 
 	return 0;

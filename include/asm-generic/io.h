@@ -163,7 +163,7 @@ static inline u16 readw(const volatile void __iomem *addr)
 	u16 val;
 
 	__io_br();
-	val = __le16_to_cpu(__raw_readw(addr));
+	val = __le16_to_cpu((__le16 __force)__raw_readw(addr));
 	__io_ar(val);
 	return val;
 }
@@ -176,7 +176,7 @@ static inline u32 readl(const volatile void __iomem *addr)
 	u32 val;
 
 	__io_br();
-	val = __le32_to_cpu(__raw_readl(addr));
+	val = __le32_to_cpu((__le32 __force)__raw_readl(addr));
 	__io_ar(val);
 	return val;
 }
@@ -212,7 +212,7 @@ static inline void writeb(u8 value, volatile void __iomem *addr)
 static inline void writew(u16 value, volatile void __iomem *addr)
 {
 	__io_bw();
-	__raw_writew(cpu_to_le16(value), addr);
+	__raw_writew((u16 __force)cpu_to_le16(value), addr);
 	__io_aw();
 }
 #endif
@@ -222,7 +222,7 @@ static inline void writew(u16 value, volatile void __iomem *addr)
 static inline void writel(u32 value, volatile void __iomem *addr)
 {
 	__io_bw();
-	__raw_writel(__cpu_to_le32(value), addr);
+	__raw_writel((u32 __force)__cpu_to_le32(value), addr);
 	__io_aw();
 }
 #endif
@@ -448,17 +448,15 @@ static inline void writesq(volatile void __iomem *addr, const void *buffer,
 #define IO_SPACE_LIMIT 0xffff
 #endif
 
-#include <linux/logic_pio.h>
-
 /*
  * {in,out}{b,w,l}() access little endian I/O. {in,out}{b,w,l}_p() can be
  * implemented on hardware that needs an additional delay for I/O accesses to
  * take effect.
  */
 
-#ifndef inb
-#define inb inb
-static inline u8 inb(unsigned long addr)
+#if !defined(inb) && !defined(_inb)
+#define _inb _inb
+static inline u8 _inb(unsigned long addr)
 {
 	u8 val;
 
@@ -469,35 +467,35 @@ static inline u8 inb(unsigned long addr)
 }
 #endif
 
-#ifndef inw
-#define inw inw
-static inline u16 inw(unsigned long addr)
+#if !defined(inw) && !defined(_inw)
+#define _inw _inw
+static inline u16 _inw(unsigned long addr)
 {
 	u16 val;
 
 	__io_pbr();
-	val = __le16_to_cpu(__raw_readw(PCI_IOBASE + addr));
+	val = __le16_to_cpu((__le16 __force)__raw_readw(PCI_IOBASE + addr));
 	__io_par(val);
 	return val;
 }
 #endif
 
-#ifndef inl
-#define inl inl
-static inline u32 inl(unsigned long addr)
+#if !defined(inl) && !defined(_inl)
+#define _inl _inl
+static inline u32 _inl(unsigned long addr)
 {
 	u32 val;
 
 	__io_pbr();
-	val = __le32_to_cpu(__raw_readl(PCI_IOBASE + addr));
+	val = __le32_to_cpu((__le32 __force)__raw_readl(PCI_IOBASE + addr));
 	__io_par(val);
 	return val;
 }
 #endif
 
-#ifndef outb
-#define outb outb
-static inline void outb(u8 value, unsigned long addr)
+#if !defined(outb) && !defined(_outb)
+#define _outb _outb
+static inline void _outb(u8 value, unsigned long addr)
 {
 	__io_pbw();
 	__raw_writeb(value, PCI_IOBASE + addr);
@@ -505,24 +503,50 @@ static inline void outb(u8 value, unsigned long addr)
 }
 #endif
 
-#ifndef outw
-#define outw outw
-static inline void outw(u16 value, unsigned long addr)
+#if !defined(outw) && !defined(_outw)
+#define _outw _outw
+static inline void _outw(u16 value, unsigned long addr)
 {
 	__io_pbw();
-	__raw_writew(cpu_to_le16(value), PCI_IOBASE + addr);
+	__raw_writew((u16 __force)cpu_to_le16(value), PCI_IOBASE + addr);
 	__io_paw();
 }
 #endif
 
-#ifndef outl
-#define outl outl
-static inline void outl(u32 value, unsigned long addr)
+#if !defined(outl) && !defined(_outl)
+#define _outl _outl
+static inline void _outl(u32 value, unsigned long addr)
 {
 	__io_pbw();
-	__raw_writel(cpu_to_le32(value), PCI_IOBASE + addr);
+	__raw_writel((u32 __force)cpu_to_le32(value), PCI_IOBASE + addr);
 	__io_paw();
 }
+#endif
+
+#include <linux/logic_pio.h>
+
+#ifndef inb
+#define inb _inb
+#endif
+
+#ifndef inw
+#define inw _inw
+#endif
+
+#ifndef inl
+#define inl _inl
+#endif
+
+#ifndef outb
+#define outb _outb
+#endif
+
+#ifndef outw
+#define outw _outw
+#endif
+
+#ifndef outl
+#define outl _outl
 #endif
 
 #ifndef inb_p
@@ -887,18 +911,6 @@ static inline void iowrite64_rep(volatile void __iomem *addr,
 #include <linux/vmalloc.h>
 #define __io_virt(x) ((void __force *)(x))
 
-#ifndef CONFIG_GENERIC_IOMAP
-struct pci_dev;
-extern void __iomem *pci_iomap(struct pci_dev *dev, int bar, unsigned long max);
-
-#ifndef pci_iounmap
-#define pci_iounmap pci_iounmap
-static inline void pci_iounmap(struct pci_dev *dev, void __iomem *p)
-{
-}
-#endif
-#endif /* CONFIG_GENERIC_IOMAP */
-
 /*
  * Change virtual addresses to physical addresses and vv.
  * These are pretty trivial
@@ -930,7 +942,9 @@ static inline void *phys_to_virt(unsigned long address)
  *
  * ioremap_wc() and ioremap_wt() can provide more relaxed caching attributes
  * for specific drivers if the architecture choses to implement them.  If they
- * are not implemented we fall back to plain ioremap.
+ * are not implemented we fall back to plain ioremap. Conversely, ioremap_np()
+ * can provide stricter non-posted write semantics if the architecture
+ * implements them.
  */
 #ifndef CONFIG_MMU
 #ifndef ioremap
@@ -943,12 +957,12 @@ static inline void __iomem *ioremap(phys_addr_t offset, size_t size)
 
 #ifndef iounmap
 #define iounmap iounmap
-static inline void iounmap(void __iomem *addr)
+static inline void iounmap(volatile void __iomem *addr)
 {
 }
 #endif
 #elif defined(CONFIG_GENERIC_IOREMAP)
-#include <asm/pgtable.h>
+#include <linux/pgtable.h>
 
 void __iomem *ioremap_prot(phys_addr_t addr, size_t size, unsigned long prot);
 void iounmap(volatile void __iomem *addr);
@@ -959,10 +973,6 @@ static inline void __iomem *ioremap(phys_addr_t addr, size_t size)
 	return ioremap_prot(addr, size, _PAGE_IOREMAP);
 }
 #endif /* !CONFIG_MMU || CONFIG_GENERIC_IOREMAP */
-
-#ifndef ioremap_nocache
-#define ioremap_nocache ioremap
-#endif
 
 #ifndef ioremap_wc
 #define ioremap_wc ioremap
@@ -987,6 +997,23 @@ static inline void __iomem *ioremap_uc(phys_addr_t offset, size_t size)
 }
 #endif
 
+/*
+ * ioremap_np needs an explicit architecture implementation, as it
+ * requests stronger semantics than regular ioremap(). Portable drivers
+ * should instead use one of the higher-level abstractions, like
+ * devm_ioremap_resource(), to choose the correct variant for any given
+ * device and bus. Portable drivers with a good reason to want non-posted
+ * write semantics should always provide an ioremap() fallback in case
+ * ioremap_np() is not available.
+ */
+#ifndef ioremap_np
+#define ioremap_np ioremap_np
+static inline void __iomem *ioremap_np(phys_addr_t offset, size_t size)
+{
+	return NULL;
+}
+#endif
+
 #ifdef CONFIG_HAS_IOPORT_MAP
 #ifndef CONFIG_GENERIC_IOMAP
 #ifndef ioport_map
@@ -996,6 +1023,7 @@ static inline void __iomem *ioport_map(unsigned long port, unsigned int nr)
 	port &= IO_SPACE_LIMIT;
 	return (port > MMIO_UPPER_LIMIT) ? NULL : PCI_IOBASE + port;
 }
+#define ARCH_HAS_GENERIC_IOPORT_MAP
 #endif
 
 #ifndef ioport_unmap
@@ -1010,15 +1038,10 @@ extern void ioport_unmap(void __iomem *p);
 #endif /* CONFIG_GENERIC_IOMAP */
 #endif /* CONFIG_HAS_IOPORT_MAP */
 
-/*
- * Convert a virtual cached pointer to an uncached pointer
- */
-#ifndef xlate_dev_kmem_ptr
-#define xlate_dev_kmem_ptr xlate_dev_kmem_ptr
-static inline void *xlate_dev_kmem_ptr(void *addr)
-{
-	return addr;
-}
+#ifndef CONFIG_GENERIC_IOMAP
+#ifndef pci_iounmap
+#define ARCH_WANTS_GENERIC_PCI_IOUNMAP
+#endif
 #endif
 
 #ifndef xlate_dev_mem_ptr
@@ -1100,6 +1123,10 @@ static inline void memcpy_toio(volatile void __iomem *addr, const void *buffer,
 {
 	memcpy(__io_virt(addr), buffer, size);
 }
+#endif
+
+#ifndef CONFIG_GENERIC_DEVMEM_IS_ALLOWED
+extern int devmem_is_allowed(unsigned long pfn);
 #endif
 
 #endif /* __KERNEL__ */

@@ -162,18 +162,15 @@ static int stm32_iwdg_clk_init(struct platform_device *pdev,
 	u32 ret;
 
 	wdt->clk_lsi = devm_clk_get(dev, "lsi");
-	if (IS_ERR(wdt->clk_lsi)) {
-		dev_err(dev, "Unable to get lsi clock\n");
-		return PTR_ERR(wdt->clk_lsi);
-	}
+	if (IS_ERR(wdt->clk_lsi))
+		return dev_err_probe(dev, PTR_ERR(wdt->clk_lsi), "Unable to get lsi clock\n");
 
 	/* optional peripheral clock */
 	if (wdt->data->has_pclk) {
 		wdt->clk_pclk = devm_clk_get(dev, "pclk");
-		if (IS_ERR(wdt->clk_pclk)) {
-			dev_err(dev, "Unable to get pclk clock\n");
-			return PTR_ERR(wdt->clk_pclk);
-		}
+		if (IS_ERR(wdt->clk_pclk))
+			return dev_err_probe(dev, PTR_ERR(wdt->clk_pclk),
+					     "Unable to get pclk clock\n");
 
 		ret = clk_prepare_enable(wdt->clk_pclk);
 		if (ret) {
@@ -240,10 +237,8 @@ static int stm32_iwdg_probe(struct platform_device *pdev)
 
 	/* This is the timer base. */
 	wdt->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(wdt->regs)) {
-		dev_err(dev, "Could not get resource\n");
+	if (IS_ERR(wdt->regs))
 		return PTR_ERR(wdt->regs);
-	}
 
 	ret = stm32_iwdg_clk_init(pdev, wdt);
 	if (ret)
@@ -261,6 +256,24 @@ static int stm32_iwdg_probe(struct platform_device *pdev)
 	watchdog_set_drvdata(wdd, wdt);
 	watchdog_set_nowayout(wdd, WATCHDOG_NOWAYOUT);
 	watchdog_init_timeout(wdd, 0, dev);
+
+	/*
+	 * In case of CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED is set
+	 * (Means U-Boot/bootloaders leaves the watchdog running)
+	 * When we get here we should make a decision to prevent
+	 * any side effects before user space daemon will take care of it.
+	 * The best option, taking into consideration that there is no
+	 * way to read values back from hardware, is to enforce watchdog
+	 * being run with deterministic values.
+	 */
+	if (IS_ENABLED(CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED)) {
+		ret = stm32_iwdg_start(wdd);
+		if (ret)
+			return ret;
+
+		/* Make sure the watchdog is serviced */
+		set_bit(WDOG_HW_RUNNING, &wdd->status);
+	}
 
 	ret = devm_watchdog_register_device(dev, wdd);
 	if (ret)

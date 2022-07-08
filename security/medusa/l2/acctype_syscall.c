@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #include <linux/linkage.h>
 #include <linux/medusa/l3/registry.h>
 #include <linux/medusa/l3/med_model.h>
@@ -22,39 +24,37 @@ struct syscall_access {
 };
 
 MED_ATTRS(syscall_access) {
-	MED_ATTR_RO (syscall_access, sysnr, "sysnr", MED_UNSIGNED),
-	MED_ATTR (syscall_access, arg1, "arg1", MED_UNSIGNED),
-	MED_ATTR (syscall_access, arg2, "arg2", MED_UNSIGNED),
-	MED_ATTR (syscall_access, arg3, "arg3", MED_UNSIGNED),
-	MED_ATTR (syscall_access, arg4, "arg4", MED_UNSIGNED),
-	MED_ATTR (syscall_access, arg5, "arg5", MED_UNSIGNED),
-	MED_ATTR (syscall_access, arg6, "arg6", MED_UNSIGNED),
-	MED_ATTR (syscall_access, arg7, "arg7", MED_UNSIGNED),
+	MED_ATTR_RO(syscall_access, sysnr, "sysnr", MED_UNSIGNED),
+	MED_ATTR(syscall_access, arg1, "arg1", MED_UNSIGNED),
+	MED_ATTR(syscall_access, arg2, "arg2", MED_UNSIGNED),
+	MED_ATTR(syscall_access, arg3, "arg3", MED_UNSIGNED),
+	MED_ATTR(syscall_access, arg4, "arg4", MED_UNSIGNED),
+	MED_ATTR(syscall_access, arg5, "arg5", MED_UNSIGNED),
+	MED_ATTR(syscall_access, arg6, "arg6", MED_UNSIGNED),
+	MED_ATTR(syscall_access, arg7, "arg7", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(syscall_access, "syscall", process_kobject, "process", process_kobject, "process");
 
-int __init syscall_acctype_init(void) {
-	MED_REGISTER_ACCTYPE(syscall_access,MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
+int __init syscall_acctype_init(void)
+{
+	MED_REGISTER_ACCTYPE(syscall_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 
-medusa_answer_t asmlinkage medusa_syscall_i386(
+asmlinkage enum medusa_answer_t medusa_syscall_i386(
 	unsigned int eax,  /* in: syscall #, out: retval */
 	struct task_struct *curr,
-	volatile unsigned int p1,
-	volatile unsigned int p2,
-	volatile unsigned int p3,
-	volatile unsigned int p4,
-	volatile unsigned int p5)
+	unsigned int p1,
+	unsigned int p2,
+	unsigned int p3,
+	unsigned int p4,
+	unsigned int p5)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	enum medusa_answer_t retval = MED_ALLOW;
 	struct syscall_access access;
 	struct process_kobject proc;
-
-        memset(&access, '\0', sizeof(struct syscall_access));
-        /* process_kobject proc is zeroed by process_kern2kobj function */
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
@@ -71,11 +71,10 @@ medusa_answer_t asmlinkage medusa_syscall_i386(
 	}
 	/* this needs more optimization some day */
 	if (retval == MED_DENY)
-			return 0; /* deny */
+		return 0; /* deny */
 	if (retval != MED_FAKE_ALLOW)
 		return 1; /* allow */
 	return 2; /* skip trace code */
 }
 
-__initcall(syscall_acctype_init);
-
+device_initcall(syscall_acctype_init);

@@ -13,7 +13,8 @@ enum {
 	HDAC_HDMI_0_DAI_ID,
 	HDAC_HDMI_1_DAI_ID,
 	HDAC_HDMI_2_DAI_ID,
-	HDAC_LAST_DAI_ID = HDAC_HDMI_2_DAI_ID,
+	HDAC_HDMI_3_DAI_ID,
+	HDAC_LAST_DAI_ID = HDAC_HDMI_3_DAI_ID,
 };
 
 struct hdac_hda_pcm {
@@ -26,10 +27,6 @@ struct hdac_hda_priv {
 	struct hdac_hda_pcm pcm[HDAC_LAST_DAI_ID];
 	bool need_display_power;
 };
-
-#define hdac_to_hda_priv(_hdac) \
-			container_of(_hdac, struct hdac_hda_priv, codec.core)
-#define hdac_to_hda_codec(_hdac) container_of(_hdac, struct hda_codec, core)
 
 struct hdac_ext_bus_ops *snd_soc_hdac_hda_get_ops(void);
 

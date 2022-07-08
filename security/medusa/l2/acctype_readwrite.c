@@ -1,25 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 /* this file is not really a part of the model. however, someone may find
  * it useful.
  */
 
-#include <linux/fs.h>
-#include <linux/dcache.h>
-#include <linux/limits.h>
-#include <linux/list.h>
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l3/med_model.h>
-#include <linux/init.h>
-
-#include "kobject_process.h"
-#include "kobject_file.h"
-#include <linux/medusa/l1/file_handlers.h>
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_file.h"
 
 /**
  * medusa_read - L1-called code to check VS
  * @file: file to read
  *
  */
-medusa_answer_t medusa_read(struct file *file)
+enum medusa_answer_t medusa_read(struct file *file)
 {
 	struct dentry *dentry;
 
@@ -31,11 +25,11 @@ medusa_answer_t medusa_read(struct file *file)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(dentry,NULL) <= 0)
+		file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
 		return MED_ALLOW;
 	if (
-		!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSR(task_security(current)),VS(inode_security(dentry->d_inode)))
+		!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSR(task_security(current)), VS(inode_security(dentry->d_inode)))
 	   ) {
 		return MED_DENY;
 	}
@@ -48,7 +42,7 @@ medusa_answer_t medusa_read(struct file *file)
  * @file: file to write
  *
  */
-medusa_answer_t medusa_write(struct file *file)
+enum medusa_answer_t medusa_write(struct file *file)
 {
 	struct dentry *dentry;
 
@@ -60,11 +54,11 @@ medusa_answer_t medusa_write(struct file *file)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-			file_kobj_validate_dentry(dentry,NULL) <= 0)
+		file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
 		return MED_ALLOW;
 	if (
-		!vs_intersects(VSS(task_security(current)),VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)),VS(inode_security(dentry->d_inode)))
+		!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
+		!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
 	   ) {
 		return MED_DENY;
 	}

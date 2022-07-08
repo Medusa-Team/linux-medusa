@@ -22,11 +22,10 @@ function do_exit {
 }
 
 function parse_argv {
-        GRUB=1
+        GRUB=0
         REBOOT=1
         MEDUSA_ONLY=0
         DELETE=0
-        INSTALL=1
         USE_RSYNC=1
         RSYNC_ONLY=0
         RUN_KUNIT=0
@@ -36,17 +35,13 @@ function parse_argv {
                         DELETE=1
                 elif [[ "$arg" == '--clean' || "$arg" == '-clean' ]]; then
                         sudo make clean
-                        sudo rm -rf debian
-                elif [[ "$arg" == '--nogdb' || "$arg" == '-nogdb' || "$arg" == '--nogrub' || "$arg" == '-nogrub' ]]; then
-                        GRUB=0
+                elif [[ "$arg" == '--patch-grub' ]]; then
+                        GRUB=1
                 elif [[ "$arg" == '--noreboot' || "$arg" == '-noreboot' ]]; then
                         REBOOT=0
                 elif [[ "$arg" == '--medusa-only' || "$arg" == '-medusa-only' ]]; then
                         MEDUSA_ONLY=1
-                        GRUB=0
                 elif [[ "$arg" == '--build-only' || "$arg" == '-build-only' ]]; then
-                        INSTALL=0
-                        GRUB=0
                         REBOOT=0
                 elif [[ "$arg" == '--norsync' || "$arg" == '-norsync' ]]; then
                         USE_RSYNC=0
@@ -66,22 +61,27 @@ function parse_argv {
 }
 
 function help {
-        echo "$PROGNAME [--help] [--delete] [--clean] [--nogrub] [--nogdb] [--noreboot]";
-        echo "    [--medusa-only] [--norsync] [--rsync-only] [--run-kunit]"
+        echo "$PROGNAME [--help] [--delete] [--clean] [--noreboot] [--medusa-only]";
+        echo "           [--norsync]"
+        echo "$PROGNAME --rsync-only";
+        echo "$PROGNAME --run-kunit";
+        echo "$PROGNAME --patch-grub";
         echo "    --help           - Prints this help"
         echo "    --delete         - Deletes the medusa object files (handy when changing"
         echo "                       header files or makefiles)"
         echo "    --clean          - Does make clean before the compilation (handy when"
         echo "                       changing kernel release)"
-        echo "    --nogrub/--nogdb - Turns off the waiting for GDB connection during booting"
         echo "    --noreboot       - Does not reboot at the end"
         echo "    --medusa-only    - Rebuilds just medusa not the whole kernel"
         echo "    --build-only     - Just rebuid the kernel(modue) no reboot no installation"
         echo "    --norsync        - Don't synchronize the sources on the debugging machine"
+	echo ""
         echo "    --rsync-only     - Synchronizes the sources on the debugging machine, doesn't"
         echo "                       compile"
         echo "    --run-kunit      - Run available KUnit Medusa tests (this option overrides all"
         echo "                       other specified options and therefore are ignored)"
+        echo "    --patch-grub     - Patch grub config files so that new boot item is automatically"
+        echo "                       created for debugging the kernel (with kgdbwait option)."
         exit 0
 }
 
@@ -101,7 +101,11 @@ function medusa_only {
 
 function run_kunit {
 	cp .config .tmpconfig
-	./tools/testing/kunit/kunit.py run
+	make ARCH=um mrproper
+	./tools/testing/kunit/kunit.py config --kunitconfig=.kunitconfig --arch=um
+	./tools/testing/kunit/kunit.py build --kunitconfig=.kunitconfig --arch=um
+	./tools/testing/kunit/kunit.py run --kunitconfig=.kunitconfig --arch=um
+	make ARCH=x86 mrproper
 	cp .tmpconfig .config
 	rm .tmpconfig
 }
@@ -120,42 +124,33 @@ function install_module {
         [ $? -ne 0 ] && do_exit 1 "Update-initramfs failed"
 }
 
-function create_package {
-        sudo rm -rf ../linux-image-*.deb
+function make_kernel {
+	make -j `expr $PROCESSORS + 1`
+        [ $? -ne 0 ] && do_exit 1 "make kernel failed"
+}
 
-        export CONCURRENCY_LEVEL=`expr $PROCESSORS + 1`
-        make deb-pkg
+function install_kernel {
+	sudo make modules_install -j `expr $PROCESSORS + 1`
+        [ $? -ne 0 ] && do_exit 1 "make modules_install failed"
 
-        [ $? -ne 0 ] && do_exit 1 "Make-kpkg failed"
+	sudo make install
+        [ $? -ne 0 ] && do_exit 1 "make install failed"
 }
 
 function rsync_repo {
-        rsync -avz --exclude 'Documentation' --exclude '*.o' --exclude '.*' --exclude '*.cmd' --exclude '.git' --exclude '*.xz' --exclude '*ctags' -e ssh . $DEST
+        rsync -avz --exclude 'Documentation' --exclude '*.o' --exclude '.*' --exclude '*.cmd' --exclude '.git' --exclude '*.xz' --exclude '*tags' -e ssh . $DEST
 }
 
-function install_package {
-        CONTINUE=1
-        while [ $CONTINUE -ne 0 ]; do
-                sudo dpkg --force-all -i ../linux-image-*.deb
-                CONTINUE=$?
-                [ $CONTINUE -ne 0 ] && sleep 5;
-        done
-}
+function patch_grub {
+	if ! grep -q "### medusa simple section ###" /etc/grub.d/10_linux; then
+		sudo patch /etc/grub.d/10_linux < scripts/medusa/10_linux_patch
+		[ $? -ne 0 ] && do_exit 1 "can't patch /etc/grub.d/10_linux"
+	fi
+	sudo scripts/medusa/update_grub_alternatives.py
+	[ $? -ne 0 ] && do_exit 1 "update_grub_alternatives.py failed"
 
-function update_grub {
-        temp=`mktemp XXXXXX`
-
-        sudo cat /boot/grub/grub.cfg | while read line; do
-                if [[ "$line" = */boot/vmlinuz-*medusa* ]]; then
-                        echo "$line" | sed -e 's/quiet/kgdboc=ttyS0,115200 kgdbwait/' >> $temp
-                else
-                        echo "$line" >> $temp
-                fi
-        done
-
-        sudo mv $temp /boot/grub/grub.cfg
-
-        rm $temp 2> /dev/null
+	echo "Grub successfully patched. You may now compile the kernel or, if \
+the kernel is already compiled, run sudo update-grub."
 }
 
 parse_argv $@
@@ -170,14 +165,21 @@ if [ $RSYNC_ONLY -eq 1 ]; then
 	exit 0
 fi
 
+if [ $GRUB -eq 1 ]; then
+	patch_grub
+	exit 0
+fi
+
 [ -f vmlinux ] && sudo rm -f vmlinux 2> /dev/null
 
 [ $DELETE -eq 1 ] && delete_medusa
 
 if [ $MEDUSA_ONLY -eq 1 ]; then
         medusa_only
+        install_module
 else
-        create_package
+        make_kernel
+	install_kernel
 fi
 
 [ $USE_RSYNC -eq 1 ] && [ "$DEST" != "NONE" ] && rsync_repo
@@ -185,14 +187,7 @@ fi
 echo $(($major + 1)) > .major
 echo 0 > .minor
 
-if [ $INSTALL -eq 1 ]; then
-        [ $MEDUSA_ONLY -eq 0 ] && install_package
-        [ $MEDUSA_ONLY -ne 0 ] && install_module
-fi
-
 echo $major.$minor >> myversioning
-
-[ $GRUB -eq 1 ] && update_grub
 
 [ $REBOOT -eq 1 ] && sudo reboot
 

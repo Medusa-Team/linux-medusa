@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: (GPL-2.0 OR BSD-3-Clause) */
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause) */
 /*
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
@@ -17,16 +17,48 @@
 
 struct snd_sof_dsp_ops;
 
+/**
+ * enum sof_fw_state - DSP firmware state definitions
+ * @SOF_FW_BOOT_NOT_STARTED:	firmware boot is not yet started
+ * @SOF_FW_BOOT_PREPARE:	preparing for boot (firmware loading for exaqmple)
+ * @SOF_FW_BOOT_IN_PROGRESS:	firmware boot is in progress
+ * @SOF_FW_BOOT_FAILED:		firmware boot failed
+ * @SOF_FW_BOOT_READY_FAILED:	firmware booted but fw_ready op failed
+ * @SOF_FW_BOOT_READY_OK:	firmware booted and fw_ready op passed
+ * @SOF_FW_BOOT_COMPLETE:	firmware is booted up and functional
+ * @SOF_FW_CRASHED:		firmware crashed after successful boot
+ */
+enum sof_fw_state {
+	SOF_FW_BOOT_NOT_STARTED = 0,
+	SOF_FW_BOOT_PREPARE,
+	SOF_FW_BOOT_IN_PROGRESS,
+	SOF_FW_BOOT_FAILED,
+	SOF_FW_BOOT_READY_FAILED,
+	SOF_FW_BOOT_READY_OK,
+	SOF_FW_BOOT_COMPLETE,
+	SOF_FW_CRASHED,
+};
+
+/* DSP power states */
+enum sof_dsp_power_states {
+	SOF_DSP_PM_D0,
+	SOF_DSP_PM_D1,
+	SOF_DSP_PM_D2,
+	SOF_DSP_PM_D3,
+};
+
 /*
  * SOF Platform data.
  */
 struct snd_sof_pdata {
 	const struct firmware *fw;
-	const char *drv_name;
 	const char *name;
 	const char *platform;
 
 	struct device *dev;
+
+	/* indicate how many first bytes shouldn't be loaded into DSP memory. */
+	size_t fw_offset;
 
 	/*
 	 * notification callback used if the hardware initialization
@@ -64,17 +96,14 @@ struct sof_dev_desc {
 	/* alternate list of machines using this configuration */
 	struct snd_soc_acpi_mach *alt_machines;
 
+	bool use_acpi_target_states;
+
 	/* Platform resource indexes in BAR / ACPI resources. */
 	/* Must set to -1 if not used - add new items to end */
 	int resindex_lpe_base;
 	int resindex_pcicfg_base;
 	int resindex_imr_base;
 	int irqindex_host_ipc;
-	int resindex_dma_base;
-
-	/* DMA only valid when resindex_dma_base != -1*/
-	int dma_engine;
-	int dma_size;
 
 	/* IPC timeouts in ms */
 	int ipc_timeout;
@@ -84,20 +113,19 @@ struct sof_dev_desc {
 	const void *chip_info;
 
 	/* defaults for no codec mode */
-	const char *nocodec_fw_filename;
 	const char *nocodec_tplg_filename;
 
 	/* defaults paths for firmware and topology files */
 	const char *default_fw_path;
 	const char *default_tplg_path;
 
+	/* default firmware name */
+	const char *default_fw_filename;
+
 	const struct snd_sof_dsp_ops *ops;
-	const struct sof_arch_ops *arch_ops;
 };
 
-int sof_nocodec_setup(struct device *dev,
-		      struct snd_sof_pdata *sof_pdata,
-		      struct snd_soc_acpi_mach *mach,
-		      const struct sof_dev_desc *desc,
-		      const struct snd_sof_dsp_ops *ops);
+int sof_dai_get_mclk(struct snd_soc_pcm_runtime *rtd);
+int sof_dai_get_bclk(struct snd_soc_pcm_runtime *rtd);
+
 #endif

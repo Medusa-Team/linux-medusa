@@ -28,11 +28,10 @@
 #include <asm/prom.h>
 #include <asm/smp.h>
 #include <asm/hw_breakpoint.h>
-#include <asm/asm-prototypes.h>
 #include <asm/svm.h>
 #include <asm/ultravisor.h>
 
-int default_machine_kexec_prepare(struct kimage *image)
+int machine_kexec_prepare(struct kimage *image)
 {
 	int i;
 	unsigned long begin, end;	/* limits of segment */
@@ -64,15 +63,18 @@ int default_machine_kexec_prepare(struct kimage *image)
 			begin = image->segment[i].mem;
 			end = begin + image->segment[i].memsz;
 
-			if ((begin < high) && (end > low))
+			if ((begin < high) && (end > low)) {
+				of_node_put(node);
 				return -ETXTBSY;
+			}
 		}
 	}
 
 	return 0;
 }
 
-static void copy_segments(unsigned long ind)
+/* Called during kexec sequence with MMU off */
+static notrace void copy_segments(unsigned long ind)
 {
 	unsigned long entry;
 	unsigned long *ptr;
@@ -105,7 +107,8 @@ static void copy_segments(unsigned long ind)
 	}
 }
 
-void kexec_copy_flush(struct kimage *image)
+/* Called during kexec sequence with MMU off */
+notrace void kexec_copy_flush(struct kimage *image)
 {
 	long i, nr_segments = image->nr_segments;
 	struct  kexec_segment ranges[KEXEC_SEGMENT_MAX];
@@ -151,6 +154,8 @@ static void kexec_smp_down(void *arg)
 	 */
 	if (ppc_md.kexec_cpu_down)
 		ppc_md.kexec_cpu_down(0, 1);
+
+	reset_sprs();
 
 	kexec_smp_wait();
 	/* NOTREACHED */
@@ -212,7 +217,7 @@ static void wake_offline_cpus(void)
 		if (!cpu_online(cpu)) {
 			printk(KERN_INFO "kexec: Waking offline cpu %d.\n",
 			       cpu);
-			WARN_ON(cpu_up(cpu));
+			WARN_ON(add_cpu(cpu));
 		}
 	}
 }
@@ -285,7 +290,7 @@ static union thread_union kexec_stack __init_task_data =
  * For similar reasons to the stack above, the kexecing CPU needs to be on a
  * static PACA; we switch to kexec_paca.
  */
-struct paca_struct kexec_paca;
+static struct paca_struct kexec_paca;
 
 /* Our assembly helper, in misc_64.S */
 extern void kexec_sequence(void *newstack, unsigned long start,
@@ -372,7 +377,7 @@ void default_machine_kexec(struct kimage *image)
 	/* NOTREACHED */
 }
 
-#ifdef CONFIG_PPC_BOOK3S_64
+#ifdef CONFIG_PPC_64S_HASH_MMU
 /* Values we need to export to the second kernel via the device tree. */
 static unsigned long htab_base;
 static unsigned long htab_size;
@@ -414,4 +419,4 @@ static int __init export_htab_values(void)
 	return 0;
 }
 late_initcall(export_htab_values);
-#endif /* CONFIG_PPC_BOOK3S_64 */
+#endif /* CONFIG_PPC_64S_HASH_MMU */

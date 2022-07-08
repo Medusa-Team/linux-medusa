@@ -210,7 +210,7 @@ static int st33zp24_i2c_request_resources(struct i2c_client *client)
 
 /*
  * st33zp24_i2c_probe initialize the TPM device
- * @param: client, the i2c_client drescription (TPM I2C description).
+ * @param: client, the i2c_client description (TPM I2C description).
  * @param: id, the i2c_device_id struct.
  * @return: 0 in case of success.
  *	 -1 in other case.
@@ -267,11 +267,8 @@ static int st33zp24_i2c_probe(struct i2c_client *client,
 static int st33zp24_i2c_remove(struct i2c_client *client)
 {
 	struct tpm_chip *chip = i2c_get_clientdata(client);
-	int ret;
 
-	ret = st33zp24_remove(chip);
-	if (ret)
-		return ret;
+	st33zp24_remove(chip);
 
 	return 0;
 }

@@ -711,7 +711,7 @@ static void process_txdone_queue (struct fs_dev *dev, struct queue *q)
 
 		switch (STATUS_CODE (qe)) {
 		case 0x01: /* This is for AAL0 where we put the chip in streaming mode */
-			/* Fall through */
+			fallthrough;
 		case 0x02:
 			/* Process a real txdone entry. */
 			tmp = qe->p0;
@@ -795,6 +795,7 @@ static void process_incoming (struct fs_dev *dev, struct queue *q)
 		switch (STATUS_CODE (qe)) {
 		case 0x1:
 			/* Fall through for streaming mode */
+			fallthrough;
 		case 0x2:/* Packet received OK.... */
 			if (atm_vcc) {
 				skb = pe->skb;
@@ -998,6 +999,7 @@ static int fs_open(struct atm_vcc *atm_vcc)
 				error = make_rate (pcr, r, &tmc0, NULL);
 				if (error) {
 					kfree(tc);
+					kfree(vcc);
 					return error;
 				}
 			}
@@ -1277,8 +1279,6 @@ static const struct atmdev_ops ops = {
 	.send =         fs_send,
 	.owner =        THIS_MODULE,
 	/* ioctl:          fs_ioctl, */
-	/* getsockopt:     fs_getsockopt, */
-	/* setsockopt:     fs_setsockopt, */
 	/* change_qos:     fs_change_qos, */
 
 	/* For now implement these internally here... */  
@@ -1676,6 +1676,8 @@ static int fs_init(struct fs_dev *dev)
 	dev->hw_base = pci_resource_start(pci_dev, 0);
 
 	dev->base = ioremap(dev->hw_base, 0x1000);
+	if (!dev->base)
+		return 1;
 
 	reset_chip (dev);
   

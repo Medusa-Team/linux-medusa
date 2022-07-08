@@ -22,6 +22,7 @@ struct nfs_delegation {
 	unsigned long pagemod_limit;
 	__u64 change_attr;
 	unsigned long flags;
+	refcount_t refcount;
 	spinlock_t lock;
 	struct rcu_head rcu;
 };
@@ -35,6 +36,7 @@ enum {
 	NFS_DELEGATION_REVOKED,
 	NFS_DELEGATION_TEST_EXPIRED,
 	NFS_DELEGATION_INODE_FREEING,
+	NFS_DELEGATION_RETURN_DELAYED,
 };
 
 int nfs_inode_set_delegation(struct inode *inode, const struct cred *cred,
@@ -42,6 +44,7 @@ int nfs_inode_set_delegation(struct inode *inode, const struct cred *cred,
 void nfs_inode_reclaim_delegation(struct inode *inode, const struct cred *cred,
 		fmode_t type, const nfs4_stateid *stateid, unsigned long pagemod_limit);
 int nfs4_inode_return_delegation(struct inode *inode);
+void nfs4_inode_return_delegation_on_close(struct inode *inode);
 int nfs_async_inode_return_delegation(struct inode *inode, const nfs4_stateid *stateid);
 void nfs_inode_evict_delegation(struct inode *inode);
 
@@ -82,8 +85,7 @@ int nfs4_inode_make_writeable(struct inode *inode);
 
 static inline int nfs_have_delegated_attributes(struct inode *inode)
 {
-	return NFS_PROTO(inode)->have_delegation(inode, FMODE_READ) &&
-		!(NFS_I(inode)->cache_validity & NFS_INO_REVAL_FORCED);
+	return NFS_PROTO(inode)->have_delegation(inode, FMODE_READ);
 }
 
 #endif

@@ -5,6 +5,7 @@
  *
  */
 #include <linux/clk.h>
+#include <linux/pm_runtime.h>
 #include <linux/spinlock.h>
 
 #include <drm/drm_atomic.h>
@@ -73,16 +74,18 @@ static void komeda_crtc_update_clock_ratio(struct komeda_crtc_state *kcrtc_st)
  */
 static int
 komeda_crtc_atomic_check(struct drm_crtc *crtc,
-			 struct drm_crtc_state *state)
+			 struct drm_atomic_state *state)
 {
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state,
+									  crtc);
 	struct komeda_crtc *kcrtc = to_kcrtc(crtc);
-	struct komeda_crtc_state *kcrtc_st = to_kcrtc_st(state);
+	struct komeda_crtc_state *kcrtc_st = to_kcrtc_st(crtc_state);
 	int err;
 
-	if (drm_atomic_crtc_needs_modeset(state))
+	if (drm_atomic_crtc_needs_modeset(crtc_state))
 		komeda_crtc_update_clock_ratio(kcrtc_st);
 
-	if (state->active) {
+	if (crtc_state->active) {
 		err = komeda_build_display_data_flow(kcrtc, kcrtc_st);
 		if (err)
 			return err;
@@ -272,8 +275,11 @@ komeda_crtc_do_flush(struct drm_crtc *crtc,
 
 static void
 komeda_crtc_atomic_enable(struct drm_crtc *crtc,
-			  struct drm_crtc_state *old)
+			  struct drm_atomic_state *state)
 {
+	struct drm_crtc_state *old = drm_atomic_get_old_crtc_state(state,
+								   crtc);
+	pm_runtime_get_sync(crtc->dev->dev);
 	komeda_crtc_prepare(to_kcrtc(crtc));
 	drm_crtc_vblank_on(crtc);
 	WARN_ON(drm_crtc_vblank_get(crtc));
@@ -317,8 +323,10 @@ komeda_crtc_flush_and_wait_for_flip_done(struct komeda_crtc *kcrtc,
 
 static void
 komeda_crtc_atomic_disable(struct drm_crtc *crtc,
-			   struct drm_crtc_state *old)
+			   struct drm_atomic_state *state)
 {
+	struct drm_crtc_state *old = drm_atomic_get_old_crtc_state(state,
+								   crtc);
 	struct komeda_crtc *kcrtc = to_kcrtc(crtc);
 	struct komeda_crtc_state *old_st = to_kcrtc_st(old);
 	struct komeda_pipeline *master = kcrtc->master;
@@ -372,14 +380,19 @@ komeda_crtc_atomic_disable(struct drm_crtc *crtc,
 	drm_crtc_vblank_put(crtc);
 	drm_crtc_vblank_off(crtc);
 	komeda_crtc_unprepare(kcrtc);
+	pm_runtime_put(crtc->dev->dev);
 }
 
 static void
 komeda_crtc_atomic_flush(struct drm_crtc *crtc,
-			 struct drm_crtc_state *old)
+			 struct drm_atomic_state *state)
 {
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state,
+									  crtc);
+	struct drm_crtc_state *old = drm_atomic_get_old_crtc_state(state,
+								   crtc);
 	/* commit with modeset will be handled in enable/disable */
-	if (drm_atomic_crtc_needs_modeset(crtc->state))
+	if (drm_atomic_crtc_needs_modeset(crtc_state))
 		return;
 
 	komeda_crtc_do_flush(crtc, old);
@@ -489,10 +502,8 @@ static void komeda_crtc_reset(struct drm_crtc *crtc)
 	crtc->state = NULL;
 
 	state = kzalloc(sizeof(*state), GFP_KERNEL);
-	if (state) {
-		crtc->state = &state->base;
-		crtc->state->crtc = crtc;
-	}
+	if (state)
+		__drm_atomic_helper_crtc_reset(crtc, &state->base);
 }
 
 static struct drm_crtc_state *
@@ -539,7 +550,6 @@ static void komeda_crtc_vblank_disable(struct drm_crtc *crtc)
 }
 
 static const struct drm_crtc_funcs komeda_crtc_funcs = {
-	.gamma_set		= drm_atomic_helper_legacy_gamma_set,
 	.destroy		= drm_crtc_cleanup,
 	.set_config		= drm_atomic_helper_set_config,
 	.page_flip		= drm_atomic_helper_page_flip,
@@ -613,9 +623,10 @@ static int komeda_crtc_add(struct komeda_kms_dev *kms,
 		return err;
 
 	drm_crtc_helper_add(crtc, &komeda_crtc_helper_funcs);
-	drm_crtc_vblank_reset(crtc);
 
 	crtc->port = kcrtc->master->of_output_port;
+
+	drm_crtc_enable_color_mgmt(crtc, 0, true, KOMEDA_COLOR_LUT_SIZE);
 
 	return err;
 }

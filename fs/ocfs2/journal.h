@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* -*- mode: c; c-basic-offset: 8; -*-
- * vim: noexpandtab sw=8 ts=8 sts=0:
- *
+/*
  * journal.h
  *
  * Defines journalling api and structures.
@@ -169,8 +167,7 @@ int ocfs2_compute_replay_slots(struct ocfs2_super *osb);
  *  ocfs2_start_checkpoint - Kick the commit thread to do a checkpoint.
  */
 void   ocfs2_set_journal_params(struct ocfs2_super *osb);
-int    ocfs2_journal_init(struct ocfs2_journal *journal,
-			  int *dirty);
+int    ocfs2_journal_init(struct ocfs2_super *osb, int *dirty);
 void   ocfs2_journal_shutdown(struct ocfs2_super *osb);
 int    ocfs2_journal_wipe(struct ocfs2_journal *journal,
 			  int full);
@@ -597,9 +594,11 @@ static inline void ocfs2_update_inode_fsync_trans(handle_t *handle,
 {
 	struct ocfs2_inode_info *oi = OCFS2_I(inode);
 
-	oi->i_sync_tid = handle->h_transaction->t_tid;
-	if (datasync)
-		oi->i_datasync_tid = handle->h_transaction->t_tid;
+	if (!is_handle_aborted(handle)) {
+		oi->i_sync_tid = handle->h_transaction->t_tid;
+		if (datasync)
+			oi->i_datasync_tid = handle->h_transaction->t_tid;
+	}
 }
 
 #endif /* OCFS2_JOURNAL_H */

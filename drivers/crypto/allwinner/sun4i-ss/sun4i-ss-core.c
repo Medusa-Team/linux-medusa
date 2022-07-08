@@ -10,9 +10,11 @@
  */
 #include <linux/clk.h>
 #include <linux/crypto.h>
+#include <linux/debugfs.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <crypto/scatterwalk.h>
 #include <linux/scatterlist.h>
@@ -21,6 +23,14 @@
 #include <linux/reset.h>
 
 #include "sun4i-ss.h"
+
+static const struct ss_variant ss_a10_variant = {
+	.sha1_in_be = false,
+};
+
+static const struct ss_variant ss_a33_variant = {
+	.sha1_in_be = true,
+};
 
 static struct sun4i_ss_alg_template ss_algs[] = {
 {       .type = CRYPTO_ALG_TYPE_AHASH,
@@ -225,6 +235,51 @@ static struct sun4i_ss_alg_template ss_algs[] = {
 #endif
 };
 
+static int sun4i_ss_dbgfs_read(struct seq_file *seq, void *v)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(ss_algs); i++) {
+		if (!ss_algs[i].ss)
+			continue;
+		switch (ss_algs[i].type) {
+		case CRYPTO_ALG_TYPE_SKCIPHER:
+			seq_printf(seq, "%s %s reqs=%lu opti=%lu fallback=%lu tsize=%lu\n",
+				   ss_algs[i].alg.crypto.base.cra_driver_name,
+				   ss_algs[i].alg.crypto.base.cra_name,
+				   ss_algs[i].stat_req, ss_algs[i].stat_opti, ss_algs[i].stat_fb,
+				   ss_algs[i].stat_bytes);
+			break;
+		case CRYPTO_ALG_TYPE_RNG:
+			seq_printf(seq, "%s %s reqs=%lu tsize=%lu\n",
+				   ss_algs[i].alg.rng.base.cra_driver_name,
+				   ss_algs[i].alg.rng.base.cra_name,
+				   ss_algs[i].stat_req, ss_algs[i].stat_bytes);
+			break;
+		case CRYPTO_ALG_TYPE_AHASH:
+			seq_printf(seq, "%s %s reqs=%lu\n",
+				   ss_algs[i].alg.hash.halg.base.cra_driver_name,
+				   ss_algs[i].alg.hash.halg.base.cra_name,
+				   ss_algs[i].stat_req);
+			break;
+		}
+	}
+	return 0;
+}
+
+static int sun4i_ss_dbgfs_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, sun4i_ss_dbgfs_read, inode->i_private);
+}
+
+static const struct file_operations sun4i_ss_debugfs_fops = {
+	.owner = THIS_MODULE,
+	.open = sun4i_ss_dbgfs_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 /*
  * Power management strategy: The device is suspended unless a TFM exists for
  * one of the algorithms proposed by this driver.
@@ -233,8 +288,7 @@ static int sun4i_ss_pm_suspend(struct device *dev)
 {
 	struct sun4i_ss_ctx *ss = dev_get_drvdata(dev);
 
-	if (ss->reset)
-		reset_control_assert(ss->reset);
+	reset_control_assert(ss->reset);
 
 	clk_disable_unprepare(ss->ssclk);
 	clk_disable_unprepare(ss->busclk);
@@ -259,12 +313,10 @@ static int sun4i_ss_pm_resume(struct device *dev)
 		goto err_enable;
 	}
 
-	if (ss->reset) {
-		err = reset_control_deassert(ss->reset);
-		if (err) {
-			dev_err(ss->dev, "Cannot deassert reset control\n");
-			goto err_enable;
-		}
+	err = reset_control_deassert(ss->reset);
+	if (err) {
+		dev_err(ss->dev, "Cannot deassert reset control\n");
+		goto err_enable;
 	}
 
 	return err;
@@ -273,7 +325,7 @@ err_enable:
 	return err;
 }
 
-const struct dev_pm_ops sun4i_ss_pm_ops = {
+static const struct dev_pm_ops sun4i_ss_pm_ops = {
 	SET_RUNTIME_PM_OPS(sun4i_ss_pm_suspend, sun4i_ss_pm_resume, NULL)
 };
 
@@ -323,6 +375,12 @@ static int sun4i_ss_probe(struct platform_device *pdev)
 		return PTR_ERR(ss->base);
 	}
 
+	ss->variant = of_device_get_match_data(&pdev->dev);
+	if (!ss->variant) {
+		dev_err(&pdev->dev, "Missing Security System variant\n");
+		return -EINVAL;
+	}
+
 	ss->ssclk = devm_clk_get(&pdev->dev, "mod");
 	if (IS_ERR(ss->ssclk)) {
 		err = PTR_ERR(ss->ssclk);
@@ -340,12 +398,10 @@ static int sun4i_ss_probe(struct platform_device *pdev)
 	dev_dbg(&pdev->dev, "clock ahb_ss acquired\n");
 
 	ss->reset = devm_reset_control_get_optional(&pdev->dev, "ahb");
-	if (IS_ERR(ss->reset)) {
-		if (PTR_ERR(ss->reset) == -EPROBE_DEFER)
-			return PTR_ERR(ss->reset);
+	if (IS_ERR(ss->reset))
+		return PTR_ERR(ss->reset);
+	if (!ss->reset)
 		dev_info(&pdev->dev, "no reset control found\n");
-		ss->reset = NULL;
-	}
 
 	/*
 	 * Check that clock have the correct rates given in the datasheet
@@ -398,7 +454,7 @@ static int sun4i_ss_probe(struct platform_device *pdev)
 	 * this info could be useful
 	 */
 
-	err = pm_runtime_get_sync(ss->dev);
+	err = pm_runtime_resume_and_get(ss->dev);
 	if (err < 0)
 		goto error_pm;
 
@@ -439,6 +495,12 @@ static int sun4i_ss_probe(struct platform_device *pdev)
 			break;
 		}
 	}
+
+	/* Ignore error of debugfs */
+	ss->dbgfs_dir = debugfs_create_dir("sun4i-ss", NULL);
+	ss->dbgfs_stats = debugfs_create_file("stats", 0444, ss->dbgfs_dir, ss,
+					      &sun4i_ss_debugfs_fops);
+
 	return 0;
 error_alg:
 	i--;
@@ -484,7 +546,12 @@ static int sun4i_ss_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id a20ss_crypto_of_match_table[] = {
-	{ .compatible = "allwinner,sun4i-a10-crypto" },
+	{ .compatible = "allwinner,sun4i-a10-crypto",
+	  .data = &ss_a10_variant
+	},
+	{ .compatible = "allwinner,sun8i-a33-crypto",
+	  .data = &ss_a33_variant
+	},
 	{}
 };
 MODULE_DEVICE_TABLE(of, a20ss_crypto_of_match_table);

@@ -63,7 +63,7 @@ int main(void)
 	DEFINE(PT_AREG15, offsetof (struct pt_regs, areg[15]));
 	DEFINE(PT_WINDOWBASE, offsetof (struct pt_regs, windowbase));
 	DEFINE(PT_WINDOWSTART, offsetof(struct pt_regs, windowstart));
-	DEFINE(PT_SIZE, sizeof(struct pt_regs));
+	DEFINE(PT_KERNEL_SIZE, offsetof(struct pt_regs, areg[16]));
 	DEFINE(PT_AREG_END, offsetof (struct pt_regs, areg[XCHAL_NUM_AREGS]));
 	DEFINE(PT_USER_SIZE, offsetof(struct pt_regs, areg[XCHAL_NUM_AREGS]));
 	DEFINE(PT_XTREGS_OPT, offsetof(struct pt_regs, xtregs_opt));
@@ -87,12 +87,14 @@ int main(void)
 	OFFSET(TI_STSTUS, thread_info, status);
 	OFFSET(TI_CPU, thread_info, cpu);
 	OFFSET(TI_PRE_COUNT, thread_info, preempt_count);
-	OFFSET(TI_ADDR_LIMIT, thread_info, addr_limit);
 
 	/* struct thread_info (offset from start_struct) */
 	DEFINE(THREAD_RA, offsetof (struct task_struct, thread.ra));
 	DEFINE(THREAD_SP, offsetof (struct task_struct, thread.sp));
 	DEFINE(THREAD_CPENABLE, offsetof (struct thread_info, cpenable));
+#if XCHAL_HAVE_EXCLUSIVE
+	DEFINE(THREAD_ATOMCTL8, offsetof (struct thread_info, atomctl8));
+#endif
 #if XTENSA_HAVE_COPROCESSORS
 	DEFINE(THREAD_XTREGS_CP0, offsetof(struct thread_info, xtregs_cp.cp0));
 	DEFINE(THREAD_XTREGS_CP1, offsetof(struct thread_info, xtregs_cp.cp1));
@@ -105,8 +107,6 @@ int main(void)
 #endif
 	DEFINE(THREAD_XTREGS_USER, offsetof (struct thread_info, xtregs_user));
 	DEFINE(XTREGS_USER_SIZE, sizeof(xtregs_user_t));
-	DEFINE(THREAD_CURRENT_DS, offsetof (struct task_struct, \
-	       thread.current_ds));
 
 	/* struct mm_struct */
 	DEFINE(MM_USERS, offsetof(struct mm_struct, mm_users));

@@ -12,6 +12,8 @@
  *  asm/spinlock_types.h: contains the arch_spinlock_t/arch_rwlock_t and the
  *                        initializers
  *
+ *  linux/spinlock_types_raw:
+ *			  The raw types and initializers
  *  linux/spinlock_types.h:
  *                        defines the generic type and initializers
  *
@@ -31,6 +33,8 @@
  *                        contains the generic, simplified UP spinlock type.
  *                        (which is an empty structure on non-debug builds)
  *
+ *  linux/spinlock_types_raw:
+ *			  The raw RT types and initializers
  *  linux/spinlock_types.h:
  *                        defines the generic type and initializers
  *
@@ -53,9 +57,9 @@
 #include <linux/compiler.h>
 #include <linux/irqflags.h>
 #include <linux/thread_info.h>
-#include <linux/kernel.h>
 #include <linux/stringify.h>
 #include <linux/bottom_half.h>
+#include <linux/lockdep.h>
 #include <asm/barrier.h>
 #include <asm/mmiowb.h>
 
@@ -75,7 +79,7 @@
 #define LOCK_SECTION_END                        \
         ".previous\n\t"
 
-#define __lockfunc __attribute__((section(".spinlock.text")))
+#define __lockfunc __section(".spinlock.text")
 
 /*
  * Pull the arch_spinlock_t and arch_rwlock_t definitions:
@@ -93,12 +97,13 @@
 
 #ifdef CONFIG_DEBUG_SPINLOCK
   extern void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
-				   struct lock_class_key *key);
-# define raw_spin_lock_init(lock)				\
-do {								\
-	static struct lock_class_key __key;			\
-								\
-	__raw_spin_lock_init((lock), #lock, &__key);		\
+				   struct lock_class_key *key, short inner);
+
+# define raw_spin_lock_init(lock)					\
+do {									\
+	static struct lock_class_key __key;				\
+									\
+	__raw_spin_lock_init((lock), #lock, &__key, LD_WAIT_SPIN);	\
 } while (0)
 
 #else
@@ -166,12 +171,11 @@ do {								\
  * Architectures that can implement ACQUIRE better need to take care.
  */
 #ifndef smp_mb__after_spinlock
-#define smp_mb__after_spinlock()	do { } while (0)
+#define smp_mb__after_spinlock()	kcsan_mb()
 #endif
 
 #ifdef CONFIG_DEBUG_SPINLOCK
  extern void do_raw_spin_lock(raw_spinlock_t *lock) __acquires(lock);
-#define do_raw_spin_lock_flags(lock, flags) do_raw_spin_lock(lock)
  extern int do_raw_spin_trylock(raw_spinlock_t *lock);
  extern void do_raw_spin_unlock(raw_spinlock_t *lock) __releases(lock);
 #else
@@ -179,18 +183,6 @@ static inline void do_raw_spin_lock(raw_spinlock_t *lock) __acquires(lock)
 {
 	__acquire(lock);
 	arch_spin_lock(&lock->raw_lock);
-	mmiowb_spin_lock();
-}
-
-#ifndef arch_spin_lock_flags
-#define arch_spin_lock_flags(lock, flags)	arch_spin_lock(lock)
-#endif
-
-static inline void
-do_raw_spin_lock_flags(raw_spinlock_t *lock, unsigned long *flags) __acquires(lock)
-{
-	__acquire(lock);
-	arch_spin_lock_flags(&lock->raw_lock, *flags);
 	mmiowb_spin_lock();
 }
 
@@ -306,8 +298,10 @@ static inline void do_raw_spin_unlock(raw_spinlock_t *lock) __releases(lock)
 	1 : ({ local_irq_restore(flags); 0; }); \
 })
 
-/* Include rwlock functions */
+#ifndef CONFIG_PREEMPT_RT
+/* Include rwlock functions for !RT */
 #include <linux/rwlock.h>
+#endif
 
 /*
  * Pull the _spin_*()/_read_*()/_write_*() functions/declarations:
@@ -318,6 +312,9 @@ static inline void do_raw_spin_unlock(raw_spinlock_t *lock) __releases(lock)
 # include <linux/spinlock_api_up.h>
 #endif
 
+/* Non PREEMPT_RT kernel, map to raw spinlocks: */
+#ifndef CONFIG_PREEMPT_RT
+
 /*
  * Map the spin_lock functions to the raw variants for PREEMPT_RT=n
  */
@@ -327,11 +324,25 @@ static __always_inline raw_spinlock_t *spinlock_check(spinlock_t *lock)
 	return &lock->rlock;
 }
 
-#define spin_lock_init(_lock)				\
-do {							\
-	spinlock_check(_lock);				\
-	raw_spin_lock_init(&(_lock)->rlock);		\
+#ifdef CONFIG_DEBUG_SPINLOCK
+
+# define spin_lock_init(lock)					\
+do {								\
+	static struct lock_class_key __key;			\
+								\
+	__raw_spin_lock_init(spinlock_check(lock),		\
+			     #lock, &__key, LD_WAIT_CONFIG);	\
 } while (0)
+
+#else
+
+# define spin_lock_init(_lock)			\
+do {						\
+	spinlock_check(_lock);			\
+	*(_lock) = __SPIN_LOCK_UNLOCKED(_lock);	\
+} while (0)
+
+#endif
 
 static __always_inline void spin_lock(spinlock_t *lock)
 {
@@ -437,6 +448,10 @@ static __always_inline int spin_is_contended(spinlock_t *lock)
 }
 
 #define assert_spin_locked(lock)	assert_raw_spin_locked(&(lock)->rlock)
+
+#else  /* !CONFIG_PREEMPT_RT */
+# include <linux/spinlock_rt.h>
+#endif /* CONFIG_PREEMPT_RT */
 
 /*
  * Pull the atomic_t declaration:

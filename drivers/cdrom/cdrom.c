@@ -284,7 +284,6 @@
 #include <linux/times.h>
 #include <linux/uaccess.h>
 #include <scsi/scsi_common.h>
-#include <scsi/scsi_request.h>
 
 /* used to tell the module to turn on full debugging messages */
 static bool debug;
@@ -343,6 +342,12 @@ do {							\
 static void cdrom_sysctl_register(void);
 
 static LIST_HEAD(cdrom_list);
+
+static void signal_media_change(struct cdrom_device_info *cdi)
+{
+	cdi->mc_flags = 0x3; /* set media changed bits, on both queues */
+	cdi->last_media_change_ms = ktime_to_ms(ktime_get());
+}
 
 int cdrom_dummy_generic_packet(struct cdrom_device_info *cdi,
 			       struct packet_command *cgc)
@@ -586,7 +591,7 @@ static int cdrom_mrw_set_lba_space(struct cdrom_device_info *cdi, int space)
 	return 0;
 }
 
-int register_cdrom(struct cdrom_device_info *cdi)
+int register_cdrom(struct gendisk *disk, struct cdrom_device_info *cdi)
 {
 	static char banner_printed;
 	const struct cdrom_device_ops *cdo = cdi->ops;
@@ -601,8 +606,11 @@ int register_cdrom(struct cdrom_device_info *cdi)
 		cdrom_sysctl_register();
 	}
 
+	cdi->disk = disk;
+	disk->cdi = cdi;
+
 	ENSURE(cdo, drive_status, CDC_DRIVE_STATUS);
-	if (cdo->check_events == NULL && cdo->media_changed == NULL)
+	if (cdo->check_events == NULL)
 		WARN_ON_ONCE(cdo->capability & (CDC_MEDIA_CHANGED | CDC_SELECT_DISC));
 	ENSURE(cdo, tray_move, CDC_CLOSE_TRAY | CDC_OPEN_TRAY);
 	ENSURE(cdo, lock_door, CDC_LOCK);
@@ -613,6 +621,7 @@ int register_cdrom(struct cdrom_device_info *cdi)
 	ENSURE(cdo, generic_packet, CDC_GENERIC_PACKET);
 	cdi->mc_flags = 0;
 	cdi->options = CDO_USE_FFLAGS;
+	cdi->last_media_change_ms = ktime_to_ms(ktime_get());
 
 	if (autoclose == 1 && CDROM_CAN(CDC_CLOSE_TRAY))
 		cdi->options |= (int) CDO_AUTO_CLOSE;
@@ -626,7 +635,7 @@ int register_cdrom(struct cdrom_device_info *cdi)
 	if (CDROM_CAN(CDC_MRW_W))
 		cdi->exit = cdrom_mrw_exit;
 
-	if (cdi->disk)
+	if (cdi->ops->read_cdda_bpc)
 		cdi->cdda_method = CDDA_BPC_FULL;
 	else
 		cdi->cdda_method = CDDA_OLD;
@@ -861,7 +870,7 @@ static void cdrom_mmc3_profile(struct cdrom_device_info *cdi)
 {
 	struct packet_command cgc;
 	char buffer[32];
-	int ret, mmc3_profile;
+	int mmc3_profile;
 
 	init_cdrom_command(&cgc, buffer, sizeof(buffer), CGC_DATA_READ);
 
@@ -871,7 +880,7 @@ static void cdrom_mmc3_profile(struct cdrom_device_info *cdi)
 	cgc.cmd[8] = sizeof(buffer);		/* Allocation Length */
 	cgc.quiet = 1;
 
-	if ((ret = cdi->ops->generic_packet(cdi, &cgc)))
+	if (cdi->ops->generic_packet(cdi, &cgc))
 		mmc3_profile = 0xffff;
 	else
 		mmc3_profile = (buffer[6] << 8) | buffer[7];
@@ -1356,7 +1365,6 @@ out_free:
  */
 int cdrom_number_of_slots(struct cdrom_device_info *cdi) 
 {
-	int status;
 	int nslots = 1;
 	struct cdrom_changer_info *info;
 
@@ -1368,7 +1376,7 @@ int cdrom_number_of_slots(struct cdrom_device_info *cdi)
 	if (!info)
 		return -ENOMEM;
 
-	if ((status = cdrom_read_mech_status(cdi, info)) == 0)
+	if (cdrom_read_mech_status(cdi, info) == 0)
 		nslots = info->hdr.nslots;
 
 	kfree(info);
@@ -1416,12 +1424,9 @@ static int cdrom_select_disc(struct cdrom_device_info *cdi, int slot)
 
 	if (cdi->ops->check_events)
 		cdi->ops->check_events(cdi, 0, slot);
-	else
-		cdi->ops->media_changed(cdi, slot);
 
 	if (slot == CDSL_NONE) {
-		/* set media changed bits, on both queues */
-		cdi->mc_flags = 0x3;
+		signal_media_change(cdi);
 		return cdrom_load_unload(cdi, -1);
 	}
 
@@ -1454,7 +1459,7 @@ static int cdrom_select_disc(struct cdrom_device_info *cdi, int slot)
 		slot = curslot;
 
 	/* set media changed bits on both queues */
-	cdi->mc_flags = 0x3;
+	signal_media_change(cdi);
 	if ((ret = cdrom_load_unload(cdi, slot)))
 		return ret;
 
@@ -1514,34 +1519,19 @@ int media_changed(struct cdrom_device_info *cdi, int queue)
 		return ret;
 
 	/* changed since last call? */
-	if (cdi->ops->check_events) {
-		BUG_ON(!queue);	/* shouldn't be called from VFS path */
-		cdrom_update_events(cdi, DISK_EVENT_MEDIA_CHANGE);
-		changed = cdi->ioctl_events & DISK_EVENT_MEDIA_CHANGE;
-		cdi->ioctl_events = 0;
-	} else
-		changed = cdi->ops->media_changed(cdi, CDSL_CURRENT);
+	BUG_ON(!queue);	/* shouldn't be called from VFS path */
+	cdrom_update_events(cdi, DISK_EVENT_MEDIA_CHANGE);
+	changed = cdi->ioctl_events & DISK_EVENT_MEDIA_CHANGE;
+	cdi->ioctl_events = 0;
 
 	if (changed) {
-		cdi->mc_flags = 0x3;    /* set bit on both queues */
+		signal_media_change(cdi);
 		ret |= 1;
 		cdi->media_written = 0;
 	}
 
 	cdi->mc_flags &= ~mask;         /* clear bit */
 	return ret;
-}
-
-int cdrom_media_changed(struct cdrom_device_info *cdi)
-{
-	/* This talks to the VFS, which doesn't like errors - just 1 or 0.  
-	 * Returning "0" is always safe (media hasn't been changed). Do that 
-	 * if the low-level cdrom driver dosn't support media changed. */ 
-	if (cdi == NULL || cdi->ops->media_changed == NULL)
-		return 0;
-	if (!CDROM_CAN(CDC_MEDIA_CHANGED))
-		return 0;
-	return media_changed(cdi, 0);
 }
 
 /* Requests to the low-level drivers will /always/ be done in the
@@ -2173,81 +2163,26 @@ static int cdrom_read_cdda_old(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 			       int lba, int nframes)
 {
-	struct request_queue *q = cdi->disk->queue;
-	struct request *rq;
-	struct scsi_request *req;
-	struct bio *bio;
-	unsigned int len;
+	int max_frames = (queue_max_sectors(cdi->disk->queue) << 9) /
+			  CD_FRAMESIZE_RAW;
 	int nr, ret = 0;
-
-	if (!q)
-		return -ENXIO;
-
-	if (!blk_queue_scsi_passthrough(q)) {
-		WARN_ONCE(true,
-			  "Attempt read CDDA info through a non-SCSI queue\n");
-		return -EINVAL;
-	}
 
 	cdi->last_sense = 0;
 
 	while (nframes) {
-		nr = nframes;
 		if (cdi->cdda_method == CDDA_BPC_SINGLE)
 			nr = 1;
-		if (nr * CD_FRAMESIZE_RAW > (queue_max_sectors(q) << 9))
-			nr = (queue_max_sectors(q) << 9) / CD_FRAMESIZE_RAW;
+		else
+			nr = min(nframes, max_frames);
 
-		len = nr * CD_FRAMESIZE_RAW;
-
-		rq = blk_get_request(q, REQ_OP_SCSI_IN, 0);
-		if (IS_ERR(rq)) {
-			ret = PTR_ERR(rq);
-			break;
-		}
-		req = scsi_req(rq);
-
-		ret = blk_rq_map_user(q, rq, NULL, ubuf, len, GFP_KERNEL);
-		if (ret) {
-			blk_put_request(rq);
-			break;
-		}
-
-		req->cmd[0] = GPCMD_READ_CD;
-		req->cmd[1] = 1 << 2;
-		req->cmd[2] = (lba >> 24) & 0xff;
-		req->cmd[3] = (lba >> 16) & 0xff;
-		req->cmd[4] = (lba >>  8) & 0xff;
-		req->cmd[5] = lba & 0xff;
-		req->cmd[6] = (nr >> 16) & 0xff;
-		req->cmd[7] = (nr >>  8) & 0xff;
-		req->cmd[8] = nr & 0xff;
-		req->cmd[9] = 0xf8;
-
-		req->cmd_len = 12;
-		rq->timeout = 60 * HZ;
-		bio = rq->bio;
-
-		blk_execute_rq(q, cdi->disk, rq, 0);
-		if (scsi_req(rq)->result) {
-			struct scsi_sense_hdr sshdr;
-
-			ret = -EIO;
-			scsi_normalize_sense(req->sense, req->sense_len,
-					     &sshdr);
-			cdi->last_sense = sshdr.sense_key;
-		}
-
-		if (blk_rq_unmap_user(bio))
-			ret = -EFAULT;
-		blk_put_request(rq);
-
+		ret = cdi->ops->read_cdda_bpc(cdi, ubuf, lba, nr,
+					      &cdi->last_sense);
 		if (ret)
 			break;
 
 		nframes -= nr;
 		lba += nr;
-		ubuf += len;
+		ubuf += (nr * CD_FRAMESIZE_RAW);
 	}
 
 	return ret;
@@ -2292,37 +2227,46 @@ retry:
 	return cdrom_read_cdda_old(cdi, ubuf, lba, nframes);	
 }
 
-static int cdrom_ioctl_multisession(struct cdrom_device_info *cdi,
-		void __user *argp)
+int cdrom_multisession(struct cdrom_device_info *cdi,
+		struct cdrom_multisession *info)
 {
-	struct cdrom_multisession ms_info;
 	u8 requested_format;
 	int ret;
-
-	cd_dbg(CD_DO_IOCTL, "entering CDROMMULTISESSION\n");
 
 	if (!(cdi->ops->capability & CDC_MULTI_SESSION))
 		return -ENOSYS;
 
-	if (copy_from_user(&ms_info, argp, sizeof(ms_info)))
-		return -EFAULT;
-
-	requested_format = ms_info.addr_format;
+	requested_format = info->addr_format;
 	if (requested_format != CDROM_MSF && requested_format != CDROM_LBA)
 		return -EINVAL;
-	ms_info.addr_format = CDROM_LBA;
+	info->addr_format = CDROM_LBA;
 
-	ret = cdi->ops->get_last_session(cdi, &ms_info);
+	ret = cdi->ops->get_last_session(cdi, info);
+	if (!ret)
+		sanitize_format(&info->addr, &info->addr_format,
+				requested_format);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(cdrom_multisession);
+
+static int cdrom_ioctl_multisession(struct cdrom_device_info *cdi,
+		void __user *argp)
+{
+	struct cdrom_multisession info;
+	int ret;
+
+	cd_dbg(CD_DO_IOCTL, "entering CDROMMULTISESSION\n");
+
+	if (copy_from_user(&info, argp, sizeof(info)))
+		return -EFAULT;
+	ret = cdrom_multisession(cdi, &info);
 	if (ret)
 		return ret;
-
-	sanitize_format(&ms_info.addr, &ms_info.addr_format, requested_format);
-
-	if (copy_to_user(argp, &ms_info, sizeof(ms_info)))
+	if (copy_to_user(argp, &info, sizeof(info)))
 		return -EFAULT;
 
 	cd_dbg(CD_DO_IOCTL, "CDROMMULTISESSION successful\n");
-	return 0;
+	return ret;
 }
 
 static int cdrom_ioctl_eject(struct cdrom_device_info *cdi)
@@ -2394,6 +2338,49 @@ static int cdrom_ioctl_media_changed(struct cdrom_device_info *cdi,
 		ret = info->slots[arg].change;
 	kfree(info);
 	return ret;
+}
+
+/*
+ * Media change detection with timing information.
+ *
+ * arg is a pointer to a cdrom_timed_media_change_info struct.
+ * arg->last_media_change may be set by calling code to signal
+ * the timestamp (in ms) of the last known media change (by the caller).
+ * Upon successful return, ioctl call will set arg->last_media_change
+ * to the latest media change timestamp known by the kernel/driver
+ * and set arg->has_changed to 1 if that timestamp is more recent
+ * than the timestamp set by the caller.
+ */
+static int cdrom_ioctl_timed_media_change(struct cdrom_device_info *cdi,
+		unsigned long arg)
+{
+	int ret;
+	struct cdrom_timed_media_change_info __user *info;
+	struct cdrom_timed_media_change_info tmp_info;
+
+	if (!CDROM_CAN(CDC_MEDIA_CHANGED))
+		return -ENOSYS;
+
+	info = (struct cdrom_timed_media_change_info __user *)arg;
+	cd_dbg(CD_DO_IOCTL, "entering CDROM_TIMED_MEDIA_CHANGE\n");
+
+	ret = cdrom_ioctl_media_changed(cdi, CDSL_CURRENT);
+	if (ret < 0)
+		return ret;
+
+	if (copy_from_user(&tmp_info, info, sizeof(tmp_info)) != 0)
+		return -EFAULT;
+
+	tmp_info.media_flags = 0;
+	if (tmp_info.last_media_change - cdi->last_media_change_ms < 0)
+		tmp_info.media_flags |= MEDIA_CHANGED_FLAG;
+
+	tmp_info.last_media_change = cdi->last_media_change_ms;
+
+	if (copy_to_user(info, &tmp_info, sizeof(*info)) != 0)
+		return -EFAULT;
+
+	return 0;
 }
 
 static int cdrom_ioctl_set_options(struct cdrom_device_info *cdi,
@@ -2663,32 +2650,37 @@ static int cdrom_ioctl_read_tochdr(struct cdrom_device_info *cdi,
 	return 0;
 }
 
+int cdrom_read_tocentry(struct cdrom_device_info *cdi,
+		struct cdrom_tocentry *entry)
+{
+	u8 requested_format = entry->cdte_format;
+	int ret;
+
+	if (requested_format != CDROM_MSF && requested_format != CDROM_LBA)
+		return -EINVAL;
+
+	/* make interface to low-level uniform */
+	entry->cdte_format = CDROM_MSF;
+	ret = cdi->ops->audio_ioctl(cdi, CDROMREADTOCENTRY, entry);
+	if (!ret)
+		sanitize_format(&entry->cdte_addr, &entry->cdte_format,
+				requested_format);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(cdrom_read_tocentry);
+
 static int cdrom_ioctl_read_tocentry(struct cdrom_device_info *cdi,
 		void __user *argp)
 {
 	struct cdrom_tocentry entry;
-	u8 requested_format;
 	int ret;
-
-	/* cd_dbg(CD_DO_IOCTL, "entering CDROMREADTOCENTRY\n"); */
 
 	if (copy_from_user(&entry, argp, sizeof(entry)))
 		return -EFAULT;
-
-	requested_format = entry.cdte_format;
-	if (requested_format != CDROM_MSF && requested_format != CDROM_LBA)
-		return -EINVAL;
-	/* make interface to low-level uniform */
-	entry.cdte_format = CDROM_MSF;
-	ret = cdi->ops->audio_ioctl(cdi, CDROMREADTOCENTRY, &entry);
-	if (ret)
-		return ret;
-	sanitize_format(&entry.cdte_addr, &entry.cdte_format, requested_format);
-
-	if (copy_to_user(argp, &entry, sizeof(entry)))
+	ret = cdrom_read_tocentry(cdi, &entry);
+	if (!ret && copy_to_user(argp, &entry, sizeof(entry)))
 		return -EFAULT;
-	/* cd_dbg(CD_DO_IOCTL, "CDROMREADTOCENTRY successful\n"); */
-	return 0;
+	return ret;
 }
 
 static int cdrom_ioctl_play_msf(struct cdrom_device_info *cdi,
@@ -2996,13 +2988,15 @@ static noinline int mmc_ioctl_cdrom_read_data(struct cdrom_device_info *cdi,
 		 * SCSI-II devices are not required to support
 		 * READ_CD, so let's try switching block size
 		 */
-		/* FIXME: switch back again... */
-		ret = cdrom_switch_blocksize(cdi, blocksize);
-		if (ret)
-			goto out;
+		if (blocksize != CD_FRAMESIZE) {
+			ret = cdrom_switch_blocksize(cdi, blocksize);
+			if (ret)
+				goto out;
+		}
 		cgc->sshdr = NULL;
 		ret = cdrom_read_cd(cdi, cgc, lba, blocksize, 1);
-		ret |= cdrom_switch_blocksize(cdi, blocksize);
+		if (blocksize != CD_FRAMESIZE)
+			ret |= cdrom_switch_blocksize(cdi, CD_FRAMESIZE);
 	}
 	if (!ret && copy_to_user(arg, cgc->buffer, blocksize))
 		ret = -EFAULT;
@@ -3017,9 +3011,31 @@ static noinline int mmc_ioctl_cdrom_read_audio(struct cdrom_device_info *cdi,
 	struct cdrom_read_audio ra;
 	int lba;
 
-	if (copy_from_user(&ra, (struct cdrom_read_audio __user *)arg,
-			   sizeof(ra)))
-		return -EFAULT;
+#ifdef CONFIG_COMPAT
+	if (in_compat_syscall()) {
+		struct compat_cdrom_read_audio {
+			union cdrom_addr	addr;
+			u8			addr_format;
+			compat_int_t		nframes;
+			compat_caddr_t		buf;
+		} ra32;
+
+		if (copy_from_user(&ra32, arg, sizeof(ra32)))
+			return -EFAULT;
+
+		ra = (struct cdrom_read_audio) {
+			.addr		= ra32.addr,
+			.addr_format	= ra32.addr_format,
+			.nframes	= ra32.nframes,
+			.buf		= compat_ptr(ra32.buf),
+		};
+	} else
+#endif
+	{
+		if (copy_from_user(&ra, (struct cdrom_read_audio __user *)arg,
+				   sizeof(ra)))
+			return -EFAULT;
+	}
 
 	if (ra.addr_format == CDROM_MSF)
 		lba = msf_to_lba(ra.addr.msf.minute,
@@ -3271,9 +3287,10 @@ static noinline int mmc_ioctl_cdrom_last_written(struct cdrom_device_info *cdi,
 	ret = cdrom_get_last_written(cdi, &last);
 	if (ret)
 		return ret;
-	if (copy_to_user((long __user *)arg, &last, sizeof(last)))
-		return -EFAULT;
-	return 0;
+	if (in_compat_syscall())
+		return put_user(last, (__s32 __user *)arg);
+
+	return put_user(last, (long __user *)arg);
 }
 
 static int mmc_ioctl(struct cdrom_device_info *cdi, unsigned int cmd,
@@ -3332,13 +3349,6 @@ int cdrom_ioctl(struct cdrom_device_info *cdi, struct block_device *bdev,
 	void __user *argp = (void __user *)arg;
 	int ret;
 
-	/*
-	 * Try the generic SCSI command ioctl's first.
-	 */
-	ret = scsi_cmd_blk_ioctl(bdev, mode, cmd, argp);
-	if (ret != -ENOTTY)
-		return ret;
-
 	switch (cmd) {
 	case CDROMMULTISESSION:
 		return cdrom_ioctl_multisession(cdi, argp);
@@ -3350,6 +3360,8 @@ int cdrom_ioctl(struct cdrom_device_info *cdi, struct block_device *bdev,
 		return cdrom_ioctl_eject_sw(cdi, arg);
 	case CDROM_MEDIA_CHANGED:
 		return cdrom_ioctl_media_changed(cdi, arg);
+	case CDROM_TIMED_MEDIA_CHANGE:
+		return cdrom_ioctl_timed_media_change(cdi, arg);
 	case CDROM_SET_OPTIONS:
 		return cdrom_ioctl_set_options(cdi, arg);
 	case CDROM_CLEAR_OPTIONS:
@@ -3424,7 +3436,6 @@ EXPORT_SYMBOL(unregister_cdrom);
 EXPORT_SYMBOL(cdrom_open);
 EXPORT_SYMBOL(cdrom_release);
 EXPORT_SYMBOL(cdrom_ioctl);
-EXPORT_SYMBOL(cdrom_media_changed);
 EXPORT_SYMBOL(cdrom_number_of_slots);
 EXPORT_SYMBOL(cdrom_mode_select);
 EXPORT_SYMBOL(cdrom_mode_sense);
@@ -3495,7 +3506,7 @@ static int cdrom_print_info(const char *header, int val, char *info,
 }
 
 static int cdrom_sysctl_info(struct ctl_table *ctl, int write,
-                           void __user *buffer, size_t *lenp, loff_t *ppos)
+                           void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int pos;
 	char *info = cdrom_sysctl_settings.info;
@@ -3608,7 +3619,7 @@ static void cdrom_update_settings(void)
 }
 
 static int cdrom_sysctl_handler(struct ctl_table *ctl, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
+				void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int ret;
 	
@@ -3678,27 +3689,6 @@ static struct ctl_table cdrom_table[] = {
 	},
 	{ }
 };
-
-static struct ctl_table cdrom_cdrom_table[] = {
-	{
-		.procname	= "cdrom",
-		.maxlen		= 0,
-		.mode		= 0555,
-		.child		= cdrom_table,
-	},
-	{ }
-};
-
-/* Make sure that /proc/sys/dev is there */
-static struct ctl_table cdrom_root_table[] = {
-	{
-		.procname	= "dev",
-		.maxlen		= 0,
-		.mode		= 0555,
-		.child		= cdrom_cdrom_table,
-	},
-	{ }
-};
 static struct ctl_table_header *cdrom_sysctl_header;
 
 static void cdrom_sysctl_register(void)
@@ -3708,7 +3698,7 @@ static void cdrom_sysctl_register(void)
 	if (!atomic_add_unless(&initialized, 1, 1))
 		return;
 
-	cdrom_sysctl_header = register_sysctl_table(cdrom_root_table);
+	cdrom_sysctl_header = register_sysctl("dev/cdrom", cdrom_table);
 
 	/* set the defaults */
 	cdrom_sysctl_settings.autoclose = autoclose;

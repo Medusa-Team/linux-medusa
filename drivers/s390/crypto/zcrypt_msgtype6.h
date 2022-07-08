@@ -19,8 +19,6 @@
 #define MSGTYPE06_VARIANT_NORNG		1
 #define MSGTYPE06_VARIANT_EP11		2
 
-#define MSGTYPE06_MAX_MSG_SIZE		(12*1024)
-
 /**
  * The type 6 message family is associated with CEXxC/CEXxP cards.
  *
@@ -96,11 +94,14 @@ struct type86_fmt2_ext {
 	unsigned int	  offset4;	/* 0x00000000			*/
 } __packed;
 
-unsigned int get_cprb_fc(struct ica_xcRB *, struct ap_message *,
-			 unsigned int *, unsigned short **);
-unsigned int get_ep11cprb_fc(struct ep11_urb *, struct ap_message *,
-			     unsigned int *);
-unsigned int get_rng_fc(struct ap_message *, int *, unsigned int *);
+int prep_cca_ap_msg(bool userspace, struct ica_xcRB *xcrb,
+		    struct ap_message *ap_msg,
+		    unsigned int *fc, unsigned short **dom);
+int prep_ep11_ap_msg(bool userspace, struct ep11_urb *xcrb,
+		     struct ap_message *ap_msg,
+		     unsigned int *fc, unsigned int *dom);
+int prep_rng_ap_msg(struct ap_message *ap_msg,
+		    int *fc, unsigned int *dom);
 
 #define LOW	10
 #define MEDIUM	100
@@ -127,7 +128,7 @@ static inline void rng_type6CPRB_msgX(struct ap_message *ap_msg,
 		char rule[8];
 		short int verb_length;
 		short int key_length;
-	} __packed * msg = ap_msg->message;
+	} __packed * msg = ap_msg->msg;
 	static struct type6_hdr static_type6_hdrX = {
 		.type		= 0x06,
 		.offset1	= 0x00000058,
@@ -154,7 +155,7 @@ static inline void rng_type6CPRB_msgX(struct ap_message *ap_msg,
 	memcpy(msg->rule, "RANDOM  ", 8);
 	msg->verb_length = 0x02;
 	msg->key_length = 0x02;
-	ap_msg->length = sizeof(*msg);
+	ap_msg->len = sizeof(*msg);
 	*domain = (unsigned short)msg->cprbx.domain;
 }
 

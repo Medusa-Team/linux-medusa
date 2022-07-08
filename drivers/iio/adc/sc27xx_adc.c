@@ -307,7 +307,7 @@ static int sc27xx_adc_convert_volt(struct sc27xx_adc_data *data, int channel,
 
 	sc27xx_adc_volt_ratio(data, channel, scale, &numerator, &denominator);
 
-	return (volt * denominator + numerator / 2) / numerator;
+	return DIV_ROUND_CLOSEST(volt * denominator, numerator);
 }
 
 static int sc27xx_adc_read_processed(struct sc27xx_adc_data *data,
@@ -533,7 +533,6 @@ static int sc27xx_adc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	indio_dev->dev.parent = dev;
 	indio_dev->name = dev_name(dev);
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->info = &sc27xx_info;
@@ -550,6 +549,7 @@ static const struct of_device_id sc27xx_adc_of_match[] = {
 	{ .compatible = "sprd,sc2731-adc", },
 	{ }
 };
+MODULE_DEVICE_TABLE(of, sc27xx_adc_of_match);
 
 static struct platform_driver sc27xx_adc_driver = {
 	.probe = sc27xx_adc_probe,

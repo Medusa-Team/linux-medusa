@@ -77,11 +77,11 @@ Side-channel attacks
 
 fscrypt is only resistant to side-channel attacks, such as timing or
 electromagnetic attacks, to the extent that the underlying Linux
-Cryptographic API algorithms are.  If a vulnerable algorithm is used,
-such as a table-based implementation of AES, it may be possible for an
-attacker to mount a side channel attack against the online system.
-Side channel attacks may also be mounted against applications
-consuming decrypted data.
+Cryptographic API algorithms or inline encryption hardware are.  If a
+vulnerable algorithm is used, such as a table-based implementation of
+AES, it may be possible for an attacker to mount a side channel attack
+against the online system.  Side channel attacks may also be mounted
+against applications consuming decrypted data.
 
 Unauthorized file access
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -176,11 +176,11 @@ Master Keys
 
 Each encrypted directory tree is protected by a *master key*.  Master
 keys can be up to 64 bytes long, and must be at least as long as the
-greater of the key length needed by the contents and filenames
-encryption modes being used.  For example, if AES-256-XTS is used for
-contents encryption, the master key must be 64 bytes (512 bits).  Note
-that the XTS mode is defined to require a key twice as long as that
-required by the underlying block cipher.
+greater of the security strength of the contents and filenames
+encryption modes being used.  For example, if any AES-256 mode is
+used, the master key must be at least 256 bits, i.e. 32 bytes.  A
+stricter requirement applies if the key is used by a v1 encryption
+policy and AES-256-XTS is used; such keys must be 64 bytes.
 
 To "unlock" an encrypted directory tree, userspace must provide the
 appropriate master key.  There can be any number of master keys, each
@@ -234,8 +234,8 @@ HKDF is more flexible, is nonreversible, and evenly distributes
 entropy from the master key.  HKDF is also standardized and widely
 used by other software, whereas the AES-128-ECB based KDF is ad-hoc.
 
-Per-file keys
--------------
+Per-file encryption keys
+------------------------
 
 Since each master key can protect many files, it is necessary to
 "tweak" the encryption of each file so that the same plaintext in two
@@ -268,9 +268,9 @@ is greater than that of an AES-256-XTS key.
 Therefore, to improve performance and save memory, for Adiantum a
 "direct key" configuration is supported.  When the user has enabled
 this by setting FSCRYPT_POLICY_FLAG_DIRECT_KEY in the fscrypt policy,
-per-file keys are not used.  Instead, whenever any data (contents or
-filenames) is encrypted, the file's 16-byte nonce is included in the
-IV.  Moreover:
+per-file encryption keys are not used.  Instead, whenever any data
+(contents or filenames) is encrypted, the file's 16-byte nonce is
+included in the IV.  Moreover:
 
 - For v1 encryption policies, the encryption is done directly with the
   master key.  Because of this, users **must not** use the same master
@@ -292,8 +292,22 @@ files' data differently, inode numbers are included in the IVs.
 Consequently, shrinking the filesystem may not be allowed.
 
 This format is optimized for use with inline encryption hardware
-compliant with the UFS or eMMC standards, which support only 64 IV
-bits per I/O request and may have only a small number of keyslots.
+compliant with the UFS standard, which supports only 64 IV bits per
+I/O request and may have only a small number of keyslots.
+
+IV_INO_LBLK_32 policies
+-----------------------
+
+IV_INO_LBLK_32 policies work like IV_INO_LBLK_64, except that for
+IV_INO_LBLK_32, the inode number is hashed with SipHash-2-4 (where the
+SipHash key is derived from the master key) and added to the file
+logical block number mod 2^32 to produce a 32-bit IV.
+
+This format is optimized for use with inline encryption hardware
+compliant with the eMMC v5.2 standard, which supports only 32 IV bits
+per I/O request and may have only a small number of keyslots.  This
+format results in some level of IV reuse, so it should only be used
+when necessary due to hardware limitations.
 
 Key identifiers
 ---------------
@@ -301,6 +315,16 @@ Key identifiers
 For master keys used for v2 encryption policies, a unique 16-byte "key
 identifier" is also derived using the KDF.  This value is stored in
 the clear, since it is needed to reliably identify the key itself.
+
+Dirhash keys
+------------
+
+For directories that are indexed using a secret-keyed dirhash over the
+plaintext filenames, the KDF is also used to derive a 128-bit
+SipHash-2-4 key per directory in order to hash filenames.  This works
+just like deriving a per-file encryption key, except that a different
+KDF context is used.  Currently, only casefolded ("case-insensitive")
+encrypted directories use this style of hashing.
 
 Encryption modes and usage
 ==========================
@@ -325,11 +349,11 @@ used.
 Adiantum is a (primarily) stream cipher-based mode that is fast even
 on CPUs without dedicated crypto instructions.  It's also a true
 wide-block mode, unlike XTS.  It can also eliminate the need to derive
-per-file keys.  However, it depends on the security of two primitives,
-XChaCha12 and AES-256, rather than just one.  See the paper
-"Adiantum: length-preserving encryption for entry-level processors"
-(https://eprint.iacr.org/2018/720.pdf) for more details.  To use
-Adiantum, CONFIG_CRYPTO_ADIANTUM must be enabled.  Also, fast
+per-file encryption keys.  However, it depends on the security of two
+primitives, XChaCha12 and AES-256, rather than just one.  See the
+paper "Adiantum: length-preserving encryption for entry-level
+processors" (https://eprint.iacr.org/2018/720.pdf) for more details.
+To use Adiantum, CONFIG_CRYPTO_ADIANTUM must be enabled.  Also, fast
 implementations of ChaCha and NHPoly1305 should be enabled, e.g.
 CONFIG_CRYPTO_CHACHA20_NEON and CONFIG_CRYPTO_NHPOLY1305_NEON for ARM.
 
@@ -358,6 +382,10 @@ a little endian number, except that:
 - With `IV_INO_LBLK_64 policies`_, the logical block number is limited
   to 32 bits and is placed in bits 0-31 of the IV.  The inode number
   (which is also limited to 32 bits) is placed in bits 32-63.
+
+- With `IV_INO_LBLK_32 policies`_, the logical block number is limited
+  to 32 bits and is placed in bits 0-31 of the IV.  The inode number
+  is then hashed and added mod 2^32.
 
 Note that because file logical block numbers are included in the IVs,
 filesystems must enforce that blocks are never shifted around within
@@ -408,9 +436,9 @@ FS_IOC_SET_ENCRYPTION_POLICY
 
 The FS_IOC_SET_ENCRYPTION_POLICY ioctl sets an encryption policy on an
 empty directory or verifies that a directory or regular file already
-has the specified encryption policy.  It takes in a pointer to a
-:c:type:`struct fscrypt_policy_v1` or a :c:type:`struct
-fscrypt_policy_v2`, defined as follows::
+has the specified encryption policy.  It takes in a pointer to
+struct fscrypt_policy_v1 or struct fscrypt_policy_v2, defined as
+follows::
 
     #define FSCRYPT_POLICY_V1               0
     #define FSCRYPT_KEY_DESCRIPTOR_SIZE     8
@@ -436,11 +464,11 @@ fscrypt_policy_v2`, defined as follows::
 
 This structure must be initialized as follows:
 
-- ``version`` must be FSCRYPT_POLICY_V1 (0) if the struct is
-  :c:type:`fscrypt_policy_v1` or FSCRYPT_POLICY_V2 (2) if the struct
-  is :c:type:`fscrypt_policy_v2`.  (Note: we refer to the original
-  policy version as "v1", though its version code is really 0.)  For
-  new encrypted directories, use v2 policies.
+- ``version`` must be FSCRYPT_POLICY_V1 (0) if
+  struct fscrypt_policy_v1 is used or FSCRYPT_POLICY_V2 (2) if
+  struct fscrypt_policy_v2 is used. (Note: we refer to the original
+  policy version as "v1", though its version code is really 0.)
+  For new encrypted directories, use v2 policies.
 
 - ``contents_encryption_mode`` and ``filenames_encryption_mode`` must
   be set to constants from ``<linux/fscrypt.h>`` which identify the
@@ -455,8 +483,15 @@ This structure must be initialized as follows:
     (0x3).
   - FSCRYPT_POLICY_FLAG_DIRECT_KEY: See `DIRECT_KEY policies`_.
   - FSCRYPT_POLICY_FLAG_IV_INO_LBLK_64: See `IV_INO_LBLK_64
-    policies`_.  This is mutually exclusive with DIRECT_KEY and is not
-    supported on v1 policies.
+    policies`_.
+  - FSCRYPT_POLICY_FLAG_IV_INO_LBLK_32: See `IV_INO_LBLK_32
+    policies`_.
+
+  v1 encryption policies only support the PAD_* and DIRECT_KEY flags.
+  The other flags are only supported by v2 encryption policies.
+
+  The DIRECT_KEY, IV_INO_LBLK_64, and IV_INO_LBLK_32 flags are
+  mutually exclusive.
 
 - For v2 encryption policies, ``__reserved`` must be zeroed.
 
@@ -473,9 +508,9 @@ This structure must be initialized as follows:
   replaced with ``master_key_identifier``, which is longer and cannot
   be arbitrarily chosen.  Instead, the key must first be added using
   `FS_IOC_ADD_ENCRYPTION_KEY`_.  Then, the ``key_spec.u.identifier``
-  the kernel returned in the :c:type:`struct fscrypt_add_key_arg` must
-  be used as the ``master_key_identifier`` in the :c:type:`struct
-  fscrypt_policy_v2`.
+  the kernel returned in the struct fscrypt_add_key_arg must
+  be used as the ``master_key_identifier`` in
+  struct fscrypt_policy_v2.
 
 If the file is not yet encrypted, then FS_IOC_SET_ENCRYPTION_POLICY
 verifies that the file is an empty directory.  If so, the specified
@@ -513,7 +548,9 @@ FS_IOC_SET_ENCRYPTION_POLICY can fail with the following errors:
 - ``EEXIST``: the file is already encrypted with an encryption policy
   different from the one specified
 - ``EINVAL``: an invalid encryption policy was specified (invalid
-  version, mode(s), or flags; or reserved bits were set)
+  version, mode(s), or flags; or reserved bits were set); or a v1
+  encryption policy was specified but the directory has the casefold
+  flag enabled (casefolding is incompatible with v1 policies).
 - ``ENOKEY``: a v2 encryption policy was specified, but the key with
   the specified ``master_key_identifier`` has not been added, nor does
   the process have the CAP_FOWNER capability in the initial user
@@ -553,7 +590,7 @@ FS_IOC_GET_ENCRYPTION_POLICY_EX
 The FS_IOC_GET_ENCRYPTION_POLICY_EX ioctl retrieves the encryption
 policy, if any, for a directory or regular file.  No additional
 permissions are required beyond the ability to open the file.  It
-takes in a pointer to a :c:type:`struct fscrypt_get_policy_ex_arg`,
+takes in a pointer to struct fscrypt_get_policy_ex_arg,
 defined as follows::
 
     struct fscrypt_get_policy_ex_arg {
@@ -600,9 +637,8 @@ The FS_IOC_GET_ENCRYPTION_POLICY ioctl can also retrieve the
 encryption policy, if any, for a directory or regular file.  However,
 unlike `FS_IOC_GET_ENCRYPTION_POLICY_EX`_,
 FS_IOC_GET_ENCRYPTION_POLICY only supports the original policy
-version.  It takes in a pointer directly to a :c:type:`struct
-fscrypt_policy_v1` rather than a :c:type:`struct
-fscrypt_get_policy_ex_arg`.
+version.  It takes in a pointer directly to struct fscrypt_policy_v1
+rather than struct fscrypt_get_policy_ex_arg.
 
 The error codes for FS_IOC_GET_ENCRYPTION_POLICY are the same as those
 for FS_IOC_GET_ENCRYPTION_POLICY_EX, except that
@@ -621,6 +657,17 @@ from a passphrase or other low-entropy user credential.
 FS_IOC_GET_ENCRYPTION_PWSALT is deprecated.  Instead, prefer to
 generate and manage any needed salt(s) in userspace.
 
+Getting a file's encryption nonce
+---------------------------------
+
+Since Linux v5.7, the ioctl FS_IOC_GET_ENCRYPTION_NONCE is supported.
+On encrypted files and directories it gets the inode's 16-byte nonce.
+On unencrypted files and directories, it fails with ENODATA.
+
+This ioctl can be useful for automated tests which verify that the
+encryption is being done correctly.  It is not needed for normal use
+of fscrypt.
+
 Adding keys
 -----------
 
@@ -632,13 +679,13 @@ the filesystem, making all files on the filesystem which were
 encrypted using that key appear "unlocked", i.e. in plaintext form.
 It can be executed on any file or directory on the target filesystem,
 but using the filesystem's root directory is recommended.  It takes in
-a pointer to a :c:type:`struct fscrypt_add_key_arg`, defined as
-follows::
+a pointer to struct fscrypt_add_key_arg, defined as follows::
 
     struct fscrypt_add_key_arg {
             struct fscrypt_key_specifier key_spec;
             __u32 raw_size;
-            __u32 __reserved[9];
+            __u32 key_id;
+            __u32 __reserved[8];
             __u8 raw[];
     };
 
@@ -655,17 +702,22 @@ follows::
             } u;
     };
 
-:c:type:`struct fscrypt_add_key_arg` must be zeroed, then initialized
+    struct fscrypt_provisioning_key_payload {
+            __u32 type;
+            __u32 __reserved;
+            __u8 raw[];
+    };
+
+struct fscrypt_add_key_arg must be zeroed, then initialized
 as follows:
 
 - If the key is being added for use by v1 encryption policies, then
   ``key_spec.type`` must contain FSCRYPT_KEY_SPEC_TYPE_DESCRIPTOR, and
   ``key_spec.u.descriptor`` must contain the descriptor of the key
   being added, corresponding to the value in the
-  ``master_key_descriptor`` field of :c:type:`struct
-  fscrypt_policy_v1`.  To add this type of key, the calling process
-  must have the CAP_SYS_ADMIN capability in the initial user
-  namespace.
+  ``master_key_descriptor`` field of struct fscrypt_policy_v1.
+  To add this type of key, the calling process must have the
+  CAP_SYS_ADMIN capability in the initial user namespace.
 
   Alternatively, if the key is being added for use by v2 encryption
   policies, then ``key_spec.type`` must contain
@@ -677,9 +729,27 @@ as follows:
   ``Documentation/security/keys/core.rst``).
 
 - ``raw_size`` must be the size of the ``raw`` key provided, in bytes.
+  Alternatively, if ``key_id`` is nonzero, this field must be 0, since
+  in that case the size is implied by the specified Linux keyring key.
+
+- ``key_id`` is 0 if the raw key is given directly in the ``raw``
+  field.  Otherwise ``key_id`` is the ID of a Linux keyring key of
+  type "fscrypt-provisioning" whose payload is
+  struct fscrypt_provisioning_key_payload whose ``raw`` field contains
+  the raw key and whose ``type`` field matches ``key_spec.type``.
+  Since ``raw`` is variable-length, the total size of this key's
+  payload must be ``sizeof(struct fscrypt_provisioning_key_payload)``
+  plus the raw key size.  The process must have Search permission on
+  this key.
+
+  Most users should leave this 0 and specify the raw key directly.
+  The support for specifying a Linux keyring key is intended mainly to
+  allow re-adding keys after a filesystem is unmounted and re-mounted,
+  without having to store the raw keys in userspace memory.
 
 - ``raw`` is a variable-length field which must contain the actual
-  key, ``raw_size`` bytes long.
+  key, ``raw_size`` bytes long.  Alternatively, if ``key_id`` is
+  nonzero, then this field is unused.
 
 For v2 policy keys, the kernel keeps track of which user (identified
 by effective user ID) added the key, and only allows the key to be
@@ -701,11 +771,16 @@ FS_IOC_ADD_ENCRYPTION_KEY can fail with the following errors:
 
 - ``EACCES``: FSCRYPT_KEY_SPEC_TYPE_DESCRIPTOR was specified, but the
   caller does not have the CAP_SYS_ADMIN capability in the initial
-  user namespace
+  user namespace; or the raw key was specified by Linux key ID but the
+  process lacks Search permission on the key.
 - ``EDQUOT``: the key quota for this user would be exceeded by adding
   the key
 - ``EINVAL``: invalid key size or key specifier type, or reserved bits
   were set
+- ``EKEYREJECTED``: the raw key was specified by Linux key ID, but the
+  key has the wrong type
+- ``ENOKEY``: the raw key was specified by Linux key ID, but no key
+  exists with that ID
 - ``ENOTTY``: this type of filesystem does not implement encryption
 - ``EOPNOTSUPP``: the kernel was not configured with encryption
   support for this filesystem, or the filesystem superblock has not
@@ -783,8 +858,8 @@ The FS_IOC_REMOVE_ENCRYPTION_KEY ioctl removes a claim to a master
 encryption key from the filesystem, and possibly removes the key
 itself.  It can be executed on any file or directory on the target
 filesystem, but using the filesystem's root directory is recommended.
-It takes in a pointer to a :c:type:`struct fscrypt_remove_key_arg`,
-defined as follows::
+It takes in a pointer to struct fscrypt_remove_key_arg, defined
+as follows::
 
     struct fscrypt_remove_key_arg {
             struct fscrypt_key_specifier key_spec;
@@ -879,8 +954,8 @@ FS_IOC_GET_ENCRYPTION_KEY_STATUS
 The FS_IOC_GET_ENCRYPTION_KEY_STATUS ioctl retrieves the status of a
 master encryption key.  It can be executed on any file or directory on
 the target filesystem, but using the filesystem's root directory is
-recommended.  It takes in a pointer to a :c:type:`struct
-fscrypt_get_key_status_arg`, defined as follows::
+recommended.  It takes in a pointer to
+struct fscrypt_get_key_status_arg, defined as follows::
 
     struct fscrypt_get_key_status_arg {
             /* input */
@@ -972,12 +1047,12 @@ astute users may notice some differences in behavior:
   may be used to overwrite the source files but isn't guaranteed to be
   effective on all filesystems and storage devices.
 
-- Direct I/O is not supported on encrypted files.  Attempts to use
-  direct I/O on such files will fall back to buffered I/O.
+- Direct I/O is supported on encrypted files only under some
+  circumstances.  For details, see `Direct I/O support`_.
 
-- The fallocate operations FALLOC_FL_COLLAPSE_RANGE,
-  FALLOC_FL_INSERT_RANGE, and FALLOC_FL_ZERO_RANGE are not supported
-  on encrypted files and will fail with EOPNOTSUPP.
+- The fallocate operations FALLOC_FL_COLLAPSE_RANGE and
+  FALLOC_FL_INSERT_RANGE are not supported on encrypted files and will
+  fail with EOPNOTSUPP.
 
 - Online defragmentation of encrypted files is not supported.  The
   EXT4_IOC_MOVE_EXT and F2FS_IOC_MOVE_RANGE ioctls will fail with
@@ -987,11 +1062,6 @@ astute users may notice some differences in behavior:
   regular files.  It will fall back to ordered data mode instead.
 
 - DAX (Direct Access) is not supported on encrypted files.
-
-- The st_size of an encrypted symlink will not necessarily give the
-  length of the symlink target as required by POSIX.  It will actually
-  give the length of the ciphertext, which will be slightly longer
-  than the plaintext due to NUL-padding and an extra 2-byte overhead.
 
 - The maximum length of an encrypted symlink is 2 bytes shorter than
   the maximum length of an unencrypted symlink.  For example, on an
@@ -1065,23 +1135,88 @@ where applications may later write sensitive data.  It is recommended
 that systems implementing a form of "verified boot" take advantage of
 this by validating all top-level encryption policies prior to access.
 
+Inline encryption support
+=========================
+
+By default, fscrypt uses the kernel crypto API for all cryptographic
+operations (other than HKDF, which fscrypt partially implements
+itself).  The kernel crypto API supports hardware crypto accelerators,
+but only ones that work in the traditional way where all inputs and
+outputs (e.g. plaintexts and ciphertexts) are in memory.  fscrypt can
+take advantage of such hardware, but the traditional acceleration
+model isn't particularly efficient and fscrypt hasn't been optimized
+for it.
+
+Instead, many newer systems (especially mobile SoCs) have *inline
+encryption hardware* that can encrypt/decrypt data while it is on its
+way to/from the storage device.  Linux supports inline encryption
+through a set of extensions to the block layer called *blk-crypto*.
+blk-crypto allows filesystems to attach encryption contexts to bios
+(I/O requests) to specify how the data will be encrypted or decrypted
+in-line.  For more information about blk-crypto, see
+:ref:`Documentation/block/inline-encryption.rst <inline_encryption>`.
+
+On supported filesystems (currently ext4 and f2fs), fscrypt can use
+blk-crypto instead of the kernel crypto API to encrypt/decrypt file
+contents.  To enable this, set CONFIG_FS_ENCRYPTION_INLINE_CRYPT=y in
+the kernel configuration, and specify the "inlinecrypt" mount option
+when mounting the filesystem.
+
+Note that the "inlinecrypt" mount option just specifies to use inline
+encryption when possible; it doesn't force its use.  fscrypt will
+still fall back to using the kernel crypto API on files where the
+inline encryption hardware doesn't have the needed crypto capabilities
+(e.g. support for the needed encryption algorithm and data unit size)
+and where blk-crypto-fallback is unusable.  (For blk-crypto-fallback
+to be usable, it must be enabled in the kernel configuration with
+CONFIG_BLK_INLINE_ENCRYPTION_FALLBACK=y.)
+
+Currently fscrypt always uses the filesystem block size (which is
+usually 4096 bytes) as the data unit size.  Therefore, it can only use
+inline encryption hardware that supports that data unit size.
+
+Inline encryption doesn't affect the ciphertext or other aspects of
+the on-disk format, so users may freely switch back and forth between
+using "inlinecrypt" and not using "inlinecrypt".
+
+Direct I/O support
+==================
+
+For direct I/O on an encrypted file to work, the following conditions
+must be met (in addition to the conditions for direct I/O on an
+unencrypted file):
+
+* The file must be using inline encryption.  Usually this means that
+  the filesystem must be mounted with ``-o inlinecrypt`` and inline
+  encryption hardware must be present.  However, a software fallback
+  is also available.  For details, see `Inline encryption support`_.
+
+* The I/O request must be fully aligned to the filesystem block size.
+  This means that the file position the I/O is targeting, the lengths
+  of all I/O segments, and the memory addresses of all I/O buffers
+  must be multiples of this value.  Note that the filesystem block
+  size may be greater than the logical block size of the block device.
+
+If either of the above conditions is not met, then direct I/O on the
+encrypted file will fall back to buffered I/O.
+
 Implementation details
 ======================
 
 Encryption context
 ------------------
 
-An encryption policy is represented on-disk by a :c:type:`struct
-fscrypt_context_v1` or a :c:type:`struct fscrypt_context_v2`.  It is
-up to individual filesystems to decide where to store it, but normally
-it would be stored in a hidden extended attribute.  It should *not* be
+An encryption policy is represented on-disk by
+struct fscrypt_context_v1 or struct fscrypt_context_v2.  It is up to
+individual filesystems to decide where to store it, but normally it
+would be stored in a hidden extended attribute.  It should *not* be
 exposed by the xattr-related system calls such as getxattr() and
 setxattr() because of the special semantics of the encryption xattr.
 (In particular, there would be much confusion if an encryption policy
 were to be added to or removed from anything other than an empty
 directory.)  These structs are defined as follows::
 
-    #define FS_KEY_DERIVATION_NONCE_SIZE 16
+    #define FSCRYPT_FILE_NONCE_SIZE 16
 
     #define FSCRYPT_KEY_DESCRIPTOR_SIZE  8
     struct fscrypt_context_v1 {
@@ -1090,7 +1225,7 @@ directory.)  These structs are defined as follows::
             u8 filenames_encryption_mode;
             u8 flags;
             u8 master_key_descriptor[FSCRYPT_KEY_DESCRIPTOR_SIZE];
-            u8 nonce[FS_KEY_DERIVATION_NONCE_SIZE];
+            u8 nonce[FSCRYPT_FILE_NONCE_SIZE];
     };
 
     #define FSCRYPT_KEY_IDENTIFIER_SIZE  16
@@ -1101,18 +1236,25 @@ directory.)  These structs are defined as follows::
             u8 flags;
             u8 __reserved[4];
             u8 master_key_identifier[FSCRYPT_KEY_IDENTIFIER_SIZE];
-            u8 nonce[FS_KEY_DERIVATION_NONCE_SIZE];
+            u8 nonce[FSCRYPT_FILE_NONCE_SIZE];
     };
 
 The context structs contain the same information as the corresponding
 policy structs (see `Setting an encryption policy`_), except that the
 context structs also contain a nonce.  The nonce is randomly generated
 by the kernel and is used as KDF input or as a tweak to cause
-different files to be encrypted differently; see `Per-file keys`_ and
-`DIRECT_KEY policies`_.
+different files to be encrypted differently; see `Per-file encryption
+keys`_ and `DIRECT_KEY policies`_.
 
 Data path changes
 -----------------
+
+When inline encryption is used, filesystems just need to associate
+encryption contexts with bios to specify how the block layer or the
+inline encryption hardware will encrypt/decrypt the file contents.
+
+When inline encryption isn't used, filesystems must encrypt/decrypt
+the file contents themselves, as described below:
 
 For the read path (->readpage()) of regular files, filesystems can
 read the ciphertext into the page cache and decrypt it in-place.  The
@@ -1148,20 +1290,20 @@ the user-supplied name to get the ciphertext.
 
 Lookups without the key are more complicated.  The raw ciphertext may
 contain the ``\0`` and ``/`` characters, which are illegal in
-filenames.  Therefore, readdir() must base64-encode the ciphertext for
-presentation.  For most filenames, this works fine; on ->lookup(), the
-filesystem just base64-decodes the user-supplied name to get back to
-the raw ciphertext.
+filenames.  Therefore, readdir() must base64url-encode the ciphertext
+for presentation.  For most filenames, this works fine; on ->lookup(),
+the filesystem just base64url-decodes the user-supplied name to get
+back to the raw ciphertext.
 
-However, for very long filenames, base64 encoding would cause the
+However, for very long filenames, base64url encoding would cause the
 filename length to exceed NAME_MAX.  To prevent this, readdir()
 actually presents long filenames in an abbreviated form which encodes
 a strong "hash" of the ciphertext filename, along with the optional
 filesystem-specific hash(es) needed for directory lookups.  This
 allows the filesystem to still, with a high degree of confidence, map
 the filename given in ->lookup() back to a particular directory entry
-that was previously listed by readdir().  See :c:type:`struct
-fscrypt_digested_name` in the source for more details.
+that was previously listed by readdir().  See
+struct fscrypt_nokey_name in the source for more details.
 
 Note that the precise way that filenames are presented to userspace
 without the key is subject to change in the future.  It is only meant
@@ -1173,11 +1315,14 @@ Tests
 
 To test fscrypt, use xfstests, which is Linux's de facto standard
 filesystem test suite.  First, run all the tests in the "encrypt"
-group on the relevant filesystem(s).  For example, to test ext4 and
+group on the relevant filesystem(s).  One can also run the tests
+with the 'inlinecrypt' mount option to test the implementation for
+inline encryption support.  For example, to test ext4 and
 f2fs encryption using `kvm-xfstests
 <https://github.com/tytso/xfstests-bld/blob/master/Documentation/kvm-quickstart.md>`_::
 
     kvm-xfstests -c ext4,f2fs -g encrypt
+    kvm-xfstests -c ext4,f2fs -g encrypt -m inlinecrypt
 
 UBIFS encryption can also be tested this way, but it should be done in
 a separate command, and it takes some time for kvm-xfstests to set up
@@ -1199,6 +1344,7 @@ This tests the encrypted I/O paths more thoroughly.  To do this with
 kvm-xfstests, use the "encrypt" filesystem configuration::
 
     kvm-xfstests -c ext4/encrypt,f2fs/encrypt -g auto
+    kvm-xfstests -c ext4/encrypt,f2fs/encrypt -g auto -m inlinecrypt
 
 Because this runs many more tests than "-g encrypt" does, it takes
 much longer to run; so also consider using `gce-xfstests
@@ -1206,3 +1352,4 @@ much longer to run; so also consider using `gce-xfstests
 instead of kvm-xfstests::
 
     gce-xfstests -c ext4/encrypt,f2fs/encrypt -g auto
+    gce-xfstests -c ext4/encrypt,f2fs/encrypt -g auto -m inlinecrypt

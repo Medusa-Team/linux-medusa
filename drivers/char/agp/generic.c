@@ -42,7 +42,6 @@
 #ifdef CONFIG_X86
 #include <asm/set_memory.h>
 #endif
-#include <asm/pgtable.h>
 #include "agp.h"
 
 __u32 *agp_gatt_table;
@@ -941,7 +940,7 @@ int agp_generic_create_gatt_table(struct agp_bridge_data *bridge)
 
 	bridge->gatt_table = (u32 __iomem *)table;
 #else
-	bridge->gatt_table = ioremap_nocache(virt_to_phys(table),
+	bridge->gatt_table = ioremap(virt_to_phys(table),
 					(PAGE_SIZE * (1 << page_order)));
 	bridge->driver->cache_flush();
 #endif

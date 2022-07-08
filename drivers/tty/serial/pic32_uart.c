@@ -618,7 +618,7 @@ static int pic32_uart_request_port(struct uart_port *port)
 				"pic32_uart_mem"))
 		return -EBUSY;
 
-	port->membase = devm_ioremap_nocache(port->dev, port->mapbase,
+	port->membase = devm_ioremap(port->dev, port->mapbase,
 						resource_size(res_mem));
 	if (!port->membase) {
 		dev_err(port->dev, "Unable to map registers\n");
@@ -691,7 +691,7 @@ static const struct uart_ops pic32_uart_ops = {
 
 #ifdef CONFIG_SERIAL_PIC32_CONSOLE
 /* output given char */
-static void pic32_console_putchar(struct uart_port *port, int ch)
+static void pic32_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct pic32_sport *sport = to_pic32_sport(port);
 
@@ -767,11 +767,6 @@ static int __init pic32_console_init(void)
 	return 0;
 }
 console_initcall(pic32_console_init);
-
-static inline bool is_pic32_console_port(struct uart_port *port)
-{
-	return port->cons && port->cons->index == port->line;
-}
 
 /*
  * Late console initialization.
@@ -873,8 +868,7 @@ static int pic32_uart_probe(struct platform_device *pdev)
 	}
 
 #ifdef CONFIG_SERIAL_PIC32_CONSOLE
-	if (is_pic32_console_port(port) &&
-	    (pic32_console.flags & CON_ENABLED)) {
+	if (uart_console(port) && (pic32_console.flags & CON_ENABLED)) {
 		/* The peripheral clock has been enabled by console_setup,
 		 * so disable it till the port is used.
 		 */

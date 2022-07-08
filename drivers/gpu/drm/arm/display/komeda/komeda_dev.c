@@ -10,6 +10,7 @@
 #include <linux/of_graph.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/dma-mapping.h>
 #ifdef CONFIG_DEBUG_FS
 #include <linux/debugfs.h>
@@ -27,27 +28,20 @@ static int komeda_register_show(struct seq_file *sf, void *x)
 
 	seq_puts(sf, "\n====== Komeda register dump =========\n");
 
+	pm_runtime_get_sync(mdev->dev);
+
 	if (mdev->funcs->dump_register)
 		mdev->funcs->dump_register(mdev, sf);
 
 	for (i = 0; i < mdev->n_pipelines; i++)
 		komeda_pipeline_dump_register(mdev->pipelines[i], sf);
 
+	pm_runtime_put(mdev->dev);
+
 	return 0;
 }
 
-static int komeda_register_open(struct inode *inode, struct file *filp)
-{
-	return single_open(filp, komeda_register_show, inode->i_private);
-}
-
-static const struct file_operations komeda_register_fops = {
-	.owner		= THIS_MODULE,
-	.open		= komeda_register_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(komeda_register);
 
 #ifdef CONFIG_DEBUG_FS
 static void komeda_debugfs_init(struct komeda_dev *mdev)
@@ -58,6 +52,8 @@ static void komeda_debugfs_init(struct komeda_dev *mdev)
 	mdev->debugfs_root = debugfs_create_dir("komeda", NULL);
 	debugfs_create_file("register", 0444, mdev->debugfs_root,
 			    mdev, &komeda_register_fops);
+	debugfs_create_x16("err_verbosity", 0664, mdev->debugfs_root,
+			   &mdev->err_verbosity);
 }
 #endif
 
@@ -66,7 +62,7 @@ core_id_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct komeda_dev *mdev = dev_to_mdev(dev);
 
-	return snprintf(buf, PAGE_SIZE, "0x%08x\n", mdev->chip.core_id);
+	return sysfs_emit(buf, "0x%08x\n", mdev->chip.core_id);
 }
 static DEVICE_ATTR_RO(core_id);
 
@@ -89,7 +85,7 @@ config_id_show(struct device *dev, struct device_attribute *attr, char *buf)
 		if (pipe->layers[i]->layer_type == KOMEDA_FMT_RICH_LAYER)
 			config_id.n_richs++;
 	}
-	return snprintf(buf, PAGE_SIZE, "0x%08x\n", config_id.value);
+	return sysfs_emit(buf, "0x%08x\n", config_id.value);
 }
 static DEVICE_ATTR_RO(config_id);
 
@@ -98,7 +94,7 @@ aclk_hz_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct komeda_dev *mdev = dev_to_mdev(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%lu\n", clk_get_rate(mdev->aclk));
+	return sysfs_emit(buf, "%lu\n", clk_get_rate(mdev->aclk));
 }
 static DEVICE_ATTR_RO(aclk_hz);
 
@@ -113,22 +109,14 @@ static struct attribute_group komeda_sysfs_attr_group = {
 	.attrs = komeda_sysfs_entries,
 };
 
-static int komeda_parse_pipe_dt(struct komeda_dev *mdev, struct device_node *np)
+static int komeda_parse_pipe_dt(struct komeda_pipeline *pipe)
 {
-	struct komeda_pipeline *pipe;
+	struct device_node *np = pipe->of_node;
 	struct clk *clk;
-	u32 pipe_id;
-	int ret = 0;
-
-	ret = of_property_read_u32(np, "reg", &pipe_id);
-	if (ret != 0 || pipe_id >= mdev->n_pipelines)
-		return -EINVAL;
-
-	pipe = mdev->pipelines[pipe_id];
 
 	clk = of_clk_get_by_name(np, "pxclk");
 	if (IS_ERR(clk)) {
-		DRM_ERROR("get pxclk for pipeline %d failed!\n", pipe_id);
+		DRM_ERROR("get pxclk for pipeline %d failed!\n", pipe->id);
 		return PTR_ERR(clk);
 	}
 	pipe->pxlclk = clk;
@@ -142,7 +130,6 @@ static int komeda_parse_pipe_dt(struct komeda_dev *mdev, struct device_node *np)
 		of_graph_get_port_by_id(np, KOMEDA_OF_PORT_OUTPUT);
 
 	pipe->dual_link = pipe->of_output_links[0] && pipe->of_output_links[1];
-	pipe->of_node = of_node_get(np);
 
 	return 0;
 }
@@ -151,7 +138,9 @@ static int komeda_parse_dt(struct device *dev, struct komeda_dev *mdev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct device_node *child, *np = dev->of_node;
-	int ret;
+	struct komeda_pipeline *pipe;
+	u32 pipe_id = U32_MAX;
+	int ret = -1;
 
 	mdev->irq  = platform_get_irq(pdev, 0);
 	if (mdev->irq < 0) {
@@ -163,39 +152,45 @@ static int komeda_parse_dt(struct device *dev, struct komeda_dev *mdev)
 	ret = of_reserved_mem_device_init(dev);
 	if (ret && ret != -ENODEV)
 		return ret;
-	ret = 0;
 
 	for_each_available_child_of_node(np, child) {
-		if (of_node_cmp(child->name, "pipeline") == 0) {
-			ret = komeda_parse_pipe_dt(mdev, child);
-			if (ret) {
-				DRM_ERROR("parse pipeline dt error!\n");
-				of_node_put(child);
-				break;
+		if (of_node_name_eq(child, "pipeline")) {
+			of_property_read_u32(child, "reg", &pipe_id);
+			if (pipe_id >= mdev->n_pipelines) {
+				DRM_WARN("Skip the redundant DT node: pipeline-%u.\n",
+					 pipe_id);
+				continue;
 			}
+			mdev->pipelines[pipe_id]->of_node = of_node_get(child);
 		}
 	}
 
-	return ret;
+	for (pipe_id = 0; pipe_id < mdev->n_pipelines; pipe_id++) {
+		pipe = mdev->pipelines[pipe_id];
+
+		if (!pipe->of_node) {
+			DRM_ERROR("Pipeline-%d doesn't have a DT node.\n",
+				  pipe->id);
+			return -EINVAL;
+		}
+		ret = komeda_parse_pipe_dt(pipe);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 struct komeda_dev *komeda_dev_create(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
-	const struct komeda_product_data *product;
+	komeda_identify_func komeda_identify;
 	struct komeda_dev *mdev;
-	struct resource *io_res;
 	int err = 0;
 
-	product = of_device_get_match_data(dev);
-	if (!product)
+	komeda_identify = of_device_get_match_data(dev);
+	if (!komeda_identify)
 		return ERR_PTR(-ENODEV);
-
-	io_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!io_res) {
-		DRM_ERROR("No registers defined.\n");
-		return ERR_PTR(-ENODEV);
-	}
 
 	mdev = devm_kzalloc(dev, sizeof(*mdev), GFP_KERNEL);
 	if (!mdev)
@@ -204,7 +199,7 @@ struct komeda_dev *komeda_dev_create(struct device *dev)
 	mutex_init(&mdev->lock);
 
 	mdev->dev = dev;
-	mdev->reg_base = devm_ioremap_resource(dev, io_res);
+	mdev->reg_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(mdev->reg_base)) {
 		DRM_ERROR("Map register space failed.\n");
 		err = PTR_ERR(mdev->reg_base);
@@ -222,11 +217,9 @@ struct komeda_dev *komeda_dev_create(struct device *dev)
 
 	clk_prepare_enable(mdev->aclk);
 
-	mdev->funcs = product->identify(mdev->reg_base, &mdev->chip);
-	if (!komeda_product_match(mdev, product->product_id)) {
-		DRM_ERROR("DT configured %x mismatch with real HW %x.\n",
-			  product->product_id,
-			  MALIDP_CORE_ID_PRODUCT_ID(mdev->chip.core_id));
+	mdev->funcs = komeda_identify(mdev->reg_base, &mdev->chip);
+	if (!mdev->funcs) {
+		DRM_ERROR("Failed to identify the HW.\n");
 		err = -ENODEV;
 		goto disable_clk;
 	}
@@ -256,21 +249,11 @@ struct komeda_dev *komeda_dev_create(struct device *dev)
 		goto disable_clk;
 	}
 
-	dev->dma_parms = &mdev->dma_parms;
-	dma_set_max_seg_size(dev, DMA_BIT_MASK(32));
+	dma_set_max_seg_size(dev, U32_MAX);
 
 	mdev->iommu = iommu_get_domain_for_dev(mdev->dev);
 	if (!mdev->iommu)
 		DRM_INFO("continue without IOMMU support!\n");
-
-	if (mdev->iommu && mdev->funcs->connect_iommu) {
-		err = mdev->funcs->connect_iommu(mdev);
-		if (err) {
-			DRM_ERROR("connect iommu failed.\n");
-			mdev->iommu = NULL;
-			goto disable_clk;
-		}
-	}
 
 	clk_disable_unprepare(mdev->aclk);
 
@@ -279,6 +262,8 @@ struct komeda_dev *komeda_dev_create(struct device *dev)
 		DRM_ERROR("create sysfs group failed.\n");
 		goto err_cleanup;
 	}
+
+	mdev->err_verbosity = KOMEDA_DEV_PRINT_ERR_EVENTS;
 
 #ifdef CONFIG_DEBUG_FS
 	komeda_debugfs_init(mdev);
@@ -308,11 +293,6 @@ void komeda_dev_destroy(struct komeda_dev *mdev)
 	if (mdev->aclk)
 		clk_prepare_enable(mdev->aclk);
 
-	if (mdev->iommu && mdev->funcs->disconnect_iommu)
-		if (mdev->funcs->disconnect_iommu(mdev))
-			DRM_ERROR("disconnect iommu failed.\n");
-	mdev->iommu = NULL;
-
 	for (i = 0; i < mdev->n_pipelines; i++) {
 		komeda_pipeline_destroy(mdev, mdev->pipelines[i]);
 		mdev->pipelines[i] = NULL;
@@ -341,44 +321,26 @@ void komeda_dev_destroy(struct komeda_dev *mdev)
 
 int komeda_dev_resume(struct komeda_dev *mdev)
 {
-	int ret = 0;
-
 	clk_prepare_enable(mdev->aclk);
 
-	if (mdev->iommu && mdev->funcs->connect_iommu) {
-		ret = mdev->funcs->connect_iommu(mdev);
-		if (ret < 0) {
+	mdev->funcs->enable_irq(mdev);
+
+	if (mdev->iommu && mdev->funcs->connect_iommu)
+		if (mdev->funcs->connect_iommu(mdev))
 			DRM_ERROR("connect iommu failed.\n");
-			goto disable_clk;
-		}
-	}
 
-	ret = mdev->funcs->enable_irq(mdev);
-
-disable_clk:
-	clk_disable_unprepare(mdev->aclk);
-
-	return ret;
+	return 0;
 }
 
 int komeda_dev_suspend(struct komeda_dev *mdev)
 {
-	int ret = 0;
-
-	clk_prepare_enable(mdev->aclk);
-
-	if (mdev->iommu && mdev->funcs->disconnect_iommu) {
-		ret = mdev->funcs->disconnect_iommu(mdev);
-		if (ret < 0) {
+	if (mdev->iommu && mdev->funcs->disconnect_iommu)
+		if (mdev->funcs->disconnect_iommu(mdev))
 			DRM_ERROR("disconnect iommu failed.\n");
-			goto disable_clk;
-		}
-	}
 
-	ret = mdev->funcs->disable_irq(mdev);
+	mdev->funcs->disable_irq(mdev);
 
-disable_clk:
 	clk_disable_unprepare(mdev->aclk);
 
-	return ret;
+	return 0;
 }

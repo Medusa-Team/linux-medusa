@@ -1,4 +1,4 @@
-#include <linux/medusa/l2/audit_medusa.h>
+#include "l2/audit_medusa.h"
 
 /* array for auditing med_answer,
  * if answers will be modified, think about that too
@@ -31,7 +31,7 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 
 	if (mad->med_answer) {
 		audit_log_format(ab, " ans=");
-		audit_log_string(ab, audit_answer[mad->med_answer+1]);
+		audit_log_format(ab, audit_answer[mad->med_answer+1]);
 	}
 
 	switch (mad->vsi) {

@@ -1,4 +1,6 @@
-/* kobject_cstrmem.c, (C) 2004 Vaclav Lorenc */
+// SPDX-License-Identifier: GPL-2.0
+
+/* (C) 2004 Vaclav Lorenc */
 
 /* This kclass allows a user to read from a given process's memory using
  * `fetch'. Kobjects of this type are never used as a subject or object of any
@@ -12,13 +14,9 @@
  * module.
  */
 #include <linux/module.h>
-#include <linux/init.h>
-#include <linux/sched.h>
-#include <linux/kernel.h>
 #include <linux/sched/task.h>
 #include <linux/mm.h>
-#include <linux/errno.h>
-#include <linux/medusa/l3/registry.h>
+#include "l3/registry.h"
 
 struct cstrmem_kobject {
 	pid_t pid;		/* pid of process to read/write */
@@ -29,11 +27,11 @@ struct cstrmem_kobject {
 };
 
 MED_ATTRS(cstrmem_kobject) {
-	MED_ATTR_KEY_RO	(cstrmem_kobject, pid, "pid", MED_UNSIGNED),
-	MED_ATTR_KEY_RO	(cstrmem_kobject, address, "address", MED_UNSIGNED),
-	MED_ATTR_KEY_RO	(cstrmem_kobject, size, "size", MED_UNSIGNED),
-	MED_ATTR_RO	(cstrmem_kobject, retval, "retval", MED_SIGNED),
-	MED_ATTR	(cstrmem_kobject, data, "data", MED_STRING),
+	MED_ATTR_KEY_RO(cstrmem_kobject, pid, "pid", MED_UNSIGNED),
+	MED_ATTR_KEY_RO(cstrmem_kobject, address, "address", MED_UNSIGNED),
+	MED_ATTR_KEY_RO(cstrmem_kobject, size, "size", MED_UNSIGNED),
+	MED_ATTR_RO(cstrmem_kobject, retval, "retval", MED_SIGNED),
+	MED_ATTR(cstrmem_kobject, data, "data", MED_STRING),
 	MED_ATTR_END
 };
 
@@ -89,19 +87,22 @@ static struct medusa_kobject_s *cstrmem_fetch(struct medusa_kobject_s *key_obj)
 {
 	int i, ret;
 	struct task_struct *p;
-	struct cstrmem_kobject* kobj = (struct cstrmem_kobject*) key_obj;
+	struct cstrmem_kobject *kobj = (struct cstrmem_kobject *) key_obj;
 
 	rcu_read_lock();
 	p = pid_task(find_vpid(kobj->pid), PIDTYPE_PID);
 	if (p) {
 		get_task_struct(p);
 		rcu_read_unlock();
-		ret = access_process_vm(p, (unsigned long)kobj->address, kobj->data, kobj->size, 0);
+		ret = access_process_vm(p, (unsigned long)kobj->address, kobj->data, kobj->size, 0)
+			;
 
 		/* TODO: refactor to something more .. obvious
 		 * see https://www.kernel.org/doc/htmldocs/kernel-api/API-strnlen.html
-		 * TODO: here it should count characters until the first #0 found in (0,size) boundary */
-		for (i = 0; (i < kobj->size) && (((char*)kobj->data)[i]); i++);
+		 * TODO: here it should count characters until the first #0 found in (0,size) boundary
+		 */
+		for (i = 0; (i < kobj->size) && (((char *)kobj->data)[i]); i++)
+			;
 
 		free_task(p);
 		kobj->retval = i;

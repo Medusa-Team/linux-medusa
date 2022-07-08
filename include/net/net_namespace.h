@@ -22,9 +22,7 @@
 #include <net/netns/nexthop.h>
 #include <net/netns/ieee802154_6lowpan.h>
 #include <net/netns/sctp.h>
-#include <net/netns/dccp.h>
 #include <net/netns/netfilter.h>
-#include <net/netns/x_tables.h>
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 #include <net/netns/conntrack.h>
 #endif
@@ -33,6 +31,10 @@
 #include <net/netns/mpls.h>
 #include <net/netns/can.h>
 #include <net/netns/xdp.h>
+#include <net/netns/smc.h>
+#include <net/netns/bpf.h>
+#include <net/netns/mctp.h>
+#include <net/net_trackers.h>
 #include <linux/ns_common.h>
 #include <linux/idr.h>
 #include <linux/skbuff.h>
@@ -59,12 +61,9 @@ struct net {
 	refcount_t		passive;	/* To decide when the network
 						 * namespace should be freed.
 						 */
-	refcount_t		count;		/* To decided when the network
-						 *  namespace should be shut down.
-						 */
 	spinlock_t		rules_mod_lock;
 
-	unsigned int		dev_unreg_count;
+	atomic_t		dev_unreg_count;
 
 	unsigned int		dev_base_seq;	/* protected by rtnl_mutex */
 	int			ifindex;
@@ -89,6 +88,7 @@ struct net {
 	struct idr		netns_ids;
 
 	struct ns_common	ns;
+	struct ref_tracker_dir  refcnt_tracker;
 
 	struct list_head 	dev_base_head;
 	struct proc_dir_entry 	*proc_net;
@@ -132,29 +132,13 @@ struct net {
 #if defined(CONFIG_IP_SCTP) || defined(CONFIG_IP_SCTP_MODULE)
 	struct netns_sctp	sctp;
 #endif
-#if defined(CONFIG_IP_DCCP) || defined(CONFIG_IP_DCCP_MODULE)
-	struct netns_dccp	dccp;
-#endif
 #ifdef CONFIG_NETFILTER
 	struct netns_nf		nf;
-	struct netns_xt		xt;
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
 	struct netns_ct		ct;
 #endif
 #if defined(CONFIG_NF_TABLES) || defined(CONFIG_NF_TABLES_MODULE)
 	struct netns_nftables	nft;
-#endif
-#if IS_ENABLED(CONFIG_NF_DEFRAG_IPV6)
-	struct netns_nf_frag	nf_frag;
-	struct ctl_table_header *nf_frag_frags_hdr;
-#endif
-	struct sock		*nfnl;
-	struct sock		*nfnl_stash;
-#if IS_ENABLED(CONFIG_NETFILTER_NETLINK_ACCT)
-	struct list_head        nfnl_acct_list;
-#endif
-#if IS_ENABLED(CONFIG_NF_CT_NETLINK_TIMEOUT)
-	struct list_head	nfct_timeout_list;
 #endif
 #endif
 #ifdef CONFIG_WEXT_CORE
@@ -162,12 +146,16 @@ struct net {
 #endif
 	struct net_generic __rcu	*gen;
 
-	struct bpf_prog __rcu	*flow_dissector_prog;
+	/* Used to store attached BPF programs */
+	struct netns_bpf	bpf;
 
 	/* Note : following structs are cache line aligned */
 #ifdef CONFIG_XFRM
 	struct netns_xfrm	xfrm;
 #endif
+
+	u64			net_cookie; /* written once */
+
 #if IS_ENABLED(CONFIG_IP_VS)
 	struct netns_ipvs	*ipvs;
 #endif
@@ -180,10 +168,16 @@ struct net {
 #ifdef CONFIG_XDP_SOCKETS
 	struct netns_xdp	xdp;
 #endif
+#if IS_ENABLED(CONFIG_MCTP)
+	struct netns_mctp	mctp;
+#endif
 #if IS_ENABLED(CONFIG_CRYPTO_USER)
 	struct sock		*crypto_nlsk;
 #endif
 	struct sock		*diag_nlsk;
+#if IS_ENABLED(CONFIG_SMC)
+	struct netns_smc	smc;
+#endif
 } __randomize_layout;
 
 #include <linux/seq_file_net.h>
@@ -198,6 +192,9 @@ struct net *copy_net_ns(unsigned long flags, struct user_namespace *user_ns,
 void net_ns_get_ownership(const struct net *net, kuid_t *uid, kgid_t *gid);
 
 void net_ns_barrier(void);
+
+struct ns_common *get_net_ns(struct ns_common *ns);
+struct net *get_net_ns_by_fd(int fd);
 #else /* CONFIG_NET_NS */
 #include <linux/sched.h>
 #include <linux/nsproxy.h>
@@ -217,13 +214,22 @@ static inline void net_ns_get_ownership(const struct net *net,
 }
 
 static inline void net_ns_barrier(void) {}
+
+static inline struct ns_common *get_net_ns(struct ns_common *ns)
+{
+	return ERR_PTR(-EINVAL);
+}
+
+static inline struct net *get_net_ns_by_fd(int fd)
+{
+	return ERR_PTR(-EINVAL);
+}
 #endif /* CONFIG_NET_NS */
 
 
 extern struct list_head net_namespace_list;
 
 struct net *get_net_ns_by_pid(pid_t pid);
-struct net *get_net_ns_by_fd(int fd);
 
 #ifdef CONFIG_SYSCTL
 void ipx_register_sysctl(void);
@@ -236,9 +242,10 @@ void ipx_unregister_sysctl(void);
 #ifdef CONFIG_NET_NS
 void __put_net(struct net *net);
 
+/* Try using get_net_track() instead */
 static inline struct net *get_net(struct net *net)
 {
-	refcount_inc(&net->count);
+	refcount_inc(&net->ns.count);
 	return net;
 }
 
@@ -249,14 +256,15 @@ static inline struct net *maybe_get_net(struct net *net)
 	 * exists.  If the reference count is zero this
 	 * function fails and returns NULL.
 	 */
-	if (!refcount_inc_not_zero(&net->count))
+	if (!refcount_inc_not_zero(&net->ns.count))
 		net = NULL;
 	return net;
 }
 
+/* Try using put_net_track() instead */
 static inline void put_net(struct net *net)
 {
-	if (refcount_dec_and_test(&net->count))
+	if (refcount_dec_and_test(&net->ns.count))
 		__put_net(net);
 }
 
@@ -268,7 +276,7 @@ int net_eq(const struct net *net1, const struct net *net2)
 
 static inline int check_net(const struct net *net)
 {
-	return refcount_read(&net->count) != 0;
+	return refcount_read(&net->ns.count) != 0;
 }
 
 void net_drop_ns(void *);
@@ -303,6 +311,36 @@ static inline int check_net(const struct net *net)
 #define net_drop_ns NULL
 #endif
 
+
+static inline void netns_tracker_alloc(struct net *net,
+				       netns_tracker *tracker, gfp_t gfp)
+{
+#ifdef CONFIG_NET_NS_REFCNT_TRACKER
+	ref_tracker_alloc(&net->refcnt_tracker, tracker, gfp);
+#endif
+}
+
+static inline void netns_tracker_free(struct net *net,
+				      netns_tracker *tracker)
+{
+#ifdef CONFIG_NET_NS_REFCNT_TRACKER
+       ref_tracker_free(&net->refcnt_tracker, tracker);
+#endif
+}
+
+static inline struct net *get_net_track(struct net *net,
+					netns_tracker *tracker, gfp_t gfp)
+{
+	get_net(net);
+	netns_tracker_alloc(net, tracker, gfp);
+	return net;
+}
+
+static inline void put_net_track(struct net *net, netns_tracker *tracker)
+{
+	netns_tracker_free(net, tracker);
+	put_net(net);
+}
 
 typedef struct {
 #ifdef CONFIG_NET_NS
@@ -347,9 +385,9 @@ static inline struct net *read_pnet(const possible_net_t *pnet)
 #endif
 
 int peernet2id_alloc(struct net *net, struct net *peer, gfp_t gfp);
-int peernet2id(struct net *net, struct net *peer);
-bool peernet_has_id(struct net *net, struct net *peer);
-struct net *get_net_ns_by_id(struct net *net, int id);
+int peernet2id(const struct net *net, struct net *peer);
+bool peernet_has_id(const struct net *net, struct net *peer);
+struct net *get_net_ns_by_id(const struct net *net, int id);
 
 struct pernet_operations {
 	struct list_head list;
@@ -408,7 +446,6 @@ int register_pernet_device(struct pernet_operations *);
 void unregister_pernet_device(struct pernet_operations *);
 
 struct ctl_table;
-struct ctl_table_header;
 
 #ifdef CONFIG_SYSCTL
 int net_sysctl_init(void);
@@ -427,10 +464,17 @@ static inline void unregister_net_sysctl_table(struct ctl_table_header *header)
 }
 #endif
 
-static inline int rt_genid_ipv4(struct net *net)
+static inline int rt_genid_ipv4(const struct net *net)
 {
 	return atomic_read(&net->ipv4.rt_genid);
 }
+
+#if IS_ENABLED(CONFIG_IPV6)
+static inline int rt_genid_ipv6(const struct net *net)
+{
+	return atomic_read(&net->ipv6.fib6_sernum);
+}
+#endif
 
 static inline void rt_genid_bump_ipv4(struct net *net)
 {
@@ -459,7 +503,7 @@ static inline void rt_genid_bump_all(struct net *net)
 	rt_genid_bump_ipv6(net);
 }
 
-static inline int fnhe_genid(struct net *net)
+static inline int fnhe_genid(const struct net *net)
 {
 	return atomic_read(&net->fnhe_genid);
 }
@@ -468,5 +512,11 @@ static inline void fnhe_genid_bump(struct net *net)
 {
 	atomic_inc(&net->fnhe_genid);
 }
+
+#ifdef CONFIG_NET
+void net_ns_init(void);
+#else
+static inline void net_ns_init(void) {}
+#endif
 
 #endif /* __NET_NET_NAMESPACE_H */

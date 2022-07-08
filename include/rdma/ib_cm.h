@@ -6,14 +6,13 @@
  * Copyright (c) 2005 Sun Microsystems, Inc. All rights reserved.
  * Copyright (c) 2019, Mellanox Technologies inc.  All rights reserved.
  */
+
 #ifndef IB_CM_H
 #define IB_CM_H
 
 #include <rdma/ib_mad.h>
 #include <rdma/ib_sa.h>
-
-/* ib_cm and ib_user_cm modules share /sys/class/infiniband_cm */
-extern struct class cm_class;
+#include <rdma/rdma_cm.h>
 
 enum ib_cm_state {
 	IB_CM_IDLE,
@@ -115,6 +114,7 @@ struct ib_cm_req_event_param {
 	unsigned int		retry_count:3;
 	unsigned int		rnr_retry_count:3;
 	unsigned int		srq:1;
+	struct rdma_ucm_ece	ece;
 };
 
 struct ib_cm_rep_event_param {
@@ -129,6 +129,7 @@ struct ib_cm_rep_event_param {
 	unsigned int		flow_control:1;
 	unsigned int		rnr_retry_count:3;
 	unsigned int		srq:1;
+	struct rdma_ucm_ece	ece;
 };
 
 enum ib_cm_rej_reason {
@@ -164,7 +165,8 @@ enum ib_cm_rej_reason {
 	IB_CM_REJ_DUPLICATE_LOCAL_COMM_ID	= 30,
 	IB_CM_REJ_INVALID_CLASS_VERSION		= 31,
 	IB_CM_REJ_INVALID_FLOW_LABEL		= 32,
-	IB_CM_REJ_INVALID_ALT_FLOW_LABEL	= 33
+	IB_CM_REJ_INVALID_ALT_FLOW_LABEL	= 33,
+	IB_CM_REJ_VENDOR_OPTION_NOT_SUPPORTED	= 35,
 };
 
 struct ib_cm_rej_event_param {
@@ -360,7 +362,6 @@ struct ib_cm_req_param {
 	u32			starting_psn;
 	const void		*private_data;
 	u8			private_data_len;
-	u8			peer_to_peer;
 	u8			responder_resources;
 	u8			initiator_depth;
 	u8			remote_cm_response_timeout;
@@ -370,6 +371,7 @@ struct ib_cm_req_param {
 	u8			rnr_retry_count;
 	u8			max_cm_retries;
 	u8			srq;
+	struct rdma_ucm_ece	ece;
 };
 
 /**
@@ -393,6 +395,7 @@ struct ib_cm_rep_param {
 	u8		flow_control;
 	u8		rnr_retry_count;
 	u8		srq;
+	struct rdma_ucm_ece ece;
 };
 
 /**
@@ -500,21 +503,6 @@ int ib_send_cm_mra(struct ib_cm_id *cm_id,
 		   u8 private_data_len);
 
 /**
- * ib_send_cm_lap - Sends a load alternate path request.
- * @cm_id: Connection identifier associated with the load alternate path
- *   message.
- * @alternate_path: A path record that identifies the alternate path to
- *   load.
- * @private_data: Optional user-defined private data sent with the
- *   load alternate path message.
- * @private_data_len: Size of the private data buffer, in bytes.
- */
-int ib_send_cm_lap(struct ib_cm_id *cm_id,
-		   struct sa_path_rec *alternate_path,
-		   const void *private_data,
-		   u8 private_data_len);
-
-/**
  * ib_cm_init_qp_attr - Initializes the QP attributes for use in transitioning
  *   to a specified QP state.
  * @cm_id: Communication identifier associated with the QP attributes to
@@ -533,25 +521,6 @@ int ib_send_cm_lap(struct ib_cm_id *cm_id,
 int ib_cm_init_qp_attr(struct ib_cm_id *cm_id,
 		       struct ib_qp_attr *qp_attr,
 		       int *qp_attr_mask);
-
-/**
- * ib_send_cm_apr - Sends an alternate path response message in response to
- *   a load alternate path request.
- * @cm_id: Connection identifier associated with the alternate path response.
- * @status: Reply status sent with the alternate path response.
- * @info: Optional additional information sent with the alternate path
- *   response.
- * @info_length: Size of the additional information, in bytes.
- * @private_data: Optional user-defined private data sent with the
- *   alternate path response message.
- * @private_data_len: Size of the private data buffer, in bytes.
- */
-int ib_send_cm_apr(struct ib_cm_id *cm_id,
-		   enum ib_cm_apr_status status,
-		   void *info,
-		   u8 info_length,
-		   const void *private_data,
-		   u8 private_data_len);
 
 struct ib_cm_sidr_req_param {
 	struct sa_path_rec	*path;
@@ -581,6 +550,7 @@ struct ib_cm_sidr_rep_param {
 	u8			info_length;
 	const void		*private_data;
 	u8			private_data_len;
+	struct rdma_ucm_ece	ece;
 };
 
 /**

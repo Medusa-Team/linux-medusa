@@ -91,18 +91,16 @@ properties:
     description:
       If using padding pages, specifies the stride of consecutive
       redistributors. Must be a multiple of 64kB.
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint64
-      - multipleOf: 0x10000
-        exclusiveMinimum: 0
+    $ref: /schemas/types.yaml#/definitions/uint64
+    multipleOf: 0x10000
+    exclusiveMinimum: 0
 
   "#redistributor-regions":
     description:
       The number of independent contiguous regions occupied by the
       redistributors. Required if more than one such region is present.
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint32
-      - maximum: 4096   # Should be enough?
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 4096
 
   msi-controller:
     description:
@@ -114,22 +112,20 @@ properties:
       A list of pairs <intid span>, where "intid" is the first SPI of a range
       that can be used an MBI, and "span" the size of that range. Multiple
       ranges can be provided.
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint32-matrix
-      - items:
-          minItems: 2
-          maxItems: 2
+    $ref: /schemas/types.yaml#/definitions/uint32-matrix
+    items:
+      minItems: 2
+      maxItems: 2
 
   mbi-alias:
     description:
       Address property. Base address of an alias of the GICD region containing
       only the {SET,CLR}SPI registers to be used if isolation is required,
       and if supported by the HW.
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint32-array
-      - items:
-          minItems: 1
-          maxItems: 2
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    items:
+      minItems: 1
+      maxItems: 2
 
   ppi-partitions:
     type: object
@@ -142,12 +138,27 @@ properties:
         properties:
           affinity:
             $ref: /schemas/types.yaml#/definitions/phandle-array
+            items:
+              maxItems: 1
             description:
               Should be a list of phandles to CPU nodes (as described in
               Documentation/devicetree/bindings/arm/cpus.yaml).
 
         required:
           - affinity
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    items:
+      - const: aclk
+
+  power-domains:
+    maxItems: 1
+
+  resets:
+    maxItems: 1
 
 dependencies:
   mbi-ranges: [ msi-controller ]
@@ -188,11 +199,10 @@ patternProperties:
         description:
           (u32, u32) tuple describing the untranslated
           address and size of the pre-ITS window.
-        allOf:
-          - $ref: /schemas/types.yaml#/definitions/uint32-array
-          - items:
-              minItems: 2
-              maxItems: 2
+        $ref: /schemas/types.yaml#/definitions/uint32-array
+        items:
+          minItems: 2
+          maxItems: 2
 
     required:
       - compatible
@@ -231,6 +241,7 @@ examples:
       };
     };
 
+  - |
     interrupt-controller@2c010000 {
       compatible = "arm,gic-v3";
       #interrupt-cells = <4>;
@@ -246,7 +257,7 @@ examples:
             <0x2c040000 0x2000>,  // GICC
             <0x2c060000 0x2000>,  // GICH
             <0x2c080000 0x2000>;  // GICV
-      interrupts = <1 9 4>;
+      interrupts = <1 9 4 0>;
 
       msi-controller@2c200000 {
         compatible = "arm,gic-v3-its";
@@ -264,11 +275,11 @@ examples:
 
       ppi-partitions {
         part0: interrupt-partition-0 {
-          affinity = <&cpu0 &cpu2>;
+          affinity = <&cpu0>, <&cpu2>;
         };
 
         part1: interrupt-partition-1 {
-          affinity = <&cpu1 &cpu3>;
+          affinity = <&cpu1>, <&cpu3>;
         };
       };
     };

@@ -47,7 +47,7 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <asm/sections.h>
-#include <asm/io.h>
+#include <linux/io.h>
 #include <asm/irq.h>
 
 #ifdef CONFIG_PPC_PMAC
@@ -59,10 +59,6 @@
 #else
 #include <linux/platform_device.h>
 #define of_machine_is_compatible(x) (0)
-#endif
-
-#if defined (CONFIG_SERIAL_PMACZILOG_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
 #endif
 
 #include <linux/serial.h>
@@ -217,6 +213,7 @@ static void pmz_interrupt_control(struct uart_pmac_port *uap, int enable)
 }
 
 static bool pmz_receive_chars(struct uart_pmac_port *uap)
+	__must_hold(&uap->port.lock)
 {
 	struct tty_port *port;
 	unsigned char ch, r1, drop, flag;
@@ -1647,7 +1644,7 @@ static int __init pmz_probe(void)
 		 * TODO: Add routines with proper locking to do that...
 		 */
 		node_a = node_b = NULL;
-		for (np = NULL; (np = of_get_next_child(node_p, np)) != NULL;) {
+		for_each_child_of_node(node_p, np) {
 			if (of_node_name_prefix(np, "ch-a"))
 				node_a = of_node_get(np);
 			else if (of_node_name_prefix(np, "ch-b"))
@@ -1696,6 +1693,11 @@ static int __init pmz_probe(void)
 
 #else
 
+/* On PCI PowerMacs, pmz_probe() does an explicit search of the OpenFirmware
+ * tree to obtain the device_nodes needed to start the console before the
+ * macio driver. On Macs without OpenFirmware, global platform_devices take
+ * the place of those device_nodes.
+ */
 extern struct platform_device scc_a_pdev, scc_b_pdev;
 
 static int __init pmz_init_port(struct uart_pmac_port *uap)
@@ -1704,9 +1706,12 @@ static int __init pmz_init_port(struct uart_pmac_port *uap)
 	int irq;
 
 	r_ports = platform_get_resource(uap->pdev, IORESOURCE_MEM, 0);
-	irq = platform_get_irq(uap->pdev, 0);
-	if (!r_ports || irq <= 0)
+	if (!r_ports)
 		return -ENODEV;
+
+	irq = platform_get_irq(uap->pdev, 0);
+	if (irq < 0)
+		return irq;
 
 	uap->port.mapbase  = r_ports->start;
 	uap->port.membase  = (unsigned char __iomem *) r_ports->start;
@@ -1721,6 +1726,7 @@ static int __init pmz_init_port(struct uart_pmac_port *uap)
 	uap->control_reg   = uap->port.membase;
 	uap->data_reg      = uap->control_reg + 4;
 	uap->port_type     = 0;
+	uap->port.has_sysrq = IS_ENABLED(CONFIG_SERIAL_PMACZILOG_CONSOLE);
 
 	pmz_convert_to_zs(uap, CS8, 0, 9600);
 
@@ -1938,7 +1944,7 @@ static void __exit exit_pmz(void)
 
 #ifdef CONFIG_SERIAL_PMACZILOG_CONSOLE
 
-static void pmz_console_putchar(struct uart_port *port, int ch)
+static void pmz_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	struct uart_pmac_port *uap =
 		container_of(port, struct uart_pmac_port, port);

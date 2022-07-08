@@ -12,9 +12,9 @@
 #include <linux/export.h>
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
+#include <linux/pgtable.h>
 
 #include <asm/io.h>
-#include <asm/pgtable.h>
 #include <asm/prom.h>
 #include <asm/ptrace.h>
 #include <asm/cell-regs.h>
@@ -165,7 +165,7 @@ u32 cbe_node_to_cpu(int node)
 }
 EXPORT_SYMBOL_GPL(cbe_node_to_cpu);
 
-static struct device_node *cbe_get_be_node(int cpu_id)
+static struct device_node *__init cbe_get_be_node(int cpu_id)
 {
 	struct device_node *np;
 

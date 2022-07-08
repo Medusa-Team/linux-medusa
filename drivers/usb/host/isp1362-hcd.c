@@ -1748,7 +1748,7 @@ static int isp1362_bus_suspend(struct usb_hcd *hcd)
 		isp1362_hcd->hc_control &= ~OHCI_CTRL_HCFS;
 		isp1362_hcd->hc_control |= OHCI_USB_RESET;
 		isp1362_write_reg32(isp1362_hcd, HCCONTROL, isp1362_hcd->hc_control);
-		/* FALL THROUGH */
+		fallthrough;
 	case OHCI_USB_RESET:
 		status = -EBUSY;
 		pr_warn("%s: needs reinit!\n", __func__);
@@ -2164,15 +2164,13 @@ DEFINE_SHOW_ATTRIBUTE(isp1362);
 /* expect just one isp1362_hcd per system */
 static void create_debug_file(struct isp1362_hcd *isp1362_hcd)
 {
-	isp1362_hcd->debug_file = debugfs_create_file("isp1362", S_IRUGO,
-						      usb_debug_root,
-						      isp1362_hcd,
-						      &isp1362_fops);
+	debugfs_create_file("isp1362", S_IRUGO, usb_debug_root, isp1362_hcd,
+			    &isp1362_fops);
 }
 
 static void remove_debug_file(struct isp1362_hcd *isp1362_hcd)
 {
-	debugfs_remove(isp1362_hcd->debug_file);
+	debugfs_remove(debugfs_lookup("isp1362", usb_debug_root));
 }
 
 /*-------------------------------------------------------------------------*/

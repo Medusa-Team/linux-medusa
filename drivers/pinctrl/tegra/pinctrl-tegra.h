@@ -107,7 +107,8 @@ struct tegra_function {
  *			drvup, slwr, slwf, and drvtype parameters.
  * @drv_bank:		Drive fields register bank.
  * @hsm_bit:		High Speed Mode register bit.
- * @schmitt_bit:	Scmitt register bit.
+ * @sfsel_bit:		GPIO/SFIO selection register bit.
+ * @schmitt_bit:	Schmitt register bit.
  * @lpmd_bit:		Low Power Mode register bit.
  * @drvdn_bit:		Drive Down register bit.
  * @drvdn_width:	Drive Down field width.
@@ -117,6 +118,7 @@ struct tegra_function {
  * @slwr_width:		Slew Rising field width.
  * @slwf_bit:		Slew Falling register bit.
  * @slwf_width:		Slew Falling field width.
+ * @lpdr_bit:		Base driver enabling bit.
  * @drvtype_bit:	Drive type register bit.
  * @parked_bitmask:	Parked register mask. 0 if unsupported.
  *
@@ -153,12 +155,14 @@ struct tegra_pingroup {
 	s32 ioreset_bit:6;
 	s32 rcv_sel_bit:6;
 	s32 hsm_bit:6;
+	s32 sfsel_bit:6;
 	s32 schmitt_bit:6;
 	s32 lpmd_bit:6;
 	s32 drvdn_bit:6;
 	s32 drvup_bit:6;
 	s32 slwr_bit:6;
 	s32 slwf_bit:6;
+	s32 lpdr_bit:6;
 	s32 drvtype_bit:6;
 	s32 drvdn_width:6;
 	s32 drvup_width:6;
@@ -192,6 +196,7 @@ struct tegra_pinctrl_soc_data {
 	bool hsm_in_mux;
 	bool schmitt_in_mux;
 	bool drvtype_in_mux;
+	bool sfsel_in_mux;
 };
 
 extern const struct dev_pm_ops tegra_pinctrl_pm;

@@ -6,6 +6,7 @@
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
 #include "bus.h"
+#include "sysfs_local.h"
 
 static void sdw_slave_release(struct device *dev)
 {
@@ -14,11 +15,18 @@ static void sdw_slave_release(struct device *dev)
 	kfree(slave);
 }
 
-static int sdw_slave_add(struct sdw_bus *bus,
-			 struct sdw_slave_id *id, struct fwnode_handle *fwnode)
+struct device_type sdw_slave_type = {
+	.name =		"sdw_slave",
+	.release =	sdw_slave_release,
+	.uevent =	sdw_slave_uevent,
+};
+
+int sdw_slave_add(struct sdw_bus *bus,
+		  struct sdw_slave_id *id, struct fwnode_handle *fwnode)
 {
 	struct sdw_slave *slave;
 	int ret;
+	int i;
 
 	slave = kzalloc(sizeof(*slave), GFP_KERNEL);
 	if (!slave)
@@ -31,22 +39,31 @@ static int sdw_slave_add(struct sdw_bus *bus,
 
 	if (id->unique_id == SDW_IGNORED_UNIQUE_ID) {
 		/* name shall be sdw:link:mfg:part:class */
-		dev_set_name(&slave->dev, "sdw:%x:%x:%x:%x",
+		dev_set_name(&slave->dev, "sdw:%01x:%04x:%04x:%02x",
 			     bus->link_id, id->mfg_id, id->part_id,
 			     id->class_id);
 	} else {
 		/* name shall be sdw:link:mfg:part:class:unique */
-		dev_set_name(&slave->dev, "sdw:%x:%x:%x:%x:%x",
+		dev_set_name(&slave->dev, "sdw:%01x:%04x:%04x:%02x:%01x",
 			     bus->link_id, id->mfg_id, id->part_id,
 			     id->class_id, id->unique_id);
 	}
 
-	slave->dev.release = sdw_slave_release;
 	slave->dev.bus = &sdw_bus_type;
 	slave->dev.of_node = of_node_get(to_of_node(fwnode));
+	slave->dev.type = &sdw_slave_type;
+	slave->dev.groups = sdw_slave_status_attr_groups;
 	slave->bus = bus;
 	slave->status = SDW_SLAVE_UNATTACHED;
+	init_completion(&slave->enumeration_complete);
+	init_completion(&slave->initialization_complete);
 	slave->dev_num = 0;
+	init_completion(&slave->probe_complete);
+	slave->probed = false;
+	slave->first_interrupt_done = false;
+
+	for (i = 0; i < SDW_MAX_PORTS; i++)
+		init_completion(&slave->port_ready[i]);
 
 	mutex_lock(&bus->bus_lock);
 	list_add_tail(&slave->node, &bus->slaves);
@@ -64,11 +81,14 @@ static int sdw_slave_add(struct sdw_bus *bus,
 		list_del(&slave->node);
 		mutex_unlock(&bus->bus_lock);
 		put_device(&slave->dev);
+
+		return ret;
 	}
 	sdw_slave_debugfs_init(slave);
 
 	return ret;
 }
+EXPORT_SYMBOL(sdw_slave_add);
 
 #if IS_ENABLED(CONFIG_ACPI)
 
@@ -76,7 +96,7 @@ static bool find_slave(struct sdw_bus *bus,
 		       struct acpi_device *adev,
 		       struct sdw_slave_id *id)
 {
-	unsigned long long addr;
+	u64 addr;
 	unsigned int link_id;
 	acpi_status status;
 
@@ -89,8 +109,14 @@ static bool find_slave(struct sdw_bus *bus,
 		return false;
 	}
 
+	if (bus->ops->override_adr)
+		addr = bus->ops->override_adr(bus, addr);
+
+	if (!addr)
+		return false;
+
 	/* Extract link id from ADR, Bit 51 to 48 (included) */
-	link_id = (addr >> 48) & GENMASK(3, 0);
+	link_id = SDW_DISCO_LINK_ID(addr);
 
 	/* Check for link_id match */
 	if (link_id != bus->link_id)
@@ -144,15 +170,13 @@ int sdw_acpi_find_slaves(struct sdw_bus *bus)
 
 			if (id.unique_id != id2.unique_id) {
 				dev_dbg(bus->dev,
-					"Valid unique IDs %x %x for Slave mfg %x part %d\n",
-					id.unique_id, id2.unique_id,
-					id.mfg_id, id.part_id);
+					"Valid unique IDs 0x%x 0x%x for Slave mfg_id 0x%04x, part_id 0x%04x\n",
+					id.unique_id, id2.unique_id, id.mfg_id, id.part_id);
 				ignore_unique_id = false;
 			} else {
 				dev_err(bus->dev,
-					"Invalid unique IDs %x %x for Slave mfg %x part %d\n",
-					id.unique_id, id2.unique_id,
-					id.mfg_id, id.part_id);
+					"Invalid unique IDs 0x%x 0x%x for Slave mfg_id 0x%04x, part_id 0x%04x\n",
+					id.unique_id, id2.unique_id, id.mfg_id, id.part_id);
 				return -ENODEV;
 			}
 		}

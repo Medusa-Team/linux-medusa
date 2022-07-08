@@ -81,7 +81,7 @@ static int param_get_hashtbl_sz(char *buffer, const struct kernel_param *kp)
 	unsigned int nbits;
 
 	nbits = *(unsigned int *)kp->arg;
-	return sprintf(buffer, "%u", 1U << nbits);
+	return sprintf(buffer, "%u\n", 1U << nbits);
 }
 
 #define param_check_hashtbl_sz(name, p) __param_check(name, p, unsigned int);
@@ -220,55 +220,6 @@ rpcauth_get_gssinfo(rpc_authflavor_t pseudoflavor, struct rpcsec_gss_info *info)
 	return result;
 }
 EXPORT_SYMBOL_GPL(rpcauth_get_gssinfo);
-
-/**
- * rpcauth_list_flavors - discover registered flavors and pseudoflavors
- * @array: array to fill in
- * @size: size of "array"
- *
- * Returns the number of array items filled in, or a negative errno.
- *
- * The returned array is not sorted by any policy.  Callers should not
- * rely on the order of the items in the returned array.
- */
-int
-rpcauth_list_flavors(rpc_authflavor_t *array, int size)
-{
-	const struct rpc_authops *ops;
-	rpc_authflavor_t flavor, pseudos[4];
-	int i, len, result = 0;
-
-	rcu_read_lock();
-	for (flavor = 0; flavor < RPC_AUTH_MAXFLAVOR; flavor++) {
-		ops = rcu_dereference(auth_flavors[flavor]);
-		if (result >= size) {
-			result = -ENOMEM;
-			break;
-		}
-
-		if (ops == NULL)
-			continue;
-		if (ops->list_pseudoflavors == NULL) {
-			array[result++] = ops->au_flavor;
-			continue;
-		}
-		len = ops->list_pseudoflavors(pseudos, ARRAY_SIZE(pseudos));
-		if (len < 0) {
-			result = len;
-			break;
-		}
-		for (i = 0; i < len; i++) {
-			if (result >= size) {
-				result = -ENOMEM;
-				break;
-			}
-			array[result++] = pseudos[i];
-		}
-	}
-	rcu_read_unlock();
-	return result;
-}
-EXPORT_SYMBOL_GPL(rpcauth_list_flavors);
 
 struct rpc_auth *
 rpcauth_create(const struct rpc_auth_create_args *args, struct rpc_clnt *clnt)
@@ -664,6 +615,8 @@ rpcauth_bind_root_cred(struct rpc_task *task, int lookupflags)
 	};
 	struct rpc_cred *ret;
 
+	if (RPC_IS_ASYNC(task))
+		lookupflags |= RPCAUTH_LOOKUP_ASYNC;
 	ret = auth->au_ops->lookup_cred(auth, &acred, lookupflags);
 	put_cred(acred.cred);
 	return ret;
@@ -680,6 +633,8 @@ rpcauth_bind_machine_cred(struct rpc_task *task, int lookupflags)
 
 	if (!acred.principal)
 		return NULL;
+	if (RPC_IS_ASYNC(task))
+		lookupflags |= RPCAUTH_LOOKUP_ASYNC;
 	return auth->au_ops->lookup_cred(auth, &acred, lookupflags);
 }
 
@@ -703,7 +658,7 @@ rpcauth_bindcred(struct rpc_task *task, const struct cred *cred, int flags)
 	};
 
 	if (flags & RPC_TASK_ASYNC)
-		lookupflags |= RPCAUTH_LOOKUP_NEW;
+		lookupflags |= RPCAUTH_LOOKUP_NEW | RPCAUTH_LOOKUP_ASYNC;
 	if (task->tk_op_cred)
 		/* Task must use exactly this rpc_cred */
 		new = get_rpccred(task->tk_op_cred);
@@ -715,7 +670,7 @@ rpcauth_bindcred(struct rpc_task *task, const struct cred *cred, int flags)
 	/* If machine cred couldn't be bound, try a root cred */
 	if (new)
 		;
-	else if (cred == &machine_cred || (flags & RPC_TASK_ROOTCREDS))
+	else if (cred == &machine_cred)
 		new = rpcauth_bind_root_cred(task, lookupflags);
 	else if (flags & RPC_TASK_NULLCREDS)
 		new = authnull_ops.lookup_cred(NULL, NULL, 0);

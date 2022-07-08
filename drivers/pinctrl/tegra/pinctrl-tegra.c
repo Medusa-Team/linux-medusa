@@ -275,11 +275,85 @@ static int tegra_pinctrl_set_mux(struct pinctrl_dev *pctldev,
 	return 0;
 }
 
+static const struct tegra_pingroup *tegra_pinctrl_get_group(struct pinctrl_dev *pctldev,
+					unsigned int offset)
+{
+	struct tegra_pmx *pmx = pinctrl_dev_get_drvdata(pctldev);
+	unsigned int group, num_pins, j;
+	const unsigned int *pins;
+	int ret;
+
+	for (group = 0; group < pmx->soc->ngroups; ++group) {
+		ret = tegra_pinctrl_get_group_pins(pctldev, group, &pins, &num_pins);
+		if (ret < 0)
+			continue;
+		for (j = 0; j < num_pins; j++) {
+			if (offset == pins[j])
+				return &pmx->soc->groups[group];
+		}
+	}
+
+	dev_err(pctldev->dev, "Pingroup not found for pin %u\n", offset);
+	return NULL;
+}
+
+static int tegra_pinctrl_gpio_request_enable(struct pinctrl_dev *pctldev,
+					     struct pinctrl_gpio_range *range,
+					     unsigned int offset)
+{
+	struct tegra_pmx *pmx = pinctrl_dev_get_drvdata(pctldev);
+	const struct tegra_pingroup *group;
+	u32 value;
+
+	if (!pmx->soc->sfsel_in_mux)
+		return 0;
+
+	group = tegra_pinctrl_get_group(pctldev, offset);
+
+	if (!group)
+		return -EINVAL;
+
+	if (group->mux_reg < 0 || group->sfsel_bit < 0)
+		return -EINVAL;
+
+	value = pmx_readl(pmx, group->mux_bank, group->mux_reg);
+	value &= ~BIT(group->sfsel_bit);
+	pmx_writel(pmx, value, group->mux_bank, group->mux_reg);
+
+	return 0;
+}
+
+static void tegra_pinctrl_gpio_disable_free(struct pinctrl_dev *pctldev,
+					    struct pinctrl_gpio_range *range,
+					    unsigned int offset)
+{
+	struct tegra_pmx *pmx = pinctrl_dev_get_drvdata(pctldev);
+	const struct tegra_pingroup *group;
+	u32 value;
+
+	if (!pmx->soc->sfsel_in_mux)
+		return;
+
+	group = tegra_pinctrl_get_group(pctldev, offset);
+
+	if (!group)
+		return;
+
+	if (group->mux_reg < 0 || group->sfsel_bit < 0)
+		return;
+
+	value = pmx_readl(pmx, group->mux_bank, group->mux_reg);
+	value |= BIT(group->sfsel_bit);
+	pmx_writel(pmx, value, group->mux_bank, group->mux_reg);
+}
+
 static const struct pinmux_ops tegra_pinmux_ops = {
 	.get_functions_count = tegra_pinctrl_get_funcs_count,
 	.get_function_name = tegra_pinctrl_get_func_name,
 	.get_function_groups = tegra_pinctrl_get_func_groups,
 	.set_mux = tegra_pinctrl_set_mux,
+	.gpio_request_enable = tegra_pinctrl_gpio_request_enable,
+	.gpio_disable_free = tegra_pinctrl_gpio_disable_free,
 };
 
 static int tegra_pinconf_reg(struct tegra_pmx *pmx,
@@ -648,7 +722,7 @@ static int tegra_pinctrl_suspend(struct device *dev)
 {
 	struct tegra_pmx *pmx = dev_get_drvdata(dev);
 	u32 *backup_regs = pmx->backup_regs;
-	u32 *regs;
+	u32 __iomem *regs;
 	size_t bank_size;
 	unsigned int i, k;
 
@@ -666,7 +740,7 @@ static int tegra_pinctrl_resume(struct device *dev)
 {
 	struct tegra_pmx *pmx = dev_get_drvdata(dev);
 	u32 *backup_regs = pmx->backup_regs;
-	u32 *regs;
+	u32 __iomem *regs;
 	size_t bank_size;
 	unsigned int i, k;
 
@@ -685,16 +759,16 @@ static int tegra_pinctrl_resume(struct device *dev)
 }
 
 const struct dev_pm_ops tegra_pinctrl_pm = {
-	.suspend = &tegra_pinctrl_suspend,
-	.resume = &tegra_pinctrl_resume
+	.suspend_noirq = &tegra_pinctrl_suspend,
+	.resume_noirq = &tegra_pinctrl_resume
 };
 
-static bool gpio_node_has_range(const char *compatible)
+static bool tegra_pinctrl_gpio_node_has_range(struct tegra_pmx *pmx)
 {
 	struct device_node *np;
 	bool has_prop = false;
 
-	np = of_find_compatible_node(NULL, NULL, compatible);
+	np = of_find_compatible_node(NULL, NULL, pmx->soc->gpio_compatible);
 	if (!np)
 		return has_prop;
 
@@ -794,7 +868,7 @@ int tegra_pinctrl_probe(struct platform_device *pdev,
 
 	tegra_pinctrl_clear_parked_bits(pmx);
 
-	if (!gpio_node_has_range(pmx->soc->gpio_compatible))
+	if (pmx->soc->ngpios > 0 && !tegra_pinctrl_gpio_node_has_range(pmx))
 		pinctrl_add_gpio_range(pmx->pctl, &tegra_pinctrl_gpio_range);
 
 	platform_set_drvdata(pdev, pmx);

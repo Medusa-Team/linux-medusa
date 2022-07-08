@@ -17,7 +17,6 @@
 #include <linux/sys.h>
 #include <asm/unistd.h>
 #include <asm/setup.h>
-#include <asm/segment.h>
 #include <asm/linkage.h>
 #include <asm/asm-offsets.h>
 #include <asm/thread_info.h>
@@ -284,12 +283,12 @@ badsys:
 	mov.l	er0,@(LER0:16,sp)
 	bra	resume_userspace
 
-#if !defined(CONFIG_PREEMPT)
+#if !defined(CONFIG_PREEMPTION)
 #define resume_kernel restore_all
 #endif
 
 ret_from_exception:
-#if defined(CONFIG_PREEMPT)
+#if defined(CONFIG_PREEMPTION)
 	orc	#0xc0,ccr
 #endif
 ret_from_interrupt:
@@ -319,7 +318,7 @@ work_resched:
 restore_all:
 	RESTORE_ALL			/* Does RTE */
 
-#if defined(CONFIG_PREEMPT)
+#if defined(CONFIG_PREEMPTION)
 resume_kernel:
 	mov.l	@(TI_PRE_COUNT:16,er4),er0
 	bne	restore_all:8

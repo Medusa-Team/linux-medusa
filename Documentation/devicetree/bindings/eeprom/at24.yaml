@@ -32,9 +32,8 @@ properties:
     oneOf:
       - allOf:
           - minItems: 1
-            maxItems: 2
             items:
-              - pattern: "^(atmel|catalyst|microchip|nxp|ramtron|renesas|rohm|st),(24(c|cs|mac)[0-9]+|spd)$"
+              - pattern: "^(atmel|catalyst|microchip|nxp|ramtron|renesas|rohm|st),(24(c|cs|lc|mac)[0-9]+|spd)$"
               - pattern: "^atmel,(24(c|cs|mac)[0-9]+|spd)$"
           - oneOf:
               - items:
@@ -88,6 +87,10 @@ properties:
               - items:
                   pattern: cs1024$
               - items:
+                  pattern: c1025$
+              - items:
+                  pattern: cs1025$
+              - items:
                   pattern: c2048$
               - items:
                   pattern: cs2048$
@@ -96,14 +99,20 @@ properties:
       # These are special cases that don't conform to the above pattern.
       # Each requires a standard at24 model as fallback.
       - items:
-          - const: rohm,br24t01
+          - enum:
+              - rohm,br24g01
+              - rohm,br24t01
           - const: atmel,24c01
       - items:
-          - const: nxp,se97b
+          - enum:
+              - nxp,se97b
+              - renesas,r1ex24002
           - const: atmel,24c02
       - items:
-          - const: renesas,r1ex24002
-          - const: atmel,24c02
+          - enum:
+              - onnn,cat24c04
+              - onnn,cat24c05
+          - const: atmel,24c04
       - items:
           - const: renesas,r1ex24016
           - const: atmel,24c16
@@ -114,22 +123,24 @@ properties:
           - const: renesas,r1ex24128
           - const: atmel,24c128
 
+  label:
+    description: Descriptive name of the EEPROM.
+
   reg:
     maxItems: 1
 
   pagesize:
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint32
     description:
       The length of the pagesize for writing. Please consult the
       manual of your device, that value varies a lot. A wrong value
       may result in data loss! If not specified, a safety value of
       '1' is used which will be very slow.
-    enum: [ 1, 8, 16, 32, 64, 128, 258 ]
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [1, 8, 16, 32, 64, 128, 256]
     default: 1
 
   read-only:
-    $ref: /schemas/types.yaml#definitions/flag
+    $ref: /schemas/types.yaml#/definitions/flag
     description:
       Disables writes to the eeprom.
 
@@ -139,37 +150,38 @@ properties:
       Total eeprom size in bytes.
 
   no-read-rollover:
-    $ref: /schemas/types.yaml#definitions/flag
+    $ref: /schemas/types.yaml#/definitions/flag
     description:
       Indicates that the multi-address eeprom does not automatically roll
       over reads to the next slave address. Please consult the manual of
       your device.
 
-  wp-gpios:
-    description:
-      GPIO to which the write-protect pin of the chip is connected.
-    maxItems: 1
+  wp-gpios: true
 
   address-width:
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint32
     description:
       Number of address bits.
+    $ref: /schemas/types.yaml#/definitions/uint32
     default: 8
     enum: [ 8, 16 ]
 
   num-addresses:
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint32
     description:
       Total number of i2c slave addresses this device takes.
+    $ref: /schemas/types.yaml#/definitions/uint32
     default: 1
     minimum: 1
     maximum: 8
 
+  vcc-supply:
+    description:
+      phandle of the regulator that provides the supply voltage.
+
 required:
   - compatible
   - reg
+
+additionalProperties: false
 
 examples:
   - |

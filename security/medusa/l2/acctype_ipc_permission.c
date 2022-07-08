@@ -1,32 +1,49 @@
-#include <linux/medusa/l3/registry.h>
-#include <linux/medusa/l2/audit_medusa.h>
-#include <linux/medusa/l1/task.h>
-#include <linux/medusa/l1/ipc.h>
-#include <linux/init.h>
-#include <linux/mm.h>
-#include "kobject_process.h"
-#include "kobject_ipc.h"
+// SPDX-License-Identifier: GPL-2.0-only
+
+/*
+ * IPC permission access type implementation.
+ *
+ * Copyright (C) 2017-2018 Viliam Mihalik
+ * Copyright (C) 2018-2020 Matus Jokay
+ */
+
+#include "l3/registry.h"
+#include "l2/kobject_process.h"
+#include "l2/kobject_ipc.h"
+#include "l2/l2.h"
+#include "l2/audit_medusa.h"
 
 struct ipc_perm_access {
 	MEDUSA_ACCESS_HEADER;
 	unsigned int ipc_class;
-	u32 perms;	/* desired (requested) permission set */
+	u32 perms;		/* desired (requested) permission set */
 };
 
 MED_ATTRS(ipc_perm_access) {
-	MED_ATTR_RO (ipc_perm_access, perms, "perms", MED_UNSIGNED),
-	MED_ATTR_RO (ipc_perm_access, ipc_class, "ipc_class", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_perm_access, perms, "perms", MED_UNSIGNED),
+	MED_ATTR_RO(ipc_perm_access, ipc_class, "ipc_class", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
 MED_ACCTYPE(ipc_perm_access, "ipc_perm", process_kobject, "process", ipc_kobject, "object");
 
-int __init ipc_acctype_init(void) {
-	MED_REGISTER_ACCTYPE(ipc_perm_access,MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
+int __init ipc_acctype_perm_init(void)
+{
+	MED_REGISTER_ACCTYPE(ipc_perm_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
 }
 
-static void medusa_ipc_perm_pacb(struct audit_buffer *ab, void *pcad);
+static void medusa_ipc_perm_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	if (mad->pacb.ipc_perm.perms)
+		audit_log_format(ab," perms=%u", mad->pacb.ipc_perm.perms);
+	if (mad->pacb.ipc_perm.ipc_class)
+		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_perm.ipc_class);
+}
+
 /*
  * Check permissions for access to IPC
  * @ipcp contains the kernel IPC permission structure
@@ -56,17 +73,18 @@ static void medusa_ipc_perm_pacb(struct audit_buffer *ab, void *pcad);
  *        |<-- semctl_stat()
  *        |<-- semctl_setval()
  */
-medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
+int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 {
-	medusa_answer_t retval = MED_ALLOW;
+	int retval;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .event = EVENT_MONITORED_N, .pacb.ipc_perm.ipc_class = MED_IPC_UNDEFINED };
+	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_perm_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
-	bool use_locking = false;
+	bool __maybe_unused use_locking = false;
+	int err = 0;
 
-#ifdef CONFIG_SMP
 	/*
 	 * WORKAROUND!!!
 	 *
@@ -83,8 +101,7 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 	 * Note: On UP spins doesn't exist, lucky us ;)
 	 *       Medusa on UP always can make a decision without a carry on spinlocks...
 	 */
-
-	if (spin_is_locked(&(ipcp->lock))) {
+	if (IS_ENABLED(CONFIG_SMP) && spin_is_locked(&(ipcp->lock))) {
 #ifdef CONFIG_DEBUG_SPINLOCK
 		/*
 		 * If current process is holding the spinlock, we need to unlock it;
@@ -97,7 +114,7 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 		 */
 		if (ipcp->lock.rlock.owner == current)
 			use_locking = true;
-#else /* !CONFIG_DEBUG_SPINLOCK */
+#else
 		/*
 		 * If CONFIG_DEBUG_SPINLOCK is off and a spinlock is held, there is no
 		 * possibility to determine the owner of this spinlock. So we cannot
@@ -112,71 +129,57 @@ medusa_answer_t medusa_ipc_permission(struct kern_ipc_perm *ipcp, u32 perms)
 		 * in this function this way we lose do_msgsnd() and ipc_check_perms()
 		 * controls...
 		 */
-		return retval;
-#endif /* CONFIG_DEBUG_SPINLOCK */
+		return lsm_retval(ans, err);
+#endif
 	}
-#endif /* CONFIG_SMP */
 
 	/*
 	 * Increase references to the IPC object; second argument:
 	 *   true - returns with unlocked IPC object
 	 *   false - don't need to unlock IPC object
 	 */
-	if (unlikely(ipc_getref(ipcp, use_locking)))
-		/* for now, we don't support error codes */
-		return MED_DENY;
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
+	if (unlikely((err = ipc_getref(ipcp, use_locking)) != 0))
+		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
+		return err;
+
+	if (!is_med_magic_valid(&(task_security(current)->med_object))
+	    && process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
+	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
-	if (MEDUSA_MONITORED_ACCESS_S(ipc_perm_access, task_security(current))) {
+	if (MEDUSA_MONITORED_ACCESS_O(ipc_perm_access, ipc_security(ipcp))) {
 		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
-		if (ipc_kern2kobj(&object, ipcp, true) == NULL)
-			goto audit;
+		ipc_kern2kobj(&object, ipcp, true);
 
-		memset(&access, '\0', sizeof(struct ipc_perm_access));
-		access.perms = perms;
+		access.perms = flag;
 		access.ipc_class = object.ipc_class;
 		mad.pacb.ipc_perm.ipc_class = object.ipc_class;
 
-		retval = MED_DECIDE(ipc_perm_access, &access, &process, &object);
+		ans = MED_DECIDE(ipc_perm_access, &access, &process, &object);
 	}
-audit:
-	if (unlikely(ipc_putref(ipcp, use_locking)))
-		retval = MED_DENY;
-#ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	mad.pacb.ipc_perm.perms = perms;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad, medusa_ipc_perm_pacb);
-#endif
-	return retval;
 out:
 	/*
 	 * Decrease references to the IPC object; second argument:
 	 *   true - returns with locked IPC object
 	 *   false - don't need to lock IPC object
 	 */
-	if (unlikely(ipc_putref(ipcp, use_locking)))
-		/* for now, we don't support error codes */
-		retval = MED_DENY;
+	/* second argument true: returns with locked IPC object */
+	err = ipc_putref(ipcp, use_locking);
+	retval = lsm_retval(ans, err);
+#ifdef CONFIG_AUDIT
+	cad.type = LSM_AUDIT_DATA_IPC;
+	cad.u.ipc_id = ipcp->key;
+	mad.function = __func__;
+	mad.med_answer = retval;
+	mad.pacb.ipc_perm.perms = flag;
+	cad.medusa_audit_data = &mad;
+	medusa_audit_log_callback(&cad, medusa_ipc_perm_pacb);
+#endif
 	return retval;
 }
 
-static void medusa_ipc_perm_pacb(struct audit_buffer *ab, void *pcad)
-{
-	struct common_audit_data *cad = pcad;
-	struct medusa_audit_data *mad = cad->medusa_audit_data;
-
-	if (mad->pacb.ipc_perm.perms)
-		audit_log_format(ab," perms=%u", mad->pacb.ipc_perm.perms);
-	if (mad->pacb.ipc_perm.ipc_class)
-		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_perm.ipc_class);
-}
-__initcall(ipc_acctype_init);
+device_initcall(ipc_acctype_perm_init);

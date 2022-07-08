@@ -49,15 +49,15 @@ struct dio48e_gpio {
 	unsigned char out_state[6];
 	unsigned char control[2];
 	raw_spinlock_t lock;
-	unsigned base;
+	unsigned int base;
 	unsigned char irq_mask;
 };
 
-static int dio48e_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
+static int dio48e_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
 {
 	struct dio48e_gpio *const dio48egpio = gpiochip_get_data(chip);
-	const unsigned port = offset / 8;
-	const unsigned mask = BIT(offset % 8);
+	const unsigned int port = offset / 8;
+	const unsigned int mask = BIT(offset % 8);
 
 	if (dio48egpio->io_state[port] & mask)
 		return  GPIO_LINE_DIRECTION_IN;
@@ -65,14 +65,14 @@ static int dio48e_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
 	return GPIO_LINE_DIRECTION_OUT;
 }
 
-static int dio48e_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
+static int dio48e_gpio_direction_input(struct gpio_chip *chip, unsigned int offset)
 {
 	struct dio48e_gpio *const dio48egpio = gpiochip_get_data(chip);
-	const unsigned io_port = offset / 8;
+	const unsigned int io_port = offset / 8;
 	const unsigned int control_port = io_port / 3;
-	const unsigned control_addr = dio48egpio->base + 3 + control_port*4;
+	const unsigned int control_addr = dio48egpio->base + 3 + control_port * 4;
 	unsigned long flags;
-	unsigned control;
+	unsigned int control;
 
 	raw_spin_lock_irqsave(&dio48egpio->lock, flags);
 
@@ -104,17 +104,17 @@ static int dio48e_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 	return 0;
 }
 
-static int dio48e_gpio_direction_output(struct gpio_chip *chip, unsigned offset,
-	int value)
+static int dio48e_gpio_direction_output(struct gpio_chip *chip, unsigned int offset,
+					int value)
 {
 	struct dio48e_gpio *const dio48egpio = gpiochip_get_data(chip);
-	const unsigned io_port = offset / 8;
+	const unsigned int io_port = offset / 8;
 	const unsigned int control_port = io_port / 3;
-	const unsigned mask = BIT(offset % 8);
-	const unsigned control_addr = dio48egpio->base + 3 + control_port*4;
-	const unsigned out_port = (io_port > 2) ? io_port + 1 : io_port;
+	const unsigned int mask = BIT(offset % 8);
+	const unsigned int control_addr = dio48egpio->base + 3 + control_port * 4;
+	const unsigned int out_port = (io_port > 2) ? io_port + 1 : io_port;
 	unsigned long flags;
-	unsigned control;
+	unsigned int control;
 
 	raw_spin_lock_irqsave(&dio48egpio->lock, flags);
 
@@ -154,14 +154,14 @@ static int dio48e_gpio_direction_output(struct gpio_chip *chip, unsigned offset,
 	return 0;
 }
 
-static int dio48e_gpio_get(struct gpio_chip *chip, unsigned offset)
+static int dio48e_gpio_get(struct gpio_chip *chip, unsigned int offset)
 {
 	struct dio48e_gpio *const dio48egpio = gpiochip_get_data(chip);
-	const unsigned port = offset / 8;
-	const unsigned mask = BIT(offset % 8);
-	const unsigned in_port = (port > 2) ? port + 1 : port;
+	const unsigned int port = offset / 8;
+	const unsigned int mask = BIT(offset % 8);
+	const unsigned int in_port = (port > 2) ? port + 1 : port;
 	unsigned long flags;
-	unsigned port_state;
+	unsigned int port_state;
 
 	raw_spin_lock_irqsave(&dio48egpio->lock, flags);
 
@@ -202,12 +202,12 @@ static int dio48e_gpio_get_multiple(struct gpio_chip *chip, unsigned long *mask,
 	return 0;
 }
 
-static void dio48e_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
+static void dio48e_gpio_set(struct gpio_chip *chip, unsigned int offset, int value)
 {
 	struct dio48e_gpio *const dio48egpio = gpiochip_get_data(chip);
-	const unsigned port = offset / 8;
-	const unsigned mask = BIT(offset % 8);
-	const unsigned out_port = (port > 2) ? port + 1 : port;
+	const unsigned int port = offset / 8;
+	const unsigned int mask = BIT(offset % 8);
+	const unsigned int out_port = (port > 2) ? port + 1 : port;
 	unsigned long flags;
 
 	raw_spin_lock_irqsave(&dio48egpio->lock, flags);
@@ -306,7 +306,7 @@ static void dio48e_irq_unmask(struct irq_data *data)
 	raw_spin_unlock_irqrestore(&dio48egpio->lock, flags);
 }
 
-static int dio48e_irq_set_type(struct irq_data *data, unsigned flow_type)
+static int dio48e_irq_set_type(struct irq_data *data, unsigned int flow_type)
 {
 	const unsigned long offset = irqd_to_hwirq(data);
 
@@ -336,8 +336,8 @@ static irqreturn_t dio48e_irq_handler(int irq, void *dev_id)
 	unsigned long gpio;
 
 	for_each_set_bit(gpio, &irq_mask, 2)
-		generic_handle_irq(irq_find_mapping(chip->irq.domain,
-			19 + gpio*24));
+		generic_handle_domain_irq(chip->irq.domain,
+					  19 + gpio*24);
 
 	raw_spin_lock(&dio48egpio->lock);
 
@@ -368,10 +368,21 @@ static const char *dio48e_names[DIO48E_NGPIO] = {
 	"PPI Group 1 Port C 5", "PPI Group 1 Port C 6", "PPI Group 1 Port C 7"
 };
 
+static int dio48e_irq_init_hw(struct gpio_chip *gc)
+{
+	struct dio48e_gpio *const dio48egpio = gpiochip_get_data(gc);
+
+	/* Disable IRQ by default */
+	inb(dio48egpio->base + 0xB);
+
+	return 0;
+}
+
 static int dio48e_probe(struct device *dev, unsigned int id)
 {
 	struct dio48e_gpio *dio48egpio;
 	const char *const name = dev_name(dev);
+	struct gpio_irq_chip *girq;
 	int err;
 
 	dio48egpio = devm_kzalloc(dev, sizeof(*dio48egpio), GFP_KERNEL);
@@ -399,13 +410,17 @@ static int dio48e_probe(struct device *dev, unsigned int id)
 	dio48egpio->chip.set_multiple = dio48e_gpio_set_multiple;
 	dio48egpio->base = base[id];
 
-	raw_spin_lock_init(&dio48egpio->lock);
+	girq = &dio48egpio->chip.irq;
+	girq->chip = &dio48e_irqchip;
+	/* This will let us handle the parent IRQ in the driver */
+	girq->parent_handler = NULL;
+	girq->num_parents = 0;
+	girq->parents = NULL;
+	girq->default_type = IRQ_TYPE_NONE;
+	girq->handler = handle_edge_irq;
+	girq->init_hw = dio48e_irq_init_hw;
 
-	err = devm_gpiochip_add_data(dev, &dio48egpio->chip, dio48egpio);
-	if (err) {
-		dev_err(dev, "GPIO registering failed (%d)\n", err);
-		return err;
-	}
+	raw_spin_lock_init(&dio48egpio->lock);
 
 	/* initialize all GPIO as output */
 	outb(0x80, base[id] + 3);
@@ -419,13 +434,9 @@ static int dio48e_probe(struct device *dev, unsigned int id)
 	outb(0x00, base[id] + 6);
 	outb(0x00, base[id] + 7);
 
-	/* disable IRQ by default */
-	inb(base[id] + 0xB);
-
-	err = gpiochip_irqchip_add(&dio48egpio->chip, &dio48e_irqchip, 0,
-		handle_edge_irq, IRQ_TYPE_NONE);
+	err = devm_gpiochip_add_data(dev, &dio48egpio->chip, dio48egpio);
 	if (err) {
-		dev_err(dev, "Could not add irqchip (%d)\n", err);
+		dev_err(dev, "GPIO registering failed (%d)\n", err);
 		return err;
 	}
 

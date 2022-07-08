@@ -36,6 +36,9 @@
 #define TPM_CR50_FW_VER(l)			(0x0f90 | ((l) << 12))
 #define TPM_CR50_MAX_FW_VER_LEN			64
 
+/* Default quality for hwrng. */
+#define TPM_CR50_DEFAULT_RNG_QUALITY		700
+
 struct cr50_spi_phy {
 	struct tpm_tis_spi_phy spi_phy;
 
@@ -132,7 +135,12 @@ static void cr50_wake_if_needed(struct cr50_spi_phy *cr50_phy)
 
 	if (cr50_needs_waking(cr50_phy)) {
 		/* Assert CS, wait 1 msec, deassert CS */
-		struct spi_transfer spi_cs_wake = { .delay_usecs = 1000 };
+		struct spi_transfer spi_cs_wake = {
+			.delay = {
+				.value = 1000,
+				.unit = SPI_DELAY_UNIT_USECS
+			}
+		};
 
 		spi_sync_transfer(phy->spi_device, &spi_cs_wake, 1);
 		/* Wait for it to fully wake */
@@ -175,6 +183,19 @@ static int cr50_spi_flow_control(struct tpm_tis_spi_phy *phy,
 	} while (!(phy->iobuf[0] & 0x01));
 
 	return 0;
+}
+
+static bool tpm_cr50_spi_is_firmware_power_managed(struct device *dev)
+{
+	u8 val;
+	int ret;
+
+	/* This flag should default true when the device property is not present */
+	ret = device_property_read_u8(dev, "firmware-power-managed", &val);
+	if (ret)
+		return true;
+
+	return val;
 }
 
 static int tpm_tis_spi_cr50_transfer(struct tpm_tis_data *data, u32 addr, u16 len,
@@ -259,6 +280,7 @@ int cr50_spi_probe(struct spi_device *spi)
 	phy = &cr50_phy->spi_phy;
 	phy->flow_control = cr50_spi_flow_control;
 	phy->wake_after = jiffies;
+	phy->priv.rng_quality = TPM_CR50_DEFAULT_RNG_QUALITY;
 	init_completion(&phy->ready);
 
 	cr50_phy->access_delay = CR50_NOIRQ_ACCESS_DELAY;
@@ -300,7 +322,8 @@ int cr50_spi_probe(struct spi_device *spi)
 	cr50_print_fw_version(&phy->priv);
 
 	chip = dev_get_drvdata(&spi->dev);
-	chip->flags |= TPM_CHIP_FLAG_FIRMWARE_POWER_MANAGED;
+	if (tpm_cr50_spi_is_firmware_power_managed(&spi->dev))
+		chip->flags |= TPM_CHIP_FLAG_FIRMWARE_POWER_MANAGED;
 
 	return 0;
 }

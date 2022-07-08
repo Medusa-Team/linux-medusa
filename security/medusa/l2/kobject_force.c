@@ -1,4 +1,6 @@
-/* kobject_force.c, (C) 2002 Milan Pikula */
+// SPDX-License-Identifier: GPL-2.0
+
+/* (C) 2002 Milan Pikula */
 
 #include <linux/sched.h>
 #include <linux/module.h>
@@ -19,17 +21,17 @@ struct force_kobject {
 };
 
 MED_ATTRS(force_kobject) {
-	MED_ATTR_KEY_RO	(force_kobject, pid, "pid", MED_SIGNED),
-	MED_ATTR	(force_kobject, code, "code", MED_BITMAP_8),
+	MED_ATTR_KEY_RO(force_kobject, pid, "pid", MED_SIGNED),
+	MED_ATTR(force_kobject, code, "code", MED_BITMAP_8),
 
 	MED_ATTR_END
 };
 
-static medusa_answer_t force_update(struct medusa_kobject_s * kobj)
+static enum medusa_answer_t force_update(struct medusa_kobject_s *kobj)
 {
-	struct task_struct * p;
-	medusa_answer_t retval = MED_ERR;
-	char * buf;
+	struct task_struct *p;
+	enum medusa_answer_t retval = MED_ERR;
+	char *buf;
 
 	/* kmalloc() with GFP_KERNEL may sleep; it can't be in RCU */
 	buf = kmalloc(MAX_FORCE_SIZE, GFP_KERNEL);
@@ -74,10 +76,11 @@ MED_KCLASS(force_kobject) {
 	NULL,	/* unmonitor */
 };
 
-int __init force_kobject_init(void) {
+int __init force_kobject_init(void)
+{
 	//MED_REGISTER_KCLASS(force_kobject);
 	return 0;
 }
 
-__initcall(force_kobject_init);
+device_initcall(force_kobject_init);
 

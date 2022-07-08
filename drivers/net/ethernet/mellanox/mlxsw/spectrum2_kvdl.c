@@ -35,6 +35,7 @@ static const struct mlxsw_sp2_kvdl_part_info mlxsw_sp2_kvdl_parts_info[] = {
 				 MAX_KVD_ACTION_SETS),
 	MLXSW_SP2_KVDL_PART_INFO(PBS, 0x24, KVD_SIZE, KVD_SIZE),
 	MLXSW_SP2_KVDL_PART_INFO(MCRIGR, 0x26, KVD_SIZE, KVD_SIZE),
+	MLXSW_SP2_KVDL_PART_INFO(IPV6_ADDRESS, 0x28, KVD_SIZE, KVD_SIZE),
 	MLXSW_SP2_KVDL_PART_INFO(TNUMT, 0x29, KVD_SIZE, KVD_SIZE),
 };
 
@@ -45,7 +46,7 @@ struct mlxsw_sp2_kvdl_part {
 	unsigned int usage_bit_count;
 	unsigned int indexes_per_usage_bit;
 	unsigned int last_allocated_bit;
-	unsigned long usage[0];	/* Usage bits */
+	unsigned long usage[];	/* Usage bits */
 };
 
 struct mlxsw_sp2_kvdl {

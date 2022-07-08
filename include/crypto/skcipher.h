@@ -8,9 +8,13 @@
 #ifndef _CRYPTO_SKCIPHER_H
 #define _CRYPTO_SKCIPHER_H
 
+#include <linux/container_of.h>
 #include <linux/crypto.h>
-#include <linux/kernel.h>
 #include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/types.h>
+
+struct scatterlist;
 
 /**
  *	struct skcipher_request - Symmetric key cipher request
@@ -18,7 +22,7 @@
  *	@iv: Initialisation Vector
  *	@src: Source SG list
  *	@dst: Destination SG list
- *	@base: Underlying async request request
+ *	@base: Underlying async request
  *	@__ctx: Start of private context data
  */
 struct skcipher_request {
@@ -35,14 +39,7 @@ struct skcipher_request {
 };
 
 struct crypto_skcipher {
-	int (*setkey)(struct crypto_skcipher *tfm, const u8 *key,
-	              unsigned int keylen);
-	int (*encrypt)(struct skcipher_request *req);
-	int (*decrypt)(struct skcipher_request *req);
-
-	unsigned int ivsize;
 	unsigned int reqsize;
-	unsigned int keysize;
 
 	struct crypto_tfm base;
 };
@@ -203,6 +200,8 @@ static inline struct crypto_tfm *crypto_skcipher_tfm(
 /**
  * crypto_free_skcipher() - zeroize and free cipher handle
  * @tfm: cipher handle to be freed
+ *
+ * If @tfm is a NULL or error pointer, this function does nothing.
  */
 static inline void crypto_free_skcipher(struct crypto_skcipher *tfm)
 {
@@ -255,7 +254,7 @@ static inline unsigned int crypto_skcipher_alg_ivsize(struct skcipher_alg *alg)
  */
 static inline unsigned int crypto_skcipher_ivsize(struct crypto_skcipher *tfm)
 {
-	return tfm->ivsize;
+	return crypto_skcipher_alg(tfm)->ivsize;
 }
 
 static inline unsigned int crypto_sync_skcipher_ivsize(
@@ -366,11 +365,8 @@ static inline void crypto_sync_skcipher_clear_flags(
  *
  * Return: 0 if the setting of the key was successful; < 0 if an error occurred
  */
-static inline int crypto_skcipher_setkey(struct crypto_skcipher *tfm,
-					 const u8 *key, unsigned int keylen)
-{
-	return tfm->setkey(tfm, key, keylen);
-}
+int crypto_skcipher_setkey(struct crypto_skcipher *tfm,
+			   const u8 *key, unsigned int keylen);
 
 static inline int crypto_sync_skcipher_setkey(struct crypto_sync_skcipher *tfm,
 					 const u8 *key, unsigned int keylen)
@@ -378,10 +374,16 @@ static inline int crypto_sync_skcipher_setkey(struct crypto_sync_skcipher *tfm,
 	return crypto_skcipher_setkey(&tfm->base, key, keylen);
 }
 
-static inline unsigned int crypto_skcipher_default_keysize(
+static inline unsigned int crypto_skcipher_min_keysize(
 	struct crypto_skcipher *tfm)
 {
-	return tfm->keysize;
+	return crypto_skcipher_alg(tfm)->min_keysize;
+}
+
+static inline unsigned int crypto_skcipher_max_keysize(
+	struct crypto_skcipher *tfm)
+{
+	return crypto_skcipher_alg(tfm)->max_keysize;
 }
 
 /**
@@ -512,7 +514,7 @@ static inline struct skcipher_request *skcipher_request_alloc(
  */
 static inline void skcipher_request_free(struct skcipher_request *req)
 {
-	kzfree(req);
+	kfree_sensitive(req);
 }
 
 static inline void skcipher_request_zero(struct skcipher_request *req)

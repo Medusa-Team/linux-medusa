@@ -341,38 +341,6 @@ static struct dentry *aafs_create_dir(const char *name, struct dentry *parent)
 }
 
 /**
- * aafs_create_symlink - create a symlink in the apparmorfs filesystem
- * @name: name of dentry to create
- * @parent: parent directory for this dentry
- * @target: if symlink, symlink target string
- * @private: private data
- * @iops: struct of inode_operations that should be used
- *
- * If @target parameter is %NULL, then the @iops parameter needs to be
- * setup to handle .readlink and .get_link inode_operations.
- */
-static struct dentry *aafs_create_symlink(const char *name,
-					  struct dentry *parent,
-					  const char *target,
-					  void *private,
-					  const struct inode_operations *iops)
-{
-	struct dentry *dent;
-	char *link = NULL;
-
-	if (target) {
-		if (!link)
-			return ERR_PTR(-ENOMEM);
-	}
-	dent = aafs_create(name, S_IFLNK | 0444, parent, private, link, NULL,
-			   iops);
-	if (IS_ERR(dent))
-		kfree(link);
-
-	return dent;
-}
-
-/**
  * aafs_remove - removes a file or directory from the apparmorfs filesystem
  *
  * @dentry: dentry of the file/directory/symlink to removed.
@@ -454,7 +422,7 @@ static ssize_t policy_update(u32 mask, const char __user *buf, size_t size,
 	 */
 	error = aa_may_manage_policy(label, ns, mask);
 	if (error)
-		return error;
+		goto end_section;
 
 	data = aa_simple_write_to_buffer(buf, size, size, pos);
 	error = PTR_ERR(data);
@@ -462,6 +430,7 @@ static ssize_t policy_update(u32 mask, const char __user *buf, size_t size,
 		error = aa_replace_profiles(ns, label, mask, data);
 		aa_put_loaddata(data);
 	}
+end_section:
 	end_current_label_crit_section(label);
 
 	return error;
@@ -623,7 +592,7 @@ static __poll_t ns_revision_poll(struct file *file, poll_table *pt)
 
 void __aa_bump_ns_revision(struct aa_ns *ns)
 {
-	WRITE_ONCE(ns->revision, ns->revision + 1);
+	WRITE_ONCE(ns->revision, READ_ONCE(ns->revision) + 1);
 	wake_up_interruptible(&ns->wait);
 }
 
@@ -839,12 +808,10 @@ static ssize_t query_label(char *buf, size_t buf_len,
 struct multi_transaction {
 	struct kref count;
 	ssize_t size;
-	char data[0];
+	char data[];
 };
 
 #define MULTI_TRANSACTION_LIMIT (PAGE_SIZE - sizeof(struct multi_transaction))
-/* TODO: replace with per file lock */
-static DEFINE_SPINLOCK(multi_transaction_lock);
 
 static void multi_transaction_kref(struct kref *kref)
 {
@@ -878,10 +845,10 @@ static void multi_transaction_set(struct file *file,
 	AA_BUG(n > MULTI_TRANSACTION_LIMIT);
 
 	new->size = n;
-	spin_lock(&multi_transaction_lock);
+	spin_lock(&file->f_lock);
 	old = (struct multi_transaction *) file->private_data;
 	file->private_data = new;
-	spin_unlock(&multi_transaction_lock);
+	spin_unlock(&file->f_lock);
 	put_multi_transaction(old);
 }
 
@@ -910,9 +877,10 @@ static ssize_t multi_transaction_read(struct file *file, char __user *buf,
 	struct multi_transaction *t;
 	ssize_t ret;
 
-	spin_lock(&multi_transaction_lock);
+	spin_lock(&file->f_lock);
 	t = get_multi_transaction(file->private_data);
-	spin_unlock(&multi_transaction_lock);
+	spin_unlock(&file->f_lock);
+
 	if (!t)
 		return 0;
 
@@ -1389,7 +1357,7 @@ static int rawdata_open(struct inode *inode, struct file *file)
 	struct aa_loaddata *loaddata;
 	struct rawdata_f_data *private;
 
-	if (!policy_view_capable(NULL))
+	if (!aa_current_policy_view_capable(NULL))
 		return -EACCES;
 
 	loaddata = __aa_get_loaddata(inode->i_private);
@@ -1762,25 +1730,25 @@ int __aafs_profile_mkdir(struct aa_profile *profile, struct dentry *parent)
 	}
 
 	if (profile->rawdata) {
-		dent = aafs_create_symlink("raw_sha1", dir, NULL,
-					   profile->label.proxy,
-					   &rawdata_link_sha1_iops);
+		dent = aafs_create("raw_sha1", S_IFLNK | 0444, dir,
+				   profile->label.proxy, NULL, NULL,
+				   &rawdata_link_sha1_iops);
 		if (IS_ERR(dent))
 			goto fail;
 		aa_get_proxy(profile->label.proxy);
 		profile->dents[AAFS_PROF_RAW_HASH] = dent;
 
-		dent = aafs_create_symlink("raw_abi", dir, NULL,
-					   profile->label.proxy,
-					   &rawdata_link_abi_iops);
+		dent = aafs_create("raw_abi", S_IFLNK | 0444, dir,
+				   profile->label.proxy, NULL, NULL,
+				   &rawdata_link_abi_iops);
 		if (IS_ERR(dent))
 			goto fail;
 		aa_get_proxy(profile->label.proxy);
 		profile->dents[AAFS_PROF_RAW_ABI] = dent;
 
-		dent = aafs_create_symlink("raw_data", dir, NULL,
-					   profile->label.proxy,
-					   &rawdata_link_data_iops);
+		dent = aafs_create("raw_data", S_IFLNK | 0444, dir,
+				   profile->label.proxy, NULL, NULL,
+				   &rawdata_link_data_iops);
 		if (IS_ERR(dent))
 			goto fail;
 		aa_get_proxy(profile->label.proxy);
@@ -1804,7 +1772,8 @@ fail2:
 	return error;
 }
 
-static int ns_mkdir_op(struct inode *dir, struct dentry *dentry, umode_t mode)
+static int ns_mkdir_op(struct user_namespace *mnt_userns, struct inode *dir,
+		       struct dentry *dentry, umode_t mode)
 {
 	struct aa_ns *ns, *parent;
 	/* TODO: improve permission check */
@@ -2077,9 +2046,6 @@ fail2:
 	return error;
 }
 
-
-#define list_entry_is_head(pos, head, member) (&pos->member == (head))
-
 /**
  * __next_ns - find the next namespace to list
  * @root: root namespace to stop search at (NOT NULL)
@@ -2147,7 +2113,7 @@ static struct aa_profile *__first_profile(struct aa_ns *root,
 
 /**
  * __next_profile - step to the next profile in a profile tree
- * @profile: current profile in tree (NOT NULL)
+ * @p: current profile in tree (NOT NULL)
  *
  * Perform a depth first traversal on the profile tree in a namespace
  *
@@ -2298,7 +2264,7 @@ static const struct seq_operations aa_sfs_profiles_op = {
 
 static int profiles_open(struct inode *inode, struct file *file)
 {
-	if (!policy_view_capable(NULL))
+	if (!aa_current_policy_view_capable(NULL))
 		return -EACCES;
 
 	return seq_open(file, &aa_sfs_profiles_op);
@@ -2363,6 +2329,8 @@ static struct aa_sfs_entry aa_sfs_entry_versions[] = {
 static struct aa_sfs_entry aa_sfs_entry_policy[] = {
 	AA_SFS_DIR("versions",			aa_sfs_entry_versions),
 	AA_SFS_FILE_BOOLEAN("set_load",		1),
+	/* number of out of band transitions supported */
+	AA_SFS_FILE_U64("outofband",		MAX_OOB_SUPPORTED),
 	{ }
 };
 
@@ -2573,16 +2541,18 @@ static const char *policy_get_link(struct dentry *dentry,
 {
 	struct aa_ns *ns;
 	struct path path;
+	int error;
 
 	if (!dentry)
 		return ERR_PTR(-ECHILD);
+
 	ns = aa_get_current_ns();
 	path.mnt = mntget(aafs_mnt);
 	path.dentry = dget(ns_dir(ns));
-	nd_jump_link(&path);
+	error = nd_jump_link(&path);
 	aa_put_ns(ns);
 
-	return NULL;
+	return ERR_PTR(error);
 }
 
 static int policy_readlink(struct dentry *dentry, char __user *buffer,

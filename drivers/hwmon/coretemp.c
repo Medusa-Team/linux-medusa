@@ -167,7 +167,7 @@ static ssize_t show_temp(struct device *dev,
 		 * really help at all.
 		 */
 		tdata->temp = tdata->tjmax - ((eax >> 16) & 0x7f) * 1000;
-		tdata->valid = 1;
+		tdata->valid = true;
 		tdata->last_updated = jiffies;
 	}
 
@@ -709,7 +709,7 @@ static int coretemp_cpu_offline(unsigned int cpu)
 	return 0;
 }
 static const struct x86_cpu_id __initconst coretemp_ids[] = {
-	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_DTHERM },
+	X86_MATCH_VENDOR_FEATURE(INTEL, X86_FEATURE_DTHERM, NULL),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, coretemp_ids);

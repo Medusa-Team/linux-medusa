@@ -149,8 +149,10 @@ static int gpmi_init(struct gpmi_nand_data *this)
 	int ret;
 
 	ret = pm_runtime_get_sync(this->dev);
-	if (ret < 0)
+	if (ret < 0) {
+		pm_runtime_put_noidle(this->dev);
 		return ret;
+	}
 
 	ret = gpmi_reset_block(r->gpmi_regs, false);
 	if (ret)
@@ -179,9 +181,11 @@ static int gpmi_init(struct gpmi_nand_data *this)
 
 	/*
 	 * Decouple the chip select from dma channel. We use dma0 for all
-	 * the chips.
+	 * the chips, force all NAND RDY_BUSY inputs to be sourced from
+	 * RDY_BUSY0.
 	 */
-	writel(BM_GPMI_CTRL1_DECOUPLE_CS, r->gpmi_regs + HW_GPMI_CTRL1_SET);
+	writel(BM_GPMI_CTRL1_DECOUPLE_CS | BM_GPMI_CTRL1_GANGED_RDYBUSY,
+	       r->gpmi_regs + HW_GPMI_CTRL1_SET);
 
 err_out:
 	pm_runtime_mark_last_busy(this->dev);
@@ -272,8 +276,8 @@ static int set_geometry_by_ecc_info(struct gpmi_nand_data *this,
 	default:
 		dev_err(this->dev,
 			"unsupported nand chip. ecc bits : %d, ecc size : %d\n",
-			chip->base.eccreq.strength,
-			chip->base.eccreq.step_size);
+			nanddev_get_ecc_requirements(&chip->base)->strength,
+			nanddev_get_ecc_requirements(&chip->base)->step_size);
 		return -EINVAL;
 	}
 	geo->ecc_chunk_size = ecc_step;
@@ -510,6 +514,8 @@ static int legacy_set_geometry(struct gpmi_nand_data *this)
 static int common_nfc_set_geometry(struct gpmi_nand_data *this)
 {
 	struct nand_chip *chip = &this->nand;
+	const struct nand_ecc_props *requirements =
+		nanddev_get_ecc_requirements(&chip->base);
 
 	if (chip->ecc.strength > 0 && chip->ecc.size > 0)
 		return set_geometry_by_ecc_info(this, chip->ecc.strength,
@@ -517,13 +523,12 @@ static int common_nfc_set_geometry(struct gpmi_nand_data *this)
 
 	if ((of_property_read_bool(this->dev->of_node, "fsl,use-minimum-ecc"))
 				|| legacy_set_geometry(this)) {
-		if (!(chip->base.eccreq.strength > 0 &&
-		      chip->base.eccreq.step_size > 0))
+		if (!(requirements->strength > 0 && requirements->step_size > 0))
 			return -EINVAL;
 
 		return set_geometry_by_ecc_info(this,
-						chip->base.eccreq.strength,
-						chip->base.eccreq.step_size);
+						requirements->strength,
+						requirements->step_size);
 	}
 
 	return 0;
@@ -540,8 +545,10 @@ static int bch_set_geometry(struct gpmi_nand_data *this)
 		return ret;
 
 	ret = pm_runtime_get_sync(this->dev);
-	if (ret < 0)
+	if (ret < 0) {
+		pm_runtime_put_autosuspend(this->dev);
 		return ret;
+	}
 
 	/*
 	* Due to erratum #2847 of the MX23, the BCH cannot be soft reset on this
@@ -637,10 +644,11 @@ err_out:
  *         RDN_DELAY = -----------------------     {3}
  *                           RP
  */
-static void gpmi_nfc_compute_timings(struct gpmi_nand_data *this,
-				     const struct nand_sdr_timings *sdr)
+static int gpmi_nfc_compute_timings(struct gpmi_nand_data *this,
+				    const struct nand_sdr_timings *sdr)
 {
 	struct gpmi_nfc_hardware_timing *hw = &this->hw;
+	struct resources *r = &this->resources;
 	unsigned int dll_threshold_ps = this->devdata->max_chain_delay;
 	unsigned int period_ps, reference_period_ps;
 	unsigned int data_setup_cycles, data_hold_cycles, addr_setup_cycles;
@@ -649,21 +657,33 @@ static void gpmi_nfc_compute_timings(struct gpmi_nand_data *this,
 	int sample_delay_ps, sample_delay_factor;
 	u16 busy_timeout_cycles;
 	u8 wrn_dly_sel;
+	unsigned long clk_rate, min_rate;
 
 	if (sdr->tRC_min >= 30000) {
 		/* ONFI non-EDO modes [0-3] */
 		hw->clk_rate = 22000000;
+		min_rate = 0;
 		wrn_dly_sel = BV_GPMI_CTRL1_WRN_DLY_SEL_4_TO_8NS;
 	} else if (sdr->tRC_min >= 25000) {
 		/* ONFI EDO mode 4 */
 		hw->clk_rate = 80000000;
+		min_rate = 22000000;
 		wrn_dly_sel = BV_GPMI_CTRL1_WRN_DLY_SEL_NO_DELAY;
 	} else {
 		/* ONFI EDO mode 5 */
 		hw->clk_rate = 100000000;
+		min_rate = 80000000;
 		wrn_dly_sel = BV_GPMI_CTRL1_WRN_DLY_SEL_NO_DELAY;
 	}
 
+	clk_rate = clk_round_rate(r->clock[0], hw->clk_rate);
+	if (clk_rate <= min_rate) {
+		dev_err(this->dev, "clock setting: expected %ld, got %ld\n",
+			hw->clk_rate, clk_rate);
+		return -ENOTSUPP;
+	}
+
+	hw->clk_rate = clk_rate;
 	/* SDR core timings are given in picoseconds */
 	period_ps = div_u64((u64)NSEC_PER_SEC * 1000, hw->clk_rate);
 
@@ -704,16 +724,35 @@ static void gpmi_nfc_compute_timings(struct gpmi_nand_data *this,
 		hw->ctrl1n |= BF_GPMI_CTRL1_RDN_DELAY(sample_delay_factor) |
 			      BM_GPMI_CTRL1_DLL_ENABLE |
 			      (use_half_period ? BM_GPMI_CTRL1_HALF_PERIOD : 0);
+	return 0;
 }
 
-static void gpmi_nfc_apply_timings(struct gpmi_nand_data *this)
+static int gpmi_nfc_apply_timings(struct gpmi_nand_data *this)
 {
 	struct gpmi_nfc_hardware_timing *hw = &this->hw;
 	struct resources *r = &this->resources;
 	void __iomem *gpmi_regs = r->gpmi_regs;
 	unsigned int dll_wait_time_us;
+	int ret;
 
-	clk_set_rate(r->clock[0], hw->clk_rate);
+	/* Clock dividers do NOT guarantee a clean clock signal on its output
+	 * during the change of the divide factor on i.MX6Q/UL/SX. On i.MX7/8,
+	 * all clock dividers provide these guarantee.
+	 */
+	if (GPMI_IS_MX6Q(this) || GPMI_IS_MX6SX(this))
+		clk_disable_unprepare(r->clock[0]);
+
+	ret = clk_set_rate(r->clock[0], hw->clk_rate);
+	if (ret) {
+		dev_err(this->dev, "cannot set clock rate to %lu Hz: %d\n", hw->clk_rate, ret);
+		return ret;
+	}
+
+	if (GPMI_IS_MX6Q(this) || GPMI_IS_MX6SX(this)) {
+		ret = clk_prepare_enable(r->clock[0]);
+		if (ret)
+			return ret;
+	}
 
 	writel(hw->timing0, gpmi_regs + HW_GPMI_TIMING0);
 	writel(hw->timing1, gpmi_regs + HW_GPMI_TIMING1);
@@ -732,21 +771,24 @@ static void gpmi_nfc_apply_timings(struct gpmi_nand_data *this)
 
 	/* Wait for the DLL to settle. */
 	udelay(dll_wait_time_us);
+
+	return 0;
 }
 
-static int gpmi_setup_data_interface(struct nand_chip *chip, int chipnr,
-				     const struct nand_data_interface *conf)
+static int gpmi_setup_interface(struct nand_chip *chip, int chipnr,
+				const struct nand_interface_config *conf)
 {
 	struct gpmi_nand_data *this = nand_get_controller_data(chip);
 	const struct nand_sdr_timings *sdr;
+	int ret;
 
 	/* Retrieve required NAND timings */
 	sdr = nand_get_sdr_timings(conf);
 	if (IS_ERR(sdr))
 		return PTR_ERR(sdr);
 
-	/* Only MX6 GPMI controller can reach EDO timings */
-	if (sdr->tRC_min <= 25000 && !GPMI_IS_MX6(this))
+	/* Only MX28/MX6 GPMI controller can reach EDO timings */
+	if (sdr->tRC_min <= 25000 && !GPMI_IS_MX28(this) && !GPMI_IS_MX6(this))
 		return -ENOTSUPP;
 
 	/* Stop here if this call was just a check */
@@ -754,7 +796,9 @@ static int gpmi_setup_data_interface(struct nand_chip *chip, int chipnr,
 		return 0;
 
 	/* Do the actual derivation of the controller timings */
-	gpmi_nfc_compute_timings(this, sdr);
+	ret = gpmi_nfc_compute_timings(this, sdr);
+	if (ret)
+		return ret;
 
 	this->hw.must_apply_timings = true;
 
@@ -832,158 +876,6 @@ map_fail:
 	dma_map_sg(this->dev, sgl, 1, dr);
 
 	return false;
-}
-
-/**
- * gpmi_copy_bits - copy bits from one memory region to another
- * @dst: destination buffer
- * @dst_bit_off: bit offset we're starting to write at
- * @src: source buffer
- * @src_bit_off: bit offset we're starting to read from
- * @nbits: number of bits to copy
- *
- * This functions copies bits from one memory region to another, and is used by
- * the GPMI driver to copy ECC sections which are not guaranteed to be byte
- * aligned.
- *
- * src and dst should not overlap.
- *
- */
-static void gpmi_copy_bits(u8 *dst, size_t dst_bit_off, const u8 *src,
-			   size_t src_bit_off, size_t nbits)
-{
-	size_t i;
-	size_t nbytes;
-	u32 src_buffer = 0;
-	size_t bits_in_src_buffer = 0;
-
-	if (!nbits)
-		return;
-
-	/*
-	 * Move src and dst pointers to the closest byte pointer and store bit
-	 * offsets within a byte.
-	 */
-	src += src_bit_off / 8;
-	src_bit_off %= 8;
-
-	dst += dst_bit_off / 8;
-	dst_bit_off %= 8;
-
-	/*
-	 * Initialize the src_buffer value with bits available in the first
-	 * byte of data so that we end up with a byte aligned src pointer.
-	 */
-	if (src_bit_off) {
-		src_buffer = src[0] >> src_bit_off;
-		if (nbits >= (8 - src_bit_off)) {
-			bits_in_src_buffer += 8 - src_bit_off;
-		} else {
-			src_buffer &= GENMASK(nbits - 1, 0);
-			bits_in_src_buffer += nbits;
-		}
-		nbits -= bits_in_src_buffer;
-		src++;
-	}
-
-	/* Calculate the number of bytes that can be copied from src to dst. */
-	nbytes = nbits / 8;
-
-	/* Try to align dst to a byte boundary. */
-	if (dst_bit_off) {
-		if (bits_in_src_buffer < (8 - dst_bit_off) && nbytes) {
-			src_buffer |= src[0] << bits_in_src_buffer;
-			bits_in_src_buffer += 8;
-			src++;
-			nbytes--;
-		}
-
-		if (bits_in_src_buffer >= (8 - dst_bit_off)) {
-			dst[0] &= GENMASK(dst_bit_off - 1, 0);
-			dst[0] |= src_buffer << dst_bit_off;
-			src_buffer >>= (8 - dst_bit_off);
-			bits_in_src_buffer -= (8 - dst_bit_off);
-			dst_bit_off = 0;
-			dst++;
-			if (bits_in_src_buffer > 7) {
-				bits_in_src_buffer -= 8;
-				dst[0] = src_buffer;
-				dst++;
-				src_buffer >>= 8;
-			}
-		}
-	}
-
-	if (!bits_in_src_buffer && !dst_bit_off) {
-		/*
-		 * Both src and dst pointers are byte aligned, thus we can
-		 * just use the optimized memcpy function.
-		 */
-		if (nbytes)
-			memcpy(dst, src, nbytes);
-	} else {
-		/*
-		 * src buffer is not byte aligned, hence we have to copy each
-		 * src byte to the src_buffer variable before extracting a byte
-		 * to store in dst.
-		 */
-		for (i = 0; i < nbytes; i++) {
-			src_buffer |= src[i] << bits_in_src_buffer;
-			dst[i] = src_buffer;
-			src_buffer >>= 8;
-		}
-	}
-	/* Update dst and src pointers */
-	dst += nbytes;
-	src += nbytes;
-
-	/*
-	 * nbits is the number of remaining bits. It should not exceed 8 as
-	 * we've already copied as much bytes as possible.
-	 */
-	nbits %= 8;
-
-	/*
-	 * If there's no more bits to copy to the destination and src buffer
-	 * was already byte aligned, then we're done.
-	 */
-	if (!nbits && !bits_in_src_buffer)
-		return;
-
-	/* Copy the remaining bits to src_buffer */
-	if (nbits)
-		src_buffer |= (*src & GENMASK(nbits - 1, 0)) <<
-			      bits_in_src_buffer;
-	bits_in_src_buffer += nbits;
-
-	/*
-	 * In case there were not enough bits to get a byte aligned dst buffer
-	 * prepare the src_buffer variable to match the dst organization (shift
-	 * src_buffer by dst_bit_off and retrieve the least significant bits
-	 * from dst).
-	 */
-	if (dst_bit_off)
-		src_buffer = (src_buffer << dst_bit_off) |
-			     (*dst & GENMASK(dst_bit_off - 1, 0));
-	bits_in_src_buffer += dst_bit_off;
-
-	/*
-	 * Keep most significant bits from dst if we end up with an unaligned
-	 * number of bits.
-	 */
-	nbytes = bits_in_src_buffer / 8;
-	if (bits_in_src_buffer % 8) {
-		src_buffer |= (dst[nbytes] &
-			       GENMASK(7, bits_in_src_buffer % 8)) <<
-			      (nbytes * 8);
-		nbytes++;
-	}
-
-	/* Copy the remaining bytes to dst */
-	for (i = 0; i < nbytes; i++) {
-		dst[i] = src_buffer;
-		src_buffer >>= 8;
-	}
 }
 
 /* add our owner bbt descriptor */
@@ -1096,11 +988,9 @@ static int acquire_register_block(struct gpmi_nand_data *this,
 {
 	struct platform_device *pdev = this->pdev;
 	struct resources *res = &this->resources;
-	struct resource *r;
 	void __iomem *p;
 
-	r = platform_get_resource_byname(pdev, IORESOURCE_MEM, res_name);
-	p = devm_ioremap_resource(&pdev->dev, r);
+	p = devm_platform_ioremap_resource_byname(pdev, res_name);
 	if (IS_ERR(p))
 		return PTR_ERR(p);
 
@@ -1118,16 +1008,13 @@ static int acquire_bch_irq(struct gpmi_nand_data *this, irq_handler_t irq_h)
 {
 	struct platform_device *pdev = this->pdev;
 	const char *res_name = GPMI_NAND_BCH_INTERRUPT_RES_NAME;
-	struct resource *r;
 	int err;
 
-	r = platform_get_resource_byname(pdev, IORESOURCE_IRQ, res_name);
-	if (!r) {
-		dev_err(this->dev, "Can't get resource for %s\n", res_name);
-		return -ENODEV;
-	}
+	err = platform_get_irq_byname(pdev, res_name);
+	if (err < 0)
+		return err;
 
-	err = devm_request_irq(this->dev, r->start, irq_h, 0, res_name, this);
+	err = devm_request_irq(this->dev, err, irq_h, 0, res_name, this);
 	if (err)
 		dev_err(this->dev, "error requesting BCH IRQ\n");
 
@@ -1148,20 +1035,19 @@ static int acquire_dma_channels(struct gpmi_nand_data *this)
 {
 	struct platform_device *pdev = this->pdev;
 	struct dma_chan *dma_chan;
+	int ret = 0;
 
 	/* request dma channel */
-	dma_chan = dma_request_slave_channel(&pdev->dev, "rx-tx");
-	if (!dma_chan) {
-		dev_err(this->dev, "Failed to request DMA channel.\n");
-		goto acquire_err;
+	dma_chan = dma_request_chan(&pdev->dev, "rx-tx");
+	if (IS_ERR(dma_chan)) {
+		ret = dev_err_probe(this->dev, PTR_ERR(dma_chan),
+				    "DMA channel request failed\n");
+		release_dma_channels(this);
+	} else {
+		this->dma_chans[0] = dma_chan;
 	}
 
-	this->dma_chans[0] = dma_chan;
-	return 0;
-
-acquire_err:
-	release_dma_channels(this);
-	return -EINVAL;
+	return ret;
 }
 
 static int gpmi_get_clks(struct gpmi_nand_data *this)
@@ -1179,15 +1065,6 @@ static int gpmi_get_clks(struct gpmi_nand_data *this)
 
 		r->clock[i] = clk;
 	}
-
-	if (GPMI_IS_MX6(this))
-		/*
-		 * Set the default value for the gpmi clock.
-		 *
-		 * If you want to use the ONFI nand which is in the
-		 * Synchronous Mode, you should change the clock as you need.
-		 */
-		clk_set_rate(r->clock[0], 22000000);
 
 	return 0;
 
@@ -1573,7 +1450,6 @@ static int gpmi_ecc_write_page(struct nand_chip *chip, const uint8_t *buf,
 	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct gpmi_nand_data *this = nand_get_controller_data(chip);
 	struct bch_geometry *nfc_geo = &this->bch_geometry;
-	int ret;
 
 	dev_dbg(this->dev, "ecc write page.\n");
 
@@ -1593,9 +1469,7 @@ static int gpmi_ecc_write_page(struct nand_chip *chip, const uint8_t *buf,
 				    this->auxiliary_virt);
 	}
 
-	ret = nand_prog_page_op(chip, page, 0, buf, nfc_geo->page_size);
-
-	return ret;
+	return nand_prog_page_op(chip, page, 0, buf, nfc_geo->page_size);
 }
 
 /*
@@ -1712,7 +1586,7 @@ static int gpmi_ecc_write_oob(struct nand_chip *chip, int page)
  * inline (interleaved with payload DATA), and do not align data chunk on
  * byte boundaries.
  * We thus need to take care moving the payload data and ECC bits stored in the
- * page into the provided buffers, which is why we're using gpmi_copy_bits.
+ * page into the provided buffers, which is why we're using nand_extract_bits().
  *
  * See set_geometry_by_ecc_info inline comments to have a full description
  * of the layout used by the GPMI controller.
@@ -1761,9 +1635,8 @@ static int gpmi_ecc_read_page_raw(struct nand_chip *chip, uint8_t *buf,
 	/* Extract interleaved payload data and ECC bits */
 	for (step = 0; step < nfc_geo->ecc_chunk_count; step++) {
 		if (buf)
-			gpmi_copy_bits(buf, step * eccsize * 8,
-				       tmp_buf, src_bit_off,
-				       eccsize * 8);
+			nand_extract_bits(buf, step * eccsize * 8, tmp_buf,
+					  src_bit_off, eccsize * 8);
 		src_bit_off += eccsize * 8;
 
 		/* Align last ECC block to align a byte boundary */
@@ -1772,9 +1645,8 @@ static int gpmi_ecc_read_page_raw(struct nand_chip *chip, uint8_t *buf,
 			eccbits += 8 - ((oob_bit_off + eccbits) % 8);
 
 		if (oob_required)
-			gpmi_copy_bits(oob, oob_bit_off,
-				       tmp_buf, src_bit_off,
-				       eccbits);
+			nand_extract_bits(oob, oob_bit_off, tmp_buf,
+					  src_bit_off, eccbits);
 
 		src_bit_off += eccbits;
 		oob_bit_off += eccbits;
@@ -1799,7 +1671,7 @@ static int gpmi_ecc_read_page_raw(struct nand_chip *chip, uint8_t *buf,
  * inline (interleaved with payload DATA), and do not align data chunk on
  * byte boundaries.
  * We thus need to take care moving the OOB area at the right place in the
- * final page, which is why we're using gpmi_copy_bits.
+ * final page, which is why we're using nand_extract_bits().
  *
  * See set_geometry_by_ecc_info inline comments to have a full description
  * of the layout used by the GPMI controller.
@@ -1838,8 +1710,8 @@ static int gpmi_ecc_write_page_raw(struct nand_chip *chip, const uint8_t *buf,
 	/* Interleave payload data and ECC bits */
 	for (step = 0; step < nfc_geo->ecc_chunk_count; step++) {
 		if (buf)
-			gpmi_copy_bits(tmp_buf, dst_bit_off,
-				       buf, step * eccsize * 8, eccsize * 8);
+			nand_extract_bits(tmp_buf, dst_bit_off, buf,
+					  step * eccsize * 8, eccsize * 8);
 		dst_bit_off += eccsize * 8;
 
 		/* Align last ECC block to align a byte boundary */
@@ -1848,8 +1720,8 @@ static int gpmi_ecc_write_page_raw(struct nand_chip *chip, const uint8_t *buf,
 			eccbits += 8 - ((oob_bit_off + eccbits) % 8);
 
 		if (oob_required)
-			gpmi_copy_bits(tmp_buf, dst_bit_off,
-				       oob, oob_bit_off, eccbits);
+			nand_extract_bits(tmp_buf, dst_bit_off, oob,
+					  oob_bit_off, eccbits);
 
 		dst_bit_off += eccbits;
 		oob_bit_off += eccbits;
@@ -2183,7 +2055,7 @@ static int gpmi_init_last(struct gpmi_nand_data *this)
 	ecc->write_page_raw = gpmi_ecc_write_page_raw;
 	ecc->read_oob_raw = gpmi_ecc_read_oob_raw;
 	ecc->write_oob_raw = gpmi_ecc_write_oob_raw;
-	ecc->mode	= NAND_ECC_HW;
+	ecc->engine_type = NAND_ECC_ENGINE_TYPE_ON_HOST;
 	ecc->size	= bch_geo->ecc_chunk_size;
 	ecc->strength	= bch_geo->ecc_strength;
 	mtd_set_ooblayout(mtd, &gpmi_ooblayout_ops);
@@ -2404,16 +2276,21 @@ static int gpmi_nfc_exec_op(struct nand_chip *chip,
 	void *buf_read = NULL;
 	const void *buf_write = NULL;
 	bool direct = false;
-	struct completion *completion;
+	struct completion *dma_completion, *bch_completion;
 	unsigned long to;
+
+	if (check_only)
+		return 0;
 
 	this->ntransfers = 0;
 	for (i = 0; i < GPMI_MAX_TRANSFERS; i++)
 		this->transfers[i].direction = DMA_NONE;
 
 	ret = pm_runtime_get_sync(this->dev);
-	if (ret < 0)
+	if (ret < 0) {
+		pm_runtime_put_noidle(this->dev);
 		return ret;
+	}
 
 	/*
 	 * This driver currently supports only one NAND chip. Plus, dies share
@@ -2423,7 +2300,9 @@ static int gpmi_nfc_exec_op(struct nand_chip *chip,
 	 */
 	if (this->hw.must_apply_timings) {
 		this->hw.must_apply_timings = false;
-		gpmi_nfc_apply_timings(this);
+		ret = gpmi_nfc_apply_timings(this);
+		if (ret)
+			goto out_pm;
 	}
 
 	dev_dbg(this->dev, "%s: %d instructions\n", __func__, op->ninstrs);
@@ -2496,27 +2375,39 @@ static int gpmi_nfc_exec_op(struct nand_chip *chip,
 		       this->resources.bch_regs + HW_BCH_FLASH0LAYOUT1);
 	}
 
+	desc->callback = dma_irq_callback;
+	desc->callback_param = this;
+	dma_completion = &this->dma_done;
+	bch_completion = NULL;
+
+	init_completion(dma_completion);
+
 	if (this->bch && buf_read) {
 		writel(BM_BCH_CTRL_COMPLETE_IRQ_EN,
 		       this->resources.bch_regs + HW_BCH_CTRL_SET);
-		completion = &this->bch_done;
-	} else {
-		desc->callback = dma_irq_callback;
-		desc->callback_param = this;
-		completion = &this->dma_done;
+		bch_completion = &this->bch_done;
+		init_completion(bch_completion);
 	}
-
-	init_completion(completion);
 
 	dmaengine_submit(desc);
 	dma_async_issue_pending(get_dma_chan(this));
 
-	to = wait_for_completion_timeout(completion, msecs_to_jiffies(1000));
+	to = wait_for_completion_timeout(dma_completion, msecs_to_jiffies(1000));
 	if (!to) {
 		dev_err(this->dev, "DMA timeout, last DMA\n");
 		gpmi_dump_info(this);
 		ret = -ETIMEDOUT;
 		goto unmap;
+	}
+
+	if (this->bch && buf_read) {
+		to = wait_for_completion_timeout(bch_completion, msecs_to_jiffies(1000));
+		if (!to) {
+			dev_err(this->dev, "BCH timeout, last DMA\n");
+			gpmi_dump_info(this);
+			ret = -ETIMEDOUT;
+			goto unmap;
+		}
 	}
 
 	writel(BM_BCH_CTRL_COMPLETE_IRQ_EN,
@@ -2540,6 +2431,7 @@ unmap:
 
 	this->bch = false;
 
+out_pm:
 	pm_runtime_mark_last_busy(this->dev);
 	pm_runtime_put_autosuspend(this->dev);
 
@@ -2548,7 +2440,7 @@ unmap:
 
 static const struct nand_controller_ops gpmi_nand_controller_ops = {
 	.attach_chip = gpmi_nand_attach_chip,
-	.setup_data_interface = gpmi_setup_data_interface,
+	.setup_interface = gpmi_setup_interface,
 	.exec_op = gpmi_nfc_exec_op,
 };
 
@@ -2580,7 +2472,7 @@ static int gpmi_nand_init(struct gpmi_nand_data *this)
 	this->bch_geometry.auxiliary_size = 128;
 	ret = gpmi_alloc_dma_buffer(this);
 	if (ret)
-		goto err_out;
+		return ret;
 
 	nand_controller_init(&this->base);
 	this->base.ops = &gpmi_nand_controller_ops;
@@ -2610,43 +2502,25 @@ err_out:
 }
 
 static const struct of_device_id gpmi_nand_id_table[] = {
-	{
-		.compatible = "fsl,imx23-gpmi-nand",
-		.data = &gpmi_devdata_imx23,
-	}, {
-		.compatible = "fsl,imx28-gpmi-nand",
-		.data = &gpmi_devdata_imx28,
-	}, {
-		.compatible = "fsl,imx6q-gpmi-nand",
-		.data = &gpmi_devdata_imx6q,
-	}, {
-		.compatible = "fsl,imx6sx-gpmi-nand",
-		.data = &gpmi_devdata_imx6sx,
-	}, {
-		.compatible = "fsl,imx7d-gpmi-nand",
-		.data = &gpmi_devdata_imx7d,
-	}, {}
+	{ .compatible = "fsl,imx23-gpmi-nand", .data = &gpmi_devdata_imx23, },
+	{ .compatible = "fsl,imx28-gpmi-nand", .data = &gpmi_devdata_imx28, },
+	{ .compatible = "fsl,imx6q-gpmi-nand", .data = &gpmi_devdata_imx6q, },
+	{ .compatible = "fsl,imx6sx-gpmi-nand", .data = &gpmi_devdata_imx6sx, },
+	{ .compatible = "fsl,imx7d-gpmi-nand", .data = &gpmi_devdata_imx7d,},
+	{}
 };
 MODULE_DEVICE_TABLE(of, gpmi_nand_id_table);
 
 static int gpmi_nand_probe(struct platform_device *pdev)
 {
 	struct gpmi_nand_data *this;
-	const struct of_device_id *of_id;
 	int ret;
 
 	this = devm_kzalloc(&pdev->dev, sizeof(*this), GFP_KERNEL);
 	if (!this)
 		return -ENOMEM;
 
-	of_id = of_match_device(gpmi_nand_id_table, &pdev->dev);
-	if (of_id) {
-		this->devdata = of_id->data;
-	} else {
-		dev_err(&pdev->dev, "Failed to find the right device id.\n");
-		return -ENODEV;
-	}
-
+	this->devdata = of_device_get_match_data(&pdev->dev);
 	platform_set_drvdata(pdev, this);
 	this->pdev  = pdev;
 	this->dev   = &pdev->dev;
@@ -2657,7 +2531,7 @@ static int gpmi_nand_probe(struct platform_device *pdev)
 
 	ret = __gpmi_enable_clk(this, true);
 	if (ret)
-		goto exit_nfc_init;
+		goto exit_acquire_resources;
 
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 500);
 	pm_runtime_use_autosuspend(&pdev->dev);
@@ -2692,11 +2566,15 @@ exit_acquire_resources:
 static int gpmi_nand_remove(struct platform_device *pdev)
 {
 	struct gpmi_nand_data *this = platform_get_drvdata(pdev);
+	struct nand_chip *chip = &this->nand;
+	int ret;
 
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 
-	nand_release(&this->nand);
+	ret = mtd_device_unregister(nand_to_mtd(chip));
+	WARN_ON(ret);
+	nand_cleanup(chip);
 	gpmi_free_dma_buffer(this);
 	release_resources(this);
 	return 0;

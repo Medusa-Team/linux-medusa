@@ -11,8 +11,7 @@
 #define BNXT_ULP_H
 
 #define BNXT_ROCE_ULP	0
-#define BNXT_OTHER_ULP	1
-#define BNXT_MAX_ULP	2
+#define BNXT_MAX_ULP	1
 
 #define BNXT_MIN_ROCE_CP_RINGS	2
 #define BNXT_MIN_ROCE_STAT_CTXS	1
@@ -67,6 +66,14 @@ struct bnxt_en_dev {
 	#define BNXT_EN_FLAG_ULP_STOPPED	0x8
 	const struct bnxt_en_ops	*en_ops;
 	struct bnxt_ulp			ulp_tbl[BNXT_MAX_ULP];
+	int				l2_db_size;	/* Doorbell BAR size in
+							 * bytes mapped by L2
+							 * driver.
+							 */
+	int				l2_db_size_nc;	/* Doorbell BAR size in
+							 * bytes mapped as non-
+							 * cacheable.
+							 */
 };
 
 struct bnxt_en_ops {

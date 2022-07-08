@@ -1,11 +1,11 @@
 #
-# Makefile for the Linux kernel part of Medusa DS9 Security System,
+# file for the Linux kernel part of Medusa DS9 Security System,
 # L1 - hooks
 #
 
 O_TARGET := l1
 
-export-objs := 
+export-objs :=
 
 obj-y:= medusa.o
 

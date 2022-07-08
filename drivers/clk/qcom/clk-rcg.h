@@ -86,6 +86,7 @@ struct clk_rcg {
 };
 
 extern const struct clk_ops clk_rcg_ops;
+extern const struct clk_ops clk_rcg_floor_ops;
 extern const struct clk_ops clk_rcg_bypass_ops;
 extern const struct clk_ops clk_rcg_bypass2_ops;
 extern const struct clk_ops clk_rcg_pixel_ops;
@@ -153,6 +154,15 @@ struct clk_rcg2 {
 
 #define to_clk_rcg2(_hw) container_of(to_clk_regmap(_hw), struct clk_rcg2, clkr)
 
+struct clk_rcg2_gfx3d {
+	u8 div;
+	struct clk_rcg2 rcg;
+	struct clk_hw **hws;
+};
+
+#define to_clk_rcg2_gfx3d(_hw) \
+	container_of(to_clk_rcg2(_hw), struct clk_rcg2_gfx3d, rcg)
+
 extern const struct clk_ops clk_rcg2_ops;
 extern const struct clk_ops clk_rcg2_floor_ops;
 extern const struct clk_ops clk_edp_pixel_ops;
@@ -161,6 +171,7 @@ extern const struct clk_ops clk_byte2_ops;
 extern const struct clk_ops clk_pixel_ops;
 extern const struct clk_ops clk_gfx3d_ops;
 extern const struct clk_ops clk_rcg2_shared_ops;
+extern const struct clk_ops clk_dp_ops;
 
 struct clk_rcg_dfs_data {
 	struct clk_rcg2 *rcg;

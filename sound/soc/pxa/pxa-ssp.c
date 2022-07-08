@@ -61,22 +61,6 @@ static void dump_registers(struct ssp_device *ssp)
 		 pxa_ssp_read_reg(ssp, SSACD));
 }
 
-static void pxa_ssp_enable(struct ssp_device *ssp)
-{
-	uint32_t sscr0;
-
-	sscr0 = __raw_readl(ssp->mmio_base + SSCR0) | SSCR0_SSE;
-	__raw_writel(sscr0, ssp->mmio_base + SSCR0);
-}
-
-static void pxa_ssp_disable(struct ssp_device *ssp)
-{
-	uint32_t sscr0;
-
-	sscr0 = __raw_readl(ssp->mmio_base + SSCR0) & ~SSCR0_SSE;
-	__raw_writel(sscr0, ssp->mmio_base + SSCR0);
-}
-
 static void pxa_ssp_set_dma_params(struct ssp_device *ssp, int width4,
 			int out, struct snd_dmaengine_dai_dma_data *dma)
 {
@@ -94,13 +78,12 @@ static int pxa_ssp_startup(struct snd_pcm_substream *substream,
 	struct snd_dmaengine_dai_dma_data *dma;
 	int ret = 0;
 
-	if (!cpu_dai->active) {
+	if (!snd_soc_dai_active(cpu_dai)) {
 		clk_prepare_enable(ssp->clk);
 		pxa_ssp_disable(ssp);
 	}
 
-	if (priv->extclk)
-		clk_prepare_enable(priv->extclk);
+	clk_prepare_enable(priv->extclk);
 
 	dma = kzalloc(sizeof(struct snd_dmaengine_dai_dma_data), GFP_KERNEL);
 	if (!dma)
@@ -119,13 +102,12 @@ static void pxa_ssp_shutdown(struct snd_pcm_substream *substream,
 	struct ssp_priv *priv = snd_soc_dai_get_drvdata(cpu_dai);
 	struct ssp_device *ssp = priv->ssp;
 
-	if (!cpu_dai->active) {
+	if (!snd_soc_dai_active(cpu_dai)) {
 		pxa_ssp_disable(ssp);
 		clk_disable_unprepare(ssp->clk);
 	}
 
-	if (priv->extclk)
-		clk_disable_unprepare(priv->extclk);
+	clk_disable_unprepare(priv->extclk);
 
 	kfree(snd_soc_dai_get_dma_data(cpu_dai, substream));
 	snd_soc_dai_set_dma_data(cpu_dai, substream, NULL);
@@ -133,12 +115,12 @@ static void pxa_ssp_shutdown(struct snd_pcm_substream *substream,
 
 #ifdef CONFIG_PM
 
-static int pxa_ssp_suspend(struct snd_soc_dai *cpu_dai)
+static int pxa_ssp_suspend(struct snd_soc_component *component)
 {
-	struct ssp_priv *priv = snd_soc_dai_get_drvdata(cpu_dai);
+	struct ssp_priv *priv = snd_soc_component_get_drvdata(component);
 	struct ssp_device *ssp = priv->ssp;
 
-	if (!cpu_dai->active)
+	if (!snd_soc_component_active(component))
 		clk_prepare_enable(ssp->clk);
 
 	priv->cr0 = __raw_readl(ssp->mmio_base + SSCR0);
@@ -151,9 +133,9 @@ static int pxa_ssp_suspend(struct snd_soc_dai *cpu_dai)
 	return 0;
 }
 
-static int pxa_ssp_resume(struct snd_soc_dai *cpu_dai)
+static int pxa_ssp_resume(struct snd_soc_component *component)
 {
-	struct ssp_priv *priv = snd_soc_dai_get_drvdata(cpu_dai);
+	struct ssp_priv *priv = snd_soc_component_get_drvdata(component);
 	struct ssp_device *ssp = priv->ssp;
 	uint32_t sssr = SSSR_ROR | SSSR_TUR | SSSR_BCE;
 
@@ -165,7 +147,7 @@ static int pxa_ssp_resume(struct snd_soc_dai *cpu_dai)
 	__raw_writel(priv->to,  ssp->mmio_base + SSTO);
 	__raw_writel(priv->psp, ssp->mmio_base + SSPSP);
 
-	if (cpu_dai->active)
+	if (snd_soc_component_active(component))
 		pxa_ssp_enable(ssp);
 	else
 		clk_disable_unprepare(ssp->clk);
@@ -178,7 +160,7 @@ static int pxa_ssp_resume(struct snd_soc_dai *cpu_dai)
 #define pxa_ssp_resume	NULL
 #endif
 
-/**
+/*
  * ssp_set_clkdiv - set SSP clock divider
  * @div: serial clock rate divider
  */
@@ -488,7 +470,7 @@ static int pxa_ssp_configure_dai_fmt(struct ssp_priv *priv)
 
 	case SND_SOC_DAIFMT_DSP_A:
 		sspsp |= SSPSP_FSRT;
-		/* fall through */
+		fallthrough;
 	case SND_SOC_DAIFMT_DSP_B:
 		sscr0 |= SSCR0_MOD | SSCR0_PSP;
 		sscr1 |= SSCR1_TRAIL | SSCR1_RWOT;
@@ -850,8 +832,6 @@ static const struct snd_soc_dai_ops pxa_ssp_dai_ops = {
 static struct snd_soc_dai_driver pxa_ssp_dai = {
 		.probe = pxa_ssp_probe,
 		.remove = pxa_ssp_remove,
-		.suspend = pxa_ssp_suspend,
-		.resume = pxa_ssp_resume,
 		.playback = {
 			.channels_min = 1,
 			.channels_max = 8,
@@ -870,16 +850,14 @@ static struct snd_soc_dai_driver pxa_ssp_dai = {
 static const struct snd_soc_component_driver pxa_ssp_component = {
 	.name		= "pxa-ssp",
 	.pcm_construct	= pxa2xx_soc_pcm_new,
-	.pcm_destruct	= pxa2xx_soc_pcm_free,
 	.open		= pxa2xx_soc_pcm_open,
 	.close		= pxa2xx_soc_pcm_close,
-	.ioctl		= snd_soc_pcm_lib_ioctl,
 	.hw_params	= pxa2xx_soc_pcm_hw_params,
-	.hw_free	= pxa2xx_soc_pcm_hw_free,
 	.prepare	= pxa2xx_soc_pcm_prepare,
 	.trigger	= pxa2xx_soc_pcm_trigger,
 	.pointer	= pxa2xx_soc_pcm_pointer,
-	.mmap		= pxa2xx_soc_pcm_mmap,
+	.suspend	= pxa_ssp_suspend,
+	.resume		= pxa_ssp_resume,
 };
 
 #ifdef CONFIG_OF

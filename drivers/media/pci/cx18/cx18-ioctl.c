@@ -276,7 +276,7 @@ static int cx18_s_fmt_vid_cap(struct file *file, void *fh,
 	s->pixelformat = fmt->fmt.pix.pixelformat;
 	/* HM12 YUV size is (Y=(h*720) + UV=(h*(720/2)))
 	   UYUV YUV size is (Y=(h*720) + UV=(h*(720))) */
-	if (s->pixelformat == V4L2_PIX_FMT_HM12) {
+	if (s->pixelformat == V4L2_PIX_FMT_NV12_16L16) {
 		s->vb_bytes_per_frame = h * 720 * 3 / 2;
 		s->vb_bytes_per_line = 720; /* First plane */
 	} else {
@@ -466,14 +466,24 @@ static int cx18_enum_fmt_vid_cap(struct file *file, void *fh,
 					struct v4l2_fmtdesc *fmt)
 {
 	static const struct v4l2_fmtdesc formats[] = {
-		{ 0, V4L2_BUF_TYPE_VIDEO_CAPTURE, 0,
-		  "HM12 (YUV 4:1:1)", V4L2_PIX_FMT_HM12, { 0, 0, 0, 0 }
+		{
+			.index = 0,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.description = "HM12 (YUV 4:1:1)",
+			.pixelformat = V4L2_PIX_FMT_NV12_16L16,
 		},
-		{ 1, V4L2_BUF_TYPE_VIDEO_CAPTURE, V4L2_FMT_FLAG_COMPRESSED,
-		  "MPEG", V4L2_PIX_FMT_MPEG, { 0, 0, 0, 0 }
+		{
+			.index = 1,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.flags = V4L2_FMT_FLAG_COMPRESSED,
+			.description = "MPEG",
+			.pixelformat = V4L2_PIX_FMT_MPEG,
 		},
-		{ 2, V4L2_BUF_TYPE_VIDEO_CAPTURE, 0,
-		  "UYVY 4:2:2", V4L2_PIX_FMT_UYVY, { 0, 0, 0, 0 }
+		{
+			.index = 2,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.description = "UYVY 4:2:2",
+			.pixelformat = V4L2_PIX_FMT_UYVY,
 		},
 	};
 

@@ -70,27 +70,17 @@ static mempool_t *nfs_wdata_mempool;
 static struct kmem_cache *nfs_cdata_cachep;
 static mempool_t *nfs_commit_mempool;
 
-struct nfs_commit_data *nfs_commitdata_alloc(bool never_fail)
+struct nfs_commit_data *nfs_commitdata_alloc(void)
 {
 	struct nfs_commit_data *p;
 
-	if (never_fail)
-		p = mempool_alloc(nfs_commit_mempool, GFP_NOIO);
-	else {
-		/* It is OK to do some reclaim, not no safe to wait
-		 * for anything to be returned to the pool.
-		 * mempool_alloc() cannot handle that particular combination,
-		 * so we need two separate attempts.
-		 */
+	p = kmem_cache_zalloc(nfs_cdata_cachep, nfs_io_gfp_mask());
+	if (!p) {
 		p = mempool_alloc(nfs_commit_mempool, GFP_NOWAIT);
 		if (!p)
-			p = kmem_cache_alloc(nfs_cdata_cachep, GFP_NOIO |
-					     __GFP_NOWARN | __GFP_NORETRY);
-		if (!p)
 			return NULL;
+		memset(p, 0, sizeof(*p));
 	}
-
-	memset(p, 0, sizeof(*p));
 	INIT_LIST_HEAD(&p->pages);
 	return p;
 }
@@ -104,9 +94,15 @@ EXPORT_SYMBOL_GPL(nfs_commit_free);
 
 static struct nfs_pgio_header *nfs_writehdr_alloc(void)
 {
-	struct nfs_pgio_header *p = mempool_alloc(nfs_wdata_mempool, GFP_KERNEL);
+	struct nfs_pgio_header *p;
 
-	memset(p, 0, sizeof(*p));
+	p = kmem_cache_zalloc(nfs_wdata_cachep, nfs_io_gfp_mask());
+	if (!p) {
+		p = mempool_alloc(nfs_wdata_mempool, GFP_NOWAIT);
+		if (!p)
+			return NULL;
+		memset(p, 0, sizeof(*p));
+	}
 	p->rw_mode = FMODE_WRITE;
 	return p;
 }
@@ -147,6 +143,31 @@ static void nfs_io_completion_put(struct nfs_io_completion *ioc)
 {
 	if (ioc != NULL)
 		kref_put(&ioc->refcount, nfs_io_completion_release);
+}
+
+static void
+nfs_page_set_inode_ref(struct nfs_page *req, struct inode *inode)
+{
+	if (!test_and_set_bit(PG_INODE_REF, &req->wb_flags)) {
+		kref_get(&req->wb_kref);
+		atomic_long_inc(&NFS_I(inode)->nrequests);
+	}
+}
+
+static int
+nfs_cancel_remove_inode(struct nfs_page *req, struct inode *inode)
+{
+	int ret;
+
+	if (!test_bit(PG_REMOVE, &req->wb_flags))
+		return 0;
+	ret = nfs_page_group_lock(req);
+	if (ret)
+		return ret;
+	if (test_and_clear_bit(PG_REMOVE, &req->wb_flags))
+		nfs_page_set_inode_ref(req, inode);
+	nfs_page_group_unlock(req);
+	return 0;
 }
 
 static struct nfs_page *
@@ -218,6 +239,36 @@ static struct nfs_page *nfs_page_find_head_request(struct page *page)
 	return req;
 }
 
+static struct nfs_page *nfs_find_and_lock_page_request(struct page *page)
+{
+	struct inode *inode = page_file_mapping(page)->host;
+	struct nfs_page *req, *head;
+	int ret;
+
+	for (;;) {
+		req = nfs_page_find_head_request(page);
+		if (!req)
+			return req;
+		head = nfs_page_group_lock_head(req);
+		if (head != req)
+			nfs_release_request(req);
+		if (IS_ERR(head))
+			return head;
+		ret = nfs_cancel_remove_inode(head, inode);
+		if (ret < 0) {
+			nfs_unlock_and_release_request(head);
+			return ERR_PTR(ret);
+		}
+		/* Ensure that nobody removed the request before we locked it */
+		if (head == nfs_page_private_request(page))
+			break;
+		if (PageSwapCache(page))
+			break;
+		nfs_unlock_and_release_request(head);
+	}
+	return head;
+}
+
 /* Adjust the file length if we're writing beyond the end */
 static void nfs_grow_file(struct page *page, unsigned int offset, unsigned int count)
 {
@@ -233,23 +284,39 @@ static void nfs_grow_file(struct page *page, unsigned int offset, unsigned int c
 	end = page_file_offset(page) + ((loff_t)offset+count);
 	if (i_size >= end)
 		goto out;
+	trace_nfs_size_grow(inode, end);
 	i_size_write(inode, end);
 	NFS_I(inode)->cache_validity &= ~NFS_INO_INVALID_SIZE;
 	nfs_inc_stats(inode, NFSIOS_EXTENDWRITE);
 out:
 	spin_unlock(&inode->i_lock);
+	nfs_fscache_invalidate(inode, 0);
 }
 
 /* A writeback failed: mark the page as bad, and invalidate the page cache */
 static void nfs_set_pageerror(struct address_space *mapping)
 {
+	struct inode *inode = mapping->host;
+
 	nfs_zap_mapping(mapping->host, mapping);
+	/* Force file size revalidation */
+	spin_lock(&inode->i_lock);
+	nfs_set_cache_invalid(inode, NFS_INO_REVAL_FORCED |
+					     NFS_INO_INVALID_CHANGE |
+					     NFS_INO_INVALID_SIZE);
+	spin_unlock(&inode->i_lock);
 }
 
 static void nfs_mapping_set_error(struct page *page, int error)
 {
+	struct address_space *mapping = page_file_mapping(page);
+
 	SetPageError(page);
-	mapping_set_error(page_file_mapping(page), error);
+	filemap_set_wb_err(mapping, error);
+	if (mapping->host)
+		errseq_set(&mapping->host->i_sb->s_wb_err,
+			   error == -ENOSPC ? -ENOSPC : -EIO);
+	nfs_set_pageerror(mapping);
 }
 
 /*
@@ -349,7 +416,7 @@ static void nfs_set_page_writeback(struct page *page)
 
 	if (atomic_long_inc_return(&nfss->writeback) >
 			NFS_CONGESTION_ON_THRESH)
-		set_bdi_congested(inode_to_bdi(inode), BLK_RW_ASYNC);
+		nfss->write_congested = 1;
 }
 
 static void nfs_end_page_writeback(struct nfs_page *req)
@@ -365,35 +432,7 @@ static void nfs_end_page_writeback(struct nfs_page *req)
 
 	end_page_writeback(req->wb_page);
 	if (atomic_long_dec_return(&nfss->writeback) < NFS_CONGESTION_OFF_THRESH)
-		clear_bdi_congested(inode_to_bdi(inode), BLK_RW_ASYNC);
-}
-
-/*
- * nfs_unroll_locks_and_wait -  unlock all newly locked reqs and wait on @req
- *
- * this is a helper function for nfs_lock_and_join_requests
- *
- * @inode - inode associated with request page group, must be holding inode lock
- * @head  - head request of page group, must be holding head lock
- * @req   - request that couldn't lock and needs to wait on the req bit lock
- *
- * NOTE: this must be called holding page_group bit lock
- *       which will be released before returning.
- *
- * returns 0 on success, < 0 on error.
- */
-static void
-nfs_unroll_locks(struct inode *inode, struct nfs_page *head,
-			  struct nfs_page *req)
-{
-	struct nfs_page *tmp;
-
-	/* relinquish all the locks successfully grabbed this run */
-	for (tmp = head->wb_this_page ; tmp != req; tmp = tmp->wb_this_page) {
-		if (!kref_read(&tmp->wb_kref))
-			continue;
-		nfs_unlock_and_release_request(tmp);
-	}
+		nfss->write_congested = 0;
 }
 
 /*
@@ -417,22 +456,29 @@ nfs_destroy_unlinked_subrequests(struct nfs_page *destroy_list,
 		destroy_list = (subreq->wb_this_page == old_head) ?
 				   NULL : subreq->wb_this_page;
 
+		/* Note: lock subreq in order to change subreq->wb_head */
+		nfs_page_set_headlock(subreq);
 		WARN_ON_ONCE(old_head != subreq->wb_head);
 
 		/* make sure old group is not used */
 		subreq->wb_this_page = subreq;
+		subreq->wb_head = subreq;
 
 		clear_bit(PG_REMOVE, &subreq->wb_flags);
 
 		/* Note: races with nfs_page_group_destroy() */
 		if (!kref_read(&subreq->wb_kref)) {
 			/* Check if we raced with nfs_page_group_destroy() */
-			if (test_and_clear_bit(PG_TEARDOWN, &subreq->wb_flags))
+			if (test_and_clear_bit(PG_TEARDOWN, &subreq->wb_flags)) {
+				nfs_page_clear_headlock(subreq);
 				nfs_free_request(subreq);
+			} else
+				nfs_page_clear_headlock(subreq);
 			continue;
 		}
+		nfs_page_clear_headlock(subreq);
 
-		subreq->wb_head = subreq;
+		nfs_release_request(old_head);
 
 		if (test_and_clear_bit(PG_INODE_REF, &subreq->wb_flags)) {
 			nfs_release_request(subreq);
@@ -446,11 +492,64 @@ nfs_destroy_unlinked_subrequests(struct nfs_page *destroy_list,
 }
 
 /*
- * nfs_lock_and_join_requests - join all subreqs to the head req and return
- *                              a locked reference, cancelling any pending
- *                              operations for this page.
+ * nfs_join_page_group - destroy subrequests of the head req
+ * @head: the page used to lookup the "page group" of nfs_page structures
+ * @inode: Inode to which the request belongs.
  *
- * @page - the page used to lookup the "page group" of nfs_page structures
+ * This function joins all sub requests to the head request by first
+ * locking all requests in the group, cancelling any pending operations
+ * and finally updating the head request to cover the whole range covered by
+ * the (former) group.  All subrequests are removed from any write or commit
+ * lists, unlinked from the group and destroyed.
+ */
+void
+nfs_join_page_group(struct nfs_page *head, struct inode *inode)
+{
+	struct nfs_page *subreq;
+	struct nfs_page *destroy_list = NULL;
+	unsigned int pgbase, off, bytes;
+
+	pgbase = head->wb_pgbase;
+	bytes = head->wb_bytes;
+	off = head->wb_offset;
+	for (subreq = head->wb_this_page; subreq != head;
+			subreq = subreq->wb_this_page) {
+		/* Subrequests should always form a contiguous range */
+		if (pgbase > subreq->wb_pgbase) {
+			off -= pgbase - subreq->wb_pgbase;
+			bytes += pgbase - subreq->wb_pgbase;
+			pgbase = subreq->wb_pgbase;
+		}
+		bytes = max(subreq->wb_pgbase + subreq->wb_bytes
+				- pgbase, bytes);
+	}
+
+	/* Set the head request's range to cover the former page group */
+	head->wb_pgbase = pgbase;
+	head->wb_bytes = bytes;
+	head->wb_offset = off;
+
+	/* Now that all requests are locked, make sure they aren't on any list.
+	 * Commit list removal accounting is done after locks are dropped */
+	subreq = head;
+	do {
+		nfs_clear_request_commit(subreq);
+		subreq = subreq->wb_this_page;
+	} while (subreq != head);
+
+	/* unlink subrequests from head, destroy them later */
+	if (head->wb_this_page != head) {
+		/* destroy list will be terminated by head */
+		destroy_list = head->wb_this_page;
+		head->wb_this_page = head;
+	}
+
+	nfs_destroy_unlinked_subrequests(destroy_list, head, inode);
+}
+
+/*
+ * nfs_lock_and_join_requests - join all subreqs to the head req
+ * @page: the page used to lookup the "page group" of nfs_page structures
  *
  * This function joins all sub requests to the head request by first
  * locking all requests in the group, cancelling any pending operations
@@ -467,132 +566,33 @@ static struct nfs_page *
 nfs_lock_and_join_requests(struct page *page)
 {
 	struct inode *inode = page_file_mapping(page)->host;
-	struct nfs_page *head, *subreq;
-	struct nfs_page *destroy_list = NULL;
-	unsigned int total_bytes;
+	struct nfs_page *head;
 	int ret;
 
-try_again:
 	/*
 	 * A reference is taken only on the head request which acts as a
 	 * reference to the whole page group - the group will not be destroyed
 	 * until the head reference is released.
 	 */
-	head = nfs_page_find_head_request(page);
-	if (!head)
-		return NULL;
-
-	/* lock the page head first in order to avoid an ABBA inefficiency */
-	if (!nfs_lock_request(head)) {
-		ret = nfs_wait_on_request(head);
-		nfs_release_request(head);
-		if (ret < 0)
-			return ERR_PTR(ret);
-		goto try_again;
-	}
-
-	/* Ensure that nobody removed the request before we locked it */
-	if (head != nfs_page_private_request(page) && !PageSwapCache(page)) {
-		nfs_unlock_and_release_request(head);
-		goto try_again;
-	}
-
-	ret = nfs_page_group_lock(head);
-	if (ret < 0)
-		goto release_request;
+	head = nfs_find_and_lock_page_request(page);
+	if (IS_ERR_OR_NULL(head))
+		return head;
 
 	/* lock each request in the page group */
-	total_bytes = head->wb_bytes;
-	for (subreq = head->wb_this_page; subreq != head;
-			subreq = subreq->wb_this_page) {
-
-		if (!kref_get_unless_zero(&subreq->wb_kref)) {
-			if (subreq->wb_offset == head->wb_offset + total_bytes)
-				total_bytes += subreq->wb_bytes;
-			continue;
-		}
-
-		while (!nfs_lock_request(subreq)) {
-			/*
-			 * Unlock page to allow nfs_page_group_sync_on_bit()
-			 * to succeed
-			 */
-			nfs_page_group_unlock(head);
-			ret = nfs_wait_on_request(subreq);
-			if (!ret)
-				ret = nfs_page_group_lock(head);
-			if (ret < 0) {
-				nfs_unroll_locks(inode, head, subreq);
-				nfs_release_request(subreq);
-				goto release_request;
-			}
-		}
-		/*
-		 * Subrequests are always contiguous, non overlapping
-		 * and in order - but may be repeated (mirrored writes).
-		 */
-		if (subreq->wb_offset == (head->wb_offset + total_bytes)) {
-			/* keep track of how many bytes this group covers */
-			total_bytes += subreq->wb_bytes;
-		} else if (WARN_ON_ONCE(subreq->wb_offset < head->wb_offset ||
-			    ((subreq->wb_offset + subreq->wb_bytes) >
-			     (head->wb_offset + total_bytes)))) {
-			nfs_page_group_unlock(head);
-			nfs_unroll_locks(inode, head, subreq);
-			nfs_unlock_and_release_request(subreq);
-			ret = -EIO;
-			goto release_request;
-		}
-	}
-
-	/* Now that all requests are locked, make sure they aren't on any list.
-	 * Commit list removal accounting is done after locks are dropped */
-	subreq = head;
-	do {
-		nfs_clear_request_commit(subreq);
-		subreq = subreq->wb_this_page;
-	} while (subreq != head);
-
-	/* unlink subrequests from head, destroy them later */
-	if (head->wb_this_page != head) {
-		/* destroy list will be terminated by head */
-		destroy_list = head->wb_this_page;
-		head->wb_this_page = head;
-
-		/* change head request to cover whole range that
-		 * the former page group covered */
-		head->wb_bytes = total_bytes;
-	}
-
-	/* Postpone destruction of this request */
-	if (test_and_clear_bit(PG_REMOVE, &head->wb_flags)) {
-		set_bit(PG_INODE_REF, &head->wb_flags);
-		kref_get(&head->wb_kref);
-		atomic_long_inc(&NFS_I(inode)->nrequests);
-	}
-
-	nfs_page_group_unlock(head);
-
-	nfs_destroy_unlinked_subrequests(destroy_list, head, inode);
-
-	/* Did we lose a race with nfs_inode_remove_request()? */
-	if (!(PagePrivate(page) || PageSwapCache(page))) {
+	ret = nfs_page_group_lock_subrequests(head);
+	if (ret < 0) {
 		nfs_unlock_and_release_request(head);
-		return NULL;
+		return ERR_PTR(ret);
 	}
 
-	/* still holds ref on head from nfs_page_find_head_request
-	 * and still has lock on head from lock loop */
-	return head;
+	nfs_join_page_group(head, inode);
 
-release_request:
-	nfs_unlock_and_release_request(head);
-	return ERR_PTR(ret);
+	return head;
 }
 
 static void nfs_write_error(struct nfs_page *req, int error)
 {
-	nfs_set_pageerror(page_file_mapping(req->wb_page));
+	trace_nfs_write_error(req, error);
 	nfs_mapping_set_error(req->wb_page, error);
 	nfs_inode_remove_request(req);
 	nfs_end_page_writeback(req);
@@ -671,6 +671,10 @@ static int nfs_writepage_locked(struct page *page,
 	struct inode *inode = page_file_mapping(page)->host;
 	int err;
 
+	if (wbc->sync_mode == WB_SYNC_NONE &&
+	    NFS_SERVER(inode)->write_congested)
+		return AOP_WRITEPAGE_ACTIVATE;
+
 	nfs_inc_stats(inode, NFSIOS_VFSWRITEPAGE);
 	nfs_pageio_init_write(&pgio, inode, 0,
 				false, &nfs_async_write_completion_ops);
@@ -713,16 +717,27 @@ int nfs_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
 	struct inode *inode = mapping->host;
 	struct nfs_pageio_descriptor pgio;
-	struct nfs_io_completion *ioc;
+	struct nfs_io_completion *ioc = NULL;
+	unsigned int mntflags = NFS_SERVER(inode)->flags;
+	int priority = 0;
 	int err;
+
+	if (wbc->sync_mode == WB_SYNC_NONE &&
+	    NFS_SERVER(inode)->write_congested)
+		return 0;
 
 	nfs_inc_stats(inode, NFSIOS_VFSWRITEPAGES);
 
-	ioc = nfs_io_completion_alloc(GFP_KERNEL);
-	if (ioc)
-		nfs_io_completion_init(ioc, nfs_io_completion_commit, inode);
+	if (!(mntflags & NFS_MOUNT_WRITE_EAGER) || wbc->for_kupdate ||
+	    wbc->for_background || wbc->for_sync || wbc->for_reclaim) {
+		ioc = nfs_io_completion_alloc(GFP_KERNEL);
+		if (ioc)
+			nfs_io_completion_init(ioc, nfs_io_completion_commit,
+					       inode);
+		priority = wb_priority(wbc);
+	}
 
-	nfs_pageio_init_write(&pgio, inode, wb_priority(wbc), false,
+	nfs_pageio_init_write(&pgio, inode, priority, false,
 				&nfs_async_write_completion_ops);
 	pgio.pg_io_completion = ioc;
 	err = write_cache_pages(mapping, wbc, nfs_writepages_callback, &pgio);
@@ -758,9 +773,6 @@ static void nfs_inode_add_request(struct inode *inode, struct nfs_page *req)
 	 * with invalidate/truncate.
 	 */
 	spin_lock(&mapping->private_lock);
-	if (!nfs_have_writebacks(inode) &&
-	    NFS_PROTO(inode)->have_delegation(inode, FMODE_WRITE))
-		inode_inc_iversion_raw(inode);
 	if (likely(!PageSwapCache(req->wb_page))) {
 		set_bit(PG_MAPPED, &req->wb_flags);
 		SetPagePrivate(req->wb_page);
@@ -947,9 +959,9 @@ nfs_mark_request_commit(struct nfs_page *req, struct pnfs_layout_segment *lseg,
 static void
 nfs_clear_page_commit(struct page *page)
 {
-	dec_node_page_state(page, NR_UNSTABLE_NFS);
+	dec_node_page_state(page, NR_WRITEBACK);
 	dec_wb_stat(&inode_to_bdi(page_file_mapping(page)->host)->wb,
-		    WB_RECLAIMABLE);
+		    WB_WRITEBACK);
 }
 
 /* Called holding the request lock on @req */
@@ -998,7 +1010,7 @@ static void nfs_write_completion(struct nfs_pgio_header *hdr)
 		nfs_list_remove_request(req);
 		if (test_bit(NFS_IOHDR_ERROR, &hdr->flags) &&
 		    (hdr->good_bytes < bytes)) {
-			nfs_set_pageerror(page_file_mapping(req->wb_page));
+			trace_nfs_comp_error(req, hdr->error);
 			nfs_mapping_set_error(req->wb_page, hdr->error);
 			goto remove_req;
 		}
@@ -1035,25 +1047,11 @@ nfs_scan_commit_list(struct list_head *src, struct list_head *dst,
 	struct nfs_page *req, *tmp;
 	int ret = 0;
 
-restart:
 	list_for_each_entry_safe(req, tmp, src, wb_list) {
 		kref_get(&req->wb_kref);
 		if (!nfs_lock_request(req)) {
-			int status;
-
-			/* Prevent deadlock with nfs_lock_and_join_requests */
-			if (!list_empty(dst)) {
-				nfs_release_request(req);
-				continue;
-			}
-			/* Ensure we make progress to prevent livelock */
-			mutex_unlock(&NFS_I(cinfo->inode)->commit_mutex);
-			status = nfs_wait_on_request(req);
 			nfs_release_request(req);
-			mutex_lock(&NFS_I(cinfo->inode)->commit_mutex);
-			if (status < 0)
-				break;
-			goto restart;
+			continue;
 		}
 		nfs_request_remove_commit_list(req, cinfo);
 		clear_bit(PG_COMMIT_TO_DS, &req->wb_flags);
@@ -1243,7 +1241,7 @@ nfs_key_timeout_notify(struct file *filp, struct inode *inode)
 	struct nfs_open_context *ctx = nfs_file_open_context(filp);
 
 	if (nfs_ctx_key_to_expire(ctx, inode) &&
-	    !ctx->ll_cred)
+	    !rcu_access_pointer(ctx->ll_cred))
 		/* Already expired! */
 		return -EACCES;
 	return 0;
@@ -1255,23 +1253,38 @@ nfs_key_timeout_notify(struct file *filp, struct inode *inode)
 bool nfs_ctx_key_to_expire(struct nfs_open_context *ctx, struct inode *inode)
 {
 	struct rpc_auth *auth = NFS_SERVER(inode)->client->cl_auth;
-	struct rpc_cred *cred = ctx->ll_cred;
+	struct rpc_cred *cred, *new, *old = NULL;
 	struct auth_cred acred = {
 		.cred = ctx->cred,
 	};
+	bool ret = false;
 
-	if (cred && !cred->cr_ops->crmatch(&acred, cred, 0)) {
-		put_rpccred(cred);
-		ctx->ll_cred = NULL;
-		cred = NULL;
-	}
-	if (!cred)
-		cred = auth->au_ops->lookup_cred(auth, &acred, 0);
-	if (!cred || IS_ERR(cred))
+	rcu_read_lock();
+	cred = rcu_dereference(ctx->ll_cred);
+	if (cred && !(cred->cr_ops->crkey_timeout &&
+		      cred->cr_ops->crkey_timeout(cred)))
+		goto out;
+	rcu_read_unlock();
+
+	new = auth->au_ops->lookup_cred(auth, &acred, 0);
+	if (new == cred) {
+		put_rpccred(new);
 		return true;
-	ctx->ll_cred = cred;
-	return !!(cred->cr_ops->crkey_timeout &&
-		  cred->cr_ops->crkey_timeout(cred));
+	}
+	if (IS_ERR_OR_NULL(new)) {
+		new = NULL;
+		ret = true;
+	} else if (new->cr_ops->crkey_timeout &&
+		   new->cr_ops->crkey_timeout(new))
+		ret = true;
+
+	rcu_read_lock();
+	old = rcu_dereference_protected(xchg(&ctx->ll_cred,
+					     RCU_INITIALIZER(new)), 1);
+out:
+	rcu_read_unlock();
+	put_rpccred(old);
+	return ret;
 }
 
 /*
@@ -1279,19 +1292,21 @@ bool nfs_ctx_key_to_expire(struct nfs_open_context *ctx, struct inode *inode)
  * the PageUptodate() flag. In this case, we will need to turn off
  * write optimisations that depend on the page contents being correct.
  */
-static bool nfs_write_pageuptodate(struct page *page, struct inode *inode)
+static bool nfs_write_pageuptodate(struct page *page, struct inode *inode,
+				   unsigned int pagelen)
 {
 	struct nfs_inode *nfsi = NFS_I(inode);
 
 	if (nfs_have_delegated_attributes(inode))
 		goto out;
-	if (nfsi->cache_validity & NFS_INO_REVAL_PAGECACHE)
+	if (nfsi->cache_validity &
+	    (NFS_INO_INVALID_CHANGE | NFS_INO_INVALID_SIZE))
 		return false;
 	smp_rmb();
-	if (test_bit(NFS_INO_INVALIDATING, &nfsi->flags))
+	if (test_bit(NFS_INO_INVALIDATING, &nfsi->flags) && pagelen != 0)
 		return false;
 out:
-	if (nfsi->cache_validity & NFS_INO_INVALID_DATA)
+	if (nfsi->cache_validity & NFS_INO_INVALID_DATA && pagelen != 0)
 		return false;
 	return PageUptodate(page) != 0;
 }
@@ -1311,7 +1326,8 @@ is_whole_file_wrlock(struct file_lock *fl)
  * If the file is opened for synchronous writes then we can just skip the rest
  * of the checks.
  */
-static int nfs_can_extend_write(struct file *file, struct page *page, struct inode *inode)
+static int nfs_can_extend_write(struct file *file, struct page *page,
+				struct inode *inode, unsigned int pagelen)
 {
 	int ret;
 	struct file_lock_context *flctx = inode->i_flctx;
@@ -1319,7 +1335,7 @@ static int nfs_can_extend_write(struct file *file, struct page *page, struct ino
 
 	if (file->f_flags & O_DSYNC)
 		return 0;
-	if (!nfs_write_pageuptodate(page, inode))
+	if (!nfs_write_pageuptodate(page, inode, pagelen))
 		return 0;
 	if (NFS_PROTO(inode)->have_delegation(inode, FMODE_WRITE))
 		return 1;
@@ -1357,6 +1373,7 @@ int nfs_updatepage(struct file *file, struct page *page,
 	struct nfs_open_context *ctx = nfs_file_open_context(file);
 	struct address_space *mapping = page_file_mapping(page);
 	struct inode	*inode = mapping->host;
+	unsigned int	pagelen = nfs_page_length(page);
 	int		status = 0;
 
 	nfs_inc_stats(inode, NFSIOS_VFSUPDATEPAGE);
@@ -1367,16 +1384,14 @@ int nfs_updatepage(struct file *file, struct page *page,
 	if (!count)
 		goto out;
 
-	if (nfs_can_extend_write(file, page, inode)) {
-		count = max(count + offset, nfs_page_length(page));
+	if (nfs_can_extend_write(file, page, inode, pagelen)) {
+		count = max(count + offset, pagelen);
 		offset = 0;
 	}
 
 	status = nfs_writepage_setup(ctx, page, offset, count);
 	if (status < 0)
 		nfs_set_pageerror(mapping);
-	else
-		__set_page_dirty_nobuffers(page);
 out:
 	dprintk("NFS:       nfs_updatepage returns %d (isize %lld)\n",
 			status, (long long)i_size_read(inode));
@@ -1401,10 +1416,11 @@ static void nfs_initiate_write(struct nfs_pgio_header *hdr,
 {
 	int priority = flush_task_priority(how);
 
+	if (IS_SWAPFILE(hdr->inode))
+		task_setup_data->flags |= RPC_TASK_SWAPPER;
 	task_setup_data->priority = priority;
 	rpc_ops->write_setup(hdr, msg, &task_setup_data->rpc_client);
-	trace_nfs_initiate_write(hdr->inode, hdr->io_start, hdr->good_bytes,
-				 hdr->args.stable);
+	trace_nfs_initiate_write(hdr);
 }
 
 /* If a nfs_flush_* function fails, it should remove reqs from @head and
@@ -1568,8 +1584,7 @@ static int nfs_writeback_done(struct rpc_task *task,
 		return status;
 
 	nfs_add_stats(inode, NFSIOS_SERVERWRITTENBYTES, hdr->res.count);
-	trace_nfs_writeback_done(inode, task->tk_status,
-				 hdr->args.offset, hdr->res.verf);
+	trace_nfs_writeback_done(task, hdr);
 
 	if (hdr->res.verf->committed < hdr->args.stable &&
 	    task->tk_status >= 0) {
@@ -1596,7 +1611,7 @@ static int nfs_writeback_done(struct rpc_task *task,
 	/* Deal with the suid/sgid bit corner case */
 	if (nfs_should_remove_suid(inode)) {
 		spin_lock(&inode->i_lock);
-		NFS_I(inode)->cache_validity |= NFS_INO_INVALID_OTHER;
+		nfs_set_cache_invalid(inode, NFS_INO_INVALID_MODE);
 		spin_unlock(&inode->i_lock);
 	}
 	return 0;
@@ -1649,6 +1664,8 @@ static void nfs_writeback_result(struct rpc_task *task,
 			 */
 			argp->stable = NFS_FILE_SYNC;
 		}
+		resp->count = 0;
+		resp->verf->committed = 0;
 		rpc_restart_call_prepare(task);
 	}
 }
@@ -1664,10 +1681,13 @@ static void nfs_commit_begin(struct nfs_mds_commit_info *cinfo)
 	atomic_inc(&cinfo->rpcs_out);
 }
 
-static void nfs_commit_end(struct nfs_mds_commit_info *cinfo)
+bool nfs_commit_end(struct nfs_mds_commit_info *cinfo)
 {
-	if (atomic_dec_and_test(&cinfo->rpcs_out))
+	if (atomic_dec_and_test(&cinfo->rpcs_out)) {
 		wake_up_var(&cinfo->rpcs_out);
+		return true;
+	}
+	return false;
 }
 
 void nfs_commitdata_release(struct nfs_commit_data *data)
@@ -1735,14 +1755,19 @@ void nfs_init_commit(struct nfs_commit_data *data,
 		     struct pnfs_layout_segment *lseg,
 		     struct nfs_commit_info *cinfo)
 {
-	struct nfs_page *first = nfs_list_entry(head->next);
-	struct nfs_open_context *ctx = nfs_req_openctx(first);
-	struct inode *inode = d_inode(ctx->dentry);
+	struct nfs_page *first;
+	struct nfs_open_context *ctx;
+	struct inode *inode;
 
 	/* Set up the RPC argument and reply structs
 	 * NB: take care not to mess about with data->commit et al. */
 
-	list_splice_init(head, &data->pages);
+	if (head)
+		list_splice_init(head, &data->pages);
+
+	first = nfs_list_entry(data->pages.next);
+	ctx = nfs_req_openctx(first);
+	inode = d_inode(ctx->dentry);
 
 	data->inode	  = inode;
 	data->cred	  = ctx->cred;
@@ -1762,6 +1787,7 @@ void nfs_init_commit(struct nfs_commit_data *data,
 	data->res.fattr   = &data->fattr;
 	data->res.verf    = &data->verf;
 	nfs_fattr_init(&data->fattr);
+	nfs_commit_begin(cinfo->mds);
 }
 EXPORT_SYMBOL_GPL(nfs_init_commit);
 
@@ -1798,18 +1824,25 @@ nfs_commit_list(struct inode *inode, struct list_head *head, int how,
 		struct nfs_commit_info *cinfo)
 {
 	struct nfs_commit_data	*data;
+	unsigned short task_flags = 0;
 
 	/* another commit raced with us */
 	if (list_empty(head))
 		return 0;
 
-	data = nfs_commitdata_alloc(true);
+	data = nfs_commitdata_alloc();
+	if (!data) {
+		nfs_retry_commit(head, NULL, cinfo, -1);
+		return -ENOMEM;
+	}
 
 	/* Set up the argument struct */
 	nfs_init_commit(data, head, NULL, cinfo);
-	atomic_inc(&cinfo->mds->rpcs_out);
+	if (NFS_SERVER(inode)->nfs_client->cl_minorversion)
+		task_flags = RPC_TASK_MOVEABLE;
 	return nfs_initiate_commit(NFS_CLIENT(inode), data, NFS_PROTO(inode),
-				   data->mds_ops, how, 0);
+				   data->mds_ops, how,
+				   RPC_TASK_CRED_NOREF | task_flags);
 }
 
 /*
@@ -1819,16 +1852,14 @@ static void nfs_commit_done(struct rpc_task *task, void *calldata)
 {
 	struct nfs_commit_data	*data = calldata;
 
-        dprintk("NFS: %5u nfs_commit_done (status %d)\n",
-                                task->tk_pid, task->tk_status);
-
 	/* Call the NFS version-specific code */
 	NFS_PROTO(data->inode)->commit_done(task, data);
-	trace_nfs_commit_done(data);
+	trace_nfs_commit_done(task, data);
 }
 
 static void nfs_commit_release_pages(struct nfs_commit_data *data)
 {
+	const struct nfs_writeverf *verf = data->res.verf;
 	struct nfs_page	*req;
 	int status = data->task.tk_status;
 	struct nfs_commit_info cinfo;
@@ -1847,6 +1878,7 @@ static void nfs_commit_release_pages(struct nfs_commit_data *data)
 			(long long)req_offset(req));
 		if (status < 0) {
 			if (req->wb_page) {
+				trace_nfs_commit_error(req, status);
 				nfs_mapping_set_error(req->wb_page, status);
 				nfs_inode_remove_request(req);
 			}
@@ -1856,7 +1888,7 @@ static void nfs_commit_release_pages(struct nfs_commit_data *data)
 
 		/* Okay, COMMIT succeeded, apparently. Check the verifier
 		 * returned by the server against all stored verfs. */
-		if (!nfs_write_verifier_cmp(&req->wb_verf, &data->verf.verifier)) {
+		if (nfs_write_match_verf(verf, req)) {
 			/* We have a match */
 			if (req->wb_page)
 				nfs_inode_remove_request(req);
@@ -1874,7 +1906,7 @@ static void nfs_commit_release_pages(struct nfs_commit_data *data)
 	}
 	nfss = NFS_SERVER(data->inode);
 	if (atomic_long_read(&nfss->writeback) < NFS_CONGESTION_OFF_THRESH)
-		clear_bdi_congested(inode_to_bdi(data->inode), BLK_RW_ASYNC);
+		nfss->write_congested = 0;
 
 	nfs_init_cinfo(&cinfo, data->inode, data->dreq);
 	nfs_commit_end(cinfo.mds);
@@ -1918,6 +1950,7 @@ static int __nfs_commit_inode(struct inode *inode, int how,
 	int may_wait = how & FLUSH_SYNC;
 	int ret, nscan;
 
+	how &= ~FLUSH_SYNC;
 	nfs_init_cinfo_from_inode(&cinfo, inode);
 	nfs_commit_begin(cinfo.mds);
 	for (;;) {
@@ -2029,21 +2062,21 @@ out:
 }
 EXPORT_SYMBOL_GPL(nfs_wb_all);
 
-int nfs_wb_page_cancel(struct inode *inode, struct page *page)
+int nfs_wb_folio_cancel(struct inode *inode, struct folio *folio)
 {
 	struct nfs_page *req;
 	int ret = 0;
 
-	wait_on_page_writeback(page);
+	folio_wait_writeback(folio);
 
 	/* blocking call to cancel all requests and join to a single (head)
 	 * request */
-	req = nfs_lock_and_join_requests(page);
+	req = nfs_lock_and_join_requests(&folio->page);
 
 	if (IS_ERR(req)) {
 		ret = PTR_ERR(req);
 	} else if (req) {
-		/* all requests from this page have been cancelled by
+		/* all requests from this folio have been cancelled by
 		 * nfs_lock_and_join_requests, so just remove the head
 		 * request from the inode / page_private pointer and
 		 * release it */
@@ -2106,8 +2139,11 @@ int nfs_migrate_page(struct address_space *mapping, struct page *newpage,
 	if (PagePrivate(page))
 		return -EBUSY;
 
-	if (!nfs_fscache_release_page(page, GFP_KERNEL))
-		return -EBUSY;
+	if (PageFsCache(page)) {
+		if (mode == MIGRATE_ASYNC)
+			return -EBUSY;
+		wait_on_page_fscache(page);
+	}
 
 	return migrate_page(mapping, newpage, page, mode);
 }

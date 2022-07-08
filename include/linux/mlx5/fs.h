@@ -38,16 +38,21 @@
 
 #define MLX5_FS_DEFAULT_FLOW_TAG 0x0
 
+#define MLX5_SET_CFG(p, f, v) MLX5_SET(create_flow_group_in, p, f, v)
+
 enum {
 	MLX5_FLOW_CONTEXT_ACTION_FWD_NEXT_PRIO	= 1 << 16,
 	MLX5_FLOW_CONTEXT_ACTION_ENCRYPT	= 1 << 17,
 	MLX5_FLOW_CONTEXT_ACTION_DECRYPT	= 1 << 18,
+	MLX5_FLOW_CONTEXT_ACTION_FWD_NEXT_NS	= 1 << 19,
 };
 
 enum {
 	MLX5_FLOW_TABLE_TUNNEL_EN_REFORMAT = BIT(0),
 	MLX5_FLOW_TABLE_TUNNEL_EN_DECAP = BIT(1),
 	MLX5_FLOW_TABLE_TERMINATION = BIT(2),
+	MLX5_FLOW_TABLE_UNMANAGED = BIT(3),
+	MLX5_FLOW_TABLE_OTHER_VPORT = BIT(4),
 };
 
 #define LEFTOVERS_RULE_NUM	 2
@@ -68,25 +73,35 @@ enum mlx5_flow_namespace_type {
 	MLX5_FLOW_NAMESPACE_KERNEL,
 	MLX5_FLOW_NAMESPACE_LEFTOVERS,
 	MLX5_FLOW_NAMESPACE_ANCHOR,
+	MLX5_FLOW_NAMESPACE_FDB_BYPASS,
 	MLX5_FLOW_NAMESPACE_FDB,
 	MLX5_FLOW_NAMESPACE_ESW_EGRESS,
 	MLX5_FLOW_NAMESPACE_ESW_INGRESS,
 	MLX5_FLOW_NAMESPACE_SNIFFER_RX,
 	MLX5_FLOW_NAMESPACE_SNIFFER_TX,
 	MLX5_FLOW_NAMESPACE_EGRESS,
+	MLX5_FLOW_NAMESPACE_EGRESS_KERNEL,
 	MLX5_FLOW_NAMESPACE_RDMA_RX,
 	MLX5_FLOW_NAMESPACE_RDMA_RX_KERNEL,
+	MLX5_FLOW_NAMESPACE_RDMA_TX,
+	MLX5_FLOW_NAMESPACE_PORT_SEL,
+	MLX5_FLOW_NAMESPACE_RDMA_RX_COUNTERS,
+	MLX5_FLOW_NAMESPACE_RDMA_TX_COUNTERS,
 };
 
 enum {
 	FDB_BYPASS_PATH,
 	FDB_TC_OFFLOAD,
 	FDB_FT_OFFLOAD,
+	FDB_TC_MISS,
+	FDB_BR_OFFLOAD,
 	FDB_SLOW_PATH,
+	FDB_PER_VPORT,
 };
 
 struct mlx5_pkt_reformat;
 struct mlx5_modify_hdr;
+struct mlx5_flow_definer;
 struct mlx5_flow_table;
 struct mlx5_flow_group;
 struct mlx5_flow_namespace;
@@ -127,6 +142,7 @@ struct mlx5_flow_destination {
 			struct mlx5_pkt_reformat *pkt_reformat;
 			u8		flags;
 		} vport;
+		u32			sampler_id;
 	};
 };
 
@@ -145,19 +161,17 @@ mlx5_get_flow_vport_acl_namespace(struct mlx5_core_dev *dev,
 				  enum mlx5_flow_namespace_type type,
 				  int vport);
 
-struct mlx5_flow_table *
-mlx5_create_auto_grouped_flow_table(struct mlx5_flow_namespace *ns,
-				    int prio,
-				    int num_flow_table_entries,
-				    int max_num_groups,
-				    u32 level,
-				    u32 flags);
-
 struct mlx5_flow_table_attr {
 	int prio;
 	int max_fte;
 	u32 level;
 	u32 flags;
+	struct mlx5_flow_table *next_ft;
+
+	struct {
+		int max_num_groups;
+		int num_reserved_entries;
+	} autogroup;
 };
 
 struct mlx5_flow_table *
@@ -165,10 +179,12 @@ mlx5_create_flow_table(struct mlx5_flow_namespace *ns,
 		       struct mlx5_flow_table_attr *ft_attr);
 
 struct mlx5_flow_table *
+mlx5_create_auto_grouped_flow_table(struct mlx5_flow_namespace *ns,
+				    struct mlx5_flow_table_attr *ft_attr);
+
+struct mlx5_flow_table *
 mlx5_create_vport_flow_table(struct mlx5_flow_namespace *ns,
-			     int prio,
-			     int num_flow_table_entries,
-			     u32 level, u16 vport);
+			     struct mlx5_flow_table_attr *ft_attr, u16 vport);
 struct mlx5_flow_table *mlx5_create_lag_demux_flow_table(
 					       struct mlx5_flow_namespace *ns,
 					       int prio, u32 level);
@@ -194,16 +210,21 @@ struct mlx5_fs_vlan {
 
 enum {
 	FLOW_ACT_NO_APPEND = BIT(0),
+	FLOW_ACT_IGNORE_FLOW_LEVEL = BIT(1),
 };
 
 struct mlx5_flow_act {
 	u32 action;
 	struct mlx5_modify_hdr  *modify_hdr;
 	struct mlx5_pkt_reformat *pkt_reformat;
-	uintptr_t esp_id;
+	union {
+		u32 ipsec_obj_id;
+		uintptr_t esp_id;
+	};
 	u32 flags;
 	struct mlx5_fs_vlan vlan[MLX5_FS_VLAN_DEPTH];
 	struct ib_counters *counters;
+	struct mlx5_flow_group *fg;
 };
 
 #define MLX5_DECLARE_FLOW_ACT(name) \
@@ -226,6 +247,10 @@ int mlx5_modify_rule_destination(struct mlx5_flow_handle *handler,
 				 struct mlx5_flow_destination *old_dest);
 
 struct mlx5_fc *mlx5_fc_create(struct mlx5_core_dev *dev, bool aging);
+
+/* As mlx5_fc_create() but doesn't queue stats refresh thread. */
+struct mlx5_fc *mlx5_fc_create_ex(struct mlx5_core_dev *dev, bool aging);
+
 void mlx5_fc_destroy(struct mlx5_core_dev *dev, struct mlx5_fc *counter);
 u64 mlx5_fc_query_lastuse(struct mlx5_fc *counter);
 void mlx5_fc_query_cached(struct mlx5_fc *counter,
@@ -242,11 +267,24 @@ struct mlx5_modify_hdr *mlx5_modify_header_alloc(struct mlx5_core_dev *dev,
 						 void *modify_actions);
 void mlx5_modify_header_dealloc(struct mlx5_core_dev *dev,
 				struct mlx5_modify_hdr *modify_hdr);
+struct mlx5_flow_definer *
+mlx5_create_match_definer(struct mlx5_core_dev *dev,
+			  enum mlx5_flow_namespace_type ns_type, u16 format_id,
+			  u32 *match_mask);
+void mlx5_destroy_match_definer(struct mlx5_core_dev *dev,
+				struct mlx5_flow_definer *definer);
+int mlx5_get_match_definer_id(struct mlx5_flow_definer *definer);
+
+struct mlx5_pkt_reformat_params {
+	int type;
+	u8 param_0;
+	u8 param_1;
+	size_t size;
+	void *data;
+};
 
 struct mlx5_pkt_reformat *mlx5_packet_reformat_alloc(struct mlx5_core_dev *dev,
-						     int reformat_type,
-						     size_t size,
-						     void *reformat_data,
+						     struct mlx5_pkt_reformat_params *params,
 						     enum mlx5_flow_namespace_type ns_type);
 void mlx5_packet_reformat_dealloc(struct mlx5_core_dev *dev,
 				  struct mlx5_pkt_reformat *reformat);

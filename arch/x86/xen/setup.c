@@ -20,6 +20,7 @@
 #include <asm/setup.h>
 #include <asm/acpi.h>
 #include <asm/numa.h>
+#include <asm/idtentry.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
 
@@ -31,7 +32,6 @@
 #include <xen/features.h>
 #include <xen/hvc-console.h>
 #include "xen-ops.h"
-#include "vdso.h"
 #include "mmu.h"
 
 #define GB(x) ((uint64_t)(x) * 1024 * 1024 * 1024)
@@ -59,13 +59,13 @@ static struct {
 } xen_remap_buf __initdata __aligned(PAGE_SIZE);
 static unsigned long xen_remap_mfn __initdata = INVALID_P2M_ENTRY;
 
-/* 
+/*
  * The maximum amount of extra memory compared to the base size.  The
  * main scaling factor is the size of struct page.  At extreme ratios
  * of base:extra, all the base memory can be filled with page
  * structures for the extra memory, leaving no space for anything
  * else.
- * 
+ *
  * 10x seems like a reasonable balance between scaling flexibility and
  * leaving a practically usable system.
  */
@@ -153,7 +153,7 @@ static void __init xen_del_extra_mem(unsigned long start_pfn,
 			break;
 		}
 	}
-	memblock_free(PFN_PHYS(start_pfn), PFN_PHYS(n_pfns));
+	memblock_phys_free(PFN_PHYS(start_pfn), PFN_PHYS(n_pfns));
 }
 
 /*
@@ -306,10 +306,6 @@ static void __init xen_update_mem_tables(unsigned long pfn, unsigned long mfn)
 		BUG();
 	}
 
-	/* Update kernel mapping, but not for highmem. */
-	if (pfn >= PFN_UP(__pa(high_memory - 1)))
-		return;
-
 	if (HYPERVISOR_update_va_mapping((unsigned long)__va(pfn << PAGE_SHIFT),
 					 mfn_pte(mfn, PAGE_KERNEL), 0)) {
 		WARN(1, "Failed to update kernel mapping for mfn=%ld pfn=%ld\n",
@@ -429,13 +425,13 @@ static unsigned long __init xen_set_identity_and_remap_chunk(
 	}
 
 	/*
-	 * If the PFNs are currently mapped, the VA mapping also needs
-	 * to be updated to be 1:1.
+	 * If the PFNs are currently mapped, their VA mappings need to be
+	 * zapped.
 	 */
 	for (pfn = start_pfn; pfn <= max_pfn_mapped && pfn < end_pfn; pfn++)
 		(void)HYPERVISOR_update_va_mapping(
 			(unsigned long)__va(pfn << PAGE_SHIFT),
-			mfn_pte(pfn, PAGE_KERNEL_IO), 0);
+			native_make_pte(0), 0);
 
 	return remap_pfn;
 }
@@ -544,13 +540,10 @@ static unsigned long __init xen_get_pages_limit(void)
 {
 	unsigned long limit;
 
-#ifdef CONFIG_X86_32
-	limit = GB(64) / PAGE_SIZE;
-#else
 	limit = MAXMEM / PAGE_SIZE;
 	if (!xen_initial_domain() && xen_512gb_limit)
 		limit = GB(512) / PAGE_SIZE;
-#endif
+
 	return limit;
 }
 
@@ -721,21 +714,12 @@ static void __init xen_reserve_xen_mfnlist(void)
 	if (!xen_is_e820_reserved(start, size))
 		return;
 
-#ifdef CONFIG_X86_32
-	/*
-	 * Relocating the p2m on 32 bit system to an arbitrary virtual address
-	 * is not supported, so just give up.
-	 */
-	xen_raw_console_write("Xen hypervisor allocated p2m list conflicts with E820 map\n");
-	BUG();
-#else
 	xen_relocate_p2m();
-	memblock_free(start, size);
-#endif
+	memblock_phys_free(start, size);
 }
 
 /**
- * machine_specific_memory_setup - Hook for machine specific memory setup.
+ * xen_memory_setup - Hook for machine specific memory setup.
  **/
 char * __init xen_memory_setup(void)
 {
@@ -803,17 +787,10 @@ char * __init xen_memory_setup(void)
 
 	/*
 	 * Clamp the amount of extra memory to a EXTRA_MEM_RATIO
-	 * factor the base size.  On non-highmem systems, the base
-	 * size is the full initial memory allocation; on highmem it
-	 * is limited to the max size of lowmem, so that it doesn't
-	 * get completely filled.
+	 * factor the base size.
 	 *
 	 * Make sure we have no memory above max_pages, as this area
 	 * isn't handled by the p2m management.
-	 *
-	 * In principle there could be a problem in lowmem systems if
-	 * the initial memory is also very large with respect to
-	 * lowmem, but we won't try to deal with that here.
 	 */
 	extra_pages = min3(EXTRA_MEM_RATIO * min(max_pfn, PFN_DOWN(MAXMEM)),
 			   extra_pages, max_pages - max_pfn);
@@ -904,7 +881,7 @@ char * __init xen_memory_setup(void)
 		xen_phys_memcpy(new_area, start, size);
 		pr_info("initrd moved from [mem %#010llx-%#010llx] to [mem %#010llx-%#010llx]\n",
 			start, start + size, new_area, new_area + size);
-		memblock_free(start, size);
+		memblock_phys_free(start, size);
 		boot_params.hdr.ramdisk_image = new_area;
 		boot_params.ext_ramdisk_image = new_area >> 32;
 	}
@@ -918,20 +895,6 @@ char * __init xen_memory_setup(void)
 	pr_info("Released %ld page(s)\n", xen_released_pages);
 
 	return "Xen";
-}
-
-/*
- * Set the bit indicating "nosegneg" library variants should be used.
- * We only need to bother in pure 32-bit mode; compat 32-bit processes
- * can have un-truncated segments, so wrapping around is allowed.
- */
-static void __init fiddle_vdso(void)
-{
-#ifdef CONFIG_X86_32
-	u32 *mask = vdso_image_32.data +
-		vdso_image_32.sym_VDSO32_NOTE_MASK;
-	*mask |= 1 << VDSO_NOTE_NONEGSEG_BIT;
-#endif
 }
 
 static int register_callback(unsigned type, const void *func)
@@ -950,11 +913,7 @@ void xen_enable_sysenter(void)
 	int ret;
 	unsigned sysenter_feature;
 
-#ifdef CONFIG_X86_32
-	sysenter_feature = X86_FEATURE_SEP;
-#else
 	sysenter_feature = X86_FEATURE_SYSENTER32;
-#endif
 
 	if (!boot_cpu_has(sysenter_feature))
 		return;
@@ -966,7 +925,6 @@ void xen_enable_sysenter(void)
 
 void xen_enable_syscall(void)
 {
-#ifdef CONFIG_X86_64
 	int ret;
 
 	ret = register_callback(CALLBACKTYPE_syscall, xen_syscall_target);
@@ -982,10 +940,9 @@ void xen_enable_syscall(void)
 		if (ret != 0)
 			setup_clear_cpu_cap(X86_FEATURE_SYSCALL32);
 	}
-#endif /* CONFIG_X86_64 */
 }
 
-void __init xen_pvmmu_arch_setup(void)
+static void __init xen_pvmmu_arch_setup(void)
 {
 	HYPERVISOR_vm_assist(VMASST_CMD_enable, VMASST_TYPE_4gb_segments);
 	HYPERVISOR_vm_assist(VMASST_CMD_enable, VMASST_TYPE_writable_pagetables);
@@ -993,7 +950,8 @@ void __init xen_pvmmu_arch_setup(void)
 	HYPERVISOR_vm_assist(VMASST_CMD_enable,
 			     VMASST_TYPE_pae_extended_cr3);
 
-	if (register_callback(CALLBACKTYPE_event, xen_hypervisor_callback) ||
+	if (register_callback(CALLBACKTYPE_event,
+			      xen_asm_exc_xen_hypervisor_callback) ||
 	    register_callback(CALLBACKTYPE_failsafe, xen_failsafe_callback))
 		BUG();
 
@@ -1022,7 +980,6 @@ void __init xen_arch_setup(void)
 	disable_cpuidle();
 	disable_cpufreq();
 	WARN_ON(xen_set_default_idle());
-	fiddle_vdso();
 #ifdef CONFIG_NUMA
 	numa_off = 1;
 #endif

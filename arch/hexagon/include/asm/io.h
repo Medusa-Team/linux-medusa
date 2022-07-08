@@ -64,7 +64,6 @@ static inline void *phys_to_virt(unsigned long address)
  * convert a physical pointer to a virtual kernel pointer for
  * /dev/mem access.
  */
-#define xlate_dev_kmem_ptr(p)    __va(p)
 #define xlate_dev_mem_ptr(p)    __va(p)
 
 /*
@@ -172,7 +171,6 @@ static inline void writel(u32 data, volatile void __iomem *addr)
 #define writel_relaxed __raw_writel
 
 void __iomem *ioremap(unsigned long phys_addr, unsigned long size);
-#define ioremap_nocache ioremap
 #define ioremap_uc(X, Y) ioremap((X), (Y))
 
 

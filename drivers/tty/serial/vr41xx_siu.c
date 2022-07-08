@@ -7,10 +7,6 @@
  *  Based on drivers/serial/8250.c, by Russell King.
  */
 
-#if defined(CONFIG_SERIAL_VR41XX_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-#define SUPPORT_SYSRQ
-#endif
-
 #include <linux/console.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -24,7 +20,7 @@
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 
-#include <asm/io.h>
+#include <linux/io.h>
 #include <asm/vr41xx/siu.h>
 #include <asm/vr41xx/vr41xx.h>
 
@@ -508,20 +504,7 @@ static void siu_set_termios(struct uart_port *port, struct ktermios *new,
 	unsigned long flags;
 
 	c_cflag = new->c_cflag;
-	switch (c_cflag & CSIZE) {
-	case CS5:
-		lcr = UART_LCR_WLEN5;
-		break;
-	case CS6:
-		lcr = UART_LCR_WLEN6;
-		break;
-	case CS7:
-		lcr = UART_LCR_WLEN7;
-		break;
-	default:
-		lcr = UART_LCR_WLEN8;
-		break;
-	}
+	lcr = UART_LCR_WLEN(tty_get_char_size(c_cflag));
 
 	if (c_cflag & CSTOPB)
 		lcr |= UART_LCR_STOP;
@@ -747,7 +730,7 @@ static void wait_for_xmitr(struct uart_port *port)
 	}
 }
 
-static void siu_console_putchar(struct uart_port *port, int ch)
+static void siu_console_putchar(struct uart_port *port, unsigned char ch)
 {
 	wait_for_xmitr(port);
 	siu_write(port, UART_TX, ch);
@@ -869,6 +852,7 @@ static int siu_probe(struct platform_device *dev)
 		port = &siu_uart_ports[i];
 		port->ops = &siu_uart_ops;
 		port->dev = &dev->dev;
+		port->has_sysrq = IS_ENABLED(CONFIG_SERIAL_VR41XX_CONSOLE);
 
 		retval = uart_add_one_port(&siu_uart_driver, port);
 		if (retval < 0) {

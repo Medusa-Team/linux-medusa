@@ -16,7 +16,7 @@
  */
 
 /*
- * This module provides an interface to the the proc sysctl interfaces.  This
+ * This module provides an interface to the proc sysctl interfaces.  This
  * driver requires CONFIG_PROC_SYSCTL. It will not normally be loaded by the
  * system unless explicitly requested by name. You can also build this driver
  * into your kernel.
@@ -44,6 +44,8 @@ struct test_sysctl_data {
 	int int_0002;
 	int int_0003[4];
 
+	int boot_int;
+
 	unsigned int uint_0001;
 
 	char string_0001[65];
@@ -60,6 +62,8 @@ static struct test_sysctl_data test_data = {
 	.int_0003[1] = 1,
 	.int_0003[2] = 2,
 	.int_0003[3] = 3,
+
+	.boot_int = 0,
 
 	.uint_0001 = 314,
 
@@ -92,6 +96,15 @@ static struct ctl_table test_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
+		.procname	= "boot_int",
+		.data		= &test_data.boot_int,
+		.maxlen		= sizeof(test_data.boot_int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+		.extra1		= SYSCTL_ZERO,
+		.extra2         = SYSCTL_ONE,
+	},
+	{
 		.procname	= "uint_0001",
 		.data		= &test_data.uint_0001,
 		.maxlen		= sizeof(unsigned int),
@@ -115,26 +128,6 @@ static struct ctl_table test_table[] = {
 	{ }
 };
 
-static struct ctl_table test_sysctl_table[] = {
-	{
-		.procname	= "test_sysctl",
-		.maxlen		= 0,
-		.mode		= 0555,
-		.child		= test_table,
-	},
-	{ }
-};
-
-static struct ctl_table test_sysctl_root_table[] = {
-	{
-		.procname	= "debug",
-		.maxlen		= 0,
-		.mode		= 0555,
-		.child		= test_sysctl_table,
-	},
-	{ }
-};
-
 static struct ctl_table_header *test_sysctl_header;
 
 static int __init test_sysctl_init(void)
@@ -142,14 +135,14 @@ static int __init test_sysctl_init(void)
 	test_data.bitmap_0001 = kzalloc(SYSCTL_TEST_BITMAP_SIZE/8, GFP_KERNEL);
 	if (!test_data.bitmap_0001)
 		return -ENOMEM;
-	test_sysctl_header = register_sysctl_table(test_sysctl_root_table);
+	test_sysctl_header = register_sysctl("debug/test_sysctl", test_table);
 	if (!test_sysctl_header) {
 		kfree(test_data.bitmap_0001);
 		return -ENOMEM;
 	}
 	return 0;
 }
-late_initcall(test_sysctl_init);
+module_init(test_sysctl_init);
 
 static void __exit test_sysctl_exit(void)
 {

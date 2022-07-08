@@ -13,7 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/module.h>
-#include <linux/of.h>
+#include <linux/mod_devicetable.h>
 #include <linux/pm_runtime.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
@@ -185,7 +185,6 @@ static int bh1780_probe(struct i2c_client *client,
 	pm_runtime_use_autosuspend(&client->dev);
 	pm_runtime_put(&client->dev);
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &bh1780_info;
 	indio_dev->name = "bh1780";
 	indio_dev->channels = bh1780_channels;
@@ -222,7 +221,6 @@ static int bh1780_remove(struct i2c_client *client)
 	return 0;
 }
 
-#ifdef CONFIG_PM
 static int bh1780_runtime_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -257,14 +255,9 @@ static int bh1780_runtime_resume(struct device *dev)
 
 	return 0;
 }
-#endif /* CONFIG_PM */
 
-static const struct dev_pm_ops bh1780_dev_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
-	SET_RUNTIME_PM_OPS(bh1780_runtime_suspend,
-			   bh1780_runtime_resume, NULL)
-};
+static DEFINE_RUNTIME_DEV_PM_OPS(bh1780_dev_pm_ops, bh1780_runtime_suspend,
+				bh1780_runtime_resume, NULL);
 
 static const struct i2c_device_id bh1780_id[] = {
 	{ "bh1780", 0 },
@@ -273,13 +266,11 @@ static const struct i2c_device_id bh1780_id[] = {
 
 MODULE_DEVICE_TABLE(i2c, bh1780_id);
 
-#ifdef CONFIG_OF
 static const struct of_device_id of_bh1780_match[] = {
 	{ .compatible = "rohm,bh1780gli", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, of_bh1780_match);
-#endif
 
 static struct i2c_driver bh1780_driver = {
 	.probe		= bh1780_probe,
@@ -287,8 +278,8 @@ static struct i2c_driver bh1780_driver = {
 	.id_table	= bh1780_id,
 	.driver = {
 		.name = "bh1780",
-		.pm = &bh1780_dev_pm_ops,
-		.of_match_table = of_match_ptr(of_bh1780_match),
+		.pm = pm_ptr(&bh1780_dev_pm_ops),
+		.of_match_table = of_bh1780_match,
 	},
 };
 

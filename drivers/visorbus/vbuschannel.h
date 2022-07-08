@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (C) 2010 - 2015 UNISYS CORPORATION
  * All rights reserved.
@@ -89,7 +89,7 @@ struct visor_vbus_channel {
 	struct visor_vbus_headerinfo hdr_info;
 	struct visor_vbus_deviceinfo chp_info;
 	struct visor_vbus_deviceinfo bus_info;
-	struct visor_vbus_deviceinfo dev_info[0];
+	struct visor_vbus_deviceinfo dev_info[];
 } __packed;
 
 #endif

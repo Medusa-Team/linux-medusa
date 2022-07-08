@@ -13,8 +13,8 @@ description:
   channels (N) can be read from a dedicated register.
 
 maintainers:
-  - Fabien Dessenne <fabien.dessenne@st.com>
-  - Arnaud Pouliquen <arnaud.pouliquen@st.com>
+  - Fabien Dessenne <fabien.dessenne@foss.st.com>
+  - Arnaud Pouliquen <arnaud.pouliquen@foss.st.com>
 
 properties:
   compatible:
@@ -24,7 +24,7 @@ properties:
     maxItems: 1
 
   clocks:
-     maxItems: 1
+    maxItems: 1
 
   interrupts:
     items:
@@ -32,7 +32,6 @@ properties:
       - description: tx channel free
       - description: wakeup source
     minItems: 2
-    maxItems: 3
 
   interrupt-names:
     items:
@@ -40,7 +39,6 @@ properties:
       - const: tx
       - const: wakeup
     minItems: 2
-    maxItems: 3
 
   wakeup-source: true
 
@@ -49,9 +47,8 @@ properties:
 
   st,proc-id:
     description: Processor id using the mailbox (0 or 1)
-    allOf:
-      - $ref: /schemas/types.yaml#/definitions/uint32
-      - enum: [ 0, 1 ]
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1]
 
 required:
   - compatible

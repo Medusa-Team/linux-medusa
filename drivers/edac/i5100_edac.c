@@ -259,11 +259,6 @@ static inline u32 i5100_nrecmemb_ras(u32 a)
 	return a & ((1 << 16) - 1);
 }
 
-static inline u32 i5100_redmemb_ecc_locator(u32 a)
-{
-	return a & ((1 << 18) - 1);
-}
-
 static inline u32 i5100_recmema_merr(u32 a)
 {
 	return i5100_nrecmema_merr(a);
@@ -486,7 +481,6 @@ static void i5100_read_log(struct mem_ctl_info *mci, int chan,
 	u32 dw;
 	u32 dw2;
 	unsigned syndrome = 0;
-	unsigned ecc_loc = 0;
 	unsigned merr;
 	unsigned bank;
 	unsigned rank;
@@ -499,7 +493,6 @@ static void i5100_read_log(struct mem_ctl_info *mci, int chan,
 		pci_read_config_dword(pdev, I5100_REDMEMA, &dw2);
 		syndrome = dw2;
 		pci_read_config_dword(pdev, I5100_REDMEMB, &dw2);
-		ecc_loc = i5100_redmemb_ecc_locator(dw2);
 	}
 
 	if (i5100_validlog_recmemvalid(dw)) {
@@ -1068,15 +1061,14 @@ static int i5100_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 				    PCI_DEVICE_ID_INTEL_5100_19, 0);
 	if (!einj) {
 		ret = -ENODEV;
-		goto bail_einj;
+		goto bail_mc_free;
 	}
 
 	rc = pci_enable_device(einj);
 	if (rc < 0) {
 		ret = rc;
-		goto bail_disable_einj;
+		goto bail_einj;
 	}
-
 
 	mci->pdev = &pdev->dev;
 
@@ -1143,13 +1135,13 @@ static int i5100_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 bail_scrub:
 	priv->scrub_enable = 0;
 	cancel_delayed_work_sync(&(priv->i5100_scrubbing));
-	edac_mc_free(mci);
-
-bail_disable_einj:
 	pci_disable_device(einj);
 
 bail_einj:
 	pci_dev_put(einj);
+
+bail_mc_free:
+	edac_mc_free(mci);
 
 bail_disable_ch1:
 	pci_disable_device(ch1mm);

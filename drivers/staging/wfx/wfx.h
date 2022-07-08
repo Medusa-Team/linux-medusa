@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Common private data for Silicon Labs WFx chips.
+ * Common private data.
  *
- * Copyright (c) 2017-2019, Silicon Laboratories, Inc.
+ * Copyright (c) 2017-2020, Silicon Laboratories, Inc.
  * Copyright (c) 2010, ST-Ericsson
  * Copyright (c) 2006, Michael Wu <flamingice@sourmilk.net>
  * Copyright 2004-2006 Jean-Baptiste Note <jbnote@gmail.com>, et al.
@@ -20,117 +20,75 @@
 #include "data_tx.h"
 #include "main.h"
 #include "queue.h"
-#include "secure_link.h"
-#include "sta.h"
-#include "scan.h"
 #include "hif_tx.h"
-#include "hif_api_general.h"
 
-struct hwbus_ops;
+#define USEC_PER_TXOP 32 /* see struct ieee80211_tx_queue_params */
+#define USEC_PER_TU 1024
+
+struct wfx_hwbus_ops;
 
 struct wfx_dev {
-	struct wfx_platform_data pdata;
-	struct device		*dev;
-	struct ieee80211_hw	*hw;
-	struct ieee80211_vif	*vif[2];
-	struct mac_address	addresses[2];
-	const struct hwbus_ops	*hwbus_ops;
-	void			*hwbus_priv;
+	struct wfx_platform_data   pdata;
+	struct device              *dev;
+	struct ieee80211_hw        *hw;
+	struct ieee80211_vif       *vif[2];
+	struct mac_address         addresses[2];
+	const struct wfx_hwbus_ops *hwbus_ops;
+	void                       *hwbus_priv;
 
-	u8			keyset;
-	struct completion	firmware_ready;
-	struct hif_ind_startup	hw_caps;
-	struct wfx_hif		hif;
-	struct sl_context	sl;
-	int			chip_frozen;
-	struct mutex		conf_mutex;
+	u8                         keyset;
+	struct completion          firmware_ready;
+	struct wfx_hif_ind_startup hw_caps;
+	struct wfx_hif             hif;
+	struct delayed_work        cooling_timeout_work;
+	bool                       poll_irq;
+	bool                       chip_frozen;
+	struct mutex               conf_mutex;
 
-	struct wfx_hif_cmd	hif_cmd;
-	struct wfx_queue	tx_queue[4];
-	struct wfx_queue_stats	tx_queue_stats;
-	int			tx_burst_idx;
-	atomic_t		tx_lock;
+	struct wfx_hif_cmd         hif_cmd;
+	struct sk_buff_head        tx_pending;
+	wait_queue_head_t          tx_dequeue;
+	atomic_t                   tx_lock;
 
-	u32			key_map;
-	struct hif_req_add_key	keys[MAX_KEY_ENTRIES];
+	atomic_t                   packet_id;
+	u32                        key_map;
 
-	struct hif_rx_stats	rx_stats;
-	struct mutex		rx_stats_lock;
-
-	int			output_power;
-	atomic_t		scan_in_progress;
+	struct wfx_hif_rx_stats    rx_stats;
+	struct mutex               rx_stats_lock;
+	struct wfx_hif_tx_power_loop_info tx_power_loop_info;
+	struct mutex               tx_power_loop_info_lock;
 };
 
 struct wfx_vif {
-	struct wfx_dev		*wdev;
-	struct ieee80211_vif	*vif;
-	struct ieee80211_channel *channel;
-	int			id;
-	enum wfx_state		state;
+	struct wfx_dev             *wdev;
+	struct ieee80211_vif       *vif;
+	struct ieee80211_channel   *channel;
+	int                        id;
 
-	int			delayed_link_loss;
-	int			bss_loss_state;
-	u32			bss_loss_confirm_id;
-	struct mutex		bss_loss_lock;
-	struct delayed_work	bss_loss_work;
+	u32                        link_id_map;
 
-	u32			link_id_map;
-	struct wfx_link_entry	link_id_db[WFX_MAX_STA_IN_AP_MODE];
-	struct delayed_work	link_id_gc_work;
-	struct work_struct	link_id_work;
+	bool                       after_dtim_tx_allowed;
+	bool                       join_in_progress;
 
-	bool			aid0_bit_set;
-	bool			mcast_tx;
-	bool			mcast_buffered;
-	struct wfx_grp_addr_table mcast_filter;
-	struct timer_list	mcast_timeout;
-	struct work_struct	mcast_start_work;
-	struct work_struct	mcast_stop_work;
+	struct delayed_work        beacon_loss_work;
 
-	s8			wep_default_key_id;
-	struct sk_buff		*wep_pending_skb;
-	struct work_struct	wep_key_work;
+	struct wfx_queue           tx_queue[4];
+	struct wfx_tx_policy_cache tx_policy_cache;
+	struct work_struct         tx_policy_upload_work;
 
-	struct tx_policy_cache	tx_policy_cache;
-	struct work_struct	tx_policy_upload_work;
+	struct work_struct         update_tim_work;
 
-	u32			sta_asleep_mask;
-	u32			pspoll_mask;
-	spinlock_t		ps_state_lock;
-	struct work_struct	set_tim_work;
+	unsigned long              uapsd_mask;
 
-	int			dtim_period;
-	int			beacon_int;
-	bool			enable_beacon;
-	struct work_struct	set_beacon_wakeup_period_work;
+	/* avoid some operations in parallel with scan */
+	struct mutex               scan_lock;
+	struct work_struct         scan_work;
+	struct completion          scan_complete;
+	int                        scan_nb_chan_done;
+	bool                       scan_abort;
+	struct ieee80211_scan_request *scan_req;
 
-	bool			filter_bssid;
-	bool			fwd_probe_req;
-	bool			disable_beacon_filter;
-	struct work_struct	update_filtering_work;
-
-	u32			erp_info;
-	int			cqm_rssi_thold;
-	bool			setbssparams_done;
-	struct wfx_ht_info	ht_info;
-	struct wfx_edca_params	edca;
-	struct hif_mib_set_uapsd_information uapsd_info;
-	struct hif_req_set_bss_params bss_params;
-	struct work_struct	bss_params_work;
-	struct work_struct	set_cts_work;
-
-	int			join_complete_status;
-	bool			delayed_unjoin;
-	struct work_struct	unjoin_work;
-
-	struct wfx_scan		scan;
-
-	struct hif_req_set_pm_mode powersave_mode;
-	struct completion	set_pm_mode_complete;
-
-	struct list_head	event_queue;
-	spinlock_t		event_queue_lock;
-	struct work_struct	event_handler_work;
+	struct completion          set_pm_mode_complete;
 };
 
 static inline struct wfx_vif *wdev_to_wvif(struct wfx_dev *wdev, int vif_id)
@@ -140,16 +98,12 @@ static inline struct wfx_vif *wdev_to_wvif(struct wfx_dev *wdev, int vif_id)
 		return NULL;
 	}
 	vif_id = array_index_nospec(vif_id, ARRAY_SIZE(wdev->vif));
-	if (!wdev->vif[vif_id]) {
-		dev_dbg(wdev->dev, "requesting non-allocated vif: %d\n",
-			vif_id);
+	if (!wdev->vif[vif_id])
 		return NULL;
-	}
-	return (struct wfx_vif *) wdev->vif[vif_id]->drv_priv;
+	return (struct wfx_vif *)wdev->vif[vif_id]->drv_priv;
 }
 
-static inline struct wfx_vif *wvif_iterate(struct wfx_dev *wdev,
-					   struct wfx_vif *cur)
+static inline struct wfx_vif *wvif_iterate(struct wfx_dev *wdev, struct wfx_vif *cur)
 {
 	int i;
 	int mark = 0;
@@ -205,4 +159,4 @@ static inline int memzcmp(void *src, unsigned int size)
 	return memcmp(buf, buf + 1, size - 1);
 }
 
-#endif /* WFX_H */
+#endif

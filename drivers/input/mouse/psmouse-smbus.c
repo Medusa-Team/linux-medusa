@@ -75,6 +75,8 @@ static void psmouse_smbus_detach_i2c_client(struct i2c_client *client)
 				    "Marking SMBus companion %s as gone\n",
 				    dev_name(&smbdev->client->dev));
 			smbdev->dead = true;
+			device_link_remove(&smbdev->client->dev,
+					   &smbdev->psmouse->ps2dev.serio->dev);
 			serio_rescan(smbdev->psmouse->ps2dev.serio);
 		} else {
 			list_del(&smbdev->node);
@@ -174,6 +176,8 @@ static void psmouse_smbus_disconnect(struct psmouse *psmouse)
 		kfree(smbdev);
 	} else {
 		smbdev->dead = true;
+		device_link_remove(&smbdev->client->dev,
+				   &psmouse->ps2dev.serio->dev);
 		psmouse_dbg(smbdev->psmouse,
 			    "posting removal request for SMBus companion %s\n",
 			    dev_name(&smbdev->client->dev));
@@ -190,6 +194,7 @@ static int psmouse_smbus_create_companion(struct device *dev, void *data)
 	struct psmouse_smbus_dev *smbdev = data;
 	unsigned short addr_list[] = { smbdev->board.addr, I2C_CLIENT_END };
 	struct i2c_adapter *adapter;
+	struct i2c_client *client;
 
 	adapter = i2c_verify_adapter(dev);
 	if (!adapter)
@@ -198,12 +203,13 @@ static int psmouse_smbus_create_companion(struct device *dev, void *data)
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_HOST_NOTIFY))
 		return 0;
 
-	smbdev->client = i2c_new_probed_device(adapter, &smbdev->board,
-					       addr_list, NULL);
-	if (!smbdev->client)
+	client = i2c_new_scanned_device(adapter, &smbdev->board,
+					addr_list, NULL);
+	if (IS_ERR(client))
 		return 0;
 
 	/* We have our(?) device, stop iterating i2c bus. */
+	smbdev->client = client;
 	return 1;
 }
 
@@ -268,6 +274,12 @@ int psmouse_smbus_init(struct psmouse *psmouse,
 
 	if (smbdev->client) {
 		/* We have our companion device */
+		if (!device_link_add(&smbdev->client->dev,
+				     &psmouse->ps2dev.serio->dev,
+				     DL_FLAG_STATELESS))
+			psmouse_warn(psmouse,
+				     "failed to set up link with iSMBus companion %s\n",
+				     dev_name(&smbdev->client->dev));
 		return 0;
 	}
 

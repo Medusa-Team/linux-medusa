@@ -2,7 +2,7 @@
 /*
  * Common bus abstraction layer.
  *
- * Copyright (c) 2017-2018, Silicon Laboratories, Inc.
+ * Copyright (c) 2017-2020, Silicon Laboratories, Inc.
  * Copyright (c) 2010, ST-Ericsson
  */
 #ifndef WFX_BUS_H
@@ -20,11 +20,11 @@
 #define WFX_REG_SET_GEN_R_W   0x6
 #define WFX_REG_FRAME_OUT     0x7
 
-struct hwbus_ops {
-	int (*copy_from_io)(void *bus_priv, unsigned int addr,
-			    void *dst, size_t count);
-	int (*copy_to_io)(void *bus_priv, unsigned int addr,
-			  const void *src, size_t count);
+struct wfx_hwbus_ops {
+	int (*copy_from_io)(void *bus_priv, unsigned int addr, void *dst, size_t count);
+	int (*copy_to_io)(void *bus_priv, unsigned int addr, const void *src, size_t count);
+	int (*irq_subscribe)(void *bus_priv);
+	int (*irq_unsubscribe)(void *bus_priv);
 	void (*lock)(void *bus_priv);
 	void (*unlock)(void *bus_priv);
 	size_t (*align_size)(void *bus_priv, size_t size);

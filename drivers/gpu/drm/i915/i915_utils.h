@@ -30,24 +30,12 @@
 #include <linux/sched.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
+#include <linux/sched/clock.h>
 
 struct drm_i915_private;
 struct timer_list;
 
-#undef WARN_ON
-/* Many gcc seem to no see through this and fall over :( */
-#if 0
-#define WARN_ON(x) ({ \
-	bool __i915_warn_cond = (x); \
-	if (__builtin_constant_p(__i915_warn_cond)) \
-		BUILD_BUG_ON(__i915_warn_cond); \
-	WARN(__i915_warn_cond, "WARN_ON(" #x ")"); })
-#else
-#define WARN_ON(x) WARN((x), "%s", "WARN_ON(" __stringify(x) ")")
-#endif
-
-#undef WARN_ON_ONCE
-#define WARN_ON_ONCE(x) WARN_ONCE((x), "%s", "WARN_ON_ONCE(" __stringify(x) ")")
+#define FDO_BUG_URL "https://gitlab.freedesktop.org/drm/intel/-/wikis/How-to-file-i915-bugs"
 
 #define MISSING_CASE(x) WARN(1, "Missing case (%s == %ld)\n", \
 			     __stringify(x), (long)(x))
@@ -69,7 +57,7 @@ bool i915_error_injected(void);
 
 #else
 
-#define i915_inject_probe_error(_i915, _err) 0
+#define i915_inject_probe_error(i915, e) ({ BUILD_BUG_ON_INVALID(i915); 0; })
 #define i915_error_injected() false
 
 #endif
@@ -100,11 +88,23 @@ bool i915_error_injected(void);
 	typeof(max) max__ = (max); \
 	(void)(&start__ == &size__); \
 	(void)(&start__ == &max__); \
-	start__ > max__ || size__ > max__ - start__; \
+	start__ >= max__ || size__ > max__ - start__; \
 })
 
 #define range_overflows_t(type, start, size, max) \
 	range_overflows((type)(start), (type)(size), (type)(max))
+
+#define range_overflows_end(start, size, max) ({ \
+	typeof(start) start__ = (start); \
+	typeof(size) size__ = (size); \
+	typeof(max) max__ = (max); \
+	(void)(&start__ == &size__); \
+	(void)(&start__ == &max__); \
+	start__ > max__ || size__ > max__ - start__; \
+})
+
+#define range_overflows_end_t(type, start, size, max) \
+	range_overflows_end((type)(start), (type)(size), (type)(max))
 
 /* Note we don't consider signbits :| */
 #define overflows_type(x, T) \
@@ -187,6 +187,11 @@ __check_struct_size(size_t base, size_t arr, size_t count, size_t *size)
 	__T;								\
 })
 
+static __always_inline ptrdiff_t ptrdiff(const void *a, const void *b)
+{
+	return a - b;
+}
+
 /*
  * container_of_user: Extract the superclass from a pointer to a member.
  *
@@ -234,6 +239,11 @@ static inline u64 ptr_to_u64(const void *ptr)
 	__idx;								\
 })
 
+static inline bool is_power_of_2_u64(u64 n)
+{
+	return (n != 0 && ((n & (n - 1)) == 0));
+}
+
 static inline void __list_del_many(struct list_head *head,
 				   struct list_head *first)
 {
@@ -241,17 +251,10 @@ static inline void __list_del_many(struct list_head *head,
 	WRITE_ONCE(head->next, first);
 }
 
-/*
- * Wait until the work is finally complete, even if it tries to postpone
- * by requeueing itself. Note, that if the worker never cancels itself,
- * we will spin forever.
- */
-static inline void drain_delayed_work(struct delayed_work *dw)
+static inline int list_is_last_rcu(const struct list_head *list,
+				   const struct list_head *head)
 {
-	do {
-		while (flush_delayed_work(dw))
-			;
-	} while (delayed_work_pending(dw));
+	return READ_ONCE(list->next) == head;
 }
 
 static inline unsigned long msecs_to_jiffies_timeout(const unsigned int m)
@@ -406,12 +409,18 @@ static inline const char *onoff(bool v)
 	return v ? "on" : "off";
 }
 
+static inline const char *enabledisable(bool v)
+{
+	return v ? "enable" : "disable";
+}
+
 static inline const char *enableddisabled(bool v)
 {
 	return v ? "enabled" : "disabled";
 }
 
-static inline void add_taint_for_CI(unsigned int taint)
+void add_taint_for_CI(struct drm_i915_private *i915, unsigned int taint);
+static inline void __add_taint_for_CI(unsigned int taint)
 {
 	/*
 	 * The system is "ok", just about surviving for the user, but
@@ -425,22 +434,14 @@ static inline void add_taint_for_CI(unsigned int taint)
 void cancel_timer(struct timer_list *t);
 void set_timer_ms(struct timer_list *t, unsigned long timeout);
 
-static inline bool timer_expired(const struct timer_list *t)
+static inline bool timer_active(const struct timer_list *t)
 {
-	return READ_ONCE(t->expires) && !timer_pending(t);
+	return READ_ONCE(t->expires);
 }
 
-/*
- * This is a lookalike for IS_ENABLED() that takes a kconfig value,
- * e.g. CONFIG_DRM_I915_SPIN_REQUEST, and evaluates whether it is non-zero
- * i.e. whether the configuration is active. Wrapping up the config inside
- * a boolean context prevents clang and smatch from complaining about potential
- * issues in confusing logical-&& with bitwise-& for constants.
- *
- * Sadly IS_ENABLED() itself does not work with kconfig values.
- *
- * Returns 0 if @config is 0, 1 if set to any value.
- */
-#define IS_ACTIVE(config) ((config) != 0)
+static inline bool timer_expired(const struct timer_list *t)
+{
+	return timer_active(t) && !timer_pending(t);
+}
 
 #endif /* !__I915_UTILS_H */

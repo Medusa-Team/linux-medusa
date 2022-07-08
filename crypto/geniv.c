@@ -32,28 +32,26 @@ static int aead_geniv_setauthsize(struct crypto_aead *tfm,
 	return crypto_aead_setauthsize(ctx->child, authsize);
 }
 
-struct aead_instance *aead_geniv_alloc(struct crypto_template *tmpl,
-				       struct rtattr **tb, u32 type, u32 mask)
+static void aead_geniv_free(struct aead_instance *inst)
 {
-	const char *name;
+	crypto_drop_aead(aead_instance_ctx(inst));
+	kfree(inst);
+}
+
+struct aead_instance *aead_geniv_alloc(struct crypto_template *tmpl,
+				       struct rtattr **tb)
+{
 	struct crypto_aead_spawn *spawn;
-	struct crypto_attr_type *algt;
 	struct aead_instance *inst;
 	struct aead_alg *alg;
 	unsigned int ivsize;
 	unsigned int maxauthsize;
+	u32 mask;
 	int err;
 
-	algt = crypto_get_attr_type(tb);
-	if (IS_ERR(algt))
-		return ERR_CAST(algt);
-
-	if ((algt->type ^ CRYPTO_ALG_TYPE_AEAD) & algt->mask)
-		return ERR_PTR(-EINVAL);
-
-	name = crypto_attr_alg_name(tb[1]);
-	if (IS_ERR(name))
-		return ERR_CAST(name);
+	err = crypto_check_attr_type(tb, CRYPTO_ALG_TYPE_AEAD, &mask);
+	if (err)
+		return ERR_PTR(err);
 
 	inst = kzalloc(sizeof(*inst) + sizeof(*spawn), GFP_KERNEL);
 	if (!inst)
@@ -61,11 +59,8 @@ struct aead_instance *aead_geniv_alloc(struct crypto_template *tmpl,
 
 	spawn = aead_instance_ctx(inst);
 
-	/* Ignore async algorithms if necessary. */
-	mask |= crypto_requires_sync(algt->type, algt->mask);
-
-	crypto_set_aead_spawn(spawn, aead_crypto_instance(inst));
-	err = crypto_grab_aead(spawn, name, type, mask);
+	err = crypto_grab_aead(spawn, aead_crypto_instance(inst),
+			       crypto_attr_alg_name(tb[1]), 0, mask);
 	if (err)
 		goto err_free_inst;
 
@@ -76,19 +71,18 @@ struct aead_instance *aead_geniv_alloc(struct crypto_template *tmpl,
 
 	err = -EINVAL;
 	if (ivsize < sizeof(u64))
-		goto err_drop_alg;
+		goto err_free_inst;
 
 	err = -ENAMETOOLONG;
 	if (snprintf(inst->alg.base.cra_name, CRYPTO_MAX_ALG_NAME,
 		     "%s(%s)", tmpl->name, alg->base.cra_name) >=
 	    CRYPTO_MAX_ALG_NAME)
-		goto err_drop_alg;
+		goto err_free_inst;
 	if (snprintf(inst->alg.base.cra_driver_name, CRYPTO_MAX_ALG_NAME,
 		     "%s(%s)", tmpl->name, alg->base.cra_driver_name) >=
 	    CRYPTO_MAX_ALG_NAME)
-		goto err_drop_alg;
+		goto err_free_inst;
 
-	inst->alg.base.cra_flags = alg->base.cra_flags & CRYPTO_ALG_ASYNC;
 	inst->alg.base.cra_priority = alg->base.cra_priority;
 	inst->alg.base.cra_blocksize = alg->base.cra_blocksize;
 	inst->alg.base.cra_alignmask = alg->base.cra_alignmask;
@@ -100,24 +94,17 @@ struct aead_instance *aead_geniv_alloc(struct crypto_template *tmpl,
 	inst->alg.ivsize = ivsize;
 	inst->alg.maxauthsize = maxauthsize;
 
+	inst->free = aead_geniv_free;
+
 out:
 	return inst;
 
-err_drop_alg:
-	crypto_drop_aead(spawn);
 err_free_inst:
-	kfree(inst);
+	aead_geniv_free(inst);
 	inst = ERR_PTR(err);
 	goto out;
 }
 EXPORT_SYMBOL_GPL(aead_geniv_alloc);
-
-void aead_geniv_free(struct aead_instance *inst)
-{
-	crypto_drop_aead(aead_instance_ctx(inst));
-	kfree(inst);
-}
-EXPORT_SYMBOL_GPL(aead_geniv_free);
 
 int aead_init_geniv(struct crypto_aead *aead)
 {

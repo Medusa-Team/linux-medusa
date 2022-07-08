@@ -996,6 +996,9 @@ static int tridentfb_check_var(struct fb_var_screeninfo *var,
 	int ramdac = 230000; /* 230MHz for most 3D chips */
 	debug("enter\n");
 
+	if (!var->pixclock)
+		return -EINVAL;
+
 	/* check color depth */
 	if (bpp == 24)
 		bpp = var->bits_per_pixel = 32;
@@ -1443,7 +1446,7 @@ static int tridentfb_blank(int blank_mode, struct fb_info *info)
 	return (blank_mode == FB_BLANK_NORMAL) ? 1 : 0;
 }
 
-static struct fb_ops tridentfb_ops = {
+static const struct fb_ops tridentfb_ops = {
 	.owner = THIS_MODULE,
 	.fb_setcolreg = tridentfb_setcolreg,
 	.fb_pan_display = tridentfb_pan_display,
@@ -1556,7 +1559,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 		return -1;
 	}
 
-	default_par->io_virt = ioremap_nocache(tridentfb_fix.mmio_start,
+	default_par->io_virt = ioremap(tridentfb_fix.mmio_start,
 					       tridentfb_fix.mmio_len);
 
 	if (!default_par->io_virt) {
@@ -1579,7 +1582,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 		goto out_unmap1;
 	}
 
-	info->screen_base = ioremap_nocache(tridentfb_fix.smem_start,
+	info->screen_base = ioremap(tridentfb_fix.smem_start,
 					    tridentfb_fix.smem_len);
 
 	if (!info->screen_base) {

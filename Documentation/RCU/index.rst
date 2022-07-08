@@ -1,3 +1,5 @@
+.. SPDX-License-Identifier: GPL-2.0
+
 .. _rcu_concepts:
 
 ============
@@ -7,8 +9,20 @@ RCU concepts
 .. toctree::
    :maxdepth: 3
 
+   arrayRCU
+   checklist
+   lockdep
+   lockdep-splat
+   rcubarrier
+   rcu_dereference
+   whatisRCU
    rcu
+   rculist_nulls
+   rcuref
+   torture
+   stallwarn
    listRCU
+   NMI-RCU
    UP
 
    Design/Memory-Ordering/Tree-RCU-Memory-Ordering

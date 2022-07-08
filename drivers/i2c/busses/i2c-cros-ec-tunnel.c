@@ -107,7 +107,7 @@ static int ec_i2c_construct_message(u8 *buf, const struct i2c_msg i2c_msgs[],
 /**
  * ec_i2c_count_response - Count bytes needed for ec_i2c_parse_response
  *
- * @i2c_msgs: The i2c messages to to fill up.
+ * @i2c_msgs: The i2c messages to fill up.
  * @num: The number of i2c messages expected.
  *
  * Returns the number of response bytes expeced.
@@ -131,7 +131,7 @@ static int ec_i2c_count_response(struct i2c_msg i2c_msgs[], int num)
  * We'll take the EC's response and copy it back into msgs.
  *
  * @buf: The buffer to parse.
- * @i2c_msgs: The i2c messages to to fill up.
+ * @i2c_msgs: The i2c messages to fill up.
  * @num: The number of i2c messages; will be modified to include the actual
  *	 number received.
  *
@@ -273,6 +273,7 @@ static int ec_i2c_probe(struct platform_device *pdev)
 	bus->adap.dev.parent = &pdev->dev;
 	bus->adap.dev.of_node = pdev->dev.of_node;
 	bus->adap.retries = I2C_MAX_RETRIES;
+	ACPI_COMPANION_SET(&bus->adap.dev, ACPI_COMPANION(&pdev->dev));
 
 	err = i2c_add_adapter(&bus->adap);
 	if (err)
@@ -298,7 +299,7 @@ static const struct of_device_id cros_ec_i2c_of_match[] = {
 MODULE_DEVICE_TABLE(of, cros_ec_i2c_of_match);
 
 static const struct acpi_device_id cros_ec_i2c_tunnel_acpi_id[] = {
-	{ "GOOG001A", 0 },
+	{ "GOOG0012", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, cros_ec_i2c_tunnel_acpi_id);

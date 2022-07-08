@@ -81,7 +81,7 @@ MODULE_PARM_DESC(srpt_srq_size,
 
 static int srpt_get_u64_x(char *buffer, const struct kernel_param *kp)
 {
-	return sprintf(buffer, "0x%016llx", *(u64 *)kp->arg);
+	return sprintf(buffer, "0x%016llx\n", *(u64 *)kp->arg);
 }
 module_param_call(srpt_service_guid, NULL, srpt_get_u64_x, &srpt_service_guid,
 		  0444);
@@ -135,13 +135,10 @@ static bool srpt_set_ch_state(struct srpt_rdma_ch *ch, enum rdma_ch_state new)
 static void srpt_event_handler(struct ib_event_handler *handler,
 			       struct ib_event *event)
 {
-	struct srpt_device *sdev;
+	struct srpt_device *sdev =
+		container_of(handler, struct srpt_device, event_handler);
 	struct srpt_port *sport;
 	u8 port_num;
-
-	sdev = ib_get_client_data(event->device, &srpt_client);
-	if (!sdev || sdev->device != event->device)
-		return;
 
 	pr_debug("ASYNC event= %d on device= %s\n", event->event,
 		 dev_name(&sdev->device->dev));
@@ -217,8 +214,9 @@ static const char *get_ch_state_name(enum rdma_ch_state s)
  */
 static void srpt_qp_event(struct ib_event *event, struct srpt_rdma_ch *ch)
 {
-	pr_debug("QP event %d on ch=%p sess_name=%s state=%d\n",
-		 event->event, ch, ch->sess_name, ch->state);
+	pr_debug("QP event %d on ch=%p sess_name=%s-%d state=%s\n",
+		 event->event, ch, ch->sess_name, ch->qp->qp_num,
+		 get_ch_state_name(ch->state));
 
 	switch (event->event) {
 	case IB_EVENT_COMM_EST:
@@ -610,6 +608,11 @@ static int srpt_refresh_port(struct srpt_port *sport)
 			       dev_name(&sport->sdev->device->dev), sport->port,
 			       PTR_ERR(sport->mad_agent));
 			sport->mad_agent = NULL;
+			memset(&port_modify, 0, sizeof(port_modify));
+			port_modify.clr_port_cap_mask = IB_PORT_DEVICE_MGMT_SUP;
+			ib_modify_port(sport->sdev->device, sport->port, 0,
+				       &port_modify);
+
 		}
 	}
 
@@ -619,10 +622,11 @@ static int srpt_refresh_port(struct srpt_port *sport)
 /**
  * srpt_unregister_mad_agent - unregister MAD callback functions
  * @sdev: SRPT HCA pointer.
+ * @port_cnt: number of ports with registered MAD
  *
  * Note: It is safe to call this function more than once for the same device.
  */
-static void srpt_unregister_mad_agent(struct srpt_device *sdev)
+static void srpt_unregister_mad_agent(struct srpt_device *sdev, int port_cnt)
 {
 	struct ib_port_modify port_modify = {
 		.clr_port_cap_mask = IB_PORT_DEVICE_MGMT_SUP,
@@ -630,12 +634,11 @@ static void srpt_unregister_mad_agent(struct srpt_device *sdev)
 	struct srpt_port *sport;
 	int i;
 
-	for (i = 1; i <= sdev->device->phys_port_cnt; i++) {
+	for (i = 1; i <= port_cnt; i++) {
 		sport = &sdev->port[i - 1];
 		WARN_ON(sport->port != i);
-		if (ib_modify_port(sdev->device, i, 0, &port_modify) < 0)
-			pr_err("disabling MAD processing failed.\n");
 		if (sport->mad_agent) {
+			ib_modify_port(sdev->device, i, 0, &port_modify);
 			ib_unregister_mad_agent(sport->mad_agent);
 			sport->mad_agent = NULL;
 		}
@@ -867,7 +870,7 @@ static int srpt_zerolength_write(struct srpt_rdma_ch *ch)
 
 static void srpt_zerolength_write_done(struct ib_cq *cq, struct ib_wc *wc)
 {
-	struct srpt_rdma_ch *ch = cq->cq_context;
+	struct srpt_rdma_ch *ch = wc->qp->qp_context;
 
 	pr_debug("%s-%d wc->status %d\n", ch->sess_name, ch->qp->qp_num,
 		 wc->status);
@@ -1320,7 +1323,7 @@ static int srpt_abort_cmd(struct srpt_send_ioctx *ioctx)
  */
 static void srpt_rdma_read_done(struct ib_cq *cq, struct ib_wc *wc)
 {
-	struct srpt_rdma_ch *ch = cq->cq_context;
+	struct srpt_rdma_ch *ch = wc->qp->qp_context;
 	struct srpt_send_ioctx *ioctx =
 		container_of(wc->wr_cqe, struct srpt_send_ioctx, rdma_cqe);
 
@@ -1525,16 +1528,20 @@ static void srpt_handle_cmd(struct srpt_rdma_ch *ch,
 		goto busy;
 	}
 
-	rc = target_submit_cmd_map_sgls(cmd, ch->sess, srp_cmd->cdb,
-			       &send_ioctx->sense_data[0],
-			       scsilun_to_int(&srp_cmd->lun), data_len,
-			       TCM_SIMPLE_TAG, dir, TARGET_SCF_ACK_KREF,
-			       sg, sg_cnt, NULL, 0, NULL, 0);
+	rc = target_init_cmd(cmd, ch->sess, &send_ioctx->sense_data[0],
+			     scsilun_to_int(&srp_cmd->lun), data_len,
+			     TCM_SIMPLE_TAG, dir, TARGET_SCF_ACK_KREF);
 	if (rc != 0) {
 		pr_debug("target_submit_cmd() returned %d for tag %#llx\n", rc,
 			 srp_cmd->tag);
 		goto busy;
 	}
+
+	if (target_submit_prep(cmd, srp_cmd->cdb, sg, sg_cnt, NULL, 0, NULL, 0,
+			       GFP_KERNEL))
+		return;
+
+	target_submit(cmd);
 	return;
 
 busy:
@@ -1681,7 +1688,7 @@ push:
 
 static void srpt_recv_done(struct ib_cq *cq, struct ib_wc *wc)
 {
-	struct srpt_rdma_ch *ch = cq->cq_context;
+	struct srpt_rdma_ch *ch = wc->qp->qp_context;
 	struct srpt_recv_ioctx *ioctx =
 		container_of(wc->wr_cqe, struct srpt_recv_ioctx, ioctx.cqe);
 
@@ -1742,7 +1749,7 @@ static void srpt_process_wait_list(struct srpt_rdma_ch *ch)
  */
 static void srpt_send_done(struct ib_cq *cq, struct ib_wc *wc)
 {
-	struct srpt_rdma_ch *ch = cq->cq_context;
+	struct srpt_rdma_ch *ch = wc->qp->qp_context;
 	struct srpt_send_ioctx *ioctx =
 		container_of(wc->wr_cqe, struct srpt_send_ioctx, ioctx.cqe);
 	enum srpt_command_state state;
@@ -1789,7 +1796,7 @@ static int srpt_create_ch_ib(struct srpt_rdma_ch *ch)
 		goto out;
 
 retry:
-	ch->cq = ib_alloc_cq_any(sdev->device, ch, ch->rq_size + sq_size,
+	ch->cq = ib_cq_pool_get(sdev->device, ch->rq_size + sq_size, -1,
 				 IB_POLL_WORKQUEUE);
 	if (IS_ERR(ch->cq)) {
 		ret = PTR_ERR(ch->cq);
@@ -1797,6 +1804,7 @@ retry:
 		       ch->rq_size + sq_size, ret);
 		goto out;
 	}
+	ch->cq_size = ch->rq_size + sq_size;
 
 	qp_init->qp_context = (void *)ch;
 	qp_init->event_handler
@@ -1814,18 +1822,13 @@ retry:
 	 */
 	qp_init->cap.max_send_wr = min(sq_size / 2, attrs->max_qp_wr);
 	qp_init->cap.max_rdma_ctxs = sq_size / 2;
-	qp_init->cap.max_send_sge = min(attrs->max_send_sge,
-					SRPT_MAX_SG_PER_WQE);
-	qp_init->cap.max_recv_sge = min(attrs->max_recv_sge,
-					SRPT_MAX_SG_PER_WQE);
+	qp_init->cap.max_send_sge = attrs->max_send_sge;
+	qp_init->cap.max_recv_sge = 1;
 	qp_init->port_num = ch->sport->port;
-	if (sdev->use_srq) {
+	if (sdev->use_srq)
 		qp_init->srq = sdev->srq;
-	} else {
+	else
 		qp_init->cap.max_recv_wr = ch->rq_size;
-		qp_init->cap.max_recv_sge = min(attrs->max_recv_sge,
-						SRPT_MAX_SG_PER_WQE);
-	}
 
 	if (ch->using_rdma_cm) {
 		ret = rdma_create_qp(ch->rdma_cm.cm_id, sdev->pd, qp_init);
@@ -1846,7 +1849,7 @@ retry:
 		if (retry) {
 			pr_debug("failed to create queue pair with sq_size = %d (%d) - retrying\n",
 				 sq_size, ret);
-			ib_free_cq(ch->cq);
+			ib_cq_pool_put(ch->cq, ch->cq_size);
 			sq_size = max(sq_size / 2, MIN_SRPT_SQ_SIZE);
 			goto retry;
 		} else {
@@ -1872,14 +1875,14 @@ out:
 
 err_destroy_cq:
 	ch->qp = NULL;
-	ib_free_cq(ch->cq);
+	ib_cq_pool_put(ch->cq, ch->cq_size);
 	goto out;
 }
 
 static void srpt_destroy_ch_ib(struct srpt_rdma_ch *ch)
 {
 	ib_destroy_qp(ch->qp);
-	ib_free_cq(ch->cq);
+	ib_cq_pool_put(ch->cq, ch->cq_size);
 }
 
 /**
@@ -1984,8 +1987,8 @@ static void __srpt_close_all_ch(struct srpt_port *sport)
 	list_for_each_entry(nexus, &sport->nexus_list, entry) {
 		list_for_each_entry(ch, &nexus->ch_list, list) {
 			if (srpt_disconnect_ch(ch) >= 0)
-				pr_info("Closing channel %s because target %s_%d has been disabled\n",
-					ch->sess_name,
+				pr_info("Closing channel %s-%d because target %s_%d has been disabled\n",
+					ch->sess_name, ch->qp->qp_num,
 					dev_name(&sport->sdev->device->dev),
 					sport->port);
 			srpt_close_ch(ch);
@@ -2086,7 +2089,7 @@ static void srpt_release_channel_work(struct work_struct *w)
 	se_sess = ch->sess;
 	BUG_ON(!se_sess);
 
-	target_sess_cmd_list_set_waiting(se_sess);
+	target_stop_session(se_sess);
 	target_wait_for_sess_cmds(se_sess);
 
 	target_remove_session(se_sess);
@@ -2158,9 +2161,6 @@ static int srpt_cm_req_recv(struct srpt_device *const sdev,
 	struct srpt_tpg *stpg;
 
 	WARN_ON_ONCE(irqs_disabled());
-
-	if (WARN_ON(!sdev || !req))
-		return -EINVAL;
 
 	it_iu_len = be32_to_cpu(req->req_it_iu_len);
 
@@ -2382,6 +2382,7 @@ static int srpt_cm_req_recv(struct srpt_device *const sdev,
 		pr_info("rejected SRP_LOGIN_REQ because target %s_%d is not enabled\n",
 			dev_name(&sdev->device->dev), port_num);
 		mutex_unlock(&sport->mutex);
+		ret = -EINVAL;
 		goto reject;
 	}
 
@@ -2496,7 +2497,8 @@ reject:
 				   SRP_BUF_FORMAT_INDIRECT);
 
 	if (rdma_cm_id)
-		rdma_reject(rdma_cm_id, rej, sizeof(*rej));
+		rdma_reject(rdma_cm_id, rej, sizeof(*rej),
+			    IB_CM_REJ_CONSUMER_DEFINED);
 	else
 		ib_send_cm_rej(ib_cm_id, IB_CM_REJ_CONSUMER_DEFINED, NULL, 0,
 			       rej, sizeof(*rej));
@@ -2810,8 +2812,6 @@ static void srpt_queue_response(struct se_cmd *cmd)
 	int resp_len, ret, i;
 	u8 srp_tm_status;
 
-	BUG_ON(!ch);
-
 	state = ioctx->state;
 	switch (state) {
 	case SRPT_STATE_NEW:
@@ -2858,7 +2858,6 @@ static void srpt_queue_response(struct se_cmd *cmd)
 			&ch->sq_wr_avail) < 0)) {
 		pr_warn("%s: IB send queue full (needed %d)\n",
 				__func__, ioctx->n_rdma);
-		ret = -ENOMEM;
 		goto out;
 	}
 
@@ -3106,25 +3105,28 @@ static int srpt_use_srq(struct srpt_device *sdev, bool use_srq)
  * srpt_add_one - InfiniBand device addition callback function
  * @device: Describes a HCA.
  */
-static void srpt_add_one(struct ib_device *device)
+static int srpt_add_one(struct ib_device *device)
 {
 	struct srpt_device *sdev;
 	struct srpt_port *sport;
-	int i, ret;
+	int ret;
+	u32 i;
 
 	pr_debug("device = %p\n", device);
 
 	sdev = kzalloc(struct_size(sdev, port, device->phys_port_cnt),
 		       GFP_KERNEL);
 	if (!sdev)
-		goto err;
+		return -ENOMEM;
 
 	sdev->device = device;
 	mutex_init(&sdev->sdev_mutex);
 
 	sdev->pd = ib_alloc_pd(device, 0);
-	if (IS_ERR(sdev->pd))
+	if (IS_ERR(sdev->pd)) {
+		ret = PTR_ERR(sdev->pd);
 		goto free_dev;
+	}
 
 	sdev->lkey = sdev->pd->local_dma_lkey;
 
@@ -3140,6 +3142,7 @@ static void srpt_add_one(struct ib_device *device)
 	if (IS_ERR(sdev->cm_id)) {
 		pr_info("ib_create_cm_id() failed: %ld\n",
 			PTR_ERR(sdev->cm_id));
+		ret = PTR_ERR(sdev->cm_id);
 		sdev->cm_id = NULL;
 		if (!rdma_cm_id)
 			goto err_ring;
@@ -3184,10 +3187,12 @@ static void srpt_add_one(struct ib_device *device)
 		mutex_init(&sport->port_gid_id.mutex);
 		INIT_LIST_HEAD(&sport->port_gid_id.tpg_list);
 
-		if (srpt_refresh_port(sport)) {
+		ret = srpt_refresh_port(sport);
+		if (ret) {
 			pr_err("MAD registration failed for %s-%d.\n",
 			       dev_name(&sdev->device->dev), i);
-			goto err_event;
+			i--;
+			goto err_port;
 		}
 	}
 
@@ -3195,12 +3200,12 @@ static void srpt_add_one(struct ib_device *device)
 	list_add_tail(&sdev->list, &srpt_dev_list);
 	spin_unlock(&srpt_dev_lock);
 
-out:
 	ib_set_client_data(device, &srpt_client, sdev);
 	pr_debug("added %s.\n", dev_name(&device->dev));
-	return;
+	return 0;
 
-err_event:
+err_port:
+	srpt_unregister_mad_agent(sdev, i);
 	ib_unregister_event_handler(&sdev->event_handler);
 err_cm:
 	if (sdev->cm_id)
@@ -3210,10 +3215,8 @@ err_ring:
 	ib_dealloc_pd(sdev->pd);
 free_dev:
 	kfree(sdev);
-err:
-	sdev = NULL;
 	pr_info("%s(%s) failed.\n", __func__, dev_name(&device->dev));
-	goto out;
+	return ret;
 }
 
 /**
@@ -3226,13 +3229,7 @@ static void srpt_remove_one(struct ib_device *device, void *client_data)
 	struct srpt_device *sdev = client_data;
 	int i;
 
-	if (!sdev) {
-		pr_info("%s(%s): nothing to do.\n", __func__,
-			dev_name(&device->dev));
-		return;
-	}
-
-	srpt_unregister_mad_agent(sdev);
+	srpt_unregister_mad_agent(sdev, sdev->device->phys_port_cnt);
 
 	ib_unregister_event_handler(&sdev->event_handler);
 
@@ -3456,7 +3453,7 @@ static ssize_t srpt_tpg_attrib_srp_max_rdma_size_show(struct config_item *item,
 	struct se_portal_group *se_tpg = attrib_to_tpg(item);
 	struct srpt_port *sport = srpt_tpg_to_sport(se_tpg);
 
-	return sprintf(page, "%u\n", sport->port_attrib.srp_max_rdma_size);
+	return sysfs_emit(page, "%u\n", sport->port_attrib.srp_max_rdma_size);
 }
 
 static ssize_t srpt_tpg_attrib_srp_max_rdma_size_store(struct config_item *item,
@@ -3493,7 +3490,7 @@ static ssize_t srpt_tpg_attrib_srp_max_rsp_size_show(struct config_item *item,
 	struct se_portal_group *se_tpg = attrib_to_tpg(item);
 	struct srpt_port *sport = srpt_tpg_to_sport(se_tpg);
 
-	return sprintf(page, "%u\n", sport->port_attrib.srp_max_rsp_size);
+	return sysfs_emit(page, "%u\n", sport->port_attrib.srp_max_rsp_size);
 }
 
 static ssize_t srpt_tpg_attrib_srp_max_rsp_size_store(struct config_item *item,
@@ -3530,7 +3527,7 @@ static ssize_t srpt_tpg_attrib_srp_sq_size_show(struct config_item *item,
 	struct se_portal_group *se_tpg = attrib_to_tpg(item);
 	struct srpt_port *sport = srpt_tpg_to_sport(se_tpg);
 
-	return sprintf(page, "%u\n", sport->port_attrib.srp_sq_size);
+	return sysfs_emit(page, "%u\n", sport->port_attrib.srp_sq_size);
 }
 
 static ssize_t srpt_tpg_attrib_srp_sq_size_store(struct config_item *item,
@@ -3567,7 +3564,7 @@ static ssize_t srpt_tpg_attrib_use_srq_show(struct config_item *item,
 	struct se_portal_group *se_tpg = attrib_to_tpg(item);
 	struct srpt_port *sport = srpt_tpg_to_sport(se_tpg);
 
-	return sprintf(page, "%d\n", sport->port_attrib.use_srq);
+	return sysfs_emit(page, "%d\n", sport->port_attrib.use_srq);
 }
 
 static ssize_t srpt_tpg_attrib_use_srq_store(struct config_item *item,
@@ -3657,7 +3654,7 @@ out:
 
 static ssize_t srpt_rdma_cm_port_show(struct config_item *item, char *page)
 {
-	return sprintf(page, "%d\n", rdma_cm_port);
+	return sysfs_emit(page, "%d\n", rdma_cm_port);
 }
 
 static ssize_t srpt_rdma_cm_port_store(struct config_item *item,
@@ -3708,46 +3705,16 @@ static struct configfs_attribute *srpt_da_attrs[] = {
 	NULL,
 };
 
-static ssize_t srpt_tpg_enable_show(struct config_item *item, char *page)
+static int srpt_enable_tpg(struct se_portal_group *se_tpg, bool enable)
 {
-	struct se_portal_group *se_tpg = to_tpg(item);
 	struct srpt_port *sport = srpt_tpg_to_sport(se_tpg);
-
-	return snprintf(page, PAGE_SIZE, "%d\n", sport->enabled);
-}
-
-static ssize_t srpt_tpg_enable_store(struct config_item *item,
-		const char *page, size_t count)
-{
-	struct se_portal_group *se_tpg = to_tpg(item);
-	struct srpt_port *sport = srpt_tpg_to_sport(se_tpg);
-	unsigned long tmp;
-	int ret;
-
-	ret = kstrtoul(page, 0, &tmp);
-	if (ret < 0) {
-		pr_err("Unable to extract srpt_tpg_store_enable\n");
-		return -EINVAL;
-	}
-
-	if ((tmp != 0) && (tmp != 1)) {
-		pr_err("Illegal value for srpt_tpg_store_enable: %lu\n", tmp);
-		return -EINVAL;
-	}
 
 	mutex_lock(&sport->mutex);
-	srpt_set_enabled(sport, tmp);
+	srpt_set_enabled(sport, enable);
 	mutex_unlock(&sport->mutex);
 
-	return count;
+	return 0;
 }
-
-CONFIGFS_ATTR(srpt_tpg_, enable);
-
-static struct configfs_attribute *srpt_tpg_attrs[] = {
-	&srpt_tpg_attr_enable,
-	NULL,
-};
 
 /**
  * srpt_make_tpg - configfs callback invoked for mkdir /sys/kernel/config/target/$driver/$port/$tpg
@@ -3820,7 +3787,7 @@ static void srpt_drop_tport(struct se_wwn *wwn)
 
 static ssize_t srpt_wwn_version_show(struct config_item *item, char *buf)
 {
-	return scnprintf(buf, PAGE_SIZE, "\n");
+	return sysfs_emit(buf, "\n");
 }
 
 CONFIGFS_ATTR_RO(srpt_wwn_, version);
@@ -3859,12 +3826,12 @@ static const struct target_core_fabric_ops srpt_template = {
 	.fabric_make_wwn		= srpt_make_tport,
 	.fabric_drop_wwn		= srpt_drop_tport,
 	.fabric_make_tpg		= srpt_make_tpg,
+	.fabric_enable_tpg		= srpt_enable_tpg,
 	.fabric_drop_tpg		= srpt_drop_tpg,
 	.fabric_init_nodeacl		= srpt_init_nodeacl,
 
 	.tfc_discovery_attrs		= srpt_da_attrs,
 	.tfc_wwn_attrs			= srpt_wwn_attrs,
-	.tfc_tpg_base_attrs		= srpt_tpg_attrs,
 	.tfc_tpg_attrib_attrs		= srpt_tpg_attrib_attrs,
 };
 
