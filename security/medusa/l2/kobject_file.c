@@ -298,7 +298,7 @@ static enum medusa_answer_t file_update(struct medusa_kobject_s *kobj)
 	retval = MED_ALLOW;
 	if (unlikely(file_kobj2kern((struct file_kobject *)kobj, p) < 0))
 		retval = MED_ERR;
-	med_pr_info("file_update: dev=%lu ino=%lu vs=%*pbl act=%*pbl\n", ((struct file_kobject *)kobj)->dev, ((struct file_kobject *)kobj)->ino, CONFIG_MEDUSA_VS, &((struct file_kobject *)kobj)->med_object.vs, CONFIG_MEDUSA_ACT, &((struct file_kobject *)kobj)->med_object.act);
+	/* med_pr_info("file_update: dev=%lu ino=%lu vs=%*pbl act=%*pbl\n", ((struct file_kobject *)kobj)->dev, ((struct file_kobject *)kobj)->ino, CONFIG_MEDUSA_VS, &((struct file_kobject *)kobj)->med_object.vs, CONFIG_MEDUSA_ACT, &((struct file_kobject *)kobj)->med_object.act); */
 
 out_err_update:
 	__unlookup();
