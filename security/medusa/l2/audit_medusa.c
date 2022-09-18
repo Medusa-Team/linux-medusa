@@ -36,31 +36,31 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 
 	switch (mad->vsi) {
 	case VS_INTERSECT:
-		audit_log_format(ab, " vs={ intersect }");
+		audit_log_format(ab, " vs={intersect}");
 		break;
 	case VS_SW_N:
 		if (vs_intersects(mad->vs.sw.vss, mad->vs.sw.vst))
-			audit_log_format(ab, " vs={ see_i , ");
+			audit_log_format(ab, " vs={see_i,");
 		else
-			audit_log_format(ab, " vs={ see_n , ");
+			audit_log_format(ab, " vs={see_n,");
 		if (vs_intersects(mad->vs.sw.vsw, mad->vs.sw.vst))
-			audit_log_format(ab, "write_i }");
+			audit_log_format(ab, "write_i}");
 		else
-			audit_log_format(ab, "write_n }");
+			audit_log_format(ab, "write_n}");
 		break;
 	case VS_SRW_N:
 		if (vs_intersects(mad->vs.srw.vss, mad->vs.srw.vst))
-			audit_log_format(ab, " vs={ see_i , ");
+			audit_log_format(ab, " vs={see_i,");
 		else
-			audit_log_format(ab, " vs={ see_n , ");
+			audit_log_format(ab, " vs={see_n,");
 		if (vs_intersects(mad->vs.srw.vsr, mad->vs.srw.vst))
-			audit_log_format(ab, "read_i , ");
+			audit_log_format(ab, "read_i,");
 		else
-			audit_log_format(ab, "read_n , ");
+			audit_log_format(ab, "read_n,");
 		if (vs_intersects(mad->vs.srw.vsw, mad->vs.srw.vst))
-			audit_log_format(ab, "write_i }");
+			audit_log_format(ab, "write_i}");
 		else
-			audit_log_format(ab, "write_n }");
+			audit_log_format(ab, "write_n}");
 		break;
 	}
 
