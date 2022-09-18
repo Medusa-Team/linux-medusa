@@ -20,7 +20,7 @@
 
 /* prototypes of L2 file related handlers called from L1 hooks */
 
-extern enum medusa_answer_t medusa_exec(struct dentry **dentryp);
+extern enum medusa_answer_t medusa_exec(struct linux_binprm *bprm);
 extern enum medusa_answer_t medusa_create(struct dentry *dentry, int mode);
 extern enum medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry);
 extern enum medusa_answer_t medusa_truncate(const struct path *path);
