@@ -2,6 +2,7 @@
 
 #ifdef CONFIG_SECURITY_MEDUSA
 
+#include <linux/binfmts.h>
 #include <linux/module.h>
 
 #include "l4/comm.h"
@@ -29,6 +30,13 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  *	return 0;
  * }
  */
+
+static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
+{
+	if (medusa_exec(bprm) == MED_DENY)
+		return -EACCES;
+	return 0;
+}
 
 /*
  * static int medusa_l1_bprm_check_security (struct linux_binprm *bprm)
@@ -1381,7 +1389,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(settime, medusa_l1_settime),
 	//LSM_HOOK_INIT(vm_enough_memory, medusa_l1_vm_enough_memory),
 
-	//LSM_HOOK_INIT(bprm_creds_for_exec, medusa_l1_creds_for_exec),
+	LSM_HOOK_INIT(bprm_creds_for_exec, medusa_l1_creds_for_exec),
 	//LSM_HOOK_INIT(bprm_creds_from_file, medusa_l1_creds_from_file),
 	//LSM_HOOK_INIT(bprm_check_security, medusa_l1_bprm_check_security),
 	//LSM_HOOK_INIT(bprm_committing_creds, medusa_l1_bprm_committing_creds),

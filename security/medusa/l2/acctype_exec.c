@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <linux/binfmts.h>
+
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_file.h"
@@ -41,66 +43,74 @@ int __init exec_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_fexec(struct dentry *dentry)
+static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
+					const char *filename)
 {
 	struct exec_faccess access;
 	struct process_kobject process;
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	file_kobj_dentry2string(dentry, access.filename);
+	strncpy(access.filename, filename, sizeof(access.filename));
+	access.filename[sizeof(access.filename)-1] = '\0';
+
 	process_kern2kobj(&process, current);
-	file_kern2kobj(&file, dentry->d_inode);
-	file_kobj_live_add(dentry->d_inode);
+	file_kern2kobj(&file, inode);
+	file_kobj_live_add(inode);
 	retval = MED_DECIDE(exec_faccess, &access, &process, &file);
-	file_kobj_live_remove(dentry->d_inode);
+	file_kobj_live_remove(inode);
 	if (retval != MED_ERR)
 		return retval;
 	return MED_ALLOW;
 }
 
-static enum medusa_answer_t medusa_do_pexec(struct dentry *dentry)
+static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
+					const char *filename)
 {
 	struct exec_paccess access;
 	struct process_kobject process;
 	struct file_kobject file;
 	enum medusa_answer_t retval;
 
-	file_kobj_dentry2string(dentry, access.filename);
+	strncpy(access.filename, filename, sizeof(access.filename));
+	access.filename[sizeof(access.filename)-1] = '\0';
+
 	process_kern2kobj(&process, current);
-	file_kern2kobj(&file, dentry->d_inode);
-	file_kobj_live_add(dentry->d_inode);
+	file_kern2kobj(&file, inode);
+	file_kobj_live_add(inode);
 	retval = MED_DECIDE(exec_paccess, &access, &process, &file);
-	file_kobj_live_remove(dentry->d_inode);
+	file_kobj_live_remove(inode);
 	if (retval == MED_ERR)
 		retval = MED_ALLOW;
 	return retval;
 }
 
-enum medusa_answer_t medusa_exec(struct dentry **dentryp)
+enum medusa_answer_t medusa_exec(struct linux_binprm *bprm)
 {
 	enum medusa_answer_t retval;
+	struct path *path = &bprm->file->f_path;
+	// TODO: Can we use file_inode?
+	struct inode *inode = d_backing_inode(path->dentry);
 
-	if (!*dentryp || IS_ERR(*dentryp) || !(*dentryp)->d_inode)
-		return MED_ALLOW;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
-	if (!is_med_magic_valid(&(inode_security((*dentryp)->d_inode)->med_object)) &&
-		file_kobj_validate_dentry(*dentryp, NULL, NULL) <= 0)
+	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
+		file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
 		return MED_ALLOW;
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security((*dentryp)->d_inode))) ||
-		!vs_intersects(VSR(task_security(current)), VS(inode_security((*dentryp)->d_inode)))
+
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
+		!vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))
 	)
 		return MED_DENY;
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current))) {
-		retval = medusa_do_pexec(*dentryp);
+		retval = medusa_do_pexec(inode, bprm->filename);
 		if (retval == MED_DENY)
 			return retval;
 	}
-	if (MEDUSA_MONITORED_ACCESS_O(exec_faccess, inode_security((*dentryp)->d_inode))) {
-		retval = medusa_do_fexec(*dentryp);
+	if (MEDUSA_MONITORED_ACCESS_O(exec_faccess, inode_security(inode))) {
+		retval = medusa_do_fexec(inode, bprm->filename);
 		return retval;
 	}
 	return MED_ALLOW;
