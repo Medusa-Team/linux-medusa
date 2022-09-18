@@ -44,12 +44,18 @@ struct medusa_l1_ipc_s {
 };
 
 extern int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag);
-extern int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd);
-extern int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag);
+extern int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation);
+extern int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation);
 extern int medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops, unsigned int nsops, int alter);
 extern int medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmaddr, int shmflg);
 extern int medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *msg, int msgflg);
 extern int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *msg, struct task_struct *target, long type, int mode);
+extern int medusa_queue_associate(struct kern_ipc_perm *ipcp, int flag);
+extern int medusa_shm_associate(struct kern_ipc_perm *ipcp, int flag);
+extern int medusa_sem_associate(struct kern_ipc_perm *ipcp, int flag);
+extern int medusa_queue_ctl(struct kern_ipc_perm *ipcp, int cmd);
+extern int medusa_shm_ctl(struct kern_ipc_perm *ipcp, int cmd);
+extern int medusa_sem_ctl(struct kern_ipc_perm *ipcp, int cmd);
 
 /*
  * The following routine makes a support for many of access types,

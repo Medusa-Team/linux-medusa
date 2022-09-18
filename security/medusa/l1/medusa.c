@@ -792,6 +792,30 @@ int medusa_l1_sem_alloc_security(struct kern_ipc_perm *sma)
 	return medusa_l1_ipc_alloc_security(sma, MED_IPC_SEM);
 }
 
+int medusa_queue_associate(struct kern_ipc_perm *ipcp, int flag) {
+	return medusa_ipc_associate(ipcp, flag, "queue_associate");
+}
+
+int medusa_shm_associate(struct kern_ipc_perm *ipcp, int flag) {
+	return medusa_ipc_associate(ipcp, flag, "shm_associate");
+}
+
+int medusa_sem_associate(struct kern_ipc_perm *ipcp, int flag) {
+	return medusa_ipc_associate(ipcp, flag, "sem_associate");
+}
+
+int medusa_queue_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+	return medusa_ipc_ctl(ipcp, cmd, "msgctl");
+}
+
+int medusa_shm_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+	return medusa_ipc_ctl(ipcp, cmd, "shmctl");
+}
+
+int medusa_sem_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+	return medusa_ipc_ctl(ipcp, cmd, "semctl");
+}
+
 #ifdef CONFIG_SECURITY_NETWORK
 
 /*
@@ -1510,15 +1534,15 @@ static struct security_hook_list medusa_l1_hooks[] = {
 
 	LSM_HOOK_INIT(ipc_permission, medusa_ipc_permission),
 	//LSM_HOOK_INIT(ipc_getsecid, medusa_l1_ipc_getsecid),
-	LSM_HOOK_INIT(msg_queue_associate, medusa_ipc_associate),
-	LSM_HOOK_INIT(msg_queue_msgctl, medusa_ipc_ctl),
+	LSM_HOOK_INIT(msg_queue_associate, medusa_queue_associate),
+	LSM_HOOK_INIT(msg_queue_msgctl, medusa_queue_ctl),
 	LSM_HOOK_INIT(msg_queue_msgsnd, medusa_ipc_msgsnd),
 	LSM_HOOK_INIT(msg_queue_msgrcv, medusa_ipc_msgrcv),
-	LSM_HOOK_INIT(shm_associate, medusa_ipc_associate),
-	LSM_HOOK_INIT(shm_shmctl, medusa_ipc_ctl),
+	LSM_HOOK_INIT(shm_associate, medusa_shm_associate),
+	LSM_HOOK_INIT(shm_shmctl, medusa_shm_ctl),
 	LSM_HOOK_INIT(shm_shmat, medusa_ipc_shmat),
-	LSM_HOOK_INIT(sem_associate, medusa_ipc_associate),
-	LSM_HOOK_INIT(sem_semctl, medusa_ipc_ctl),
+	LSM_HOOK_INIT(sem_associate, medusa_sem_associate),
+	LSM_HOOK_INIT(sem_semctl, medusa_sem_ctl),
 	LSM_HOOK_INIT(sem_semop, medusa_ipc_semop),
 
 	//LSM_HOOK_INIT(netlink_send, medusa_l1_netlink_send),

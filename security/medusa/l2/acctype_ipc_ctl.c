@@ -86,7 +86,7 @@ static void medusa_ipc_ctl_pacb(struct audit_buffer *ab, void *pcad)
  *              |<-- shmctl_shm_info() (@ipcp is NULL, no rcu_read_lock())
  *              |<-- shmctl_ipc_info() (@ipcp is NULL, no rcu_read_lock())
  */
-int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd)
+int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 {
 	int retval;
 	struct common_audit_data cad;
@@ -138,13 +138,15 @@ out:
 	}
 	retval = lsm_retval(ans, err);
 #ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	mad.pacb.ipc.flcm = cmd;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad, medusa_ipc_ctl_pacb);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_IPC;
+		cad.u.ipc_id = ipcp->key;
+		mad.function = operation;
+		mad.med_answer = retval;
+		mad.pacb.ipc.flcm = cmd;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_ipc_ctl_pacb);
+	}
 #endif
 	return retval;
 }

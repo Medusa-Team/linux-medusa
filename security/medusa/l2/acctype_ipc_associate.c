@@ -65,7 +65,7 @@ static void medusa_ipc_associate_pacb(struct audit_buffer *ab, void *pcad)
  *       is always called with ipcp->lock held
  *
  */
-int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
+int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 {
 	int retval;
 	struct common_audit_data cad;
@@ -97,7 +97,7 @@ int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
 		ans = MED_DENY;
 		goto out;
 	} else {
-		mad.vsi = VS_INTERSECT;
+ 		mad.vsi = VS_INTERSECT;
 	}
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_associate_access, ipc_security(ipcp))) {
@@ -120,13 +120,15 @@ out:
 	err = ipc_putref(ipcp, true);
 	retval = lsm_retval(ans, err);
 #ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	mad.pacb.ipc.flcm = flag;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad, medusa_ipc_associate_pacb);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_IPC;
+		cad.u.ipc_id = ipcp->key;
+		mad.function = operation;
+		mad.med_answer = retval;
+		mad.pacb.ipc.flcm = flag;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_ipc_associate_pacb);
+	}
 #endif
 	return retval;
 }

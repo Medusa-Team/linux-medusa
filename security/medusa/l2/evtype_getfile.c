@@ -131,7 +131,7 @@ void inline info_mnt(struct mount *mnt)
 	pr_cont("mountpoint: %pd, vfs mnt root: %pd\n", mnt->mnt_mountpoint, mnt->mnt.mnt_root);
 }
 
-void medusa_get_upper_and_parent(struct path *ndsource,
+void medusa_get_upper_and_parent(const struct path *ndsource,
 		struct path *ndupperp, struct path *ndparentp)
 {
 	/* med_pr_info("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry); */
@@ -310,7 +310,7 @@ int file_kobj_validate_dentry_dir(const struct vfsmount* mnt, struct dentry *den
 		 */
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
 					inode_security(ndparent.dentry->d_inode))) {
-			med_pr_info("validate_dentry_dir %pd4 inheriting from %pd4\n", ndcurrent.dentry, ndparent.dentry);
+			/* med_pr_info("validate_dentry_dir %pd4 inheriting from %pd4\n", ndcurrent.dentry, ndparent.dentry); */
 			ndcurrent_inode = inode_security(ndcurrent.dentry->d_inode);
 			ndparent_inode = inode_security(ndparent.dentry->d_inode);
 			ndcurrent_inode->med_object = ndparent_inode->med_object;
@@ -395,7 +395,7 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 		 */
 		if (!MEDUSA_MONITORED_ACCESS_O(getfile_event,
 					inode_security(ndparent.dentry->d_inode))) {
-			med_pr_info("validate_dentry %pd4 inheriting from %pd4\n", ndcurrent.dentry, ndparent.dentry);
+			/* med_pr_info("validate_dentry %pd4 inheriting from %pd4\n", ndcurrent.dentry, ndparent.dentry); */
 			ndcurrent_inode = inode_security(ndcurrent.dentry->d_inode);
 			ndparent_inode = inode_security(ndparent.dentry->d_inode);
 			ndcurrent_inode->med_object = ndparent_inode->med_object;
@@ -428,9 +428,9 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 	struct file_kobject file;
 	struct file_kobject directory;
 	enum medusa_answer_t retval;
-	med_pr_info("do_validate_dentry: current=%pd4 parent=%pd4\n", ndcurrent->dentry, ndparent->dentry);
+	/* med_pr_info("do_validate_dentry: current=%pd4 parent=%pd4\n", ndcurrent->dentry, ndparent->dentry); */
 	/* med_pr_info("nducurrent: %pd4", ndcurrent->dentry); */
-	med_pr_info("ndparent: %pd4\n", ndparent->dentry);
+	/* med_pr_info("ndparent: %pd4\n", ndparent->dentry); */
 	file_kern2kobj(&file, ndcurrent->dentry->d_inode);
 	file_kobj_dentry2string_dir(ndparent, ndupper->dentry, event.filename);
 	file_kern2kobj(&directory, ndparent->dentry->d_inode);

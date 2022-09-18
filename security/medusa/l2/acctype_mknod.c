@@ -35,11 +35,14 @@ static void medusa_mknod_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.mknod.mode)
-		audit_log_format(ab," mode=%d", mad->pacb.mknod.mode);
-	if (mad->pacb.mknod.dev)
-		audit_log_format(ab," dev=%02x:%02x", MAJOR(mad->pacb.mknod.dev),
-				MINOR(mad->pacb.mknod.dev));
+	audit_log_d_path(ab, " dir=", mad->path);
+	audit_log_format(ab, " name=");
+	spin_lock(&mad->dentry->d_lock);
+	audit_log_untrustedstring(ab, mad->dentry->d_name.name);
+	spin_unlock(&mad->dentry->d_lock);
+	audit_log_format(ab, " mode=%d", mad->pacb.mknod.mode);
+	audit_log_format(ab, " dev=%02x:%02x", MAJOR(mad->pacb.mknod.dev),
+			MINOR(mad->pacb.mknod.dev));
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
@@ -70,8 +73,10 @@ enum medusa_answer_t medusa_mknod(const struct path *dir, struct dentry *dentry,
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
-		return MED_ALLOW;
+		process_kobj_validate_task(current) <= 0) {
+		retval = MED_ALLOW;
+		goto audit;
+	}
 
 	ndcurrent = *dir;
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
@@ -79,7 +84,8 @@ enum medusa_answer_t medusa_mknod(const struct path *dir, struct dentry *dentry,
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
 		file_kobj_validate_dentry(ndupper.dentry, ndupper.mnt, NULL) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
-		return MED_ALLOW;
+		retval = MED_ALLOW;
+		goto audit;
 	}
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndupper.dentry->d_inode))) ||
 		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndupper.dentry->d_inode)))
@@ -103,17 +109,21 @@ enum medusa_answer_t medusa_mknod(const struct path *dir, struct dentry *dentry,
 	medusa_put_upper_and_parent(&ndupper, NULL);
 audit:
 #ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_DENTRY;
-	cad.u.dentry = dentry;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	/* if hook is changed from inode to path this needs to be changed by calling
-	 * new_decode_dev(dev)
-	 */
-	mad.pacb.mknod.dev = dev;
-	mad.pacb.mknod.mode = mode;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad, medusa_mknod_pacb);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.u.tsk = current;
+		mad.function = "mknod";
+		mad.med_answer = retval;
+		mad.path = dir;
+		mad.dentry = dentry;
+		/* if hook is changed from inode to path this needs to be changed by calling
+		 * new_decode_dev(dev)
+		 */
+		mad.pacb.mknod.dev = dev;
+		mad.pacb.mknod.mode = mode;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_mknod_pacb);
+	}
 #endif
 	return retval;
 }

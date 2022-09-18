@@ -34,6 +34,8 @@ struct process_kobject {
 	/* bitmap of syscalls, which are reported; only on x86 arch */
 	unsigned char med_syscall[NR_syscalls / (sizeof(unsigned char) * 8)];
 #endif
+	int audit;	/* 0 - not audited, 1 - audited. More possible
+				 * values are expected in the future. */
 };
 extern MED_DECLARE_KCLASSOF(process_kobject);
 

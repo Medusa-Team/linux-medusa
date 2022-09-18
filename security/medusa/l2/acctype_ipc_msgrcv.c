@@ -139,17 +139,19 @@ out:
 	err = ipc_putref(ipcp, true);
 	retval = lsm_retval(ans, err);
 #ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	mad.pacb.ipc_msg.m_type = msg->m_type;
-	mad.pacb.ipc_msg.m_ts = msg->m_ts;
-	mad.pacb.ipc_msg.flag = mode;
-	mad.pacb.ipc_msg.type = type;
-	mad.pacb.ipc_msg.target = target->pid;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad, medusa_ipc_msgrcv_pacb);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_IPC;
+		cad.u.ipc_id = ipcp->key;
+		mad.function = "msgrcv";
+		mad.med_answer = retval;
+		mad.pacb.ipc_msg.m_type = msg->m_type;
+		mad.pacb.ipc_msg.m_ts = msg->m_ts;
+		mad.pacb.ipc_msg.flag = mode;
+		mad.pacb.ipc_msg.type = type;
+		mad.pacb.ipc_msg.target = target->pid;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_ipc_msgrcv_pacb);
+	}
 #endif
 	return retval;
 }

@@ -92,6 +92,7 @@ int process_kobj_validate_task(struct task_struct *ts)
 				       task_security(ts_parent))) {
 		task_security(ts)->med_subject = task_security(ts_parent)->med_subject;
 		task_security(ts)->med_object = task_security(ts_parent)->med_object;
+		task_security(ts)->audit = task_security(ts_parent)->audit;
 #if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
 		memcpy(task_security(ts)->med_syscall,
 		       task_security(ts_parent)->med_syscall,

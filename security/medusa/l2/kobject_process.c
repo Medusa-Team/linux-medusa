@@ -140,6 +140,8 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 #endif
 	rcu_read_unlock();
 
+	ts_security->audit = tk->audit;
+
 	/* If no change of credentials is requested, return */
 	if (!change_cred)
 		goto out;
@@ -240,6 +242,8 @@ inline int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
 
 	memset(tk, '\0', sizeof(struct process_kobject));
 
+	tk->audit = ts_security->audit;
+
 	rcu_read_lock();
 
 	/* Copy information from task_struct itself */
@@ -328,7 +332,7 @@ MED_ATTRS(process_kobject) {
 #if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
 	MED_ATTR(process_kobject, med_syscall, "syscall", MED_BYTES),
 #endif
-
+	MED_ATTR(process_kobject, audit, "audit", MED_SIGNED),
 	MED_ATTR_END
 };
 

@@ -171,13 +171,15 @@ out:
 	err = ipc_putref(ipcp, use_locking);
 	retval = lsm_retval(ans, err);
 #ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_IPC;
-	cad.u.ipc_id = ipcp->key;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	mad.pacb.ipc_perm.perms = flag;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad, medusa_ipc_perm_pacb);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_IPC;
+		cad.u.ipc_id = ipcp->key;
+		mad.function = "ipc_permission";
+		mad.med_answer = retval;
+		mad.pacb.ipc_perm.perms = flag;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_ipc_perm_pacb);
+	}
 #endif
 	return retval;
 }

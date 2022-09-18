@@ -82,3 +82,24 @@ void medusa_audit_log_callback(struct common_audit_data *cad,
 {
 	common_lsm_audit(cad, medusa_pre, medusa_post);
 }
+
+void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	medusa_path_cb(ab, pcad);
+	audit_log_format(ab, " name=");
+	spin_lock(&mad->dentry->d_lock);
+	audit_log_untrustedstring(ab, mad->dentry->d_name.name);
+	spin_unlock(&mad->dentry->d_lock);
+}
+
+void medusa_path_cb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	audit_log_d_path(ab, " dir=", mad->path);
+	audit_log_format(ab, " mode=%d", mad->pacb.mode);
+}

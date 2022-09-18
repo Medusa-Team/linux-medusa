@@ -26,17 +26,6 @@ int __init rmdir_acctype_init(void)
 	return 0;
 }
 
-static void medusa_rmdir_pacb(struct audit_buffer *ab, void *pcad)
-{
-	struct common_audit_data *cad = pcad;
-	struct medusa_audit_data *mad = cad->medusa_audit_data;
-
-	if (mad->pacb.name) {
-		audit_log_format(ab," name=");
-		audit_log_untrustedstring(ab, mad->pacb.name);
-	}
-}
-
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
 static enum medusa_answer_t medusa_do_rmdir(const struct path *dir, struct dentry *dentry)
 {
@@ -75,24 +64,25 @@ enum medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 		mad.vs.sw.vsw = VSW(task_security(current));
 		retval = MED_DENY;
 		goto audit;
-	} else {
+	} else
 		mad.vsi = VS_INTERSECT;
-	}
 	if (MEDUSA_MONITORED_ACCESS_O(rmdir_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_rmdir(dir, dentry);
 		mad.event = EVENT_MONITORED;
-	} else {
+	} else
 		mad.event = EVENT_MONITORED_N;
-	}
 audit:
 #ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_PATH;
-	cad.u.path = *dir;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	mad.pacb.name = dentry->d_name.name;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad, medusa_rmdir_pacb);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.u.tsk = current;
+		mad.function = "rmdir";
+		mad.med_answer = retval;
+		mad.path = dir;
+		mad.dentry = dentry;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_simple_file_cb);
+	}
 #endif
 	return retval;
 }

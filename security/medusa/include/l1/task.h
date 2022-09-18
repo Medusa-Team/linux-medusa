@@ -61,6 +61,7 @@ struct medusa_l1_task_s {
 #endif
 	struct mutex validation_in_progress;
 	int validation_depth_nesting;
+	int audit;
 };
 
 #endif

@@ -29,6 +29,11 @@ struct medusa_audit_data {
 	enum medusa_answer_t med_answer;//medusa answer
 	char event;//access type event flags information
 	char vsi;//virtual spaces intersection flags
+
+	// Path information for file operations
+	const struct path *path;
+	struct dentry *dentry;
+
 	/* union of virtual spaces used in access
 	 * @sw: vs of target, see and write
 	 * @srw: vs of target, see, read and write
@@ -44,14 +49,23 @@ struct medusa_audit_data {
 	union {
 		const char *name;
 		int mode;
+		struct dentry *dentry2;
 		struct {
-			const char *name;//file name in avcs
-			const char *rname;//requested file name
-		} mv;
+			struct path *path;
+			struct dentry *dentry;
+		} rename;
 		struct {
 			dev_t dev;
 			int mode;
 		} mknod;
+		struct {
+			kuid_t uid;
+			kgid_t gid;
+		} chown;
+		struct {
+			unsigned int cmd;
+			unsigned long arg;
+		} fcntl;
 		struct {
 			unsigned int ipc_class;
 			u32 perms;
@@ -86,3 +100,5 @@ struct medusa_audit_data {
 
 void medusa_audit_log_callback(struct common_audit_data *cad,
 		void (*medusa_post) (struct audit_buffer *, void *));
+void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad);
+void medusa_path_cb(struct audit_buffer *ab, void *pcad);

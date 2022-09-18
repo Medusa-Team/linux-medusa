@@ -34,10 +34,15 @@ static void medusa_link_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.name) {
-		audit_log_format(ab," rname=");
-		audit_log_untrustedstring(ab, mad->pacb.name);
-	}
+	audit_log_format(ab, " old_name=");
+	spin_lock(&mad->dentry->d_lock);
+	audit_log_untrustedstring(ab, mad->dentry->d_name.name);
+	spin_unlock(&mad->dentry->d_lock);
+	audit_log_d_path(ab, " dir=", mad->path);
+	audit_log_format(ab, " name=");
+	spin_lock(&mad->pacb.dentry2->d_lock);
+	audit_log_untrustedstring(ab, mad->pacb.dentry2->d_name.name);
+	spin_unlock(&mad->pacb.dentry2->d_lock);
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
@@ -74,19 +79,22 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	int err;
 
 	err = allow_fuck(old_dentry, new_dir, new_dentry);
-	if (err < 0)
-		return MED_ERR;
-	else if (err == 0)
-		return MED_DENY;
+	if (err < 0) {
+		retval = MED_ERR;
+		goto audit;
+	} else if (err == 0) {
+		retval = MED_DENY;
+		goto audit;
+	}
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 		process_kobj_validate_task(current) <= 0)
-		return MED_ALLOW;
+		goto audit;
 
 	if (!is_med_magic_valid(&(inode_security(old_dentry->d_inode)->med_object)) &&
 		// new_dir->mnt and old_dentry because it is a hardlink, mnt will be the same
 		file_kobj_validate_dentry_dir(new_dir->mnt, old_dentry) <= 0) {
-		return MED_ALLOW;
+		goto audit;
 	}
 
 	ndcurrent = *new_dir;
@@ -95,7 +103,7 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
 		file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
-		return MED_ALLOW;
+		goto audit;
 	}
 	// TODO: Add VSR check for old_dentry? Rationale: UGO checks RW on target.
 	// TODO: We check parecnt directory here. That could be delegated to
@@ -124,15 +132,19 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	}
 	medusa_put_upper_and_parent(&ndupper, NULL);
 audit:
-	#ifdef CONFIG_AUDIT
-	cad.type = LSM_AUDIT_DATA_DENTRY;
-	cad.u.dentry = old_dentry;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	mad.pacb.name = new_dentry->d_name.name;
-	cad.medusa_audit_data = &mad;
-	medusa_audit_log_callback(&cad, medusa_link_pacb);
-	#endif
+#ifdef CONFIG_AUDIT
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.u.tsk = current;
+		mad.function = "link";
+		mad.med_answer = retval;
+		mad.path = new_dir;
+		mad.dentry = old_dentry;
+		mad.pacb.dentry2 = new_dentry;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_link_pacb);
+	}
+#endif
 	return retval;
 }
 
