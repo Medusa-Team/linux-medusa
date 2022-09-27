@@ -566,7 +566,10 @@ static int medusa_l1_file_open(struct file *file)
  */
 int medusa_l1_task_init(struct task_struct *task, unsigned long clone_flags)
 {
+	struct medusa_l1_task_s *old = task_security(current);
 	struct medusa_l1_task_s *med = task_security(task);
+
+	med->audit = old->audit;
 
 	init_med_object(&(med->med_object));
 	init_med_subject(&(med->med_subject));
