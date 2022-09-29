@@ -73,8 +73,8 @@ int process_kobj_validate_task(struct task_struct *ts)
 	task_security(current)->validation_depth_nesting++;
 	if (!is_med_magic_valid(&(task_security(ts_parent)->med_object)) &&
 		(err = process_kobj_validate_task(ts_parent)) <= 0) {
-		put_task_struct(ts_parent);
 		mutex_unlock(&(task_security(ts_parent)->validation_in_progress));
+		put_task_struct(ts_parent);
 		task_security(current)->validation_depth_nesting--;
 		return err;
 	}
