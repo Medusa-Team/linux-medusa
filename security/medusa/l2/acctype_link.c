@@ -34,10 +34,9 @@ static void medusa_link_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	audit_log_format(ab, " old_name=");
-	spin_lock(&mad->dentry->d_lock);
-	audit_log_untrustedstring(ab, mad->dentry->d_name.name);
-	spin_unlock(&mad->dentry->d_lock);
+	struct path old_path = { .mnt = mad->path->mnt, .dentry = mad->dentry };
+
+	audit_log_d_path(ab, " old_dir=", &old_path);
 	audit_log_d_path(ab, " dir=", mad->path);
 	audit_log_format(ab, " name=");
 	spin_lock(&mad->pacb.dentry2->d_lock);

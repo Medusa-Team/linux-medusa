@@ -89,6 +89,7 @@ audit:
 		mad.function = "open";
 		mad.med_answer = retval;
 		mad.path = &file->f_path;
+		mad.pacb.mode = acc_mode;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_path_cb);
 	}
