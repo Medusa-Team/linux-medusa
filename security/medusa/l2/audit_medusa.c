@@ -83,6 +83,13 @@ void medusa_audit_log_callback(struct common_audit_data *cad,
 	common_lsm_audit(cad, medusa_pre, medusa_post);
 }
 
+/*
+ * medusa_simple_file_cb - print out path of a parent directory and a dentry
+ * @cad: common audit data to record
+ * @pcad: pointer to a struct common_audit_data
+ *
+ * pcad->medusa_audit_data should contain path and dentry
+ */
 void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad)
 {
 	struct common_audit_data *cad = pcad;
