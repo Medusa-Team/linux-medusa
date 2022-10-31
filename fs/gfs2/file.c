@@ -780,7 +780,7 @@ static inline bool should_fault_in_pages(struct iov_iter *i,
 
 	if (!count)
 		return false;
-	if (!iter_is_iovec(i))
+	if (!user_backed_iter(i))
 		return false;
 
 	size = PAGE_SIZE;
@@ -835,11 +835,12 @@ retry:
 	pagefault_disable();
 	to->nofault = true;
 	ret = iomap_dio_rw(iocb, to, &gfs2_iomap_ops, NULL,
-			   IOMAP_DIO_PARTIAL, read);
+			   IOMAP_DIO_PARTIAL, NULL, read);
 	to->nofault = false;
 	pagefault_enable();
 	if (ret <= 0 && ret != -EFAULT)
 		goto out_unlock;
+	/* No increment (+=) because iomap_dio_rw returns a cumulative value. */
 	if (ret > 0)
 		read = ret;
 
@@ -854,6 +855,7 @@ out_unlock:
 		gfs2_glock_dq(gh);
 out_uninit:
 	gfs2_holder_uninit(gh);
+	/* User space doesn't expect partial success. */
 	if (ret < 0)
 		return ret;
 	return read;
@@ -898,7 +900,7 @@ retry:
 
 	from->nofault = true;
 	ret = iomap_dio_rw(iocb, from, &gfs2_iomap_ops, NULL,
-			   IOMAP_DIO_PARTIAL, written);
+			   IOMAP_DIO_PARTIAL, NULL, written);
 	from->nofault = false;
 	if (ret <= 0) {
 		if (ret == -ENOTBLK)
@@ -906,6 +908,7 @@ retry:
 		if (ret != -EFAULT)
 			goto out_unlock;
 	}
+	/* No increment (+=) because iomap_dio_rw returns a cumulative value. */
 	if (ret > 0)
 		written = ret;
 
@@ -920,6 +923,7 @@ out_unlock:
 		gfs2_glock_dq(gh);
 out_uninit:
 	gfs2_holder_uninit(gh);
+	/* User space doesn't expect partial success. */
 	if (ret < 0)
 		return ret;
 	return written;
@@ -1062,8 +1066,7 @@ out_unlock:
 		gfs2_glock_dq(gh);
 out_uninit:
 	gfs2_holder_uninit(gh);
-	if (statfs_gh)
-		kfree(statfs_gh);
+	kfree(statfs_gh);
 	from->count = orig_count - written;
 	return written ? written : ret;
 }

@@ -268,10 +268,15 @@ static void tun_napi_init(struct tun_struct *tun, struct tun_file *tfile,
 	tfile->napi_enabled = napi_en;
 	tfile->napi_frags_enabled = napi_en && napi_frags;
 	if (napi_en) {
-		netif_tx_napi_add(tun->dev, &tfile->napi, tun_napi_poll,
-				  NAPI_POLL_WEIGHT);
+		netif_napi_add_tx(tun->dev, &tfile->napi, tun_napi_poll);
 		napi_enable(&tfile->napi);
 	}
+}
+
+static void tun_napi_enable(struct tun_file *tfile)
+{
+	if (tfile->napi_enabled)
+		napi_enable(&tfile->napi);
 }
 
 static void tun_napi_disable(struct tun_file *tfile)
@@ -635,7 +640,8 @@ static void __tun_detach(struct tun_file *tfile, bool clean)
 	tun = rtnl_dereference(tfile->tun);
 
 	if (tun && clean) {
-		tun_napi_disable(tfile);
+		if (!tfile->detached)
+			tun_napi_disable(tfile);
 		tun_napi_del(tfile);
 	}
 
@@ -654,8 +660,10 @@ static void __tun_detach(struct tun_file *tfile, bool clean)
 		if (clean) {
 			RCU_INIT_POINTER(tfile->tun, NULL);
 			sock_put(&tfile->sk);
-		} else
+		} else {
 			tun_disable_queue(tun, tfile);
+			tun_napi_disable(tfile);
+		}
 
 		synchronize_net();
 		tun_flow_delete_by_queue(tun, tun->numqueues + 1);
@@ -728,6 +736,7 @@ static void tun_detach_all(struct net_device *dev)
 		sock_put(&tfile->sk);
 	}
 	list_for_each_entry_safe(tfile, tmp, &tun->disabled, next) {
+		tun_napi_del(tfile);
 		tun_enable_queue(tfile);
 		tun_queue_purge(tfile);
 		xdp_rxq_info_unreg(&tfile->xdp_rxq);
@@ -808,6 +817,7 @@ static int tun_attach(struct tun_struct *tun, struct file *file,
 
 	if (tfile->detached) {
 		tun_enable_queue(tfile);
+		tun_napi_enable(tfile);
 	} else {
 		sock_hold(&tfile->sk);
 		tun_napi_init(tun, tfile, napi, napi_frags);
@@ -2818,7 +2828,10 @@ static int tun_set_iff(struct net *net, struct file *file, struct ifreq *ifr)
 		rcu_assign_pointer(tfile->tun, tun);
 	}
 
-	netif_carrier_on(tun->dev);
+	if (ifr->ifr_flags & IFF_NO_CARRIER)
+		netif_carrier_off(tun->dev);
+	else
+		netif_carrier_on(tun->dev);
 
 	/* Make sure persistent devices do not get stuck in
 	 * xoff state.
@@ -3046,8 +3059,8 @@ static long __tun_chr_ioctl(struct file *file, unsigned int cmd,
 		 * This is needed because we never checked for invalid flags on
 		 * TUNSETIFF.
 		 */
-		return put_user(IFF_TUN | IFF_TAP | TUN_FEATURES,
-				(unsigned int __user*)argp);
+		return put_user(IFF_TUN | IFF_TAP | IFF_NO_CARRIER |
+				TUN_FEATURES, (unsigned int __user*)argp);
 	} else if (cmd == TUNSETQUEUE) {
 		return tun_set_queue(file, &ifr);
 	} else if (cmd == SIOCGSKNS) {
