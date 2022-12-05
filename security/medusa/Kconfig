@@ -51,4 +51,28 @@ config SECURITY_MEDUSA_MONITOR_KTHREADS
 	  If set, kernel threads are monitored by Medusa LSM.
 	  By default, this functionality is turned off.
 
+config SECURITY_MEDUSA_HOOKS_TASK_KILL
+	bool "Enable LSM hook task_kill"
+	depends on SECURITY_MEDUSA
+	default y
+	help
+	  If set, enables task_kill LSM security hook.
+
+config SECURITY_MEDUSA_KILL_RESCHEDULING
+	bool "Enable rescheduling in task_kill LSM hook"
+	depends on SECURITY_MEDUSA
+	depends on SECURITY_MEDUSA && SECURITY_MEDUSA_HOOKS_TASK_KILL
+	imply PREEMPT_CPU
+	imply LOCKDEP
+	default n
+	help
+	  If set, turns on PREEMPT_CPU and LOCKDEP to enable rescheduling in
+	  the task_kill LSM hook. Rescheduling is possible only in specific
+	  cases of signal sending (e.g. when sending a signal to a single
+	  process, not a group) and serves only for security context
+	  initialization of the sender/receiver. So this feature is suitable
+	  for debugging purposes only.
+
+	  If unsure, say N.
+
 endif # if SECURITY_MEDUSA

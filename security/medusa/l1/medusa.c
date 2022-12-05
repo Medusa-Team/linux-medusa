@@ -4,6 +4,7 @@
 
 #include <linux/binfmts.h>
 #include <linux/module.h>
+#include <linux/sched/task.h>
 
 #include "l4/comm.h"
 #include "l3/registry.h"
@@ -580,6 +581,10 @@ int medusa_l1_task_init(struct task_struct *task, unsigned long clone_flags)
 	if ((task->flags & PF_KTHREAD) || !task->mm)
 		med_magic_not_monitored(&med->med_object);
 #endif
+#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
+	med->self = NULL;
+	refcount_set(&med->rcu_cb_set, 0);
+#endif /* CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILLCONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL */
 
 	return 0;
 }
@@ -698,11 +703,16 @@ void medusa_l1_task_free(struct task_struct *task)
  * }
  */
 
-static int medusa_l1_task_kill(struct task_struct *p, struct siginfo *info,
-			       int sig, u32 secid)
+#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
+static int medusa_l1_task_kill(struct task_struct *p, struct kernel_siginfo *info,
+			       int sig, const struct cred *cred)
 {
+	if (medusa_sendsig(p, info, sig, cred) == MED_DENY)
+		return -EACCES;
+
 	return 0;
 }
+#endif /* CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL */
 
 /*
  * static void medusa_l1_task_to_inode(struct task_struct *p, struct inode *inode)
@@ -1505,7 +1515,9 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(task_setscheduler, medusa_l1_task_setscheduler),
 	//LSM_HOOK_INIT(task_getscheduler, medusa_l1_task_getscheduler),
 	//LSM_HOOK_INIT(task_movememory, medusa_l1_task_movememory),
-	//LSM_HOOK_INIT(task_kill, medusa_l1_task_kill),
+#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
+	LSM_HOOK_INIT(task_kill, medusa_l1_task_kill),
+#endif /* CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL */
 	//LSM_HOOK_INIT(task_prctl, medusa_l1_task_prctl),
 	//LSM_HOOK_INIT(task_to_inode, medusa_l1_task_to_inode),
 

@@ -22,7 +22,7 @@ extern enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 extern enum medusa_answer_t medusa_capable(int cap);
 extern enum medusa_answer_t medusa_fork(unsigned long clone_flags);
 extern enum medusa_answer_t medusa_init_process(struct task_struct *new);
-extern enum medusa_answer_t medusa_sendsig(int sig, struct kernel_siginfo *info, struct task_struct *p);
+extern enum medusa_answer_t medusa_sendsig(struct task_struct *p, struct kernel_siginfo *info, int sig, const struct cred *cred);
 extern enum medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp);
 extern int medusa_monitored_pexec(void);
 extern void medusa_monitor_pexec(int flag);
@@ -59,6 +59,11 @@ struct medusa_l1_task_s {
 	/* bitmap of syscalls, which are reported */
 	unsigned char med_syscall[NR_syscalls / (sizeof(unsigned char) * 8)];
 #endif
+#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
+	struct rcu_head rcu;	/* rcu head for delayed_put_task_struct() cb registration */
+	struct task_struct *self; /* ptr to task struct related to this task security blob */
+	refcount_t rcu_cb_set; /* 1 if rcu delayed_put_task_struct() cb is set */
+#endif /* CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL */
 	struct mutex validation_in_progress;
 	int validation_depth_nesting;
 };
