@@ -29,11 +29,14 @@ enum medusa_answer_t medusa_sendsig(struct task_struct *p, struct kernel_siginfo
 	if (!in_task())
 		return MED_ALLOW;
 
-	/* always allow signals coming from kernel */
+	/* always allow signals coming from the kernel */
 	if ((info == SEND_SIG_PRIV) || (info && SI_FROMKERNEL(info)))
 		return MED_ALLOW;
 
-	/* TODO: USB IO */
+	/* USB IO: TODO list:
+	 * 1) use security blob in the cred struct
+	 * 2) move security context from task struct into cred struct
+	 */
 	if (cred)
 		return MED_ALLOW;
 
@@ -104,12 +107,18 @@ enum medusa_answer_t medusa_sendsig(struct task_struct *p, struct kernel_siginfo
 
 	/* existence test */
 	if (!sig) {
+		/* check ability of the sender see existence of the receiver */
 		if (!vs_intersects(VSS(task_security(current)), VS(task_security(p))))
 			return MED_DENY;
+
+		/* Our existence test doesn't check the permissions inevitable
+		 * for success of intended data flow between the receiver and
+		 * the sender (i.e. delivery of the signal).
+		 */
 		return MED_ALLOW;
 	}
 
-	/* write/send test */
+	/* check ability of the sender send an information to the receiver */
 	if (!vs_intersects(VSW(task_security(current)), VS(task_security(p))))
 		return MED_DENY;
 
