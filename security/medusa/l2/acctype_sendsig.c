@@ -113,5 +113,9 @@ enum medusa_answer_t medusa_sendsig(struct task_struct *p, struct kernel_siginfo
 	if (!vs_intersects(VSW(task_security(current)), VS(task_security(p))))
 		return MED_DENY;
 
+	/* check ability of the receiver obtain an information from the sender */
+	if (!vs_intersects(VSR(task_security(p)), VS(task_security(current))))
+		return MED_DENY;
+
 	return MED_ALLOW;
 }
