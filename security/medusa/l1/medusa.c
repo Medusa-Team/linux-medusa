@@ -15,6 +15,9 @@
 #include "l1/fuck.h"
 #include "../../../../fs/mount.h" /* real_mount(), struct mount */
 
+/* Used by `medusa_l1_creds_for_exec` */
+int init_loaded;
+
 int medusa_l1_inode_alloc_security(struct inode *inode);
 
 /*
@@ -31,8 +34,29 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  * }
  */
 
+static void medusa_l1_initialize_init(const char *filename)
+{
+	struct medusa_l1_task_s *med = task_security(current);
+
+	if (strcmp(filename, "/sbin/init")) {
+		med_pr_warn("Exec of non-init process happened without init running!\n");
+		return;
+	}
+
+	init_med_object(&(med->med_object));
+	init_med_subject(&(med->med_subject));
+
+	init_loaded = 1;
+}
+
+
 static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
 {
+	/* If this is the init process, initialize it, so it is monitored. */
+	if (!init_loaded) {
+		medusa_l1_initialize_init(bprm->filename);
+		return 0;
+	}
 	if (medusa_exec(bprm) == MED_DENY)
 		return -EACCES;
 	return 0;
@@ -570,11 +594,10 @@ int medusa_l1_task_init(struct task_struct *task, unsigned long clone_flags)
 	struct medusa_l1_task_s *old = task_security(current);
 	struct medusa_l1_task_s *med = task_security(task);
 
-	med->audit = old->audit;
+	*med = *old;
 
-	init_med_object(&(med->med_object));
-	init_med_subject(&(med->med_subject));
-
+	/* TODO: I have a feeling that this doesn't have to be here.
+	   Somebody check it please. */
 	mutex_init(&(med->validation_in_progress));
 	med->validation_depth_nesting = 1;
 
@@ -1708,7 +1731,13 @@ struct security_hook_list medusa_l1_hooks_alloc[] = {
 static int __init medusa_l1_init(void)
 {
 	/* set the security info for the task pid 0 on boot cpu */
-	medusa_l1_task_init(current, 0);
+	struct medusa_l1_task_s *med = task_security(current);
+
+	init_med_object(&(med->med_object));
+	init_med_subject(&(med->med_subject));
+
+	mutex_init(&(med->validation_in_progress));
+	med->validation_depth_nesting = 1;
 
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");

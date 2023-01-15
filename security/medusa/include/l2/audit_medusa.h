@@ -51,7 +51,7 @@ struct medusa_audit_data {
 		int mode;
 		struct dentry *dentry2;
 		struct {
-			struct path *path;
+			const struct path *path;
 			struct dentry *dentry;
 		} rename;
 		struct {
@@ -95,6 +95,10 @@ struct medusa_audit_data {
 			unsigned int ipc_class;
 			int flcm;//flag or cmd
 		} ipc;
+		struct {
+			struct path *path;
+			const char *filename;
+		} exec;
 	} pacb;
 };
 
