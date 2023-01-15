@@ -72,6 +72,7 @@ enum medusa_answer_t medusa_open(struct file *file)
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		retval = MED_DENY;
+		goto audit;
 	} else
 		mad.vsi = VS_INTERSECT;
 	if (MEDUSA_MONITORED_ACCESS_O(open_access, inode_security(inode))) {
