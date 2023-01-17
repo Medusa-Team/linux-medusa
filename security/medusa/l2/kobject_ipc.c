@@ -97,14 +97,16 @@ static inline struct ipc_ids *medusa_get_ipc_ids(unsigned int ipc_class)
  *
  * Return: 0 (success)
  */
-inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp, bool dec_refcount)
+inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj,
+			 struct kern_ipc_perm *ipcp,
+			 bool dec_refcount)
 {
 	memset(ipc_kobj, '\0', sizeof(struct ipc_kobject));
 
 	rcu_read_lock();
 	ipc_kobj->ipc_class = ipc_security(ipcp)->ipc_class;
-	COPY_WRITE_IPC_VARS(&(ipc_kobj->ipc_perm), ipcp);
-	COPY_READ_IPC_VARS(&(ipc_kobj->ipc_perm), ipcp);
+	COPY_WRITE_IPC_VARS(&ipc_kobj->ipc_perm, ipcp);
+	COPY_READ_IPC_VARS(&ipc_kobj->ipc_perm, ipcp);
 	ipc_kobj->med_object = ipc_security(ipcp)->med_object;
 	rcu_read_unlock();
 
@@ -146,7 +148,7 @@ inline int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipc
  */
 static inline int ipc_kobj2kern(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp)
 {
-	COPY_WRITE_IPC_VARS(ipcp, &(ipc_kobj->ipc_perm));
+	COPY_WRITE_IPC_VARS(ipcp, &ipc_kobj->ipc_perm);
 	ipc_security(ipcp)->med_object = ipc_kobj->med_object;
 	med_magic_validate(&(ipc_security(ipcp))->med_object);
 
@@ -205,7 +207,7 @@ out_err:
  * ipc_update - update kernel-side data related to related IPC object @kobj
  * @kobj - pointer to ipc_kobject which one holds identification of therelated
  *	IPC object
- * Return: MED_ALLOW if successfull, MED_ERR otherwise
+ * Return: MED_ALLOW if successful, MED_ERR otherwise
  */
 static enum medusa_answer_t ipc_update(struct medusa_kobject_s *kobj)
 {

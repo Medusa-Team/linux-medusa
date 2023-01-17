@@ -49,17 +49,17 @@ static void medusa_ipc_msgrcv_pacb(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	if (mad->pacb.ipc_msg.flag)
-		audit_log_format(ab," flag=%d", mad->pacb.ipc_msg.flag);
+		audit_log_format(ab, " flag=%d", mad->pacb.ipc_msg.flag);
 	if (mad->pacb.ipc_msg.m_type)
-		audit_log_format(ab," m_type=%ld", mad->pacb.ipc_msg.m_type);
+		audit_log_format(ab, " m_type=%ld", mad->pacb.ipc_msg.m_type);
 	if (mad->pacb.ipc_msg.m_ts)
-		audit_log_format(ab," m_ts=%lu", mad->pacb.ipc_msg.m_ts);
+		audit_log_format(ab, " m_ts=%lu", mad->pacb.ipc_msg.m_ts);
 	if (mad->pacb.ipc_msg.type)
-		audit_log_format(ab," rm_type=%ld", mad->pacb.ipc_msg.type);
+		audit_log_format(ab, " rm_type=%ld", mad->pacb.ipc_msg.type);
 	if (mad->pacb.ipc_msg.target)
-		audit_log_format(ab," opid=%d", mad->pacb.ipc_msg.target);
+		audit_log_format(ab, " opid=%d", mad->pacb.ipc_msg.target);
 	if (mad->pacb.ipc_msg.ipc_class)
-		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_msg.ipc_class);
+		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc_msg.ipc_class);
 }
 
 /*
@@ -94,12 +94,15 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 {
 	int retval;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_MONITORED_N, .pacb.ipc_msg.ipc_class = MED_IPC_UNDEFINED };
+	struct medusa_audit_data mad = {
+		.event = EVENT_MONITORED_N,
+		.pacb.ipc_msg.ipc_class = MED_IPC_UNDEFINED
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_msgrcv_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
-	int err = 0;
+	int err = ipc_getref(ipcp, true);
 
 	/* Access to the @msg should be done with locked IPC object @ipcp due to
 	 * race with freeque(), so fill related access structure fields before
@@ -109,15 +112,15 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 	access.m_ts = msg->m_ts;
 
 	/* second argument true: returns with unlocked IPC object */
-	if (unlikely((err = ipc_getref(ipcp, true)) != 0))
+	if (unlikely(err))
 		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
 		return err;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object))
-	    && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
-	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+	    ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_msgrcv_access, ipc_security(ipcp))) {

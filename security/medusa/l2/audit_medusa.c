@@ -1,15 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #include "l2/audit_medusa.h"
 
 /* array for auditing med_answer,
  * if answers will be modified, think about that too
  */
-static const char *audit_answer[] = {
+static char *audit_answer[] = {
 	"ERROR",
 	"FORCE_ALLOW",
 	"DENY",
 	"FAKE_ALLOW",
 	"ALLOW"
 };
+
 /*
  * medusa_pre - pre audit callback function to format audit record
  * @ab: audit buffer for formatting audit record
@@ -25,13 +28,12 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->function) {
+	if (mad->function)
 		audit_log_format(ab, "Medusa: op=%s", mad->function);
-	}
 
 	if (mad->med_answer) {
 		audit_log_format(ab, " ans=");
-		audit_log_format(ab, audit_answer[mad->med_answer+1]);
+		audit_log_format(ab, audit_answer[mad->med_answer + 1]);
 	}
 
 	switch (mad->vsi) {
@@ -78,7 +80,7 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
  * @medusa_post: post audit callback, unique for type of access, may be NULL
  */
 void medusa_audit_log_callback(struct common_audit_data *cad,
-		void (*medusa_post) (struct audit_buffer *, void *))
+			       void (*medusa_post)(struct audit_buffer *, void *))
 {
 	common_lsm_audit(cad, medusa_pre, medusa_post);
 }

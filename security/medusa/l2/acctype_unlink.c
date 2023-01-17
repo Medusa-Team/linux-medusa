@@ -9,7 +9,7 @@
 
 struct unlink_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
 
 MED_ATTRS(unlink_access) {
@@ -17,8 +17,9 @@ MED_ATTRS(unlink_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(unlink_access, "unlink", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(unlink_access, "unlink",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init unlink_acctype_init(void)
 {
@@ -50,14 +51,14 @@ enum medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		goto audit;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(dir->mnt, dentry) <= 0)
+	    file_kobj_validate_dentry_dir(dir->mnt, dentry) <= 0)
 		goto audit;
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
+	    !vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
 		) {
 		mad.vs.sw.vst = VS(inode_security(dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
@@ -68,8 +69,9 @@ enum medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry
 	if (MEDUSA_MONITORED_ACCESS_O(unlink_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_unlink(dir, dentry);
 		mad.event = EVENT_MONITORED;
-	} else
+	} else {
 		mad.event = EVENT_MONITORED_N;
+	}
 audit:
 #ifdef CONFIG_AUDIT
 	if (task_security(current)->audit) {

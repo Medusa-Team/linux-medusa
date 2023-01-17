@@ -16,9 +16,9 @@ MED_EVTYPE(socket_event, "getsocket", socket_kobject, "socket", socket_kobject, 
 int __init socket_evtype_init(void)
 {
 	MED_REGISTER_EVTYPE(socket_event,
-			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
-			MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT |
-			MEDUSA_EVTYPE_NOTTRIGGERED);
+			    MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
+			    MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT |
+			    MEDUSA_EVTYPE_NOTTRIGGERED);
 	return 0;
 }
 
@@ -36,7 +36,7 @@ enum medusa_answer_t socket_kobj_validate(struct socket *sock)
 		return MED_ALLOW;
 
 	sk_sec = sock_security(sock->sk);
-	init_med_object(&(sk_sec->med_object));
+	init_med_object(&sk_sec->med_object);
 	socket_kern2kobj(&sock_kobj, sock);
 
 	if (MED_DECIDE(socket_event, &event, &sock_kobj, &sock_kobj) == MED_ERR)

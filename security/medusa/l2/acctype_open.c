@@ -9,7 +9,7 @@
 
 struct open_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
 
 MED_ATTRS(open_access) {
@@ -17,8 +17,9 @@ MED_ATTRS(open_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(open_access, "open", process_kobject, "process",
-	file_kobject, "file");
+MED_ACCTYPE(open_access, "open",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init open_acctype_init(void)
 {
@@ -55,33 +56,33 @@ enum medusa_answer_t medusa_open(struct file *file)
 	struct inode *inode = d_backing_inode(path->dentry);
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0) {
-		/* med_pr_info("open: can't validate subject\n"); */
+	    process_kobj_validate_task(current) <= 0)
 		goto audit;
-	}
 
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0) {
-		/* med_pr_info("open: can't validate object\n"); */
+	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
 		goto audit;
-	}
+
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
-		(acc_mode & MAY_READ && !vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))) ||
-		(acc_mode & MAY_WRITE && !vs_intersects(VSW(task_security(current)), VS(inode_security(inode))))) {
+	    (acc_mode & MAY_READ &&
+		    !vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))) ||
+	    (acc_mode & MAY_WRITE &&
+		    !vs_intersects(VSW(task_security(current)), VS(inode_security(inode))))) {
 		mad.vs.sw.vst = VS(inode_security(inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		retval = MED_DENY;
 		goto audit;
-	} else
+	} else {
 		mad.vsi = VS_INTERSECT;
+	}
 	if (MEDUSA_MONITORED_ACCESS_O(open_access, inode_security(inode))) {
-		/* med_pr_info("open: Constable will decide\n"); */
 		mad.event = EVENT_MONITORED;
 		retval = medusa_do_open(path, inode);
-	} else
+	} else {
 		mad.event = EVENT_MONITORED_N;
-	/* med_pr_info("open: everything OK\n"); */
+	}
+
 audit:
 #ifdef CONFIG_AUDIT
 	if (task_security(current)->audit) {

@@ -41,11 +41,11 @@ static void medusa_ipc_shmat_pacb(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	if (mad->pacb.ipc_shmat.shmflg)
-		audit_log_format(ab," flag=%d", mad->pacb.ipc_shmat.shmflg);
+		audit_log_format(ab, " flag=%d", mad->pacb.ipc_shmat.shmflg);
 	if (mad->pacb.ipc_shmat.shmaddr)
-		audit_log_format(ab," shmaddr=%p", mad->pacb.ipc_shmat.shmaddr);
+		audit_log_format(ab, " shmaddr=%p", mad->pacb.ipc_shmat.shmaddr);
 	if (mad->pacb.ipc_shmat.ipc_class)
-		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_shmat.ipc_class);
+		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc_shmat.ipc_class);
 }
 
 /*
@@ -68,23 +68,26 @@ int medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
 {
 	int retval;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_MONITORED_N, .pacb.ipc_shmat.ipc_class = MED_IPC_UNDEFINED };
+	struct medusa_audit_data mad = {
+		.event = EVENT_MONITORED_N,
+		.pacb.ipc_shmat.ipc_class = MED_IPC_UNDEFINED
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_shmat_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
-	int err = 0;
+	int err = ipc_getref(ipcp, false);
 
 	/* second argument false: don't need to unlock IPC object */
-	if (unlikely((err = ipc_getref(ipcp, false)) != 0))
+	if (unlikely(err))
 		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
 		return err;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object))
-	    && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
-	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+	    ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_shmat_access, ipc_security(ipcp))) {

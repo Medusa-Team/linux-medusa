@@ -9,7 +9,7 @@
 
 struct notify_change_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 	struct iattr attr;
 	/* TODO: add few attributes here */
 };
@@ -29,7 +29,7 @@ MED_ATTRS(notify_change_access) {
 };
 
 MED_ACCTYPE(notify_change_access, "notify_change", process_kobject, "process",
-		file_kobject, "file");
+	    file_kobject, "file");
 
 int __init notify_change_acctype_init(void)
 {
@@ -65,19 +65,19 @@ static enum medusa_answer_t medusa_do_notify_change(struct dentry *dentry, struc
 
 enum medusa_answer_t medusa_notify_change(struct dentry *dentry, struct iattr *attr)
 {
-	if (!dentry || IS_ERR(dentry) || dentry->d_inode == NULL)
+	if (!dentry || IS_ERR(dentry) || !dentry->d_inode)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
+	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
 		return MED_ALLOW;
 
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
+	    !vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
 	)
 		return MED_DENY;
 	if (!attr)

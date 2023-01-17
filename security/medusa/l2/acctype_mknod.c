@@ -9,7 +9,7 @@
 
 struct mknod_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 	dev_t dev;
 	int mode;
 };
@@ -21,8 +21,9 @@ MED_ATTRS(mknod_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(mknod_access, "mknod", process_kobject, "process",
-			file_kobject, "file");
+MED_ACCTYPE(mknod_access, "mknod",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init mknod_acctype_init(void)
 {
@@ -42,11 +43,14 @@ static void medusa_mknod_pacb(struct audit_buffer *ab, void *pcad)
 	spin_unlock(&mad->dentry->d_lock);
 	audit_log_format(ab, " mode=%d", mad->pacb.mknod.mode);
 	audit_log_format(ab, " dev=%02x:%02x", MAJOR(mad->pacb.mknod.dev),
-			MINOR(mad->pacb.mknod.dev));
+			 MINOR(mad->pacb.mknod.dev));
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_mknod(const struct path *dir, struct dentry *dentry, int mode, dev_t dev)
+static enum medusa_answer_t medusa_do_mknod(const struct path *dir,
+					    struct dentry *dentry,
+					    int mode,
+					    dev_t dev)
 {
 	struct mknod_access access;
 	struct process_kobject process;
@@ -64,8 +68,10 @@ static enum medusa_answer_t medusa_do_mknod(const struct path *dir, struct dentr
 	return retval;
 }
 
-enum medusa_answer_t medusa_mknod(const struct path *dir, struct dentry *dentry, umode_t mode,
-			unsigned int dev)
+enum medusa_answer_t medusa_mknod(const struct path *dir,
+				  struct dentry *dentry,
+				  umode_t mode,
+				  unsigned int dev)
 {
 	struct path ndcurrent, ndupper;
 	enum medusa_answer_t retval = MED_ALLOW;
@@ -73,7 +79,7 @@ enum medusa_answer_t medusa_mknod(const struct path *dir, struct dentry *dentry,
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0) {
+	    process_kobj_validate_task(current) <= 0) {
 		retval = MED_ALLOW;
 		goto audit;
 	}
@@ -82,14 +88,15 @@ enum medusa_answer_t medusa_mknod(const struct path *dir, struct dentry *dentry,
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry(ndupper.dentry, ndupper.mnt, NULL) <= 0) {
+	    file_kobj_validate_dentry(ndupper.dentry, ndupper.mnt, NULL) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
 		retval = MED_ALLOW;
 		goto audit;
 	}
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndupper.dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndupper.dentry->d_inode)))
-	) {
+	if (!vs_intersects(VSS(task_security(current)),
+			   VS(inode_security(ndupper.dentry->d_inode))) ||
+	    !vs_intersects(VSW(task_security(current)),
+			   VS(inode_security(ndupper.dentry->d_inode)))) {
 		mad.vs.sw.vst = VS(inode_security(ndupper.dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));

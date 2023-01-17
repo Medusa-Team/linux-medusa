@@ -21,8 +21,8 @@ static struct medusa_kobject_s *printk_fetch(struct medusa_kobject_s *key_obj)
 
 static enum medusa_answer_t printk_update(struct medusa_kobject_s *kobj)
 {
-	((struct printk_kobject *) kobj)->message[sizeof(((struct printk_kobject *) kobj)->message)-1] = '\0';
-	med_pr_info("%s", ((struct printk_kobject *) kobj)->message);
+	((struct printk_kobject *)kobj)->message[sizeof(((struct printk_kobject *)kobj)->message) - 1] = '\0';
+	med_pr_info("%s", ((struct printk_kobject *)kobj)->message);
 	return MED_ALLOW;
 }
 
@@ -37,7 +37,7 @@ MED_KCLASS(printk_kobject) {
 };
 
 #ifdef MODULE
-static int printk_kobject_unload_check(void) __exit;
+static int printk_kobject_unload_check(void)__exit;
 #endif
 
 void printk_kobject_rmmod(void);

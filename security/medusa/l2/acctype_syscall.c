@@ -43,21 +43,21 @@ int __init syscall_acctype_init(void)
 	return 0;
 }
 
-asmlinkage enum medusa_answer_t medusa_syscall_i386(
-	unsigned int eax,  /* in: syscall #, out: retval */
-	struct task_struct *curr,
-	unsigned int p1,
-	unsigned int p2,
-	unsigned int p3,
-	unsigned int p4,
-	unsigned int p5)
+/* @eax: in: syscall #, out: retval */
+asmlinkage enum medusa_answer_t medusa_syscall_i386(unsigned int eax,
+						    struct task_struct *curr,
+						    unsigned int p1,
+						    unsigned int p2,
+						    unsigned int p3,
+						    unsigned int p4,
+						    unsigned int p5)
 {
 	enum medusa_answer_t retval = MED_ALLOW;
 	struct syscall_access access;
 	struct process_kobject proc;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(syscall_access, task_security(current))) {
@@ -65,7 +65,8 @@ asmlinkage enum medusa_answer_t medusa_syscall_i386(
 		access.arg1 = p1; access.arg2 = p2;
 		access.arg3 = p3; access.arg4 = p4;
 		access.arg5 = p5;
-		access.arg6 = access.arg7 = 0;
+		access.arg6 = 0;
+		access.arg7 = 0;
 		process_kern2kobj(&proc, current);
 		retval = MED_DECIDE(syscall_access, &access, &proc, &proc);
 	}

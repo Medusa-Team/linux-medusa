@@ -9,7 +9,7 @@
 
 struct rmdir_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
 
 MED_ATTRS(rmdir_access) {
@@ -17,8 +17,9 @@ MED_ATTRS(rmdir_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(rmdir_access, "rmdir", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(rmdir_access, "rmdir",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init rmdir_acctype_init(void)
 {
@@ -50,27 +51,28 @@ enum medusa_answer_t medusa_rmdir(const struct path *dir, struct dentry *dentry)
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		goto audit;
 
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(dir->mnt, dentry) <= 0)
+	    file_kobj_validate_dentry_dir(dir->mnt, dentry) <= 0)
 		goto audit;
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
-		) {
+	    !vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))) {
 		mad.vs.sw.vst = VS(inode_security(dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		retval = MED_DENY;
 		goto audit;
-	} else
+	} else {
 		mad.vsi = VS_INTERSECT;
+	}
 	if (MEDUSA_MONITORED_ACCESS_O(rmdir_access, inode_security(dentry->d_inode))) {
 		retval = medusa_do_rmdir(dir, dentry);
 		mad.event = EVENT_MONITORED;
-	} else
+	} else {
 		mad.event = EVENT_MONITORED_N;
+	}
 audit:
 #ifdef CONFIG_AUDIT
 	if (task_security(current)->audit) {

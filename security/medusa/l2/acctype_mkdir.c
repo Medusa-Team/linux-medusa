@@ -9,7 +9,7 @@
 
 struct mkdir_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 	int mode;
 };
 
@@ -20,7 +20,7 @@ MED_ATTRS(mkdir_access) {
 };
 
 MED_ACCTYPE(mkdir_access, "mkdir", process_kobject, "process",
-		file_kobject, "file");
+	    file_kobject, "file");
 
 int __init mkdir_acctype_init(void)
 {
@@ -67,33 +67,36 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		goto audit;
 
 	ndcurrent = *dir;
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
+	    file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
 		goto audit;
 	}
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndupper.dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndupper.dentry->d_inode)))
-	) {
+	if (!vs_intersects(VSS(task_security(current)),
+			   VS(inode_security(ndupper.dentry->d_inode))) ||
+	    !vs_intersects(VSW(task_security(current)),
+			   VS(inode_security(ndupper.dentry->d_inode)))) {
 		mad.vs.sw.vst = VS(inode_security(ndupper.dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		medusa_put_upper_and_parent(&ndupper, NULL);
 		retval = MED_DENY;
 		goto audit;
-	} else
+	} else {
 		mad.vsi = VS_INTERSECT;
+	}
 	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, inode_security(ndupper.dentry->d_inode))) {
 		retval = medusa_do_mkdir(&ndupper, dentry, mode);
 		mad.event = EVENT_MONITORED;
-	} else
+	} else {
 		mad.event = EVENT_MONITORED_N;
+	}
 	medusa_put_upper_and_parent(&ndupper, NULL);
 audit:
 #ifdef CONFIG_AUDIT

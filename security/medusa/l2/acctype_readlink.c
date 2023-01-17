@@ -9,7 +9,7 @@
 
 struct readlink_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
 
 MED_ATTRS(readlink_access) {
@@ -17,8 +17,9 @@ MED_ATTRS(readlink_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(readlink_access, "readlink", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(readlink_access, "readlink",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init readlink_acctype_init(void)
 {
@@ -50,15 +51,15 @@ enum medusa_answer_t medusa_readlink(struct dentry *dentry)
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-			process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		goto audit;
 	if (!is_med_magic_valid(&(inode_security(dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry(dentry, NULL, NULL) <= 0) {
+	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0) {
 		retval = MED_ALLOW;
 		goto audit;
 	}
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(dentry->d_inode))) ||
-			!vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
+	    !vs_intersects(VSW(task_security(current)), VS(inode_security(dentry->d_inode)))
 		) {
 		mad.vs.sw.vst = VS(inode_security(dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));

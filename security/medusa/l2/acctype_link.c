@@ -10,8 +10,8 @@
 
 struct link_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
-	char newname[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
+	char newname[NAME_MAX + 1];
 };
 
 MED_ATTRS(link_access) {
@@ -21,7 +21,7 @@ MED_ATTRS(link_access) {
 };
 
 MED_ACCTYPE(link_access, "link", process_kobject, "process",
-		file_kobject, "file");
+	    file_kobject, "file");
 
 int __init link_acctype_init(void)
 {
@@ -68,7 +68,7 @@ static enum medusa_answer_t medusa_do_link(struct dentry *old_dentry, const char
 }
 
 enum medusa_answer_t medusa_link(struct dentry *old_dentry,
-				const struct path *new_dir,
+				 const struct path *new_dir,
 				struct dentry *new_dentry)
 {
 	struct path ndcurrent, ndupper;
@@ -87,12 +87,12 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	}
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		goto audit;
 
+	// new_dir->mnt and old_dentry because it is a hardlink, mnt will be the same
 	if (!is_med_magic_valid(&(inode_security(old_dentry->d_inode)->med_object)) &&
-		// new_dir->mnt and old_dentry because it is a hardlink, mnt will be the same
-		file_kobj_validate_dentry_dir(new_dir->mnt, old_dentry) <= 0) {
+	    file_kobj_validate_dentry_dir(new_dir->mnt, old_dentry) <= 0) {
 		goto audit;
 	}
 
@@ -100,18 +100,21 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
+	    file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
 		goto audit;
 	}
 	// TODO: Add VSR check for old_dentry? Rationale: UGO checks RW on target.
 	// TODO: We check parecnt directory here. That could be delegated to
 	// inode_permission if we choose to support that hook.
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndupper.dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndupper.dentry->d_inode))) ||
-		!vs_intersects(VSS(task_security(current)), VS(inode_security(old_dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(old_dentry->d_inode)))
-		) {
+	if (!vs_intersects(VSS(task_security(current)),
+			   VS(inode_security(ndupper.dentry->d_inode))) ||
+	    !vs_intersects(VSW(task_security(current)),
+			   VS(inode_security(ndupper.dentry->d_inode))) ||
+	    !vs_intersects(VSS(task_security(current)),
+			   VS(inode_security(old_dentry->d_inode))) ||
+	    !vs_intersects(VSW(task_security(current)),
+			   VS(inode_security(old_dentry->d_inode)))) {
 		mad.vs.sw.vst = VS(inode_security(old_dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));

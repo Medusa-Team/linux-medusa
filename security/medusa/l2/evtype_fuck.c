@@ -7,7 +7,7 @@
 
 struct getfuck_event {
 	MEDUSA_ACCESS_HEADER;
-	char path[NAME_MAX+1];
+	char path[NAME_MAX + 1];
 };
 
 MED_ATTRS(getfuck_event) {

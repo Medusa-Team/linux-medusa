@@ -49,7 +49,7 @@ MED_KCLASS(memory_kobject) {
 /* module stuff */
 
 #ifdef MODULE
-static int memory_kobject_unload_check(void) __exit;
+static int memory_kobject_unload_check(void)__exit;
 #endif
 
 int __init memory_kobject_init(void)
@@ -88,7 +88,7 @@ static struct medusa_kobject_s *memory_fetch(struct medusa_kobject_s *key_obj)
 {
 	int ret;
 	struct task_struct *p;
-	struct memory_kobject *kobj = (struct memory_kobject *) key_obj;
+	struct memory_kobject *kobj = (struct memory_kobject *)key_obj;
 
 	rcu_read_lock();
 	p = pid_task(find_vpid(kobj->pid), PIDTYPE_PID);
@@ -111,18 +111,18 @@ static enum medusa_answer_t memory_update(struct medusa_kobject_s *kobj)
 	struct task_struct *p;
 
 	rcu_read_lock();
-	p = pid_task(find_vpid(((struct memory_kobject *) kobj)->pid), PIDTYPE_PID);
+	p = pid_task(find_vpid(((struct memory_kobject *)kobj)->pid), PIDTYPE_PID);
 	if (p) {
 		get_task_struct(p);
 		rcu_read_unlock();
 		ret = access_process_vm(p,
-			(unsigned long)
-				((struct memory_kobject *) kobj)->address,
-			((struct memory_kobject *) kobj)->data,
-			((struct memory_kobject *) kobj)->size,
-			1);
+					(unsigned long)
+					((struct memory_kobject *)kobj)->address,
+					((struct memory_kobject *)kobj)->data,
+					((struct memory_kobject *)kobj)->size,
+					1);
 		free_task(p);
-		return (ret == ((struct memory_kobject *) kobj)->size) ?
+		return (ret == ((struct memory_kobject *)kobj)->size) ?
 			MED_ALLOW : MED_ERR;
 	}
 	rcu_read_unlock();

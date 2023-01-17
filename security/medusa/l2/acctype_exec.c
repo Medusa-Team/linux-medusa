@@ -15,11 +15,12 @@
 
 struct exec_faccess {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
+
 struct exec_paccess {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
 
 MED_ATTRS(exec_faccess) {
@@ -31,10 +32,12 @@ MED_ATTRS(exec_paccess) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(exec_faccess, "fexec", process_kobject, "process",
-		file_kobject, "file");
-MED_ACCTYPE(exec_paccess, "pexec", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(exec_faccess, "fexec",
+	    process_kobject, "process",
+	    file_kobject, "file");
+MED_ACCTYPE(exec_paccess, "pexec",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init exec_acctype_init(void)
 {
@@ -55,7 +58,7 @@ static void medusa_exec_pacb(struct audit_buffer *ab, void *pcad)
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
 static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
-					const char *filename)
+					    const char *filename)
 {
 	struct exec_faccess access;
 	struct process_kobject process;
@@ -63,7 +66,7 @@ static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
 	enum medusa_answer_t retval;
 
 	strncpy(access.filename, filename, sizeof(access.filename));
-	access.filename[sizeof(access.filename)-1] = '\0';
+	access.filename[sizeof(access.filename) - 1] = '\0';
 
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, inode);
@@ -76,7 +79,7 @@ static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
 }
 
 static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
-					const char *filename)
+					    const char *filename)
 {
 	struct exec_paccess access;
 	struct process_kobject process;
@@ -84,7 +87,7 @@ static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
 	enum medusa_answer_t retval;
 
 	strncpy(access.filename, filename, sizeof(access.filename));
-	access.filename[sizeof(access.filename)-1] = '\0';
+	access.filename[sizeof(access.filename) - 1] = '\0';
 
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, inode);
@@ -120,8 +123,9 @@ enum medusa_answer_t medusa_exec(struct linux_binprm *bprm)
 		mad.vs.srw.vsr = VSR(task_security(current));
 		retval = MED_DENY;
 		goto audit;
-	} else
+	} else {
 		mad.vsi = VS_INTERSECT;
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current))) {
 		retval = medusa_do_pexec(inode, bprm->filename);
 		mad.event = EVENT_MONITORED;

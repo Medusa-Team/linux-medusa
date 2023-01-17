@@ -9,7 +9,7 @@
 
 struct permission_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 	int mask;
 };
 
@@ -19,8 +19,9 @@ MED_ATTRS(permission_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(permission_access, "permission", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(permission_access, "permission",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init permission_acctype_init(void)
 {
@@ -34,7 +35,7 @@ static void medusa_permission_pacb(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	if (mad->pacb.mode)
-		audit_log_format(ab," mask=%d", mad->pacb.mode);
+		audit_log_format(ab, " mask=%d", mad->pacb.mode);
 }
 
 enum medusa_answer_t medusa_do_permission(struct dentry *dentry, struct inode *inode, int mask)
@@ -68,7 +69,7 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	struct dentry *dentry;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
 	dentry = d_find_alias(inode);
@@ -76,18 +77,16 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	if (!dentry || IS_ERR(dentry))
 		return retval;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		return retval;
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
-		file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
+	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
 		goto out_dput;
-	if (
-		!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
-		((mask & (S_IRUGO | S_IXUGO)) &&
-			!vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))) ||
-		((mask & S_IWUGO) &&
-			!vs_intersects(VSW(task_security(current)), VS(inode_security(inode))))
-	   ) {
+	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
+	    ((mask & (S_IRUGO | S_IXUGO)) &&
+	     !vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))) ||
+	    ((mask & S_IWUGO) &&
+	     !vs_intersects(VSW(task_security(current)), VS(inode_security(inode))))) {
 		mad.vs.srw.vst = VS(inode_security(inode));
 		mad.vs.srw.vss = VSS(task_security(current));
 		mad.vs.srw.vsr = VSR(task_security(current));

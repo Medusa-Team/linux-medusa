@@ -39,9 +39,9 @@ static void medusa_ipc_ctl_pacb(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	if (mad->pacb.ipc.flcm)
-		audit_log_format(ab," cmd=%d", mad->pacb.ipc.flcm);
+		audit_log_format(ab, " cmd=%d", mad->pacb.ipc.flcm);
 	if (mad->pacb.ipc.ipc_class)
-		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc.ipc_class);
+		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc.ipc_class);
 }
 
 /*
@@ -90,7 +90,10 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 {
 	int retval;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_MONITORED_N, .pacb.ipc.ipc_class = MED_IPC_UNDEFINED };
+	struct medusa_audit_data mad = {
+		.event = EVENT_MONITORED_N,
+		.pacb.ipc.ipc_class = MED_IPC_UNDEFINED
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_ctl_access access;
 	struct process_kobject process;
@@ -100,18 +103,19 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 	/* 'ipcp' is NULL in case of 'cmd': IPC_INFO, MSG_INFO, SEM_INFO, SHM_INFO */
 	if (likely(ipcp)) {
 		/* second argument false: don't need to unlock IPC object */
-		if (unlikely((err = ipc_getref(ipcp, false)) != 0))
+		err = ipc_getref(ipcp, false);
+		if (unlikely(err))
 			/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
 			return err;
 
 		object_p = &object;
-		if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
-		    && ipc_kobj_validate_ipcp(ipcp) <= 0)
+		if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+		    ipc_kobj_validate_ipcp(ipcp) <= 0)
 			goto out;
 	}
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object))
-	    && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_ctl_access, ipc_security(ipcp))) {
@@ -122,7 +126,9 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 
 		process_kern2kobj(&process, current);
 		if (likely(object_p)) {
-			/* 3-th argument is true: decrement IPC object's refcount in returned object */
+			/* 3rd argument is true: decrement IPC object's refcount
+			 * in returned object
+			 */
 			ipc_kern2kobj(object_p, ipcp, true);
 			access.ipc_class = object_p->ipc_class;
 			mad.pacb.ipc.ipc_class = object_p->ipc_class;

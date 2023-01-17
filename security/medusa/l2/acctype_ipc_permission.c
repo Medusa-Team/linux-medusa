@@ -39,9 +39,9 @@ static void medusa_ipc_perm_pacb(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	if (mad->pacb.ipc_perm.perms)
-		audit_log_format(ab," perms=%u", mad->pacb.ipc_perm.perms);
+		audit_log_format(ab, " perms=%u", mad->pacb.ipc_perm.perms);
 	if (mad->pacb.ipc_perm.ipc_class)
-		audit_log_format(ab," ipc_class=%u", mad->pacb.ipc_perm.ipc_class);
+		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc_perm.ipc_class);
 }
 
 /*
@@ -77,7 +77,10 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 {
 	int retval;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .event = EVENT_MONITORED_N, .pacb.ipc_perm.ipc_class = MED_IPC_UNDEFINED };
+	struct medusa_audit_data mad = {
+		.event = EVENT_MONITORED_N,
+		.pacb.ipc_perm.ipc_class = MED_IPC_UNDEFINED
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_perm_access access;
 	struct process_kobject process;
@@ -101,7 +104,7 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 	 * Note: On UP spins doesn't exist, lucky us ;)
 	 *       Medusa on UP always can make a decision without a carry on spinlocks...
 	 */
-	if (IS_ENABLED(CONFIG_SMP) && spin_is_locked(&(ipcp->lock))) {
+	if (IS_ENABLED(CONFIG_SMP) && spin_is_locked(&ipcp->lock)) {
 #ifdef CONFIG_DEBUG_SPINLOCK
 		/*
 		 * If current process is holding the spinlock, we need to unlock it;
@@ -138,15 +141,16 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 	 *   true - returns with unlocked IPC object
 	 *   false - don't need to unlock IPC object
 	 */
-	if (unlikely((err = ipc_getref(ipcp, use_locking)) != 0))
+	err = ipc_getref(ipcp, use_locking);
+	if (unlikely(err))
 		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
 		return err;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object))
-	    && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
-	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+	    ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_perm_access, ipc_security(ipcp))) {

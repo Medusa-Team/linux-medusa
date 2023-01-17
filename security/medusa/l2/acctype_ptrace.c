@@ -13,14 +13,15 @@ MED_ATTRS(ptrace_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(ptrace_access, "ptrace", process_kobject, "tracer",
-		process_kobject, "tracee");
+MED_ACCTYPE(ptrace_access, "ptrace",
+	    process_kobject, "tracer",
+	    process_kobject, "tracee");
 
 int __init ptrace_acctype_init(void)
 {
+	/* to object or not to object? now THAT is a question ;). */
 	MED_REGISTER_ACCTYPE(ptrace_access,
-		/* to object or not to object? now THAT is a question ;). */
-			MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
+			     MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 
@@ -32,15 +33,15 @@ enum medusa_answer_t medusa_ptrace(struct task_struct *tracer, struct task_struc
 	enum medusa_answer_t retval;
 
 	if (!is_med_magic_valid(&(task_security(tracer)->med_object)) &&
-		process_kobj_validate_task(tracer) <= 0)
+	    process_kobj_validate_task(tracer) <= 0)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(tracee)->med_object)) &&
-		process_kobj_validate_task(tracee) <= 0)
+	    process_kobj_validate_task(tracee) <= 0)
 		return MED_ALLOW;
 
 	if (!vs_intersects(VSS(task_security(tracer)), VS(task_security(tracee))) ||
-		!vs_intersects(VSW(task_security(tracer)), VS(task_security(tracee))))
+	    !vs_intersects(VSW(task_security(tracer)), VS(task_security(tracee))))
 		return MED_DENY;
 	if (MEDUSA_MONITORED_ACCESS_S(ptrace_access, task_security(tracer))) {
 		process_kern2kobj(&tracer_p, tracer);

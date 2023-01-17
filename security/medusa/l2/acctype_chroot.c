@@ -9,7 +9,7 @@
 
 struct chroot_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
 
 MED_ATTRS(chroot_access) {
@@ -17,8 +17,9 @@ MED_ATTRS(chroot_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(chroot_access, "chroot", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(chroot_access, "chroot",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init chroot_acctype_init(void)
 {
@@ -50,26 +51,29 @@ enum medusa_answer_t medusa_chroot(const struct path *path)
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		goto audit;
 
 	if (!is_med_magic_valid(&(inode_security(path->dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
+	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
 		goto audit;
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(path->dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(path->dentry->d_inode)))
-		) {
+	if (!vs_intersects(VSS(task_security(current)),
+			   VS(inode_security(path->dentry->d_inode))) ||
+	    !vs_intersects(VSW(task_security(current)),
+			   VS(inode_security(path->dentry->d_inode)))) {
 		mad.vs.sw.vst = VS(inode_security(path->dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		retval = MED_DENY;
-	} else
+	} else {
 		mad.vsi = VS_INTERSECT;
+	}
 	if (MEDUSA_MONITORED_ACCESS_S(chroot_access, task_security(current))) {
 		mad.event = EVENT_MONITORED;
 		retval = medusa_do_chroot(path);
-	} else
+	} else {
 		mad.event = EVENT_MONITORED_N;
+	}
 audit:
 #ifdef CONFIG_AUDIT
 	if (task_security(current)->audit) {

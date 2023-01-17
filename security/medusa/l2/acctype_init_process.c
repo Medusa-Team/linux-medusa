@@ -28,7 +28,7 @@ enum medusa_answer_t medusa_init_process(struct task_struct *new)
 	struct process_kobject parent;
 
 	if (!is_med_magic_valid(&(task_security(new)->med_object)) &&
-		process_kobj_validate_task(new) <= 0)
+	    process_kobj_validate_task(new) <= 0)
 		return MED_ALLOW;
 
 	/* inherit from parent if the action isn't monitored? */

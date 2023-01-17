@@ -9,7 +9,7 @@
 
 struct create_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 	int mode;
 };
 
@@ -19,8 +19,9 @@ MED_ATTRS(create_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(create_access, "create", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(create_access, "create",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init create_acctype_init(void)
 {
@@ -54,7 +55,7 @@ static void medusa_create_pacb(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	if (mad->pacb.mode)
-		audit_log_format(ab," mode=%d", mad->pacb.mode);
+		audit_log_format(ab, " mode=%d", mad->pacb.mode);
 }
 
 enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
@@ -65,7 +66,7 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	struct medusa_audit_data mad = { .vsi = VS_SW_N };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		return retval;
 
 	ndcurrent.dentry = dentry;
@@ -73,27 +74,29 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
 
 	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, NULL) <= 0) {
+	    file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, NULL) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return retval;
 	}
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(ndparent.dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(ndparent.dentry->d_inode)))
-	) {
+	if (!vs_intersects(VSS(task_security(current)),
+			   VS(inode_security(ndparent.dentry->d_inode))) ||
+	    !vs_intersects(VSW(task_security(current)),
+			   VS(inode_security(ndparent.dentry->d_inode)))) {
 		mad.vs.sw.vst = VS(inode_security(ndparent.dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		retval = MED_DENY;
 		goto audit;
-	} else
+	} else {
 		mad.vsi = VS_INTERSECT;
+	}
 	if (MEDUSA_MONITORED_ACCESS_O(create_access, inode_security(ndparent.dentry->d_inode))) {
 		retval = medusa_do_create(ndparent.dentry, ndupper.dentry, mode);
 		mad.event = EVENT_MONITORED;
-	}
-	else
+	} else {
 		mad.event = EVENT_MONITORED_N;
+	}
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
 audit:
 #ifdef CONFIG_AUDIT
