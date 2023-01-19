@@ -33,7 +33,7 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 	audit_log_format(ab, " ans=");
 	audit_log_format(ab, audit_answer[mad->ans + 1]);
 
-	if (mad->ans == MED_DENY && mad->ans == AS_NO_REQUEST) {
+	if (mad->ans == MED_DENY && mad->as == AS_NO_REQUEST) {
 		/* TODO: create a data structure that will be able to store this
 		 * information */
 	}
