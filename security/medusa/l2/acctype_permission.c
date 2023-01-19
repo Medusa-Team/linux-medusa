@@ -34,8 +34,7 @@ static void medusa_permission_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.mode)
-		audit_log_format(ab, " mask=%d", mad->pacb.mode);
+	audit_log_format(ab, " mask=%d", mad->mask);
 }
 
 enum medusa_answer_t medusa_do_permission(struct dentry *dentry, struct inode *inode, int mask)
@@ -64,21 +63,20 @@ enum medusa_answer_t medusa_do_permission(struct dentry *dentry, struct inode *i
 enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 {
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VS_SRW_N };
-	enum medusa_answer_t retval = MED_ALLOW;
+	struct medusa_audit_data mad = { .ans = MED_ALLOW };
 	struct dentry *dentry;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
-		return MED_ALLOW;
+		return mad.ans;
 
 	dentry = d_find_alias(inode);
 
 	if (!dentry || IS_ERR(dentry))
-		return retval;
+		return mad.ans;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
-		return retval;
+		return mad.ans;
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
 	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
 		goto out_dput;
@@ -91,29 +89,22 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 		mad.vs.srw.vss = VSS(task_security(current));
 		mad.vs.srw.vsr = VSR(task_security(current));
 		mad.vs.srw.vsw = VSW(task_security(current));
-		retval = MED_DENY;
+		mad.ans = MED_DENY;
 		goto out_dput;
-	} else {
-		mad.vsi = VS_INTERSECT;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(permission_access, inode_security(inode))) {
-		retval = medusa_do_permission(dentry, inode, mask);
-		mad.event = EVENT_MONITORED;
-	} else {
-		mad.event = EVENT_MONITORED_N;
+		mad.ans = medusa_do_permission(dentry, inode, mask);
+		mad.as = AS_REQUEST;
 	}
 out_dput:
-#ifdef CONFIG_AUDIT
 	cad.type = LSM_AUDIT_DATA_DENTRY;
 	cad.u.dentry = dentry;
-	mad.function = __func__;
-	mad.med_answer = retval;
-	mad.pacb.mode = mask;
+	mad.function = "permission";
+	mad.mask = mask;
 	cad.medusa_audit_data = &mad;
 	medusa_audit_log_callback(&cad, medusa_permission_pacb);
-#endif
 	dput(dentry);
-	return retval;
+	return mad.ans;
 }
 
 device_initcall(permission_acctype_init);

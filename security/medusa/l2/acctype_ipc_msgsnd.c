@@ -51,14 +51,10 @@ static void medusa_ipc_msgsnd_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.ipc_msg.flag)
-		audit_log_format(ab, " flag=%d", mad->pacb.ipc_msg.flag);
-	if (mad->pacb.ipc_msg.m_type)
-		audit_log_format(ab, " m_type=%ld", mad->pacb.ipc_msg.m_type);
-	if (mad->pacb.ipc_msg.m_ts)
-		audit_log_format(ab, " m_ts=%lu", mad->pacb.ipc_msg.m_ts);
-	if (mad->pacb.ipc_msg.ipc_class)
-		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc_msg.ipc_class);
+	audit_log_format(ab, " flag=%d", mad->ipc.flag);
+	audit_log_format(ab, " m_type=%ld", mad->ipc.m_type);
+	audit_log_format(ab, " m_ts=%lu", mad->ipc.m_ts);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc.ipc_class);
 }
 
 /*
@@ -78,11 +74,10 @@ int medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
 		      struct msg_msg *msg,
 		      int msgflg)
 {
-	int retval;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		.event = EVENT_MONITORED_N,
-		.pacb.ipc_msg.ipc_class = MED_IPC_UNDEFINED
+		/* TODO: Check if the value is available here */
+		.ipc.ipc_class = ipc_security(ipcp)->ipc_class
 	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_msgsnd_access access;
@@ -103,7 +98,6 @@ int medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_msgsnd_access, ipc_security(ipcp))) {
-		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
@@ -112,28 +106,25 @@ int medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
 		access.m_ts = msg->m_ts;
 		access.msgflg = msgflg;
 		access.ipc_class = object.ipc_class;
-		mad.pacb.ipc_msg.ipc_class = object.ipc_class;
 
 		ans = MED_DECIDE(ipc_msgsnd_access, &access, &process, &object);
+		mad.as = AS_REQUEST;
 	}
 out:
-	/* second argument true: returns with locked IPC object */
-	err = ipc_putref(ipcp, true);
-	retval = lsm_retval(ans, err);
-#ifdef CONFIG_AUDIT
+	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
 		mad.function = "msgsnd";
-		mad.med_answer = retval;
-		mad.pacb.ipc_msg.m_type = msg->m_type;
-		mad.pacb.ipc_msg.m_ts = msg->m_ts;
-		mad.pacb.ipc_msg.flag = msgflg;
+		mad.ipc.m_type = msg->m_type;
+		mad.ipc.m_ts = msg->m_ts;
+		mad.ipc.flag = msgflg;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_ipc_msgsnd_pacb);
 	}
-#endif
-	return retval;
+	/* second argument true: returns with locked IPC object */
+	err = ipc_putref(ipcp, true);
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_msgsnd_init);

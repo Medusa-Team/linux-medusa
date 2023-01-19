@@ -36,9 +36,9 @@ static void medusa_fcntl_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	audit_log_d_path(ab, " path=", mad->path);
-	audit_log_format(ab, " cmd=%d", mad->pacb.fcntl.cmd);
-	audit_log_format(ab, " arg=%lu", mad->pacb.fcntl.arg);
+	audit_log_d_path(ab, " path=", mad->fcntl.path);
+	audit_log_format(ab, " cmd=%d", mad->fcntl.cmd);
+	audit_log_format(ab, " arg=%lu", mad->fcntl.arg);
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
@@ -64,61 +64,52 @@ static enum medusa_answer_t medusa_do_fcntl(struct file *file, unsigned int cmd,
 enum medusa_answer_t medusa_fcntl(struct file *file, unsigned int cmd,
 				  unsigned long arg)
 {
-	enum medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW };
 
 	struct inode *inode = file_inode(file);
 
 	if (unlikely(IS_PRIVATE(inode)))
-		return MED_ALLOW;
+		return mad.ans;
 
 	if (cmd != F_SETLK && cmd != F_SETLKW &&
-	    cmd != F_SETOWN && cmd != F_SETSIG && cmd != F_SETFL) {
-		return MED_ALLOW;
-	}
+	    cmd != F_SETOWN && cmd != F_SETSIG && cmd != F_SETFL)
+		return mad.ans;
 
 	if (cmd == F_SETFL && !((arg ^ file->f_flags) & O_APPEND))
-		return MED_ALLOW;
+		return mad.ans;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
-		goto audit;
+		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
 	    file_kobj_validate_dentry_dir(file->f_path.mnt, file_dentry(file)) <= 0)
-		goto audit;
+		return mad.ans;
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
-	    !vs_intersects(VSW(task_security(current)), VS(inode_security(inode)))
-		) {
+	    !vs_intersects(VSW(task_security(current)), VS(inode_security(inode)))) {
 		mad.vs.sw.vst = VS(inode_security(inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
-		retval = MED_DENY;
-	} else {
-		mad.vsi = VS_INTERSECT;
+		mad.ans = MED_DENY;
+		goto audit;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(fcntl_access, inode_security(inode))) {
-		retval = medusa_do_fcntl(file, cmd, arg, inode);
-		mad.event = EVENT_MONITORED;
-	} else {
-		mad.event = EVENT_MONITORED_N;
+		mad.ans = medusa_do_fcntl(file, cmd, arg, inode);
+		mad.as = AS_REQUEST;
 	}
 audit:
-#ifdef CONFIG_AUDIT
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_TASK;
 		cad.u.tsk = current;
 		mad.function = "fcntl";
-		mad.med_answer = retval;
-		mad.path = &file->f_path;
-		mad.pacb.fcntl.cmd = cmd;
-		mad.pacb.fcntl.arg = arg;
+		mad.fcntl.path = &file->f_path;
+		mad.fcntl.cmd = cmd;
+		mad.fcntl.arg = arg;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_fcntl_pacb);
 	}
-#endif
-	return retval;
+	return mad.ans;
 }
 
 device_initcall(fcntl_acctype_init);

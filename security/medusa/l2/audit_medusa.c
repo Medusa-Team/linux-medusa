@@ -22,56 +22,26 @@ static char *audit_answer[] = {
  * ..._i: vs are intersect
  * ..._n: vs are not intersect
  */
-static void medusa_pre(struct audit_buffer *ab, void *pcad);
+//static void medusa_pre(struct audit_buffer *ab, void *pcad);
 static void medusa_pre(struct audit_buffer *ab, void *pcad)
 {
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->function)
-		audit_log_format(ab, "Medusa: op=%s", mad->function);
+	audit_log_format(ab, "Medusa: op=%s", mad->function);
 
-	if (mad->med_answer) {
-		audit_log_format(ab, " ans=");
-		audit_log_format(ab, audit_answer[mad->med_answer + 1]);
+	audit_log_format(ab, " ans=");
+	audit_log_format(ab, audit_answer[mad->ans + 1]);
+
+	if (mad->ans == MED_DENY && mad->ans == AS_NO_REQUEST) {
+		/* TODO: create a data structure that will be able to store this
+		 * information */
 	}
 
-	switch (mad->vsi) {
-	case VS_INTERSECT:
-		audit_log_format(ab, " vs={intersect}");
-		break;
-	case VS_SW_N:
-		if (vs_intersects(mad->vs.sw.vss, mad->vs.sw.vst))
-			audit_log_format(ab, " vs={see_i,");
-		else
-			audit_log_format(ab, " vs={see_n,");
-		if (vs_intersects(mad->vs.sw.vsw, mad->vs.sw.vst))
-			audit_log_format(ab, "write_i}");
-		else
-			audit_log_format(ab, "write_n}");
-		break;
-	case VS_SRW_N:
-		if (vs_intersects(mad->vs.srw.vss, mad->vs.srw.vst))
-			audit_log_format(ab, " vs={see_i,");
-		else
-			audit_log_format(ab, " vs={see_n,");
-		if (vs_intersects(mad->vs.srw.vsr, mad->vs.srw.vst))
-			audit_log_format(ab, "read_i,");
-		else
-			audit_log_format(ab, "read_n,");
-		if (vs_intersects(mad->vs.srw.vsw, mad->vs.srw.vst))
-			audit_log_format(ab, "write_i}");
-		else
-			audit_log_format(ab, "write_n}");
-		break;
-	}
-
-	if (mad->event == EVENT_MONITORED)
-		audit_log_format(ab, " access=MONITORED");
-	else if (mad->event == EVENT_MONITORED_N)
-		audit_log_format(ab, " access=UNMONITORED");
+	if (mad->as == AS_REQUEST)
+		audit_log_format(ab, " as_request=1");
 	else
-		audit_log_format(ab, " access=UNDEFINED");
+		audit_log_format(ab, " as_request=0");
 }
 
 /*
@@ -97,11 +67,20 @@ void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	medusa_path_cb(ab, pcad);
+	medusa_path_mode_cb(ab, pcad);
 	audit_log_format(ab, " name=");
-	spin_lock(&mad->dentry->d_lock);
-	audit_log_untrustedstring(ab, mad->dentry->d_name.name);
-	spin_unlock(&mad->dentry->d_lock);
+	spin_lock(&mad->path.dentry->d_lock);
+	audit_log_untrustedstring(ab, mad->path.dentry->d_name.name);
+	spin_unlock(&mad->path.dentry->d_lock);
+}
+
+void medusa_path_mode_cb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	medusa_path_cb(ab, pcad);
+	audit_log_format(ab, " mode=%d", mad->path.mode);
 }
 
 void medusa_path_cb(struct audit_buffer *ab, void *pcad)
@@ -109,6 +88,5 @@ void medusa_path_cb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	audit_log_d_path(ab, " dir=", mad->path);
-	audit_log_format(ab, " mode=%d", mad->pacb.mode);
+	audit_log_d_path(ab, " dir=", mad->path.path);
 }

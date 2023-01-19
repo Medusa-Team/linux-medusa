@@ -40,12 +40,9 @@ static void medusa_ipc_shmat_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.ipc_shmat.shmflg)
-		audit_log_format(ab, " flag=%d", mad->pacb.ipc_shmat.shmflg);
-	if (mad->pacb.ipc_shmat.shmaddr)
-		audit_log_format(ab, " shmaddr=%p", mad->pacb.ipc_shmat.shmaddr);
-	if (mad->pacb.ipc_shmat.ipc_class)
-		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc_shmat.ipc_class);
+	audit_log_format(ab, " flag=%d", mad->ipc_shmat.shmflg);
+	audit_log_format(ab, " shmaddr=%p", mad->ipc_shmat.shmaddr);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc_shmat.ipc_class);
 }
 
 /*
@@ -66,11 +63,10 @@ int medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
 		     char __user *shmaddr,
 		     int shmflg)
 {
-	int retval;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		.event = EVENT_MONITORED_N,
-		.pacb.ipc_shmat.ipc_class = MED_IPC_UNDEFINED
+		/* TODO: Check if the value is available here */
+		.ipc_shmat.ipc_class = ipc_security(ipcp)->ipc_class
 	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_shmat_access access;
@@ -91,7 +87,6 @@ int medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_shmat_access, ipc_security(ipcp))) {
-		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
@@ -99,27 +94,24 @@ int medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
 		access.shmflg = shmflg;
 		access.shmaddr = shmaddr;
 		access.ipc_class = object.ipc_class;
-		mad.pacb.ipc_shmat.ipc_class = object.ipc_class;
 
 		ans = MED_DECIDE(ipc_shmat_access, &access, &process, &object);
+		mad.as = AS_REQUEST;
 	}
 out:
-	/* second argument false: don't need to lock IPC object */
-	err = ipc_putref(ipcp, false);
-	retval = lsm_retval(ans, err);
-#ifdef CONFIG_AUDIT
+	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
 		mad.function = "shmat";
-		mad.med_answer = retval;
-		mad.pacb.ipc_shmat.shmflg = shmflg;
-		mad.pacb.ipc_shmat.shmaddr = shmaddr;
+		mad.ipc_shmat.shmflg = shmflg;
+		mad.ipc_shmat.shmaddr = shmaddr;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_ipc_shmat_pacb);
 	}
-#endif
-	return retval;
+	/* second argument false: don't need to lock IPC object */
+	err = ipc_putref(ipcp, false);
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_shmat_init);

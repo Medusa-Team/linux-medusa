@@ -49,18 +49,12 @@ static void medusa_ipc_semop_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.ipc_semop.sem_flg)
-		audit_log_format(ab, " flag=%d", mad->pacb.ipc_semop.sem_flg);
-	if (mad->pacb.ipc_semop.sem_num)
-		audit_log_format(ab, " sem_num=%u", mad->pacb.ipc_semop.sem_num);
-	if (mad->pacb.ipc_semop.sem_op)
-		audit_log_format(ab, " sem_op=%d", mad->pacb.ipc_semop.sem_op);
-	if (mad->pacb.ipc_semop.nsops)
-		audit_log_format(ab, " nsops=%u", mad->pacb.ipc_semop.nsops);
-	if (mad->pacb.ipc_semop.alter)
-		audit_log_format(ab, " alter=%d", mad->pacb.ipc_semop.alter);
-	if (mad->pacb.ipc_semop.ipc_class)
-		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc_semop.ipc_class);
+	audit_log_format(ab, " flag=%d", mad->ipc_semop.sem_flg);
+	audit_log_format(ab, " sem_num=%u", mad->ipc_semop.sem_num);
+	audit_log_format(ab, " sem_op=%d", mad->ipc_semop.sem_op);
+	audit_log_format(ab, " nsops=%u", mad->ipc_semop.nsops);
+	audit_log_format(ab, " alter=%d", mad->ipc_semop.alter);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc_semop.ipc_class);
 }
 
 /*
@@ -82,11 +76,10 @@ int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 		     unsigned int nsops,
 		     int alter)
 {
-	int retval;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		.event = EVENT_MONITORED_N,
-		.pacb.ipc_semop.ipc_class = MED_IPC_UNDEFINED
+		/* TODO: Check if the value is available here */
+		.ipc_semop.ipc_class = ipc_security(ipcp)->ipc_class
 	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_semop_access access;
@@ -107,7 +100,6 @@ int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_semop_access, ipc_security(ipcp))) {
-		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
@@ -118,30 +110,27 @@ int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 		access.nsops = nsops;
 		access.alter = alter;
 		access.ipc_class = object.ipc_class;
-		mad.pacb.ipc_semop.ipc_class = object.ipc_class;
 
 		ans = MED_DECIDE(ipc_semop_access, &access, &process, &object);
+		mad.as = AS_REQUEST;
 	}
 out:
-	/* second argument false: don't need to lock IPC object */
-	err = ipc_putref(ipcp, false);
-	retval = lsm_retval(ans, err);
-#ifdef CONFIG_AUDIT
+	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
 		mad.function = "semop";
-		mad.med_answer = retval;
-		mad.pacb.ipc_semop.sem_num = sops->sem_num;
-		mad.pacb.ipc_semop.sem_op = sops->sem_op;
-		mad.pacb.ipc_semop.sem_flg = sops->sem_flg;
-		mad.pacb.ipc_semop.nsops = nsops;
-		mad.pacb.ipc_semop.alter = alter;
+		mad.ipc_semop.sem_num = sops->sem_num;
+		mad.ipc_semop.sem_op = sops->sem_op;
+		mad.ipc_semop.sem_flg = sops->sem_flg;
+		mad.ipc_semop.nsops = nsops;
+		mad.ipc_semop.alter = alter;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_ipc_semop_pacb);
 	}
-#endif
-	return retval;
+	/* second argument false: don't need to lock IPC object */
+	err = ipc_putref(ipcp, false);
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_semop_init);

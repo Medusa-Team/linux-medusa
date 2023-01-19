@@ -34,8 +34,8 @@ static void medusa_chmod_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	audit_log_d_path(ab, " dir=", mad->path);
-	audit_log_format(ab, " mode=%d", mad->pacb.mknod.mode);
+	audit_log_d_path(ab, " dir=", mad->path.path);
+	audit_log_format(ab, " mode=%d", mad->path.mode);
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
@@ -58,17 +58,16 @@ static enum medusa_answer_t medusa_do_chmod(const struct path *path, umode_t mod
 
 enum medusa_answer_t medusa_chmod(const struct path *path, umode_t mode)
 {
-	enum medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
-		goto audit;
+		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(path->dentry->d_inode)->med_object)) &&
 	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
-		goto audit;
+		return mad.ans;
 	if (!vs_intersects(VSS(task_security(current)),
 			   VS(inode_security(path->dentry->d_inode))) ||
 	    !vs_intersects(VSW(task_security(current)),
@@ -76,31 +75,24 @@ enum medusa_answer_t medusa_chmod(const struct path *path, umode_t mode)
 		mad.vs.sw.vst = VS(inode_security(path->dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
-		retval = MED_DENY;
+		mad.ans = MED_DENY;
 		goto audit;
-	} else {
-		mad.vsi = VS_INTERSECT;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(chmod_access, inode_security(path->dentry->d_inode))) {
-		retval = medusa_do_chmod(path, mode);
-		mad.event = EVENT_MONITORED;
-	} else {
-		mad.event = EVENT_MONITORED_N;
+		mad.ans = medusa_do_chmod(path, mode);
+		mad.as = AS_REQUEST;
 	}
 audit:
-#ifdef CONFIG_AUDIT
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_TASK;
 		cad.u.tsk = current;
 		mad.function = "chmod";
-		mad.med_answer = retval;
-		mad.path = path;
-		mad.pacb.mknod.mode = mode;
+		mad.path.path = path;
+		mad.path.mode = mode;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_chmod_pacb);
 	}
-#endif
-	return retval;
+	return mad.ans;
 }
 
 device_initcall(chmod_acctype_init);

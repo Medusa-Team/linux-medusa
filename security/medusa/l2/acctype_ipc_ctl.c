@@ -38,10 +38,8 @@ static void medusa_ipc_ctl_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.ipc.flcm)
-		audit_log_format(ab, " cmd=%d", mad->pacb.ipc.flcm);
-	if (mad->pacb.ipc.ipc_class)
-		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc.ipc_class);
+	audit_log_format(ab, " cmd=%d", mad->ipc_ctl.cmd);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc_ctl.ipc_class);
 }
 
 /*
@@ -88,11 +86,10 @@ static void medusa_ipc_ctl_pacb(struct audit_buffer *ab, void *pcad)
  */
 int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 {
-	int retval;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		.event = EVENT_MONITORED_N,
-		.pacb.ipc.ipc_class = MED_IPC_UNDEFINED
+		/* TODO: Can we just set this to  ipc_security(ipcp)->ipc_class ? */
+		.ipc_ctl.ipc_class = MED_IPC_UNDEFINED
 	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_ctl_access access;
@@ -119,7 +116,6 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_ctl_access, ipc_security(ipcp))) {
-		mad.event = EVENT_MONITORED;
 		memset(&access, '\0', sizeof(struct ipc_ctl_access));
 		access.cmd = cmd;
 		access.ipc_class = MED_IPC_UNDEFINED;
@@ -131,30 +127,28 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 			 */
 			ipc_kern2kobj(object_p, ipcp, true);
 			access.ipc_class = object_p->ipc_class;
-			mad.pacb.ipc.ipc_class = object_p->ipc_class;
+			mad.ipc_ctl.ipc_class = object_p->ipc_class;
 		}
 
 		/* in case of NULL 'ipcp', 'object_p' is NULL too */
 		ans = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
+		mad.as = AS_REQUEST;
 	}
 out:
-	if (likely(ipcp)) {
-		/* second argument false: don't need to lock IPC object */
-		err = ipc_putref(ipcp, false);
-	}
-	retval = lsm_retval(ans, err);
-#ifdef CONFIG_AUDIT
+	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
 		mad.function = operation;
-		mad.med_answer = retval;
-		mad.pacb.ipc.flcm = cmd;
+		mad.ipc_ctl.cmd = cmd;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_ipc_ctl_pacb);
 	}
-#endif
-	return retval;
+	if (likely(ipcp)) {
+		/* second argument false: don't need to lock IPC object */
+		err = ipc_putref(ipcp, false);
+	}
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_ctl_init);

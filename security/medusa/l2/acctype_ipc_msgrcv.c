@@ -48,18 +48,12 @@ static void medusa_ipc_msgrcv_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.ipc_msg.flag)
-		audit_log_format(ab, " flag=%d", mad->pacb.ipc_msg.flag);
-	if (mad->pacb.ipc_msg.m_type)
-		audit_log_format(ab, " m_type=%ld", mad->pacb.ipc_msg.m_type);
-	if (mad->pacb.ipc_msg.m_ts)
-		audit_log_format(ab, " m_ts=%lu", mad->pacb.ipc_msg.m_ts);
-	if (mad->pacb.ipc_msg.type)
-		audit_log_format(ab, " rm_type=%ld", mad->pacb.ipc_msg.type);
-	if (mad->pacb.ipc_msg.target)
-		audit_log_format(ab, " opid=%d", mad->pacb.ipc_msg.target);
-	if (mad->pacb.ipc_msg.ipc_class)
-		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc_msg.ipc_class);
+	audit_log_format(ab, " flag=%d", mad->ipc.flag);
+	audit_log_format(ab, " m_type=%ld", mad->ipc.m_type);
+	audit_log_format(ab, " m_ts=%lu", mad->ipc.m_ts);
+	audit_log_format(ab, " rm_type=%ld", mad->ipc.type);
+	audit_log_format(ab, " opid=%d", mad->ipc.target);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc.ipc_class);
 }
 
 /*
@@ -95,8 +89,7 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 	int retval;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		.event = EVENT_MONITORED_N,
-		.pacb.ipc_msg.ipc_class = MED_IPC_UNDEFINED
+		.ipc.ipc_class = ipc_security(ipcp)->ipc_class
 	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_msgrcv_access access;
@@ -124,7 +117,6 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_msgrcv_access, ipc_security(ipcp))) {
-		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
 		/* 3-th argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
@@ -133,30 +125,28 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 		access.mode = mode;
 		access.target = target->pid;
 		access.ipc_class = object.ipc_class;
-		mad.pacb.ipc_msg.ipc_class = object.ipc_class;
+		mad.ipc.ipc_class = object.ipc_class;
 
 		ans = MED_DECIDE(ipc_msgrcv_access, &access, &process, &object);
+		mad.as = AS_REQUEST;
 	}
 out:
-	/* second argument true: returns with locked IPC object */
-	err = ipc_putref(ipcp, true);
-	retval = lsm_retval(ans, err);
-#ifdef CONFIG_AUDIT
+	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
 		mad.function = "msgrcv";
-		mad.med_answer = retval;
-		mad.pacb.ipc_msg.m_type = msg->m_type;
-		mad.pacb.ipc_msg.m_ts = msg->m_ts;
-		mad.pacb.ipc_msg.flag = mode;
-		mad.pacb.ipc_msg.type = type;
-		mad.pacb.ipc_msg.target = target->pid;
+		mad.ipc.m_type = msg->m_type;
+		mad.ipc.m_ts = msg->m_ts;
+		mad.ipc.flag = mode;
+		mad.ipc.type = type;
+		mad.ipc.target = target->pid;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_ipc_msgrcv_pacb);
 	}
-#endif
-	return retval;
+	/* second argument true: returns with locked IPC object */
+	err = ipc_putref(ipcp, true);
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_msgrcv_init);

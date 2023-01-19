@@ -35,13 +35,13 @@ static void medusa_symlink_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	audit_log_d_path(ab, " dir=", mad->path);
+	audit_log_d_path(ab, " dir=", mad->name.dir);
 	audit_log_format(ab, " name=");
-	spin_lock(&mad->dentry->d_lock);
-	audit_log_untrustedstring(ab, mad->dentry->d_name.name);
-	spin_unlock(&mad->dentry->d_lock);
+	spin_lock(&mad->name.dentry->d_lock);
+	audit_log_untrustedstring(ab, mad->name.dentry->d_name.name);
+	spin_unlock(&mad->name.dentry->d_lock);
 	audit_log_format(ab, " oldname=");
-	audit_log_untrustedstring(ab, mad->pacb.name);
+	audit_log_untrustedstring(ab, mad->name.name);
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
@@ -74,13 +74,12 @@ enum medusa_answer_t medusa_symlink(const struct path *dir,
 				    const char *oldname)
 {
 	struct path ndcurrent, ndupper;
-	enum medusa_answer_t retval = MED_ALLOW;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VS_SW_N };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
-		goto audit;
+		return mad.ans;
 
 	ndcurrent = *dir;
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
@@ -88,7 +87,7 @@ enum medusa_answer_t medusa_symlink(const struct path *dir,
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
 	    file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
-		goto audit;
+		return mad.ans;
 	}
 	if (!vs_intersects(VSS(task_security(current)),
 			   VS(inode_security(ndupper.dentry->d_inode))) ||
@@ -98,31 +97,26 @@ enum medusa_answer_t medusa_symlink(const struct path *dir,
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		medusa_put_upper_and_parent(&ndupper, NULL);
-		retval = MED_DENY;
+		mad.ans = MED_DENY;
 		goto audit;
-	} else {
-		mad.vsi = VS_INTERSECT;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(symlink_access, inode_security(ndupper.dentry->d_inode))) {
-		retval = medusa_do_symlink(&ndupper, dentry, oldname);
-		mad.event = EVENT_MONITORED;
-	} else {
-		mad.event = EVENT_MONITORED_N;
+		mad.ans = medusa_do_symlink(&ndupper, dentry, oldname);
+		mad.as = AS_REQUEST;
 	}
-	medusa_put_upper_and_parent(&ndupper, NULL);
 audit:
-#ifdef CONFIG_AUDIT
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_TASK;
 		cad.u.tsk = current;
 		mad.function = "symlink";
-		mad.med_answer = retval;
-		mad.pacb.name = oldname;
+		mad.name.dir = dir;
+		mad.name.dentry = dentry;
+		mad.name.name = oldname;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_symlink_pacb);
 	}
-#endif
-	return retval;
+	medusa_put_upper_and_parent(&ndupper, NULL);
+	return mad.ans;
 }
 
 device_initcall(symlink_acctype_init);

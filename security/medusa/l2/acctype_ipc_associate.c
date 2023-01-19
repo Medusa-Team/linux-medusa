@@ -40,10 +40,8 @@ static void medusa_ipc_associate_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
-	if (mad->pacb.ipc.flcm)
-		audit_log_format(ab, " flag=%d", mad->pacb.ipc.flcm);
-	if (mad->pacb.ipc.ipc_class)
-		audit_log_format(ab, " ipc_class=%u", mad->pacb.ipc.ipc_class);
+	audit_log_format(ab, " flag=%d", mad->ipc.flag);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc.ipc_class);
 }
 
 /* Check permission when
@@ -69,9 +67,10 @@ static void medusa_ipc_associate_pacb(struct audit_buffer *ab, void *pcad)
  */
 int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 {
-	int retval;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .vsi = VS_SW_N, .pacb.ipc.ipc_class = MED_IPC_UNDEFINED };
+	struct medusa_audit_data mad = {
+		.ipc.ipc_class = ipc_security(ipcp)->ipc_class
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_associate_access access;
 	struct process_kobject process;
@@ -91,48 +90,39 @@ int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 		goto out;
 
 	if (!vs_intersects(VSS(task_security(current)), VS(ipc_security(ipcp))) ||
-	    !vs_intersects(VSW(task_security(current)), VS(ipc_security(ipcp)))
-	) {
+	    !vs_intersects(VSW(task_security(current)), VS(ipc_security(ipcp)))) {
 		mad.vs.sw.vst = VS(ipc_security(ipcp));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		ans = MED_DENY;
 		goto out;
-	} else {
-		mad.vsi = VS_INTERSECT;
 	}
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_associate_access, ipc_security(ipcp))) {
-		mad.event = EVENT_MONITORED;
 		process_kern2kobj(&process, current);
-		/* 3-th argument is true: decrement IPC object's refcount in returned object */
+		/* 3rd argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
 		memset(&access, '\0', sizeof(struct ipc_associate_access));
 		access.flag = flag;
 		access.ipc_class = object.ipc_class;
-		mad.pacb.ipc.ipc_class = object.ipc_class;
 
 		ans = MED_DECIDE(ipc_associate_access, &access, &process, &object);
-	} else {
-		mad.event = EVENT_MONITORED_N;
+		mad.as = AS_REQUEST;
 	}
 out:
 	/* second argument true: returns with locked IPC object */
 	err = ipc_putref(ipcp, true);
-	retval = lsm_retval(ans, err);
-#ifdef CONFIG_AUDIT
+	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
 		mad.function = operation;
-		mad.med_answer = retval;
-		mad.pacb.ipc.flcm = flag;
+		mad.ipc.flag = flag;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_ipc_associate_pacb);
 	}
-#endif
-	return retval;
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_associate_init);
