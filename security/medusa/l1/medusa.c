@@ -596,11 +596,6 @@ int medusa_l1_task_init(struct task_struct *task, unsigned long clone_flags)
 
 	*med = *old;
 
-	/* TODO: I have a feeling that this doesn't have to be here.
-	   Somebody check it please. */
-	mutex_init(&(med->validation_in_progress));
-	med->validation_depth_nesting = 1;
-
 #ifndef CONFIG_SECURITY_MEDUSA_MONITOR_KTHREADS
 	/* Kernel threads have a superpower... Don't try to restrict them! */
 	if ((task->flags & PF_KTHREAD) || !task->mm)
