@@ -33,6 +33,7 @@ struct ipc_kobject {
 	struct medusa_ipc_perm ipc_perm;
 	struct medusa_object_s med_object;
 };
+
 extern MED_DECLARE_KCLASSOF(ipc_kobject);
 
 int ipc_kern2kobj(struct ipc_kobject *ipc_kobj, struct kern_ipc_perm *ipcp,

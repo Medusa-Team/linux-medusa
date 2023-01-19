@@ -14,6 +14,7 @@ struct fuck_kobject {
 	char action[20];        /* type of operation 'update' ('append' or 'remove') */
 	struct medusa_object_s med_object;
 };
+
 extern MED_DECLARE_KCLASSOF(fuck_kobject);
 
 /* prototypes of L2 fuck related handlers called from L2 hooks */

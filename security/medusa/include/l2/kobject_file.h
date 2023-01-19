@@ -46,6 +46,7 @@ struct file_kobject { /* was: m_inode_inf */
 	kernel_cap_t ecap;
 #endif /* CONFIG_MEDUSA_FILE_CAPABILITIES */
 };
+
 extern MED_DECLARE_KCLASSOF(file_kobject);
 
 /* the conversion routine */

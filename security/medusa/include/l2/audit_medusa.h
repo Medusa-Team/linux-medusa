@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #include <linux/types.h>
 #include <linux/lsm_audit.h>
 
@@ -107,7 +109,7 @@ struct medusa_audit_data {
 };
 
 void medusa_audit_log_callback(struct common_audit_data *cad,
-		void (*medusa_post) (struct audit_buffer *, void *));
+			       void (*medusa_post)(struct audit_buffer *, void *));
 void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad);
 void medusa_path_mode_cb(struct audit_buffer *ab, void *pcad);
 void medusa_path_cb(struct audit_buffer *ab, void *pcad);
