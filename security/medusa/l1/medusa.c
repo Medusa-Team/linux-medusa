@@ -594,7 +594,16 @@ int medusa_l1_task_init(struct task_struct *task, unsigned long clone_flags)
 	struct medusa_l1_task_s *old = task_security(current);
 	struct medusa_l1_task_s *med = task_security(task);
 
-	*med = *old;
+	/*  current == task iff initializing task with pid == 0  */
+	if (unlikely(current == task)) {
+		init_med_object(&(med->med_object));
+		init_med_subject(&(med->med_subject));
+	} else {
+		*med = *old;
+	}
+
+	mutex_init(&(med->validation_in_progress));
+	med->validation_depth_nesting = 1;
 
 #ifndef CONFIG_SECURITY_MEDUSA_MONITOR_KTHREADS
 	/* Kernel threads have a superpower... Don't try to restrict them! */
@@ -1726,13 +1735,7 @@ struct security_hook_list medusa_l1_hooks_alloc[] = {
 static int __init medusa_l1_init(void)
 {
 	/* set the security info for the task pid 0 on boot cpu */
-	struct medusa_l1_task_s *med = task_security(current);
-
-	init_med_object(&(med->med_object));
-	init_med_subject(&(med->med_subject));
-
-	mutex_init(&(med->validation_in_progress));
-	med->validation_depth_nesting = 1;
+	medusa_l1_task_init(current, 0);
 
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");
