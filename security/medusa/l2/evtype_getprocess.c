@@ -32,16 +32,22 @@ MED_EVTYPE(getprocess_event, "getprocess",
  */
 int process_kobj_validate_task(struct task_struct *ts)
 {
-	enum medusa_answer_t retval;
+	enum medusa_answer_t med_ret;
 	struct getprocess_event event;
 	struct process_kobject proc;
 	struct process_kobject parent;
 	struct task_struct *ts_parent;
-	int err;
+	int ret = -1;
 
 	/* nothing to do if there is no running authserver */
 	if (!med_is_authserver_present())
 		return 0;
+
+	if (ts == current) {
+		mutex_lock_nested(&(task_security(current)->validation_in_progress),
+				  task_security(current)->validation_depth_nesting);
+		task_security(current)->validation_depth_nesting++;
+	}
 
 	init_med_object(&(task_security(ts)->med_object));
 	init_med_subject(&(task_security(ts)->med_subject));
@@ -61,7 +67,7 @@ int process_kobj_validate_task(struct task_struct *ts)
 		ts_parent = rcu_dereference(ts->real_parent);
 	if (unlikely(!ts_parent)) {
 		rcu_read_unlock();
-		return -1;
+		goto out;
 	}
 	get_task_struct(ts_parent);
 	rcu_read_unlock();
@@ -74,12 +80,12 @@ int process_kobj_validate_task(struct task_struct *ts)
 			  task_security(current)->validation_depth_nesting);
 	task_security(current)->validation_depth_nesting++;
 	if (!is_med_magic_valid(&(task_security(ts_parent)->med_object))) {
-		err = process_kobj_validate_task(ts_parent);
-		if (err <= 0) {
+		ret = process_kobj_validate_task(ts_parent);
+		if (ret <= 0) {
 			mutex_unlock(&(task_security(ts_parent)->validation_in_progress));
 			put_task_struct(ts_parent);
 			task_security(current)->validation_depth_nesting--;
-			return err;
+			goto out;
 		}
 	}
 	task_security(current)->validation_depth_nesting--;
@@ -103,7 +109,8 @@ int process_kobj_validate_task(struct task_struct *ts)
 		       sizeof(task_security(ts)->med_syscall));
 #endif
 		put_task_struct(ts_parent);
-		return 1;
+		ret = 1;
+		goto out;
 	}
 
 init_always_do_direct_getprocess:
@@ -112,10 +119,17 @@ init_always_do_direct_getprocess:
 
 	get_cmdline(ts, task_security(ts)->cmdline, sizeof(task_security(ts)->cmdline));
 	process_kern2kobj(&proc, ts);
-	retval = MED_DECIDE(getprocess_event, &event, &proc, &parent);
-	if (retval != MED_ERR)
-		return is_med_magic_valid(&(task_security(ts)->med_object));
-	return -1;
+	med_ret = MED_DECIDE(getprocess_event, &event, &proc, &parent);
+	if (med_ret != MED_ERR)
+		ret = is_med_magic_valid(&(task_security(ts)->med_object));
+
+out:
+	if (ts == current) {
+		task_security(current)->validation_depth_nesting--;
+		mutex_unlock(&(task_security(current)->validation_in_progress));
+	}
+
+	return ret;
 }
 
 int __init getprocess_evtype_init(void)
