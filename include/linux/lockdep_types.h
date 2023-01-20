@@ -12,7 +12,7 @@
 
 #include <linux/types.h>
 
-#define MAX_LOCKDEP_SUBCLASSES		8UL
+#define MAX_LOCKDEP_SUBCLASSES		16UL
 
 enum lockdep_wait_type {
 	LD_WAIT_INV = 0,	/* not checked, catch all */
