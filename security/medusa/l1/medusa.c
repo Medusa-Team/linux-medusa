@@ -39,7 +39,8 @@ static void medusa_l1_initialize_init(const char *filename)
 	struct medusa_l1_task_s *med = task_security(current);
 
 	if (strcmp(filename, "/sbin/init")) {
-		med_pr_warn("Exec of non-init process happened without init running!\n");
+		med_pr_warn("Exec of non-init process %s happened without init running!\n",
+			    filename);
 		return;
 	}
 
