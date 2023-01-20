@@ -59,7 +59,7 @@ static enum medusa_answer_t medusa_do_chmod(const struct path *path, umode_t mod
 enum medusa_answer_t medusa_chmod(const struct path *path, umode_t mode)
 {
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)

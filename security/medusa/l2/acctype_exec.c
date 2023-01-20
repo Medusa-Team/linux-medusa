@@ -105,7 +105,7 @@ enum medusa_answer_t medusa_exec(struct linux_binprm *bprm)
 	// TODO: Can we use file_inode?
 	struct inode *inode = d_backing_inode(path->dentry);
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)

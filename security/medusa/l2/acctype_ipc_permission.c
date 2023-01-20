@@ -73,12 +73,12 @@ static void medusa_ipc_perm_pacb(struct audit_buffer *ab, void *pcad)
  */
 int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 {
-	int retval;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		.ipc_perm.ipc_class = ipc_security(ipcp)->ipc_class
+		.ipc_perm.ipc_class = ipc_security(ipcp)->ipc_class,
+		.ans = MED_ALLOW,
+		.as = AS_NO_REQUEST
 	};
-	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_perm_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
@@ -129,7 +129,7 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 		 * in this function this way we lose do_msgsnd() and ipc_check_perms()
 		 * controls...
 		 */
-		return lsm_retval(ans, err);
+		return lsm_retval(mad.ans, err);
 #endif
 	}
 
@@ -152,17 +152,16 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_perm_access, ipc_security(ipcp))) {
 		process_kern2kobj(&process, current);
-		/* 3-th argument is true: decrement IPC object's refcount in returned object */
+		/* 3rd argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
 		access.perms = flag;
 		access.ipc_class = object.ipc_class;
 
-		ans = MED_DECIDE(ipc_perm_access, &access, &process, &object);
+		mad.ans = MED_DECIDE(ipc_perm_access, &access, &process, &object);
 		mad.as = AS_REQUEST;
 	}
 out:
-	retval = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
@@ -178,7 +177,7 @@ out:
 	 */
 	/* second argument true: returns with locked IPC object */
 	err = ipc_putref(ipcp, use_locking);
-	return mad.ans;
+	return lsm_retval(mad.ans, err);
 }
 
 device_initcall(ipc_acctype_perm_init);

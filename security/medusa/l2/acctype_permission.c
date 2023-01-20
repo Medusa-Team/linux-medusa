@@ -63,7 +63,7 @@ enum medusa_answer_t medusa_do_permission(struct dentry *dentry, struct inode *i
 enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 {
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 	struct dentry *dentry;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&

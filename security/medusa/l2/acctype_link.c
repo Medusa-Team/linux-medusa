@@ -73,7 +73,7 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 {
 	struct path ndcurrent, ndupper;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 	int err;
 
 	/* TODO: Implement fuck entry for audit */

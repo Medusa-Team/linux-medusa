@@ -88,16 +88,17 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 {
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		/* TODO: Can we just set this to  ipc_security(ipcp)->ipc_class ? */
-		.ipc_ctl.ipc_class = MED_IPC_UNDEFINED
+		.ipc_ctl.ipc_class = MED_IPC_UNDEFINED,
+		.ans = MED_ALLOW,
+		.as = AS_NO_REQUEST
 	};
-	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_ctl_access access;
 	struct process_kobject process;
 	struct ipc_kobject object, *object_p = NULL;
 	int err = 0;
 
-	/* 'ipcp' is NULL in case of 'cmd': IPC_INFO, MSG_INFO, SEM_INFO, SHM_INFO */
+	/* 'ipcp' is NULL in case 'cmd' is one of: IPC_INFO, MSG_INFO, SEM_INFO,
+	 * SHM_INFO */
 	if (likely(ipcp)) {
 		/* second argument false: don't need to unlock IPC object */
 		err = ipc_getref(ipcp, false);
@@ -131,11 +132,10 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 		}
 
 		/* in case of NULL 'ipcp', 'object_p' is NULL too */
-		ans = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
+		mad.ans = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
 		mad.as = AS_REQUEST;
 	}
 out:
-	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
@@ -148,7 +148,7 @@ out:
 		/* second argument false: don't need to lock IPC object */
 		err = ipc_putref(ipcp, false);
 	}
-	return mad.ans;
+	return lsm_retval(mad.ans, err);
 }
 
 device_initcall(ipc_acctype_ctl_init);

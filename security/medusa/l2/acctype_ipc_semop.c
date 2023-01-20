@@ -78,10 +78,10 @@ int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 {
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		/* TODO: Check if the value is available here */
-		.ipc_semop.ipc_class = ipc_security(ipcp)->ipc_class
+		.ipc_semop.ipc_class = ipc_security(ipcp)->ipc_class,
+		.ans = MED_ALLOW,
+		.as = AS_NO_REQUEST
 	};
-	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_semop_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
@@ -101,7 +101,7 @@ int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_semop_access, ipc_security(ipcp))) {
 		process_kern2kobj(&process, current);
-		/* 3-th argument is true: decrement IPC object's refcount in returned object */
+		/* 3rd argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
 
 		access.sem_op = sops->sem_op;
@@ -111,11 +111,10 @@ int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 		access.alter = alter;
 		access.ipc_class = object.ipc_class;
 
-		ans = MED_DECIDE(ipc_semop_access, &access, &process, &object);
+		mad.ans = MED_DECIDE(ipc_semop_access, &access, &process, &object);
 		mad.as = AS_REQUEST;
 	}
 out:
-	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
@@ -130,7 +129,7 @@ out:
 	}
 	/* second argument false: don't need to lock IPC object */
 	err = ipc_putref(ipcp, false);
-	return mad.ans;
+	return lsm_retval(mad.ans, err);
 }
 
 device_initcall(ipc_acctype_semop_init);

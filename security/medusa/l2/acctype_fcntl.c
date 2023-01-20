@@ -65,7 +65,7 @@ enum medusa_answer_t medusa_fcntl(struct file *file, unsigned int cmd,
 				  unsigned long arg)
 {
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 
 	struct inode *inode = file_inode(file);
 

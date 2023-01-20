@@ -69,9 +69,10 @@ int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 {
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		.ipc.ipc_class = ipc_security(ipcp)->ipc_class
+		.ipc.ipc_class = ipc_security(ipcp)->ipc_class,
+		.ans = MED_ALLOW,
+		.as = AS_NO_REQUEST
 	};
-	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_associate_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
@@ -94,7 +95,7 @@ int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 		mad.vs.sw.vst = VS(ipc_security(ipcp));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
-		ans = MED_DENY;
+		mad.ans = MED_DENY;
 		goto out;
 	}
 
@@ -107,13 +108,12 @@ int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 		access.flag = flag;
 		access.ipc_class = object.ipc_class;
 
-		ans = MED_DECIDE(ipc_associate_access, &access, &process, &object);
+		mad.ans = MED_DECIDE(ipc_associate_access, &access, &process, &object);
 		mad.as = AS_REQUEST;
 	}
 out:
 	/* second argument true: returns with locked IPC object */
 	err = ipc_putref(ipcp, true);
-	mad.ans = lsm_retval(ans, err);
 	if (task_security(current)->audit) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
@@ -122,7 +122,7 @@ out:
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_ipc_associate_pacb);
 	}
-	return mad.ans;
+	return lsm_retval(mad.ans, err);
 }
 
 device_initcall(ipc_acctype_associate_init);

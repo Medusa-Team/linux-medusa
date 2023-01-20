@@ -47,7 +47,7 @@ static enum medusa_answer_t medusa_do_open(struct path *path, struct inode *inod
 enum medusa_answer_t medusa_open(struct file *file)
 {
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW };
+	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 
 	struct path *path = &file->f_path;
 	const u8 acc_mode = ACC_MODE(file->f_flags);
