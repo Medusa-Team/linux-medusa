@@ -11,6 +11,7 @@
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
 #include "l2/l2.h"
+#include "l2/audit_medusa.h"
 
 struct ipc_associate_access {
 	MEDUSA_ACCESS_HEADER;
@@ -24,12 +25,23 @@ MED_ATTRS(ipc_associate_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(ipc_associate_access, "ipc_associate", process_kobject, "process", ipc_kobject, "object");
+MED_ACCTYPE(ipc_associate_access, "ipc_associate",
+	    process_kobject, "process",
+	    ipc_kobject, "object");
 
 int __init ipc_acctype_associate_init(void)
 {
 	MED_REGISTER_ACCTYPE(ipc_associate_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
+}
+
+static void medusa_ipc_associate_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	audit_log_format(ab, " flag=%d", mad->ipc.flag);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc.ipc_class);
 }
 
 /* Check permission when
@@ -53,43 +65,64 @@ int __init ipc_acctype_associate_init(void)
  *       is always called with ipcp->lock held
  *
  */
-int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag)
+int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 {
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = {
+		.ipc.ipc_class = ipc_security(ipcp)->ipc_class
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_associate_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
-	int err = 0;
+	int err = ipc_getref(ipcp, true);
 
 	/* second argument true: returns with unlocked IPC object */
-	if (unlikely((err = ipc_getref(ipcp, true)) != 0))
+	if (unlikely(err))
 		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
 		return err;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object))
-	    && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
-	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+	    ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
-	if (!vs_intersects(VSS(task_security(current)), VS(ipc_security(ipcp)))
-	    || !vs_intersects(VSW(task_security(current)), VS(ipc_security(ipcp)))
-	) {
+	if (!vs_intersects(VSS(task_security(current)), VS(ipc_security(ipcp))) ||
+	    !vs_intersects(VSW(task_security(current)), VS(ipc_security(ipcp)))) {
+		mad.vs.sw.vst = VS(ipc_security(ipcp));
+		mad.vs.sw.vss = VSS(task_security(current));
+		mad.vs.sw.vsw = VSW(task_security(current));
 		ans = MED_DENY;
 		goto out;
 	}
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_associate_access, ipc_security(ipcp))) {
 		process_kern2kobj(&process, current);
-		/* 3-th argument is true: decrement IPC object's refcount in returned object */
+		/* 3rd argument is true: decrement IPC object's refcount in returned object */
 		ipc_kern2kobj(&object, ipcp, true);
+
+		memset(&access, '\0', sizeof(struct ipc_associate_access));
+		access.flag = flag;
+		access.ipc_class = object.ipc_class;
+
 		ans = MED_DECIDE(ipc_associate_access, &access, &process, &object);
+		mad.as = AS_REQUEST;
 	}
 out:
 	/* second argument true: returns with locked IPC object */
 	err = ipc_putref(ipcp, true);
-	return lsm_retval(ans, err);
+	mad.ans = lsm_retval(ans, err);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_IPC;
+		cad.u.ipc_id = ipcp->key;
+		mad.function = operation;
+		mad.ipc.flag = flag;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_ipc_associate_pacb);
+	}
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_associate_init);

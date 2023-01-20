@@ -17,13 +17,14 @@ MED_ATTRS(afterexec_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(afterexec_access, "after_exec", process_kobject, "process",
-		process_kobject, "process");
+MED_ACCTYPE(afterexec_access, "after_exec",
+	    process_kobject, "process",
+	    process_kobject, "process");
 
 int __init afterexec_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(afterexec_access,
-			MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
+			     MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 
@@ -34,13 +35,13 @@ enum medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 	enum medusa_answer_t retval;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(afterexec_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		retval = MED_DECIDE(afterexec_access, &access,
-				&process, &process);
+				    &process, &process);
 		return retval;
 	}
 
@@ -56,10 +57,10 @@ void medusa_monitor_afterexec(int flag)
 {
 	if (flag)
 		MEDUSA_MONITOR_ACCESS_S(afterexec_access,
-				task_security(current));
+					task_security(current));
 	else
 		MEDUSA_UNMONITOR_ACCESS_S(afterexec_access,
-				task_security(current));
+					  task_security(current));
 }
 
 device_initcall(afterexec_acctype_init);

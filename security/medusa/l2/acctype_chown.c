@@ -3,12 +3,13 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_file.h"
+#include "l2/audit_medusa.h"
 
 /* let's define the 'chown' access type, with subj=task and obj=inode */
 
 struct chown_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 	kuid_t uid;
 	kgid_t gid;
 };
@@ -20,13 +21,24 @@ MED_ATTRS(chown_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(chown_access, "chown", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(chown_access, "chown",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init chown_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(chown_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
+}
+
+static void medusa_chown_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	audit_log_d_path(ab, " path=", mad->chown.path);
+	audit_log_format(ab, " uid=%d", from_kuid(&init_user_ns, mad->chown.uid));
+	audit_log_format(ab, " gid=%d", from_kgid(&init_user_ns, mad->chown.gid));
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
@@ -50,20 +62,42 @@ static enum medusa_answer_t medusa_do_chown(const struct path *path, kuid_t uid,
 
 enum medusa_answer_t medusa_chown(const struct path *path, kuid_t uid, kgid_t gid)
 {
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = { .ans = MED_ALLOW };
+
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
-		return MED_ALLOW;
+	    process_kobj_validate_task(current) <= 0)
+		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(path->dentry->d_inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
-		return MED_ALLOW;
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(path->dentry->d_inode))) ||
-		!vs_intersects(VSW(task_security(current)), VS(inode_security(path->dentry->d_inode)))
-	)
-		return MED_DENY;
-	if (MEDUSA_MONITORED_ACCESS_O(chown_access, inode_security(path->dentry->d_inode)))
-		return medusa_do_chown(path, uid, gid);
-	return MED_ALLOW;
+	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
+		return mad.ans;
+	if (!vs_intersects(VSS(task_security(current)),
+			   VS(inode_security(path->dentry->d_inode))) ||
+	    !vs_intersects(VSW(task_security(current)),
+			   VS(inode_security(path->dentry->d_inode)))) {
+		mad.vs.sw.vst = VS(inode_security(path->dentry->d_inode));
+		mad.vs.sw.vss = VSS(task_security(current));
+		mad.vs.sw.vsw = VSW(task_security(current));
+		mad.ans = MED_DENY;
+		goto audit;
+	}
+	if (MEDUSA_MONITORED_ACCESS_O(chown_access, inode_security(path->dentry->d_inode))) {
+		mad.ans = medusa_do_chown(path, uid, gid);
+		mad.as = AS_REQUEST;
+	}
+audit:
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.u.tsk = current;
+		mad.function = "chown";
+		mad.chown.path = path;
+		mad.chown.uid = uid;
+		mad.chown.gid = gid;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_chown_pacb);
+	}
+	return mad.ans;
 }
 
 device_initcall(chown_acctype_init);

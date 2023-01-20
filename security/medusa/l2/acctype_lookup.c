@@ -8,7 +8,7 @@
 
 struct lookup_access {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
 
 MED_ATTRS(lookup_access) {
@@ -16,8 +16,9 @@ MED_ATTRS(lookup_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(lookup_access, "lookup", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(lookup_access, "lookup",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init lookup_acctype_init(void)
 {
@@ -46,11 +47,11 @@ enum medusa_answer_t medusa_lookup(struct inode *dir, struct dentry **dentry)
 	if (!*dentry || IS_ERR(*dentry) || !(*dentry)->d_inode)
 		return MED_ALLOW;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security((*dentry)->d_inode)->med_object)) &&
-		file_kobj_validate_dentry(*dentry, NULL, NULL) <= 0)
+	    file_kobj_validate_dentry(*dentry, NULL, NULL) <= 0)
 		return MED_ALLOW;
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security((*dentry)->d_inode))))
 		return MED_DENY;

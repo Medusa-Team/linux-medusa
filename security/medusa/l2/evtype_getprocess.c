@@ -22,8 +22,10 @@ struct getprocess_event {
 MED_ATTRS(getprocess_event) {
 	MED_ATTR_END
 };
-MED_EVTYPE(getprocess_event, "getprocess", process_kobject, "process",
-		process_kobject, "parent");
+
+MED_EVTYPE(getprocess_event, "getprocess",
+	   process_kobject, "process",
+	   process_kobject, "parent");
 
 /*
  * This routine expects the existing, but !is_med_magic_valid Medusa task_struct security struct!
@@ -71,12 +73,14 @@ int process_kobj_validate_task(struct task_struct *ts)
 	mutex_lock_nested(&(task_security(ts_parent)->validation_in_progress),
 			  task_security(current)->validation_depth_nesting);
 	task_security(current)->validation_depth_nesting++;
-	if (!is_med_magic_valid(&(task_security(ts_parent)->med_object)) &&
-		(err = process_kobj_validate_task(ts_parent)) <= 0) {
-		mutex_unlock(&(task_security(ts_parent)->validation_in_progress));
-		put_task_struct(ts_parent);
-		task_security(current)->validation_depth_nesting--;
-		return err;
+	if (!is_med_magic_valid(&(task_security(ts_parent)->med_object))) {
+		err = process_kobj_validate_task(ts_parent);
+		if (err <= 0) {
+			mutex_unlock(&(task_security(ts_parent)->validation_in_progress));
+			put_task_struct(ts_parent);
+			task_security(current)->validation_depth_nesting--;
+			return err;
+		}
 	}
 	task_security(current)->validation_depth_nesting--;
 	mutex_unlock(&(task_security(ts_parent)->validation_in_progress));
@@ -92,6 +96,7 @@ int process_kobj_validate_task(struct task_struct *ts)
 				       task_security(ts_parent))) {
 		task_security(ts)->med_subject = task_security(ts_parent)->med_subject;
 		task_security(ts)->med_object = task_security(ts_parent)->med_object;
+		task_security(ts)->audit = task_security(ts_parent)->audit;
 #if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
 		memcpy(task_security(ts)->med_syscall,
 		       task_security(ts_parent)->med_syscall,
@@ -123,8 +128,8 @@ int __init getprocess_evtype_init(void)
 	 * Attention: Credentials (capabilities, IDs, GIDs) are not inherited!
 	 */
 	MED_REGISTER_EVTYPE(getprocess_event,
-			MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
-			MEDUSA_EVTYPE_TRIGGEREDBYSUBJECTBIT);
+			    MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |
+			    MEDUSA_EVTYPE_TRIGGEREDBYSUBJECTBIT);
 	return 0;
 }
 device_initcall(getprocess_evtype_init);

@@ -53,7 +53,7 @@ static int prepend(char *buffer, int buflen, const struct qstr *name)
 	buflen -= dlen;
 	if (buflen < 0)
 		return -ENAMETOOLONG;
-	memcpy(buffer+buflen, dname, dlen);
+	memcpy(buffer + buflen, dname, dlen);
 
 	return dlen;
 }
@@ -63,7 +63,7 @@ static int prepend(char *buffer, int buflen, const struct qstr *name)
  */
 static int prepend_dentry_name(char *buf, int buflen, struct dentry *dentry)
 {
-	unsigned seq, m_seq = 0;
+	unsigned int seq, m_seq = 0;
 	int ret;
 
 	rcu_read_lock();
@@ -132,11 +132,11 @@ static bool do_allowed_path(char *path, struct medusa_l1_inode_s *inode,
 		return false;
 
 	len = strlen(path) + 1;
-	secure_path = kmalloc(sizeof(struct fuck_path) + sizeof(char)*len, GFP_KERNEL);
+	secure_path = kmalloc(sizeof(*secure_path) + sizeof(char) * len, GFP_KERNEL);
 	if (!secure_path)
 		return false;
 	strncpy(secure_path->path, path, len);
-	secure_path->path[len-1] = '\0';
+	secure_path->path[len - 1] = '\0';
 	hash_add(inode->fuck, &secure_path->list, hash);
 
 	return true;
@@ -184,7 +184,7 @@ int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *ne
 	 * stored from the end of the buffer, too.
 	 */
 	if (new) {
-		buf[buflen-1] = '\0';
+		buf[buflen - 1] = '\0';
 		buflen--;
 
 		ret = prepend_dentry_name(buf, buflen, new);
@@ -192,8 +192,7 @@ int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *ne
 			med_pr_err("%s: prepend_dentry_name() failed with %d",
 				   __func__, ret);
 			goto out_allow_fuck;
-		}
-		else if (unlikely(!ret)) {
+		} else if (unlikely(!ret)) {
 			med_pr_warn("%s: ooops, dentry name is empty!", __func__);
 			ret = -EINVAL;
 			goto out_allow_fuck;
@@ -215,7 +214,7 @@ int allow_fuck(struct dentry *dentry, const struct path *path, struct dentry *ne
 	/* Change terminating character stored by `d_absolute_path()` to '/' if
 	 * necessary.
 	 */
-	buf[buflen-1] = term;
+	buf[buflen - 1] = term;
 
 	if (!is_allowed_path(examined_path, inode_security(fuck_inode))) {
 		med_pr_info("%s: denied access from the path '%s'", __func__,
@@ -233,11 +232,11 @@ out_allow_fuck:
 
 static struct medusa_kobject_s *fuck_fetch(struct medusa_kobject_s *kobj)
 {
-	struct fuck_kobject *fkobj = (struct fuck_kobject *) kobj;
+	struct fuck_kobject *fkobj = (struct fuck_kobject *)kobj;
 	struct inode *fuck_inode;
 	struct path path;
 
-	fkobj->path[sizeof(fkobj->path)-1] = '\0';
+	fkobj->path[sizeof(fkobj->path) - 1] = '\0';
 	if (kern_path(fkobj->path, LOOKUP_FOLLOW, &path) < 0)
 		return NULL;
 
@@ -246,7 +245,7 @@ static struct medusa_kobject_s *fuck_fetch(struct medusa_kobject_s *kobj)
 	fkobj->dev = new_encode_dev(fuck_inode->i_sb->s_dev);
 	memset(fkobj->action, '\0', sizeof(fkobj->action));
 
-	return (struct medusa_kobject_s *) kobj;
+	return (struct medusa_kobject_s *)kobj;
 }
 
 /**
@@ -273,7 +272,7 @@ static struct medusa_kobject_s *fuck_fetch(struct medusa_kobject_s *kobj)
  */
 static enum medusa_answer_t fuck_update(struct medusa_kobject_s *kobj)
 {
-	struct fuck_kobject *fkobj =  (struct fuck_kobject *) kobj;
+	struct fuck_kobject *fkobj = (struct fuck_kobject *)kobj;
 	struct super_block *sb;
 	struct inode *fuck_inode;
 
@@ -291,7 +290,7 @@ static enum medusa_answer_t fuck_update(struct medusa_kobject_s *kobj)
 		return MED_ERR;
 	}
 
-	fkobj->path[sizeof(fkobj->path)-1] = '\0';
+	fkobj->path[sizeof(fkobj->path) - 1] = '\0';
 	if (strcmp(fkobj->action, "append") == 0) {
 		if (!append_to_allowed_paths(fkobj->path, inode_security(fuck_inode))) {
 			med_pr_warn("%s: OOM ino %ld dev %d", __func__, fkobj->ino, fkobj->dev);
@@ -304,7 +303,7 @@ static enum medusa_answer_t fuck_update(struct medusa_kobject_s *kobj)
 	}
 
 	med_pr_info("%s: '%s' (dev = %u, ino = %lu, act = %s)", __func__,
-		     fkobj->path, fkobj->dev, fkobj->ino, fkobj->action);
+		    fkobj->path, fkobj->dev, fkobj->ino, fkobj->action);
 
 	iput(fuck_inode);
 	return MED_ALLOW;

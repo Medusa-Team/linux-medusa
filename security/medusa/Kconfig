@@ -2,7 +2,7 @@ source "security/medusa/testing/Kconfig"
 
 config SECURITY_MEDUSA
 	bool "MEDUSA Support"
-	depends on SECURITY
+	depends on SECURITY && AUDIT
 	select NETWORK_SECMARK
 	default n
 	help

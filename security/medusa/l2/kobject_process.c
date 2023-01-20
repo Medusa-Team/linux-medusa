@@ -43,7 +43,7 @@ static inline bool uid_differs(int newid, kuid_t old,
 	if (!uid_eq(new, old)) {
 		if (!uid_valid(new) && print_warning)
 			med_pr_warn("Invalid %s UID %d for task '%s' (PID %u)\n",
-					type, newid, cmd, pid);
+				    type, newid, cmd, pid);
 		return true;
 	}
 	return false;
@@ -77,7 +77,7 @@ static inline bool gid_differs(int newid, kgid_t old,
 	if (!gid_eq(new, old)) {
 		if (!gid_valid(new) && print_warning)
 			med_pr_warn("Invalid %s GID %d for task '%s' (PID %u)\n",
-					type, newid, cmd, pid);
+				    type, newid, cmd, pid);
 		return true;
 	}
 	return false;
@@ -140,6 +140,8 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 #endif
 	rcu_read_unlock();
 
+	ts_security->audit = tk->audit;
+
 	/* If no change of credentials is requested, return */
 	if (!change_cred)
 		goto out;
@@ -154,7 +156,7 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 		 * in the kernel.
 		 */
 		med_pr_warn("An attempt of task '%s' %u to alter credentials of the task '%s' %u\n",
-				current->comm, current->pid, ts->comm, ts->pid);
+			    current->comm, current->pid, ts->comm, ts->pid);
 
 		/* As we can't change another task's credentials, there is nothing to do anymore */
 		goto out;
@@ -162,7 +164,7 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 
 	/* With Constable never reached until not fixed modification of task's credentials */
 	med_pr_warn("Task '%s' %u modifies credentials of itself\n",
-			current->comm, current->pid);
+		    current->comm, current->pid);
 
 	/* Make a working copy of *current* task's objective credentials */
 	new = prepare_creds();
@@ -207,7 +209,7 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 
 out:
 	/* validate security context of the process */
-	med_magic_validate(&(ts_security->med_object));
+	med_magic_validate(&ts_security->med_object);
 	return 0;
 }
 
@@ -239,6 +241,8 @@ inline int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
 	struct task_struct *task;
 
 	memset(tk, '\0', sizeof(struct process_kobject));
+
+	tk->audit = ts_security->audit;
 
 	rcu_read_lock();
 
@@ -328,7 +332,7 @@ MED_ATTRS(process_kobject) {
 #if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
 	MED_ATTR(process_kobject, med_syscall, "syscall", MED_BYTES),
 #endif
-
+	MED_ATTR(process_kobject, audit, "audit", MED_SIGNED),
 	MED_ATTR_END
 };
 

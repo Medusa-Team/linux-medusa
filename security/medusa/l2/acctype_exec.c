@@ -5,6 +5,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_file.h"
+#include "l2/audit_medusa.h"
 
 /* let's define the 'exec' access type, with subj=task and obj=inode */
 
@@ -14,11 +15,12 @@
 
 struct exec_faccess {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
+
 struct exec_paccess {
 	MEDUSA_ACCESS_HEADER;
-	char filename[NAME_MAX+1];
+	char filename[NAME_MAX + 1];
 };
 
 MED_ATTRS(exec_faccess) {
@@ -30,10 +32,12 @@ MED_ATTRS(exec_paccess) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(exec_faccess, "fexec", process_kobject, "process",
-		file_kobject, "file");
-MED_ACCTYPE(exec_paccess, "pexec", process_kobject, "process",
-		file_kobject, "file");
+MED_ACCTYPE(exec_faccess, "fexec",
+	    process_kobject, "process",
+	    file_kobject, "file");
+MED_ACCTYPE(exec_paccess, "pexec",
+	    process_kobject, "process",
+	    file_kobject, "file");
 
 int __init exec_acctype_init(void)
 {
@@ -42,9 +46,19 @@ int __init exec_acctype_init(void)
 	return 0;
 }
 
+static void medusa_exec_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	audit_log_d_path(ab, " path=", mad->name.dir);
+	audit_log_format(ab, " filename=");
+	audit_log_untrustedstring(ab, mad->name.name);
+}
+
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
 static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
-					const char *filename)
+					    const char *filename)
 {
 	struct exec_faccess access;
 	struct process_kobject process;
@@ -52,7 +66,7 @@ static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
 	enum medusa_answer_t retval;
 
 	strncpy(access.filename, filename, sizeof(access.filename));
-	access.filename[sizeof(access.filename)-1] = '\0';
+	access.filename[sizeof(access.filename) - 1] = '\0';
 
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, inode);
@@ -65,7 +79,7 @@ static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
 }
 
 static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
-					const char *filename)
+					    const char *filename)
 {
 	struct exec_paccess access;
 	struct process_kobject process;
@@ -73,7 +87,7 @@ static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
 	enum medusa_answer_t retval;
 
 	strncpy(access.filename, filename, sizeof(access.filename));
-	access.filename[sizeof(access.filename)-1] = '\0';
+	access.filename[sizeof(access.filename) - 1] = '\0';
 
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, inode);
@@ -87,33 +101,50 @@ static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
 
 enum medusa_answer_t medusa_exec(struct linux_binprm *bprm)
 {
-	enum medusa_answer_t retval;
 	struct path *path = &bprm->file->f_path;
 	// TODO: Can we use file_inode?
 	struct inode *inode = d_backing_inode(path->dentry);
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = { .ans = MED_ALLOW };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
-		return MED_ALLOW;
+	    process_kobj_validate_task(current) <= 0)
+		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
-		file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
-		return MED_ALLOW;
+	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
+		return mad.ans;
 
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
-		!vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))
-	)
-		return MED_DENY;
+	    !vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))) {
+		mad.vs.srw.vst = VS(inode_security(inode));
+		mad.vs.srw.vss = VSS(task_security(current));
+		mad.vs.srw.vsr = VSR(task_security(current));
+		mad.ans = MED_DENY;
+		goto audit;
+	}
+	/* TODO: Two types of monitoring need to be supported by audit */
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current))) {
-		retval = medusa_do_pexec(inode, bprm->filename);
-		if (retval == MED_DENY)
-			return retval;
+		mad.ans = medusa_do_pexec(inode, bprm->filename);
+		mad.as = AS_REQUEST;
+		if (mad.ans == MED_DENY)
+			goto audit;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(exec_faccess, inode_security(inode))) {
-		retval = medusa_do_fexec(inode, bprm->filename);
-		return retval;
+		mad.ans = medusa_do_fexec(inode, bprm->filename);
+		mad.as = AS_REQUEST;
 	}
-	return MED_ALLOW;
+audit:
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.u.tsk = current;
+		mad.function = "exec";
+		mad.name.dir = path;
+		mad.name.name = bprm->filename;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_exec_pacb);
+	}
+	return mad.ans;
 }
 
 int medusa_monitored_pexec(void)

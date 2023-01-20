@@ -22,19 +22,22 @@ struct process_kobject {
 	int parent_pid, child_pid, sibling_pid;
 	unsigned int uid, euid, suid, fsuid;
 	unsigned int gid, egid, sgid, fsgid;
-#ifdef CONFIG_AUDIT
 	unsigned int luid;
-#endif
 	char cmdline[128];
 
 	kernel_cap_t ecap, icap, pcap, acap, bcap;
 	struct medusa_object_s med_object;
 	struct medusa_subject_s med_subject;
 #if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
-	/* bitmap of syscalls, which are reported; only on x86 arch */
+	/** @med_syscall: bitmap of syscalls, which are reported; only on x86 arch */
 	unsigned char med_syscall[NR_syscalls / (sizeof(unsigned char) * 8)];
 #endif
+	/** @audit: 0 - not audited, 1 - audited. More possible values are
+	 * expected in the future.
+	 */
+	int audit;
 };
+
 extern MED_DECLARE_KCLASSOF(process_kobject);
 
 int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts);

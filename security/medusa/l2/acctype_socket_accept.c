@@ -12,7 +12,9 @@ MED_ATTRS(socket_accept_access) {
 	MED_ATTR_END
 };
 
-MED_ACCTYPE(socket_accept_access, "socket_accept_access", process_kobject, "process", socket_kobject, "socket");
+MED_ACCTYPE(socket_accept_access, "socket_accept_access",
+	    process_kobject, "process",
+	    socket_kobject, "socket");
 
 int __init socket_accept_access_init(void)
 {
@@ -26,13 +28,15 @@ enum medusa_answer_t medusa_socket_accept(struct socket *sock, struct socket *ne
 	struct process_kobject process;
 	struct socket_kobject sock_kobj;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
-	if (!is_med_magic_valid(&(sock_security(sock->sk)->med_object)) && socket_kobj_validate(sock) <= 0)
+	if (!is_med_magic_valid(&(sock_security(sock->sk)->med_object)) &&
+	    socket_kobj_validate(sock) <= 0)
 		return MED_ALLOW;
 
 	if (!vs_intersects(VSS(task_security(current)), VS(sock_security(sock->sk))) ||
-		!vs_intersects(VSW(task_security(current)), VS(sock_security(sock->sk))))
+	    !vs_intersects(VSW(task_security(current)), VS(sock_security(sock->sk))))
 		return MED_DENY;
 
 	if (MEDUSA_MONITORED_ACCESS_S(socket_accept_access, task_security(current))) {

@@ -26,7 +26,7 @@ static inline int socket_kobj2kern(struct socket_kobject *sock_kobj, struct sock
 
 	if (unlikely(!sock_kobj || !sk_sec)) {
 		med_pr_err("ERROR: NULL pointer: %s: sock_kobj=%p or sock_security=%p",
-			__func__, sock_kobj, sk_sec);
+			   __func__, sock_kobj, sk_sec);
 		return -EINVAL;
 	}
 
@@ -42,7 +42,7 @@ inline int socket_kern2kobj(struct socket_kobject *sock_kobj, struct socket *soc
 
 	if (unlikely(!sock_kobj || !sk_sec || !inode)) {
 		med_pr_err("ERROR: NULL pointer: %s: sock_kobj=%p or sock_security=%p or sock_inode=%p",
-			__func__, sock_kobj, sk_sec, inode);
+			   __func__, sock_kobj, sk_sec, inode);
 		return -EINVAL;
 	}
 
@@ -57,14 +57,20 @@ inline int socket_kern2kobj(struct socket_kobject *sock_kobj, struct socket *soc
 		switch (sock->ops->family) {
 		case AF_INET:
 			sock_kobj->address.inet_i.port = sk_sec->address.inet_i.port;
-			memcpy(sock_kobj->address.inet_i.addrdata, sk_sec->address.inet_i.addrdata, 4);
+			memcpy(sock_kobj->address.inet_i.addrdata,
+			       sk_sec->address.inet_i.addrdata,
+			       4);
 			break;
 		case AF_INET6:
 			sock_kobj->address.inet6_i.port = sk_sec->address.inet6_i.port;
-			memcpy(sock_kobj->address.inet6_i.addrdata, sk_sec->address.inet6_i.addrdata, 16);
+			memcpy(sock_kobj->address.inet6_i.addrdata,
+			       sk_sec->address.inet6_i.addrdata,
+			       16);
 			break;
 		case AF_UNIX:
-			memcpy(sock_kobj->address.unix_i.addrdata, sk_sec->address.unix_i.addrdata, UNIX_PATH_MAX);
+			memcpy(sock_kobj->address.unix_i.addrdata,
+			       sk_sec->address.unix_i.addrdata,
+			       UNIX_PATH_MAX);
 			break;
 		default:
 			break;
@@ -79,7 +85,7 @@ static struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
 	struct socket *sock;
 	struct inode *inode = NULL;
 	struct super_block *sb = NULL;
-	struct socket_kobject *s_kobj = (struct socket_kobject *) kobj;
+	struct socket_kobject *s_kobj = (struct socket_kobject *)kobj;
 	struct medusa_kobject_s *retval = NULL;
 
 	if (s_kobj)
@@ -105,7 +111,7 @@ static enum medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
 	struct socket *sock;
 	struct inode *inode = NULL;
 	struct super_block *sb = NULL;
-	struct socket_kobject *s_kobj = (struct socket_kobject *) kobj;
+	struct socket_kobject *s_kobj = (struct socket_kobject *)kobj;
 	enum medusa_answer_t retval = MED_ERR;
 
 	if (s_kobj)

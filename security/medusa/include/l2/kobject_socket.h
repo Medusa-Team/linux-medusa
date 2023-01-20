@@ -19,6 +19,7 @@ struct socket_kobject {
 
 	struct medusa_object_s med_object;
 };
+
 extern MED_DECLARE_KCLASSOF(socket_kobject);
 
 int socket_kern2kobj(struct socket_kobject *sock_kobj, struct socket *sock);

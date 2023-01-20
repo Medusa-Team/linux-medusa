@@ -10,7 +10,7 @@ static inline int file_kobj2kern(struct file_kobject *fk, struct inode *inode)
 {
 	if (unlikely(!fk || !inode_security(inode))) {
 		med_pr_err("ERROR: NULL pointer: %s: file_kobj=%p or inode_security=%p",
-			__func__, fk, inode_security(inode));
+			   __func__, fk, inode_security(inode));
 		return -EINVAL;
 	}
 
@@ -36,7 +36,7 @@ inline int file_kern2kobj(struct file_kobject *fk, struct inode *inode)
 {
 	if (unlikely(!fk || !inode_security(inode))) {
 		med_pr_err("ERROR: NULL pointer: %s: file_kobj=%p or inode_security=%p",
-			__func__, fk, inode_security(inode));
+			   __func__, fk, inode_security(inode));
 		return -EINVAL;
 	}
 
@@ -111,6 +111,7 @@ void file_kobj_live_add(struct inode *ino)
 	live_inodes = ino;
 	write_unlock(&live_lock);
 }
+
 void file_kobj_live_remove(struct inode *ino)
 {
 	struct inode *tmp;
@@ -137,19 +138,19 @@ void file_kobj_dentry2string_dir(struct path *dir, struct dentry *dentry, char *
 {
 	int len;
 
-	if( IS_ROOT(dentry) )
-	{
+	if (IS_ROOT(dentry)) {
 		struct path ndcurrent;
+
 		ndcurrent.dentry = dentry;
 		ndcurrent.mnt = dir->mnt;
 
 		path_get(&ndcurrent);
 		follow_up(&ndcurrent);
-		dentry=dget(ndcurrent.dentry);
+		dentry = dget(ndcurrent.dentry);
 		path_put(&ndcurrent);
-	}
-	else
+	} else {
 		dget(dentry);
+	}
 
 	if (!dentry || IS_ERR(dentry) || !dentry->d_name.name) {
 		buf[0] = '\0';
@@ -170,9 +171,9 @@ void dentry2string(struct dentry *dentry, char *buf)
 
 	// TODO: This check is probably unneeded
 	/* if (!dentry || IS_ERR(dentry) || !dentry->d_name.name) { */
-	/* 	buf[0] = '\0'; */
-	/* 	dput(dentry); */
-	/* 	return; */
+	/*	buf[0] = '\0'; */
+	/*	dput(dentry); */
+	/*	return; */
 	/* } */
 	len = dentry->d_name.len < NAME_MAX ?
 		dentry->d_name.len : NAME_MAX;
@@ -185,18 +186,17 @@ void file_kobj_dentry2string_mnt(const struct path *dir, struct dentry *dentry, 
 {
 	int len;
 
-	if( IS_ROOT(dentry) )
-	{
+	if (IS_ROOT(dentry)) {
 		struct path ndcurrent, ndupper;
 
 		ndcurrent.dentry = dentry;
 		ndcurrent.mnt = dir->mnt;
-		medusa_get_upper_and_parent(&ndcurrent,&ndupper,NULL);
-		dentry=dget(ndupper.dentry);
+		medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
+		dentry = dget(ndupper.dentry);
 		medusa_put_upper_and_parent(&ndupper, NULL);
-	}
-	else
+	} else {
 		dget(dentry);
+	}
 
 	if (!dentry || IS_ERR(dentry) || !dentry->d_name.name) {
 		buf[0] = '\0';
@@ -209,6 +209,7 @@ void file_kobj_dentry2string_mnt(const struct path *dir, struct dentry *dentry, 
 	buf[len] = '\0';
 	dput(dentry);
 }
+
 void file_kobj_dentry2string(struct dentry *dentry, char *buf)
 {
 	int len;
@@ -221,8 +222,9 @@ void file_kobj_dentry2string(struct dentry *dentry, char *buf)
 		medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 		dentry = dget(ndupper.dentry);
 		medusa_put_upper_and_parent(&ndupper, NULL);
-	} else
+	} else {
 		dget(dentry);
+	}
 
 	if (!dentry || IS_ERR(dentry) || !dentry->d_name.name) {
 		buf[0] = '\0';
@@ -298,7 +300,6 @@ static enum medusa_answer_t file_update(struct medusa_kobject_s *kobj)
 	retval = MED_ALLOW;
 	if (unlikely(file_kobj2kern((struct file_kobject *)kobj, p) < 0))
 		retval = MED_ERR;
-	med_pr_info("file_update: dev=%lu ino=%lu vs=%*pbl act=%*pbl\n", ((struct file_kobject *)kobj)->dev, ((struct file_kobject *)kobj)->ino, CONFIG_MEDUSA_VS, &((struct file_kobject *)kobj)->med_object.vs, CONFIG_MEDUSA_ACT, &((struct file_kobject *)kobj)->med_object.act);
 
 out_err_update:
 	__unlookup();

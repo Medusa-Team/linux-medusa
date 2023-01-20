@@ -11,6 +11,7 @@
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
 #include "l2/l2.h"
+#include "l2/audit_medusa.h"
 
 struct ipc_semop_access {
 	MEDUSA_ACCESS_HEADER;
@@ -43,6 +44,19 @@ int __init ipc_acctype_semop_init(void)
 	return 0;
 }
 
+static void medusa_ipc_semop_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	audit_log_format(ab, " flag=%d", mad->ipc_semop.sem_flg);
+	audit_log_format(ab, " sem_num=%u", mad->ipc_semop.sem_num);
+	audit_log_format(ab, " sem_op=%d", mad->ipc_semop.sem_op);
+	audit_log_format(ab, " nsops=%u", mad->ipc_semop.nsops);
+	audit_log_format(ab, " alter=%d", mad->ipc_semop.alter);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc_semop.ipc_class);
+}
+
 /*
  * Check permissions before performing operations on members of the semaphore set
  * @ipcp contains semaphore ipc_perm structure
@@ -62,22 +76,27 @@ int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 		     unsigned int nsops,
 		     int alter)
 {
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = {
+		/* TODO: Check if the value is available here */
+		.ipc_semop.ipc_class = ipc_security(ipcp)->ipc_class
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_semop_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
-	int err = 0;
+	int err = ipc_getref(ipcp, false);
 
 	/* second argument false: don't need to unlock IPC object */
-	if (unlikely((err = ipc_getref(ipcp, false)) != 0))
+	if (unlikely(err))
 		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
 		return err;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object))
-	    && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
-	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+	    ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_semop_access, ipc_security(ipcp))) {
@@ -93,11 +112,25 @@ int medusa_ipc_semop(struct kern_ipc_perm *ipcp,
 		access.ipc_class = object.ipc_class;
 
 		ans = MED_DECIDE(ipc_semop_access, &access, &process, &object);
+		mad.as = AS_REQUEST;
 	}
 out:
+	mad.ans = lsm_retval(ans, err);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_IPC;
+		cad.u.ipc_id = ipcp->key;
+		mad.function = "semop";
+		mad.ipc_semop.sem_num = sops->sem_num;
+		mad.ipc_semop.sem_op = sops->sem_op;
+		mad.ipc_semop.sem_flg = sops->sem_flg;
+		mad.ipc_semop.nsops = nsops;
+		mad.ipc_semop.alter = alter;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_ipc_semop_pacb);
+	}
 	/* second argument false: don't need to lock IPC object */
 	err = ipc_putref(ipcp, false);
-	return lsm_retval(ans, err);
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_semop_init);

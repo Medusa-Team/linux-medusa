@@ -11,6 +11,7 @@
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
 #include "l2/l2.h"
+#include "l2/audit_medusa.h"
 
 struct ipc_perm_access {
 	MEDUSA_ACCESS_HEADER;
@@ -30,6 +31,15 @@ int __init ipc_acctype_perm_init(void)
 {
 	MED_REGISTER_ACCTYPE(ipc_perm_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
+}
+
+static void medusa_ipc_perm_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	audit_log_format(ab, " perms=%u", mad->ipc_perm.perms);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc_perm.ipc_class);
 }
 
 /*
@@ -63,6 +73,11 @@ int __init ipc_acctype_perm_init(void)
  */
 int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 {
+	int retval;
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = {
+		.ipc_perm.ipc_class = ipc_security(ipcp)->ipc_class
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_perm_access access;
 	struct process_kobject process;
@@ -86,7 +101,7 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 	 * Note: On UP spins doesn't exist, lucky us ;)
 	 *       Medusa on UP always can make a decision without a carry on spinlocks...
 	 */
-	if (IS_ENABLED(CONFIG_SMP) && spin_is_locked(&(ipcp->lock))) {
+	if (IS_ENABLED(CONFIG_SMP) && spin_is_locked(&ipcp->lock)) {
 #ifdef CONFIG_DEBUG_SPINLOCK
 		/*
 		 * If current process is holding the spinlock, we need to unlock it;
@@ -123,15 +138,16 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 	 *   true - returns with unlocked IPC object
 	 *   false - don't need to unlock IPC object
 	 */
-	if (unlikely((err = ipc_getref(ipcp, use_locking)) != 0))
+	err = ipc_getref(ipcp, use_locking);
+	if (unlikely(err))
 		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
 		return err;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object))
-	    && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
-	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+	    ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_perm_access, ipc_security(ipcp))) {
@@ -143,8 +159,18 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 		access.ipc_class = object.ipc_class;
 
 		ans = MED_DECIDE(ipc_perm_access, &access, &process, &object);
+		mad.as = AS_REQUEST;
 	}
 out:
+	retval = lsm_retval(ans, err);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_IPC;
+		cad.u.ipc_id = ipcp->key;
+		mad.function = "ipc_permission";
+		mad.ipc_perm.perms = flag;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_ipc_perm_pacb);
+	}
 	/*
 	 * Decrease references to the IPC object; second argument:
 	 *   true - returns with locked IPC object
@@ -152,7 +178,7 @@ out:
 	 */
 	/* second argument true: returns with locked IPC object */
 	err = ipc_putref(ipcp, use_locking);
-	return lsm_retval(ans, err);
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_perm_init);

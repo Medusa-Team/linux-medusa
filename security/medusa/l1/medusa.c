@@ -15,6 +15,9 @@
 #include "l1/fuck.h"
 #include "../../../../fs/mount.h" /* real_mount(), struct mount */
 
+/* Used by `medusa_l1_creds_for_exec` */
+int init_loaded;
+
 int medusa_l1_inode_alloc_security(struct inode *inode);
 
 /*
@@ -31,8 +34,29 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  * }
  */
 
+static void medusa_l1_initialize_init(const char *filename)
+{
+	struct medusa_l1_task_s *med = task_security(current);
+
+	if (strcmp(filename, "/sbin/init")) {
+		med_pr_warn("Exec of non-init process happened without init running!\n");
+		return;
+	}
+
+	init_med_object(&(med->med_object));
+	init_med_subject(&(med->med_subject));
+
+	init_loaded = 1;
+}
+
+
 static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
 {
+	/* If this is the init process, initialize it, so it is monitored. */
+	if (!init_loaded) {
+		medusa_l1_initialize_init(bprm->filename);
+		return 0;
+	}
 	if (medusa_exec(bprm) == MED_DENY)
 		return -EACCES;
 	return 0;
@@ -567,13 +591,10 @@ static int medusa_l1_file_open(struct file *file)
  */
 int medusa_l1_task_init(struct task_struct *task, unsigned long clone_flags)
 {
+	struct medusa_l1_task_s *old = task_security(current);
 	struct medusa_l1_task_s *med = task_security(task);
 
-	init_med_object(&(med->med_object));
-	init_med_subject(&(med->med_subject));
-
-	mutex_init(&(med->validation_in_progress));
-	med->validation_depth_nesting = 1;
+	*med = *old;
 
 #ifndef CONFIG_SECURITY_MEDUSA_MONITOR_KTHREADS
 	/* Kernel threads have a superpower... Don't try to restrict them! */
@@ -791,6 +812,30 @@ int medusa_l1_shm_alloc_security(struct kern_ipc_perm *shp)
 int medusa_l1_sem_alloc_security(struct kern_ipc_perm *sma)
 {
 	return medusa_l1_ipc_alloc_security(sma, MED_IPC_SEM);
+}
+
+int medusa_queue_associate(struct kern_ipc_perm *ipcp, int flag) {
+	return medusa_ipc_associate(ipcp, flag, "queue_associate");
+}
+
+int medusa_shm_associate(struct kern_ipc_perm *ipcp, int flag) {
+	return medusa_ipc_associate(ipcp, flag, "shm_associate");
+}
+
+int medusa_sem_associate(struct kern_ipc_perm *ipcp, int flag) {
+	return medusa_ipc_associate(ipcp, flag, "sem_associate");
+}
+
+int medusa_queue_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+	return medusa_ipc_ctl(ipcp, cmd, "msgctl");
+}
+
+int medusa_shm_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+	return medusa_ipc_ctl(ipcp, cmd, "shmctl");
+}
+
+int medusa_sem_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+	return medusa_ipc_ctl(ipcp, cmd, "semctl");
 }
 
 #ifdef CONFIG_SECURITY_NETWORK
@@ -1511,15 +1556,15 @@ static struct security_hook_list medusa_l1_hooks[] = {
 
 	LSM_HOOK_INIT(ipc_permission, medusa_ipc_permission),
 	//LSM_HOOK_INIT(ipc_getsecid, medusa_l1_ipc_getsecid),
-	LSM_HOOK_INIT(msg_queue_associate, medusa_ipc_associate),
-	LSM_HOOK_INIT(msg_queue_msgctl, medusa_ipc_ctl),
+	LSM_HOOK_INIT(msg_queue_associate, medusa_queue_associate),
+	LSM_HOOK_INIT(msg_queue_msgctl, medusa_queue_ctl),
 	LSM_HOOK_INIT(msg_queue_msgsnd, medusa_ipc_msgsnd),
 	LSM_HOOK_INIT(msg_queue_msgrcv, medusa_ipc_msgrcv),
-	LSM_HOOK_INIT(shm_associate, medusa_ipc_associate),
-	LSM_HOOK_INIT(shm_shmctl, medusa_ipc_ctl),
+	LSM_HOOK_INIT(shm_associate, medusa_shm_associate),
+	LSM_HOOK_INIT(shm_shmctl, medusa_shm_ctl),
 	LSM_HOOK_INIT(shm_shmat, medusa_ipc_shmat),
-	LSM_HOOK_INIT(sem_associate, medusa_ipc_associate),
-	LSM_HOOK_INIT(sem_semctl, medusa_ipc_ctl),
+	LSM_HOOK_INIT(sem_associate, medusa_sem_associate),
+	LSM_HOOK_INIT(sem_semctl, medusa_sem_ctl),
 	LSM_HOOK_INIT(sem_semop, medusa_ipc_semop),
 
 	//LSM_HOOK_INIT(netlink_send, medusa_l1_netlink_send),
@@ -1681,7 +1726,13 @@ struct security_hook_list medusa_l1_hooks_alloc[] = {
 static int __init medusa_l1_init(void)
 {
 	/* set the security info for the task pid 0 on boot cpu */
-	medusa_l1_task_init(current, 0);
+	struct medusa_l1_task_s *med = task_security(current);
+
+	init_med_object(&(med->med_object));
+	init_med_subject(&(med->med_subject));
+
+	mutex_init(&(med->validation_in_progress));
+	med->validation_depth_nesting = 1;
 
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");

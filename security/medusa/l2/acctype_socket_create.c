@@ -19,7 +19,9 @@ MED_ATTRS(socket_create_access) {
 };
 
 // acctype - subject - object
-MED_ACCTYPE(socket_create_access, "socket_create", process_kobject, "process", process_kobject, "process");
+MED_ACCTYPE(socket_create_access, "socket_create",
+	    process_kobject, "process",
+	    process_kobject, "process");
 
 int __init socket_create_acctype_init(void)
 {
@@ -32,7 +34,8 @@ enum medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 	struct socket_create_access access;
 	struct process_kobject process;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object)) && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(socket_create_access, task_security(current))) {

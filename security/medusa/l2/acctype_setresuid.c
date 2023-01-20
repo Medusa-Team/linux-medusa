@@ -36,7 +36,7 @@ enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid)
 	enum medusa_answer_t retval = MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-		process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0)
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(setresuid, task_security(current))) {

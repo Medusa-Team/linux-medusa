@@ -11,6 +11,7 @@
 #include "l2/kobject_process.h"
 #include "l2/kobject_ipc.h"
 #include "l2/l2.h"
+#include "l2/audit_medusa.h"
 
 struct ipc_shmat_access {
 	MEDUSA_ACCESS_HEADER;
@@ -34,6 +35,16 @@ int __init ipc_acctype_shmat_init(void)
 	return 0;
 }
 
+static void medusa_ipc_shmat_pacb(struct audit_buffer *ab, void *pcad)
+{
+	struct common_audit_data *cad = pcad;
+	struct medusa_audit_data *mad = cad->medusa_audit_data;
+
+	audit_log_format(ab, " flag=%d", mad->ipc_shmat.shmflg);
+	audit_log_format(ab, " shmaddr=%p", mad->ipc_shmat.shmaddr);
+	audit_log_format(ab, " ipc_class=%u", mad->ipc_shmat.ipc_class);
+}
+
 /*
  * Check permissions prior to allowing the shmat system call to attach the
  * shared memory segment with given ipc_perm @ipcp to the data segment of
@@ -52,22 +63,27 @@ int medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
 		     char __user *shmaddr,
 		     int shmflg)
 {
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = {
+		/* TODO: Check if the value is available here */
+		.ipc_shmat.ipc_class = ipc_security(ipcp)->ipc_class
+	};
 	enum medusa_answer_t ans = MED_ALLOW;
 	struct ipc_shmat_access access;
 	struct process_kobject process;
 	struct ipc_kobject object;
-	int err = 0;
+	int err = ipc_getref(ipcp, false);
 
 	/* second argument false: don't need to unlock IPC object */
-	if (unlikely((err = ipc_getref(ipcp, false)) != 0))
+	if (unlikely(err))
 		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
 		return err;
 
-	if (!is_med_magic_valid(&(task_security(current)->med_object))
-	    && process_kobj_validate_task(current) <= 0)
+	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
+	    process_kobj_validate_task(current) <= 0)
 		goto out;
-	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object))
-	    && ipc_kobj_validate_ipcp(ipcp) <= 0)
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+	    ipc_kobj_validate_ipcp(ipcp) <= 0)
 		goto out;
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_shmat_access, ipc_security(ipcp))) {
@@ -80,11 +96,22 @@ int medusa_ipc_shmat(struct kern_ipc_perm *ipcp,
 		access.ipc_class = object.ipc_class;
 
 		ans = MED_DECIDE(ipc_shmat_access, &access, &process, &object);
+		mad.as = AS_REQUEST;
 	}
 out:
+	mad.ans = lsm_retval(ans, err);
+	if (task_security(current)->audit) {
+		cad.type = LSM_AUDIT_DATA_IPC;
+		cad.u.ipc_id = ipcp->key;
+		mad.function = "shmat";
+		mad.ipc_shmat.shmflg = shmflg;
+		mad.ipc_shmat.shmaddr = shmaddr;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, medusa_ipc_shmat_pacb);
+	}
 	/* second argument false: don't need to lock IPC object */
 	err = ipc_putref(ipcp, false);
-	return lsm_retval(ans, err);
+	return mad.ans;
 }
 
 device_initcall(ipc_acctype_shmat_init);

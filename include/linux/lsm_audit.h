@@ -110,6 +110,9 @@ struct common_audit_data {
 #ifdef CONFIG_SECURITY_APPARMOR
 		struct apparmor_audit_data *apparmor_audit_data;
 #endif
+#ifdef CONFIG_SECURITY_MEDUSA
+		struct medusa_audit_data *medusa_audit_data;
+#endif
 	}; /* per LSM data pointer union */
 };
 

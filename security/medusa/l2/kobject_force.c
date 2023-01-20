@@ -51,11 +51,10 @@ static enum medusa_answer_t force_update(struct medusa_kobject_s *kobj)
 	med_pr_debug("force: 3\n");
 	memcpy(buf, ((struct force_kobject *)kobj)->code, MAX_FORCE_SIZE);
 	med_pr_debug("force: 4 0x%.2x 0x%.2x 0x%.2x 0x%.2x\n",
-		((struct force_kobject *)kobj)->code[0],
-		((struct force_kobject *)kobj)->code[1],
-		((struct force_kobject *)kobj)->code[2],
-		((struct force_kobject *)kobj)->code[3]
-	);
+		     ((struct force_kobject *)kobj)->code[0],
+		     ((struct force_kobject *)kobj)->code[1],
+		     ((struct force_kobject *)kobj)->code[2],
+		     ((struct force_kobject *)kobj)->code[3]);
 	task_security(p).force_code = buf;
 	retval = MED_ALLOW;
 	goto out_unlock;
