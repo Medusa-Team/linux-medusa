@@ -106,7 +106,7 @@ enum medusa_answer_t medusa_symlink(const struct path *dir,
 	}
 audit:
 	if (task_security(current)->audit) {
-		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.type = LSM_AUDIT_DATA_NONE;
 		cad.u.tsk = current;
 		mad.function = "symlink";
 		mad.name.dir = dir;

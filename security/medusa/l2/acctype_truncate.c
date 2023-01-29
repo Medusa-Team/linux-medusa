@@ -72,7 +72,7 @@ enum medusa_answer_t medusa_truncate(const struct path *path)
 	}
 audit:
 	if (task_security(current)->audit) {
-		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.type = LSM_AUDIT_DATA_NONE;
 		cad.u.tsk = current;
 		mad.function = "truncate";
 		mad.path.path = path;

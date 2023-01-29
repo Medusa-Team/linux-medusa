@@ -130,7 +130,7 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	medusa_put_upper_and_parent(&ndupper, NULL);
 audit:
 	if (task_security(current)->audit) {
-		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.type = LSM_AUDIT_DATA_NONE;
 		cad.u.tsk = current;
 		mad.function = "link";
 		mad.new_dir = new_dir;

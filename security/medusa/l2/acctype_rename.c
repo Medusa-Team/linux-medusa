@@ -124,7 +124,7 @@ enum medusa_answer_t medusa_rename(const struct path *old_path,
 	med_magic_invalidate(&(inode_security(old_dentry->d_inode)->med_object));
 audit:
 	if (task_security(current)->audit) {
-		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.type = LSM_AUDIT_DATA_NONE;
 		cad.u.tsk = current;
 		mad.function = "rename";
 		mad.old_dir = old_path;

@@ -71,7 +71,7 @@ enum medusa_answer_t medusa_unlink(const struct path *dir, struct dentry *dentry
 	}
 audit:
 	if (task_security(current)->audit) {
-		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.type = LSM_AUDIT_DATA_NONE;
 		cad.u.tsk = current;
 		mad.function = "unlink";
 		mad.path.path = dir;

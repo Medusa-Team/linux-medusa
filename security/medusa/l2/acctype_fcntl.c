@@ -100,7 +100,7 @@ enum medusa_answer_t medusa_fcntl(struct file *file, unsigned int cmd,
 	}
 audit:
 	if (task_security(current)->audit) {
-		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.type = LSM_AUDIT_DATA_NONE;
 		cad.u.tsk = current;
 		mad.function = "fcntl";
 		mad.fcntl.path = &file->f_path;

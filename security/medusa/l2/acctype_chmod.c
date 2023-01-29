@@ -84,7 +84,7 @@ enum medusa_answer_t medusa_chmod(const struct path *path, umode_t mode)
 	}
 audit:
 	if (task_security(current)->audit) {
-		cad.type = LSM_AUDIT_DATA_TASK;
+		cad.type = LSM_AUDIT_DATA_NONE;
 		cad.u.tsk = current;
 		mad.function = "chmod";
 		mad.path.path = path;

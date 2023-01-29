@@ -93,7 +93,7 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	}
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
 audit:
-	/* TODO: This should be LSM_AUDIT_DATA_TASK, but acctype_create is not
+	/* TODO: This should be LSM_AUDIT_DATA_NONE, but acctype_create is not
 	 * used anyway. */
 	cad.type = LSM_AUDIT_DATA_DENTRY;
 	cad.u.dentry = dentry;
