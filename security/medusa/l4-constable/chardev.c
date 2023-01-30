@@ -893,7 +893,7 @@ static unsigned int user_poll(struct file *filp, poll_table *wait)
 static int user_open(struct inode *inode, struct file *file)
 {
 	int retval = -EPERM;
-	struct teleport_insn_s *tele_mem_open;
+	struct teleport_insn_s *tele_mem_open = NULL;
 	struct tele_item *local_tele_item;
 	struct task_struct *parent;
 

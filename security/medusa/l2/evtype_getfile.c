@@ -136,7 +136,8 @@ inline void info_mnt(struct mount *mnt)
 }
 
 void medusa_get_upper_and_parent(const struct path *ndsource,
-				 struct path *ndupperp, struct path *ndparentp)
+				 struct path *ndupperp,
+				 struct path *ndparentp)
 {
 	/* med_pr_debug("medusa_get_upper_and_parent: dentry %pd4\n", ndsource->dentry); */
 	*ndupperp = *ndsource;
@@ -290,7 +291,7 @@ int file_kobj_validate_dentry_dir(const struct vfsmount *mnt, struct dentry *den
 	inode_security(dentry->d_inode)->ecap = CAP_FULL_SET;
 #endif
 	ndcurrent.dentry = dentry;
-	ndcurrent.mnt = mnt;
+	ndcurrent.mnt = (struct vfsmount *) mnt;
 
 	ndupper = ndcurrent;
 
