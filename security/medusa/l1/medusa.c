@@ -5,6 +5,7 @@
 #include <linux/binfmts.h>
 #include <linux/module.h>
 #include <linux/sched/task.h>
+#include <linux/delay.h>
 
 #include "l4/comm.h"
 #include "l3/registry.h"
@@ -38,6 +39,8 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
 static void medusa_l1_initialize_init(const char *filename)
 {
 	struct medusa_l1_task_s *med = task_security(current);
+	char *argv[3];
+	char *envp[3];
 
 	if (strcmp(filename, "/sbin/init")) {
 		med_pr_warn("Exec of non-init process %s happened without init running!\n",
@@ -48,7 +51,19 @@ static void medusa_l1_initialize_init(const char *filename)
 	init_med_object(&med->med_object);
 	init_med_subject(&med->med_subject);
 
+	med_pr_info("%s - Trying to start constable in /sbin", __func__);
+	argv[0] = "/sbin/constable";
+	argv[1] = "/sbin/constable.conf";
+	argv[2] = NULL;
+	envp[0] = "HOME=/";
+	envp[1] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
+	envp[2] = NULL;
+	call_usermodehelper(argv[0], argv, envp, UMH_NO_WAIT);
+	med_pr_info("%s - sleeping for 2 seconds to wait for Constable", __func__);
+	msleep(2000);
+
 	init_loaded = 1;
+	med_pr_info("%s - initialization complete", __func__);
 }
 
 static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
