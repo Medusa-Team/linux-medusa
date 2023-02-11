@@ -18,7 +18,8 @@
 #include "../../../../fs/mount.h" /* real_mount(), struct mount */
 
 /* Used by `medusa_l1_creds_for_exec` */
-int init_loaded;
+bool init_loaded;
+char *init_trigger;
 
 int medusa_l1_inode_alloc_security(struct inode *inode);
 
@@ -36,13 +37,38 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  * }
  */
 
+static void medusa_l1_start_constable(void)
+{
+	char *argv[3];
+	char *envp[3];
+	int error;
+
+	med_pr_info("%s - Trying to start Constable", __func__);
+	argv[0] = CONFIG_SECURITY_MEDUSA_CONSTABLE_EXECUTABLE_FILEPATH;
+	argv[1] = CONFIG_SECURITY_MEDUSA_CONSTABLE_CONFIG_FILEPATH;
+	argv[2] = NULL;
+	envp[0] = "HOME=/";
+	envp[1] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
+	envp[2] = NULL;
+	med_pr_info("%s - sleeping for 1 second before starting Constable", __func__);
+	msleep(1000);
+	error = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+	if (error) {
+		med_pr_err("%s: error starting Constable: %s", __func__, error);
+		// TODO: stop if production Medusa
+	}
+	med_pr_info("%s - sleeping for 5 seconds after starting Constable", __func__);
+	msleep(5000);
+	med_pr_info("%s - Constable initialization complete", __func__);
+}
+
 static void medusa_l1_initialize_init(const char *filename)
 {
 	struct medusa_l1_task_s *med = task_security(current);
-	char *argv[3];
-	char *envp[3];
 
-	if (strcmp(filename, "/sbin/init")) {
+	if (unlikely(!init_trigger))
+		init_trigger = CONFIG_SECURITY_MEDUSA_INITIALIZATION_TRIGGER;
+	if (strcmp(filename, init_trigger)) {
 		med_pr_warn("Exec of non-init process %s happened without init running!\n",
 			    filename);
 		return;
@@ -51,19 +77,13 @@ static void medusa_l1_initialize_init(const char *filename)
 	init_med_object(&med->med_object);
 	init_med_subject(&med->med_subject);
 
-	med_pr_info("%s - Trying to start constable in /sbin", __func__);
-	argv[0] = "/sbin/constable";
-	argv[1] = "/sbin/constable.conf";
-	argv[2] = NULL;
-	envp[0] = "HOME=/";
-	envp[1] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
-	envp[2] = NULL;
-	call_usermodehelper(argv[0], argv, envp, UMH_NO_WAIT);
-	med_pr_info("%s - sleeping for 2 seconds to wait for Constable", __func__);
-	msleep(2000);
-
+#ifdef CONFIG_SECURITY_MEDUSA_START_CONSTABLE_BEFORE_INIT
+	#ifdef CONFIG_STATIC_USERMODEHELPER
+		#error STATIC_USERMODEHELPER option must be disabled to guarantee Constable will successfuly start at startup
+	#endif
+	medusa_l1_start_constable();
+#endif
 	init_loaded = 1;
-	med_pr_info("%s - initialization complete", __func__);
 }
 
 static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)

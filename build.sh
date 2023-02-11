@@ -182,6 +182,9 @@ else
 	install_kernel
 fi
 
+echo "Generating compile commands"
+./scripts/clang-tools/gen_compile_commands.py
+
 [ $USE_RSYNC -eq 1 ] && [ "$DEST" != "NONE" ] && rsync_repo
 
 echo $(($major + 1)) > .major
