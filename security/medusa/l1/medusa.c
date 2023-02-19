@@ -584,6 +584,18 @@ static int medusa_l1_file_open(struct file *file)
 	return 0;
 }
 
+static int medusa_l1_task_fix_setuid(struct cred *new,
+				     const struct cred *old,
+				     int flags)
+{
+	if (medusa_setresuid(new->uid.val,
+			     new->euid.val,
+			     new->suid.val,
+			     flags) == MED_DENY)
+		return -EACCES;
+	return 0;
+}
+
 /*
  * Function security_task_alloc() is called only from fork().
  * If there is no memory for security blob allocation, -ENOMEM is returned
@@ -1556,7 +1568,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(kernel_post_load_data, medusa_l1_kernel_post_load_data),
 	//LSM_HOOK_INIT(kernel_read_file, medusa_l1_read_file),
 	//LSM_HOOK_INIT(kernel_post_read_file, medusa_l1_post_read_file),
-	//LSM_HOOK_INIT(task_fix_setuid, medusa_l1_task_fix_setuid),
+	LSM_HOOK_INIT(task_fix_setuid, medusa_l1_task_fix_setuid),
 	//LSM_HOOK_INIT(task_fix_setgid, medusa_l1_task_fix_setgid),
 	//LSM_HOOK_INIT(task_setpgid, medusa_l1_task_setpgid),
 	//LSM_HOOK_INIT(task_getpgid, medusa_l1_task_getpgid),

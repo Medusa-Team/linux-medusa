@@ -105,6 +105,11 @@ struct medusa_audit_data {
 		} ipc_shmat;
 		/** @mask: for acctype_permission */
 		int mask;
+		struct {
+			uid_t ruid;
+			uid_t euid;
+			uid_t suid;
+		} setresuid;
 	};
 };
 
