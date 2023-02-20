@@ -109,6 +109,9 @@ struct medusa_audit_data {
 			uid_t ruid;
 			uid_t euid;
 			uid_t suid;
+			uid_t old_ruid;
+			uid_t old_euid;
+			uid_t old_suid;
 		} setresuid;
 	};
 };

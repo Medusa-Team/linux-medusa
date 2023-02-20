@@ -37,6 +37,9 @@ static void medusa_setresuid_pacb(struct audit_buffer *ab, void *pcad)
 	struct common_audit_data *cad = pcad;
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
+	audit_log_format(ab, " old_ruid=%d", mad->setresuid.old_ruid);
+	audit_log_format(ab, " old_euid=%d", mad->setresuid.old_euid);
+	audit_log_format(ab, " old_suid=%d", mad->setresuid.old_suid);
 	audit_log_format(ab, " ruid=%d", mad->setresuid.ruid);
 	audit_log_format(ab, " euid=%d", mad->setresuid.euid);
 	audit_log_format(ab, " suid=%d", mad->setresuid.suid);
@@ -59,13 +62,17 @@ static inline char *setid_op_name(int flags)
 	}
 }
 
-enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid,
+enum medusa_answer_t medusa_setresuid(struct cred *new,
+				      const struct cred *old,
 				      int flags)
 {
 	struct setresuid access;
 	struct process_kobject process;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	uid_t ruid = new->uid.val;
+	uid_t euid = new->euid.val;
+	uid_t suid = new->suid.val;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
@@ -88,6 +95,9 @@ enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid,
 		mad.setresuid.ruid = ruid;
 		mad.setresuid.euid = euid;
 		mad.setresuid.suid = suid;
+		mad.setresuid.old_ruid = old->uid.val;
+		mad.setresuid.old_euid = old->euid.val;
+		mad.setresuid.old_suid = old->suid.val;
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_setresuid_pacb);
 	}

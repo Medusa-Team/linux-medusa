@@ -18,7 +18,9 @@
 
 /* prototypes of L2 process related handlers called from L1 hooks */
 
-extern enum medusa_answer_t medusa_setresuid(uid_t ruid, uid_t euid, uid_t suid, int flags);
+extern enum medusa_answer_t medusa_setresuid(struct cred *new,
+					     const struct cred *old,
+					     int flags);
 extern enum medusa_answer_t medusa_capable(int cap);
 extern enum medusa_answer_t medusa_fork(unsigned long clone_flags);
 extern enum medusa_answer_t medusa_init_process(struct task_struct *new);

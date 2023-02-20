@@ -588,10 +588,7 @@ static int medusa_l1_task_fix_setuid(struct cred *new,
 				     const struct cred *old,
 				     int flags)
 {
-	if (medusa_setresuid(new->uid.val,
-			     new->euid.val,
-			     new->suid.val,
-			     flags) == MED_DENY)
+	if (medusa_setresuid(new, old, flags) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
