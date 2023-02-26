@@ -6,6 +6,7 @@
 #include <linux/module.h>
 #include <linux/sched/task.h>
 #include <linux/delay.h>
+#include <linux/namei.h>
 
 #include "l4/comm.h"
 #include "l3/registry.h"
@@ -20,6 +21,9 @@
 /* Used by `medusa_l1_creds_for_exec` */
 bool init_loaded;
 char *init_trigger;
+#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+char *auth_server_loader;
+#endif
 
 int medusa_l1_inode_alloc_security(struct inode *inode);
 
@@ -37,52 +41,71 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  * }
  */
 
-static void medusa_l1_start_constable(void)
+#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+static bool medusa_l1_auth_server_loader_exists(void)
 {
-	char *argv[3];
-	char *envp[3];
+	struct path path;
+
+	if (!auth_server_loader) {
+		auth_server_loader = CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER;
+		med_pr_info("%s: initialized auth_server_loader as %s", __func__, auth_server_loader);
+	}
+	if (kern_path(auth_server_loader, LOOKUP_FOLLOW, &path)) {
+		med_pr_err("%s: auth server loader %s does not exist", __func__, auth_server_loader);
+		return false;
+	}
+	path_put(&path);
+	return true;
+}
+
+static void medusa_l1_start_auth_server(void)
+{
+	//TODO: read from a variable
+	char *argv[] = {"/bin/sh", "-c", CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER, NULL};
+	char *envp[] = {"HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 	int error;
+	size_t sleep_millis = 3000;
+
+	if (!medusa_l1_auth_server_loader_exists())
+		return;
 
 	med_pr_info("%s - Trying to start Constable", __func__);
-	argv[0] = CONFIG_SECURITY_MEDUSA_CONSTABLE_EXECUTABLE_FILEPATH;
-	argv[1] = CONFIG_SECURITY_MEDUSA_CONSTABLE_CONFIG_FILEPATH;
-	argv[2] = NULL;
-	envp[0] = "HOME=/";
-	envp[1] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
-	envp[2] = NULL;
-	med_pr_info("%s - sleeping for 1 second before starting Constable", __func__);
-	msleep(1000);
 	error = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
 	if (error) {
 		med_pr_err("%s: error starting Constable: %d", __func__, error);
 		// TODO: stop if production Medusa
 	}
-	med_pr_info("%s - sleeping for 5 seconds after starting Constable", __func__);
-	msleep(5000);
+	med_pr_info("%s - sleeping for %d seconds after starting Constable", __func__, sleep_millis / 1000);
+	msleep(sleep_millis);
 	med_pr_info("%s - Constable initialization complete", __func__);
 }
+#endif
 
 static void medusa_l1_initialize_init(const char *filename)
 {
 	struct medusa_l1_task_s *med = task_security(current);
 
-	if (unlikely(!init_trigger))
+	if (!init_trigger) {
 		init_trigger = CONFIG_SECURITY_MEDUSA_INITIALIZATION_TRIGGER;
+		med_pr_info("%s: initialized init_trigger as '%s'", __func__, init_trigger);
+	}
 	if (strcmp(filename, init_trigger)) {
-		med_pr_warn("Exec of non-init process %s happened without init running!\n",
+		med_pr_warn("Exec of non-init process '%s' happened without init running!\n",
 			    filename);
 		return;
 	}
+	med_pr_info("%s: '%s' is init_trigger - initializing Medusa", __func__, filename);
+	init_med_object(&(med->med_object));
+	init_med_subject(&(med->med_subject));
 
-	init_med_object(&med->med_object);
-	init_med_subject(&med->med_subject);
-
-#ifdef CONFIG_SECURITY_MEDUSA_START_CONSTABLE_BEFORE_INIT
-	#ifdef CONFIG_STATIC_USERMODEHELPER
-		#error STATIC_USERMODEHELPER option must be disabled to guarantee Constable will successfuly start at startup
-	#endif
-	medusa_l1_start_constable();
-#endif
+#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+	BUILD_BUG_ON_MSG(strlen(CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER) == 0, "Path to SECURITY_MEDUSA_AUTH_SERVER_LOADER must not be empty");
+#ifdef CONFIG_STATIC_USERMODEHELPER
+	BUILD_BUG_ON_MSG(strlen(CONFIG_STATIC_USERMODEHELPER_PATH) == 0, "STATIC_USERMODEHELPER is enabled, but STATIC_USERMODEHELPER_PATH is empty. Auth server will not be able to start.");
+	#warning STATIC_USERMODEHELPER is enabled -> auth server start will depend on its implementation
+#endif /* CONFIG_STATIC_USERMODEHELPER */
+	medusa_l1_start_auth_server();
+#endif /* CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT */
 	init_loaded = 1;
 }
 

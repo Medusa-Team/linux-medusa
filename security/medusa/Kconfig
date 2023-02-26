@@ -167,24 +167,19 @@ config SECURITY_MEDUSA_INITIALIZATION_TRIGGER
 	depends on SECURITY_MEDUSA
 	default "/sbin/init"
 
-config SECURITY_MEDUSA_START_CONSTABLE_BEFORE_INIT
+config SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
 # TODO: adjust make to copy constable executable to /sbin and its configuration to /etc
-	bool "Start Constable before the init process"
+	bool "Start auth server before the init process"
 # TODO: ask whether SECURITY_MEDUSA_L4_CONSTABLE is not a dependency too
 	depends on SECURITY_MEDUSA
 	default y
 	help
-	  If set, starts up Constable before the init process.
+	  If set, starts up the auth server before the init process.
 #TODO: write more help
 
-config SECURITY_MEDUSA_CONSTABLE_EXECUTABLE_FILEPATH
-	string "Filepath to the Constable executable file"
-	depends on SECURITY_MEDUSA_START_CONSTABLE_BEFORE_INIT
-	default "/sbin/constable"
-
-config SECURITY_MEDUSA_CONSTABLE_CONFIG_FILEPATH
-	string "Filepath to the Constable config"
-	depends on SECURITY_MEDUSA_START_CONSTABLE_BEFORE_INIT
-	default "/sbin/constable.conf"
+config SECURITY_MEDUSA_AUTH_SERVER_LOADER
+	string "Filepath to the auth server loader"
+	depends on SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+	default "/sbin/medusa-init"
 
 endif # if SECURITY_MEDUSA
