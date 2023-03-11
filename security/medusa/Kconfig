@@ -163,23 +163,34 @@ config SECURITY_MEDUSA_GCOV_PROFILE
 endif # SECURITY_MEDUSA_MET_DEPENDENCIES
 
 config SECURITY_MEDUSA_INITIALIZATION_TRIGGER
-	string "Process name that triggers Medusa initialization"
+	string "Medusa initialization trigger"
 	depends on SECURITY_MEDUSA
 	default "/sbin/init"
+	help
+	  Process name used as trigger to start medusa initialization.
+	  Medusa will initialize before the target process is started.
 
-config SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
-# TODO: adjust make to copy constable executable to /sbin and its configuration to /etc
-	bool "Start auth server before the init process"
-# TODO: ask whether SECURITY_MEDUSA_L4_CONSTABLE is not a dependency too
+config SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
+	bool "Start auth server during Medusa initialization"
 	depends on SECURITY_MEDUSA
 	default y
 	help
-	  If set, starts up the auth server before the init process.
-#TODO: write more help
+	  If set, Medusa will start the auth server using the provided auth server
+	  loader.
+
+	  At the moment Medusa waits until the auth server sends a 'ready' message
+	  before proceeding the system startup.
+	  TODO: what to do when server does not respond? Proceed or panic?
 
 config SECURITY_MEDUSA_AUTH_SERVER_LOADER
 	string "Filepath to the auth server loader"
-	depends on SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+	depends on SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
 	default "/sbin/medusa-init"
+	help
+	  Any executable that starts a Medusa auth server.
+
+	  TODO: duplicate explanation or decide at which config option to show it
+	  The started auth server is expected to send a 'ready' message to Medusa
+	  so it can proceed with the system startup.
 
 endif # if SECURITY_MEDUSA

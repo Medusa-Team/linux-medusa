@@ -21,7 +21,7 @@
 /* Used by `medusa_l1_creds_for_exec` */
 bool init_loaded;
 char *init_trigger;
-#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
 char *auth_server_loader;
 #endif
 
@@ -41,7 +41,7 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  * }
  */
 
-#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
 static bool medusa_l1_auth_server_loader_exists(void)
 {
 	struct path path;
@@ -98,14 +98,14 @@ static void medusa_l1_initialize_init(const char *filename)
 	init_med_object(&(med->med_object));
 	init_med_subject(&(med->med_subject));
 
-#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
 	BUILD_BUG_ON_MSG(strlen(CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER) == 0, "Path to SECURITY_MEDUSA_AUTH_SERVER_LOADER must not be empty");
 #ifdef CONFIG_STATIC_USERMODEHELPER
 	BUILD_BUG_ON_MSG(strlen(CONFIG_STATIC_USERMODEHELPER_PATH) == 0, "STATIC_USERMODEHELPER is enabled, but STATIC_USERMODEHELPER_PATH is empty. Auth server will not be able to start.");
 	#warning STATIC_USERMODEHELPER is enabled -> auth server start will depend on its implementation
 #endif /* CONFIG_STATIC_USERMODEHELPER */
 	medusa_l1_start_auth_server();
-#endif /* CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT */
+#endif /* CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT */
 	init_loaded = 1;
 }
 
