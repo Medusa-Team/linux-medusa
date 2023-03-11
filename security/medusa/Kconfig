@@ -76,11 +76,11 @@ config SECURITY_MEDUSA_KILL_RESCHEDULING
 	  If unsure, say N.
 
 config SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
-	int "FUCK Number of hash table buckets"
+	int "FUCK Number of hash table buckets (exponent)"
 	depends on SECURITY_MEDUSA
 	default 3
 	help
-	  Defines the number of buckets as 2^n a FUCK hash table stored in
+	  Determines the number of hash table buckets (exponent) the FUCK hash table stored in
 	  inode_security has.
 
 	  Increasing the size should help in cases where there are many files
