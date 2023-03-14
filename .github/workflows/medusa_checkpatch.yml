@@ -10,6 +10,8 @@ jobs:
     name: Check changed Medusa files with checkpatch
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       - uses: tj-actions/changed-files@v35
         id: changed-medusa-files
         with:
