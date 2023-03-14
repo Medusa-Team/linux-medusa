@@ -1,0 +1,23 @@
+name: Medusa checkpatch
+
+on:
+  pull_request:
+    branches: master
+    
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    name: Check changed Medusa files with checkpatch
+    steps:
+      - uses: actions/checkout@v3
+      - uses: tj-actions/changed-files@v35
+        id: changed-medusa-files
+        with:
+          files: security/medusa/**
+      - name: Install checkpatch dependencies
+        run: |
+          pip3 install ply GitPython
+      - name: Run checkpatch on changed Medusa files
+        if: steps.changed-medusa-files.outputs.any_changed == 'true'
+        run: |
+          scripts/checkpatch.pl --strict -f ${{ steps.changed-medusa-files.outputs.all_changed_files }}
