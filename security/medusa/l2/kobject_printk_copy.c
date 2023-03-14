@@ -6,7 +6,7 @@
 #include "l3/registry.h"
 
 struct printk_kobject {
-	char message[256];
+	char message[512];
 };
 
 MED_ATTRS(printk_kobject) {
