@@ -54,7 +54,7 @@ static void medusa_l1_start_constable(void)
 	msleep(1000);
 	error = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
 	if (error) {
-		med_pr_err("%s: error starting Constable: %s", __func__, error);
+		med_pr_err("%s: error starting Constable: %d", __func__, error);
 		// TODO: stop if production Medusa
 	}
 	med_pr_info("%s - sleeping for 5 seconds after starting Constable", __func__);
