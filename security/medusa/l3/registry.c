@@ -290,6 +290,38 @@ void med_unregister_evtype(struct medusa_evtype_s *med_evtype)
 }
 
 /**
+ * med_register_authserver_prepare - prepare data for the authorization server
+ * @med_authserver: pointer to the filled medusa_authserver_s structure
+ *
+ * Announce all known kclasses and evtypes to the server.
+ *
+ * Note:
+ * This should be done *before* authserver registration to prevent sending an
+ * decision request (using some kclass) to the auth server before defining the
+ * kclass used by that decision request.
+ */
+int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver)
+{
+	struct medusa_kclass_s *cp;
+	struct medusa_evtype_s *ap;
+
+	/* we must remain in write-lock here, to synchronize add_*
+	 * events across our code.
+	 */
+	mutex_lock(&registry_lock);
+
+	if (med_authserver->add_kclass)
+		for (cp = kclasses; cp; cp = cp->next)
+			med_authserver->add_kclass(cp); /* TODO: some day we might want to check the return value, to support specialized servers */
+	if (med_authserver->add_evtype)
+		for (ap = evtypes; ap; ap = ap->next)
+			med_authserver->add_evtype(ap); /* TODO: the same for this */
+
+	mutex_unlock(&registry_lock);
+	return 0;
+}
+
+/**
  * med_register_authserver - register the authorization server
  * @med_authserver: pointer to the filled medusa_authserver_s structure
  *
@@ -299,9 +331,6 @@ void med_unregister_evtype(struct medusa_evtype_s *med_evtype)
  */
 int med_register_authserver(struct medusa_authserver_s *med_authserver)
 {
-	struct medusa_kclass_s *cp;
-	struct medusa_evtype_s *ap;
-
 	med_pr_info("Registering authorization server %s\n", med_authserver->name);
 	mutex_lock(&registry_lock);
 	if (authserver) {
@@ -316,16 +345,6 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 	med_authserver->use_count = 1;
 	medusa_authserver_magic++;
 	authserver = med_authserver;
-
-	/* we must remain in write-lock here, to synchronize add_*
-	 * events across our code.
-	 */
-	if (med_authserver->add_kclass)
-		for (cp = kclasses; cp; cp = cp->next)
-			med_authserver->add_kclass(cp); /* TODO: some day we might want to check the return value, to support specialized servers */
-	if (med_authserver->add_evtype)
-		for (ap = evtypes; ap; ap = ap->next)
-			med_authserver->add_evtype(ap); /* TODO: the same for this */
 
 	mutex_unlock(&registry_lock);
 	return 0;
