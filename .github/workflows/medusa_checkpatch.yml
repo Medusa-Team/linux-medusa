@@ -18,14 +18,20 @@ jobs:
       - name: Print files
         run: ls -al
       - name: Clone master
-        if: steps.cache-master-restore.outputs.cache-hit != 'true'
+#        if: steps.cache-master-restore.outputs.cache-hit != 'true'
         uses: actions/checkout@v3
         with:
           ref: master
-          fetch-depth: 0
-      - name: Update master
-        if: steps.cache-master-restore.outputs.cache-hit == 'true'
-        run: git pull
+          clean: false
+      - name: Print files
+        run: ls -al
+      - name: Pring git log
+        run: git log
+      - name: Unshallow master
+        run: git fetch --no-tags --prune --progress --no-recurse-submodules --unshallow
+#      - name: Update master
+#        if: steps.cache-master-restore.outputs.cache-hit == 'true'
+#        run: git pull
       - name: Print files
         run: ls -al
       - name: Cache master
