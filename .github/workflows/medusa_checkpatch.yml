@@ -9,9 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     name: Check changed Medusa files with checkpatch
     steps:
-      - name: Download checkpatch
-        run: |
-          wget https://raw.githubusercontent.com/Medusa-Team/linux-medusa/checkpatch_github_action/scripts/checkpatch.pl
+#       - name: Download checkpatch
+#         run: |
+#           wget https://raw.githubusercontent.com/Medusa-Team/linux-medusa/checkpatch_github_action/scripts/checkpatch.pl
       - name: Get changed files through GitHub CLI
         id: changed-files
         run: |
@@ -38,10 +38,13 @@ jobs:
 #         id: changed-medusa-files
 #         with:
 #           files: security/medusa/**
+      - uses: actions/checkout@v3
+        with:
+          ref: master
       - name: Install checkpatch dependencies
         run: |
           pip3 install ply GitPython
       - name: Run checkpatch on changed Medusa files
         if: steps.changed-files.outputs.files != ''
         run: |
-          checkpatch.pl --strict -f ${{ steps.changed-files.outputs.files }}
+          scripts/checkpatch.pl --strict -f ${{ steps.changed-files.outputs.files }}
