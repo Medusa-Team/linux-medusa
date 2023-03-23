@@ -26,6 +26,6 @@ jobs:
           key: ${{ env.CACHE_KEY }}
           lookup-only: true
       - uses: actions/checkout@v3
-        if: steps.master-cache-lookup.outputs.cache-hit == 'false'
+        if: steps.master-cache-lookup.outputs.cache-hit != 'true'
         with:
           fetch-depth: 0

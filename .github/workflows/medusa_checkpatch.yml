@@ -9,46 +9,29 @@ jobs:
     runs-on: ubuntu-latest
     name: Check changed Medusa files with checkpatch
     steps:
-      - name: Restore master
-        id: cache-master-restore
-        uses: actions/cache/restore@v3
+      - name: Generate cache key
+        run: |
+          MASTER_HASH=$(git ls-remote https://github.com/Medusa-Team/linux-medusa master | awk '{print $1}')
+          CACHE_KEY=master-$MASTER_HASH
+          echo "CACHE_KEY=$CACHE_KEY"
+          echo "CACHE_KEY=$CACHE_KEY" >> $GITHUB_ENV
+      - uses: actions/cache@v3
+        id: master-cache
         with:
           path: ./**
-          key: master
-      - name: Print files
-        run: ls -al
-      - name: Clone master
-#        if: steps.cache-master-restore.outputs.cache-hit != 'true'
-        uses: actions/checkout@v3
+          key: ${{ env.CACHE_KEY }}
+      - uses: actions/checkout@v3
+        if: steps.master-cache.outputs.cache-hit != 'true'
         with:
           fetch-depth: 0
-          clean: false
-      - name: Print files
-        run: ls -al
-#      - name: Unshallow master
-#        run: git fetch --no-tags --prune --progress --no-recurse-submodules --unshallow
-#      - name: Update master
-#        if: steps.cache-master-restore.outputs.cache-hit == 'true'
-#        run: git pull
-      - name: Print files
-        run: ls -al
-      - name: Cache master
-        id: cache-master-save
-        uses: actions/cache/save@v3
+      - uses: tj-actions/changed-files@v35
+        id: changed-medusa-files
         with:
-          path: ./**
-          key: master
-#       - uses: actions/checkout@v3
-#         with:
-#           fetch-depth: 10
-#       - uses: tj-actions/changed-files@v35
-#         id: changed-medusa-files
-#         with:
-#           files: security/medusa/**
-#       - name: Install checkpatch dependencies
-#         run: |
-#           pip3 install ply GitPython
-#       - name: Run checkpatch on changed Medusa files
-#         if: steps.changed-medusa-files.outputs.any_changed == 'true'
-#         run: |
-#           scripts/checkpatch.pl --strict -f ${{ steps.changed-medusa-files.outputs.all_changed_files }}
+          files: security/medusa/**
+      - name: Install checkpatch dependencies
+        run: |
+          pip3 install ply GitPython
+      - name: Run checkpatch on changed Medusa files
+        if: steps.changed-medusa-files.outputs.any_changed == 'true'
+        run: |
+          scripts/checkpatch.pl --strict -f ${{ steps.changed-medusa-files.outputs.all_changed_files }}
