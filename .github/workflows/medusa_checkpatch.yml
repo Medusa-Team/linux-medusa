@@ -3,22 +3,26 @@ name: Medusa checkpatch
 on:
   pull_request:
     branches: master
-    
+
 jobs:
   check:
     runs-on: ubuntu-latest
     name: Check changed Medusa files with checkpatch
     steps:
-#       - name: Download checkpatch
-#         run: |
-#           wget https://raw.githubusercontent.com/Medusa-Team/linux-medusa/checkpatch_github_action/scripts/checkpatch.pl
-      - name: Get changed files through GitHub CLI
-        id: changed-files
+      - name: Download checkpatch
         run: |
-          echo "files=$(gh pr diff $PULL_REQUEST_URL | awk 'match($0, /diff --git.+b[/](security[/]medusa[/].+)/, m){file=m[1]; next_line=NR+1} NR==next_line && !/deleted file/{printf "%s ", file}')" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PULL_REQUEST_URL: ${{ github.event.pull_request.html_url }}
+          SCRIPTS_URL=https://raw.githubusercontent.com/Medusa-Team/linux-medusa/master/scripts
+          wget $SCRIPTS_URL/checkpatch.pl
+          wget $SCRIPTS_URL/spelling.txt
+          wget $SCRIPTS_URL/const_structs.checkpatch
+          chmod +x checkpatch.pl
+#       - name: Get changed files through GitHub CLI
+#         id: changed-files
+#         run: |
+#           echo "files=$(gh pr diff $PULL_REQUEST_URL | awk 'match($0, /diff --git.+b[/](security[/]medusa[/].+)/, m){file=m[1]; next_line=NR+1} NR==next_line && !/deleted file/{printf "%s ", file}')" >> $GITHUB_OUTPUT
+#         env:
+#           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#           PULL_REQUEST_URL: ${{ github.event.pull_request.html_url }}
 #       - name: Generate cache key
 #         run: |
 #           MASTER_HASH=$(git ls-remote https://github.com/Medusa-Team/linux-medusa master | awk '{print $1}')
@@ -38,13 +42,16 @@ jobs:
 #         id: changed-medusa-files
 #         with:
 #           files: security/medusa/**
-      - uses: actions/checkout@v3
-        with:
-          ref: master
+#       - uses: actions/checkout@v3
+#         with:
+#           ref: master
       - name: Install checkpatch dependencies
         run: |
           pip3 install ply GitPython
-      - name: Run checkpatch on changed Medusa files
-        if: steps.changed-files.outputs.files != ''
-        run: |
-          scripts/checkpatch.pl --strict -f ${{ steps.changed-files.outputs.files }}
+      - name: Run checkpatch on PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # FILE_PATH_CHANGES are ignored to suppres "does MAINTAINERS need updating?" warning
+        run: >
+          gh pr diff ${{ github.event.pull_request.html_url }} |
+          ./checkpatch.pl --strict --no-tree --color=always --ignore FILE_PATH_CHANGES --show-types
