@@ -9,16 +9,16 @@ jobs:
     runs-on: ubuntu-latest
     name: Check changed Medusa files with checkpatch
     steps:
-      - name: Test
-        id: test
+      - name: Download checkpatch
         run: |
-          echo "changed-files=$(gh pr diff $PULL_REQUEST_URL --name-only | awk -v s='security/medusa' 'index($0, s) == 1 {printf "%s ", $0}')" >> $GITHUB_OUTPUT
+          wget https://raw.githubusercontent.com/Medusa-Team/linux-medusa/checkpatch_github_action/scripts/checkpatch.pl
+      - name: Get changed files through GitHub CLI
+        id: changed-files
+        run: |
+          echo "files=$(gh pr diff $PULL_REQUEST_URL | awk 'match($0, /diff --git.+b[/](security[/]medusa[/].+)/, m){file=m[1]; next_line=NR+1} NR==next_line && !/deleted file/{printf "%s ", file}')" >> $GITHUB_OUTPUT
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PULL_REQUEST_URL: ${{ github.event.pull_request.html_url }}
-      - name: Test 2
-        run: |
-          echo ${{ steps.test.outputs.changed-files }}
 #       - name: Generate cache key
 #         run: |
 #           MASTER_HASH=$(git ls-remote https://github.com/Medusa-Team/linux-medusa master | awk '{print $1}')
@@ -38,10 +38,10 @@ jobs:
 #         id: changed-medusa-files
 #         with:
 #           files: security/medusa/**
-#       - name: Install checkpatch dependencies
-#         run: |
-#           pip3 install ply GitPython
-#       - name: Run checkpatch on changed Medusa files
-#         if: steps.changed-medusa-files.outputs.any_changed == 'true'
-#         run: |
-#           scripts/checkpatch.pl --strict -f ${{ steps.changed-medusa-files.outputs.all_changed_files }}
+      - name: Install checkpatch dependencies
+        run: |
+          pip3 install ply GitPython
+      - name: Run checkpatch on changed Medusa files
+        if: steps.changed-files.outputs.files != ''
+        run: |
+          checkpatch.pl --strict -f ${{ steps.changed-files.outputs.files }}
