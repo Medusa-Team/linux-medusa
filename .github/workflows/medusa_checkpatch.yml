@@ -16,35 +16,6 @@ jobs:
           wget $SCRIPTS_URL/spelling.txt
           wget $SCRIPTS_URL/const_structs.checkpatch
           chmod +x checkpatch.pl
-#       - name: Get changed files through GitHub CLI
-#         id: changed-files
-#         run: |
-#           echo "files=$(gh pr diff $PULL_REQUEST_URL | awk 'match($0, /diff --git.+b[/](security[/]medusa[/].+)/, m){file=m[1]; next_line=NR+1} NR==next_line && !/deleted file/{printf "%s ", file}')" >> $GITHUB_OUTPUT
-#         env:
-#           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#           PULL_REQUEST_URL: ${{ github.event.pull_request.html_url }}
-#       - name: Generate cache key
-#         run: |
-#           MASTER_HASH=$(git ls-remote https://github.com/Medusa-Team/linux-medusa master | awk '{print $1}')
-#           CACHE_KEY=master-$MASTER_HASH
-#           echo "CACHE_KEY=$CACHE_KEY"
-#           echo "CACHE_KEY=$CACHE_KEY" >> $GITHUB_ENV
-#       - uses: actions/cache@v3
-#         id: master-cache
-#         with:
-#           path: ./**
-#           key: ${{ env.CACHE_KEY }}
-#       - uses: actions/checkout@v3
-#         if: steps.master-cache.outputs.cache-hit != 'true'
-#         with:
-#           fetch-depth: 0
-#       - uses: tj-actions/changed-files@v35
-#         id: changed-medusa-files
-#         with:
-#           files: security/medusa/**
-#       - uses: actions/checkout@v3
-#         with:
-#           ref: master
       - name: Install checkpatch dependencies
         run: |
           pip3 install ply GitPython
