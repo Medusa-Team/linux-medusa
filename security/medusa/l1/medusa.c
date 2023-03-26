@@ -584,6 +584,20 @@ static int medusa_l1_file_open(struct file *file)
 	return 0;
 }
 
+/**
+ * medusa_l1_file_truncate - Target for security_file_truncate().
+ *
+ * @file: Pointer to "struct file".
+ *
+ * Returns 0 on success, negative value otherwise.
+ */
+static int medusa_l1_file_truncate(struct file *file)
+{
+	if (medusa_truncate(&file->f_path) == MED_DENY)
+		return -EACCES;
+	return 0;
+}
+
 static int medusa_l1_task_fix_setuid(struct cred *new,
 				     const struct cred *old,
 				     int flags)
@@ -1552,6 +1566,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	//LSM_HOOK_INIT(file_send_sigiotask, medusa_l1_file_send_sigiotask),
 	//LSM_HOOK_INIT(file_receive, medusa_l1_file_receive),
 	LSM_HOOK_INIT(file_open, medusa_l1_file_open),
+	LSM_HOOK_INIT(file_truncate, medusa_l1_file_truncate),
 
 	//LSM_HOOK_INIT(cred_alloc_blank, medusa_l1_cred_alloc_blank),
 	//LSM_HOOK_INIT(cred_free, medusa_l1_cred_free),
