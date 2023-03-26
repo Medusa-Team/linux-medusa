@@ -45,12 +45,11 @@ static void medusa_l1_initialize_init(const char *filename)
 		return;
 	}
 
-	init_med_object(&(med->med_object));
-	init_med_subject(&(med->med_subject));
+	init_med_object(&med->med_object);
+	init_med_subject(&med->med_subject);
 
 	init_loaded = 1;
 }
-
 
 static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
 {
@@ -201,7 +200,7 @@ int medusa_l1_inode_alloc_security(struct inode *inode)
 	struct medusa_l1_inode_s *med = inode_security(inode);
 
 	hash_init(med->fuck);
-	init_med_object(&(med->med_object));
+	init_med_object(&med->med_object);
 
 	return 0;
 }
@@ -325,7 +324,7 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 	if (no_block)
 		return -ECHILD;
 
-	mask &= (MAY_READ|MAY_WRITE|MAY_EXEC|MAY_APPEND);
+	mask &= (MAY_READ | MAY_WRITE | MAY_EXEC | MAY_APPEND);
 	/*
 	 * Existence test.
 	 * TODO What about Medusa SEE permission?
@@ -403,7 +402,7 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 static int medusa_l1_path_mknod(const struct path *dir, struct dentry *dentry,
 				umode_t mode, unsigned int dev)
 {
-	if(medusa_mknod(dir, dentry, mode, dev) == MED_DENY)
+	if (medusa_mknod(dir, dentry, mode, dev) == MED_DENY)
 		return -EACCES;
 	return 0;
 }
@@ -621,13 +620,13 @@ int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 
 	/*  current == task iff initializing task with pid == 0  */
 	if (unlikely(current == task)) {
-		init_med_object(&(med->med_object));
-		init_med_subject(&(med->med_subject));
+		init_med_object(&med->med_object);
+		init_med_subject(&med->med_subject);
 	} else {
 		*med = *old;
 	}
 
-	mutex_init(&(med->validation_in_progress));
+	mutex_init(&med->validation_in_progress);
 	med->validation_depth_nesting = 1;
 
 #ifndef CONFIG_SECURITY_MEDUSA_MONITOR_KTHREADS
@@ -811,7 +810,7 @@ int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
 {
 	struct medusa_l1_ipc_s *med = ipc_security(ipcp);
 
-	init_med_object(&(med->med_object));
+	init_med_object(&med->med_object);
 	med->ipc_class = ipc_class;
 	return 0;
 }
@@ -857,27 +856,33 @@ int medusa_l1_sem_alloc_security(struct kern_ipc_perm *sma)
 	return medusa_l1_ipc_alloc_security(sma, MED_IPC_SEM);
 }
 
-int medusa_queue_associate(struct kern_ipc_perm *ipcp, int flag) {
+int medusa_queue_associate(struct kern_ipc_perm *ipcp, int flag)
+{
 	return medusa_ipc_associate(ipcp, flag, "queue_associate");
 }
 
-int medusa_shm_associate(struct kern_ipc_perm *ipcp, int flag) {
+int medusa_shm_associate(struct kern_ipc_perm *ipcp, int flag)
+{
 	return medusa_ipc_associate(ipcp, flag, "shm_associate");
 }
 
-int medusa_sem_associate(struct kern_ipc_perm *ipcp, int flag) {
+int medusa_sem_associate(struct kern_ipc_perm *ipcp, int flag)
+{
 	return medusa_ipc_associate(ipcp, flag, "sem_associate");
 }
 
-int medusa_queue_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+int medusa_queue_ctl(struct kern_ipc_perm *ipcp, int cmd)
+{
 	return medusa_ipc_ctl(ipcp, cmd, "msgctl");
 }
 
-int medusa_shm_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+int medusa_shm_ctl(struct kern_ipc_perm *ipcp, int cmd)
+{
 	return medusa_ipc_ctl(ipcp, cmd, "shmctl");
 }
 
-int medusa_sem_ctl(struct kern_ipc_perm *ipcp, int cmd) {
+int medusa_sem_ctl(struct kern_ipc_perm *ipcp, int cmd)
+{
 	return medusa_ipc_ctl(ipcp, cmd, "semctl");
 }
 
@@ -1453,7 +1458,6 @@ static int medusa_l1_inode_setxattr(struct dentry *dentry, const char *name,
 {
 	return cap_inode_setxattr(dentry, name, value, size, flags);
 }
-
 
 static int medusa_l1_inode_removexattr(struct user_namespace *mnt_userns,
 				       struct dentry *dentry, const char *name)
