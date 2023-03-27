@@ -24,7 +24,9 @@ extern enum medusa_answer_t medusa_setresuid(struct cred *new,
 extern enum medusa_answer_t medusa_capable(int cap);
 extern enum medusa_answer_t medusa_fork(unsigned long clone_flags);
 extern enum medusa_answer_t medusa_init_process(struct task_struct *new);
+#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
 extern enum medusa_answer_t medusa_sendsig(struct task_struct *p, struct kernel_siginfo *info, int sig, const struct cred *cred);
+#endif /* CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL */
 extern enum medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp);
 extern int medusa_monitored_pexec(void);
 extern void medusa_monitor_pexec(int flag);
