@@ -637,7 +637,7 @@ int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 #ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
 	med->self = NULL;
 	refcount_set(&med->rcu_cb_set, 0);
-#endif /* CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILLCONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL */
+#endif /* CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL */
 
 	return 0;
 }
