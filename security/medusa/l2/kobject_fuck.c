@@ -35,7 +35,7 @@ MED_ATTRS(fuck_kobject) {
 
 struct fuck_path {
 	struct hlist_node list;
-	char path[0];
+	DECLARE_FLEX_ARRAY(char, path);
 };
 
 /**

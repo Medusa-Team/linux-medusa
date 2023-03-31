@@ -147,7 +147,7 @@ struct medusa_kclass_s {
 
 /* used by l3 and l4 to easily access the header of l2 structures */
 struct medusa_kobject_s {
-	unsigned char data[0];
+	DECLARE_FLEX_ARRAY(unsigned char, data);
 };
 
 /*
@@ -277,7 +277,7 @@ struct medusa_evtype_s {
 /* used by l3 and l4 to easily access the header of l2 structures */
 struct medusa_event_s {
 	MEDUSA_ACCESS_HEADER;
-	unsigned char data[0];
+	DECLARE_FLEX_ARRAY(unsigned char, data);
 };
 
 #endif
