@@ -94,23 +94,28 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 	};
 	struct ipc_ctl_access access;
 	struct process_kobject process;
-	struct ipc_kobject object, *object_p = NULL;
+	struct ipc_kobject object;
 	int err = 0;
 
-	/* 'ipcp' is NULL in case 'cmd' is one of: IPC_INFO, MSG_INFO, SEM_INFO,
-	 * SHM_INFO */
-	if (likely(ipcp)) {
-		/* second argument false: don't need to unlock IPC object */
-		err = ipc_getref(ipcp, false);
-		if (unlikely(err))
-			/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
-			return err;
+	/*
+	 * @ipcp is %NULL in case @cmd is one of: %IPC_INFO, %MSG_INFO,
+	 * %SEM_INFO or %SHM_INFO.
+	 * Allow operation: as a security context is stored in the security blob
+	 * of @ipcp (but @ipcp is %NULL), Medusa cannot do anything else except
+	 * allowing the operation.
+	 */
+	if (unlikely(!ipcp))
+		return lsm_retval(MED_ALLOW, 0);
 
-		object_p = &object;
-		if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
-		    ipc_kobj_validate_ipcp(ipcp) <= 0)
-			goto out;
-	}
+	/* second argument false: don't need to unlock IPC object */
+	err = ipc_getref(ipcp, false);
+	if (unlikely(err))
+		/* ipc_getref() returns -EIDRM if IPC object is marked to deletion */
+		return err;
+
+	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
+	    ipc_kobj_validate_ipcp(ipcp) <= 0)
+		goto out;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
@@ -122,17 +127,15 @@ int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation)
 		access.ipc_class = MED_IPC_UNDEFINED;
 
 		process_kern2kobj(&process, current);
-		if (likely(object_p)) {
-			/* 3rd argument is true: decrement IPC object's refcount
-			 * in returned object
-			 */
-			ipc_kern2kobj(object_p, ipcp, true);
-			access.ipc_class = object_p->ipc_class;
-			mad.ipc_ctl.ipc_class = object_p->ipc_class;
-		}
+		/* 3rd argument is true: decrement IPC object's refcount in
+		 * returned object
+		 */
+		ipc_kern2kobj(&object, ipcp, true);
+		access.ipc_class = object.ipc_class;
+		mad.ipc_ctl.ipc_class = object.ipc_class;
 
 		/* in case of NULL 'ipcp', 'object_p' is NULL too */
-		mad.ans = MED_DECIDE(ipc_ctl_access, &access, &process, object_p);
+		mad.ans = MED_DECIDE(ipc_ctl_access, &access, &process, &object);
 		mad.as = AS_REQUEST;
 	}
 out:
@@ -144,10 +147,10 @@ out:
 		cad.medusa_audit_data = &mad;
 		medusa_audit_log_callback(&cad, medusa_ipc_ctl_pacb);
 	}
-	if (likely(ipcp)) {
-		/* second argument false: don't need to lock IPC object */
-		err = ipc_putref(ipcp, false);
-	}
+
+	/* second argument false: don't need to lock IPC object */
+	err = ipc_putref(ipcp, false);
+
 	return lsm_retval(mad.ans, err);
 }
 
