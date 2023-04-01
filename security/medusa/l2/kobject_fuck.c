@@ -126,7 +126,7 @@ static bool do_allowed_path(char *path, struct medusa_l1_inode_s *inode,
 	char path_hash[FUCK_HASH_DIGEST_SIZE];
 
 	calc_hash(path, path_hash);
-	hash = *(u64 *) path_hash;
+	hash = *(u64 *)path_hash;
 	hash_for_each_possible_safe(inode->fuck, secure_path, tmp, list, hash) {
 		if (memcmp(path_hash, secure_path->path_hash, FUCK_HASH_DIGEST_SIZE) == 0) {
 			if (action == ACT_REMOVE) {
@@ -340,18 +340,22 @@ int __init fuck_kobject_init(void)
 	hash_transformation = crypto_alloc_shash(FUCK_HASH_NAME, 0, 0);
 	if (IS_ERR(hash_transformation)) {
 		error = PTR_ERR(hash_transformation);
-		med_pr_err("%s: can't alloc %s during init, error: %d\n", __func__, FUCK_HASH_NAME, error);
+		med_pr_err("%s: can't alloc %s during init, error: %d\n",
+			   __func__, FUCK_HASH_NAME,
+			   error);
 		return error;
 	}
 
 	fuck_path_cache = kmem_cache_create("fuck_path_cache",
-			sizeof(struct fuck_path),
-			0,
-			SLAB_HWCACHE_ALIGN | SLAB_PANIC,
-			NULL);
+					    sizeof(struct fuck_path),
+					    0,
+					    SLAB_HWCACHE_ALIGN | SLAB_PANIC,
+					    NULL);
 	if (!fuck_path_cache) {
 		error = -ENOMEM;
-		med_pr_err("%s: can't alloc fuck_path_cache during init, error: %d", __func__, error);
+		med_pr_err("%s: can't alloc fuck_path_cache during init, error: %d",
+			   __func__,
+			   error);
 		crypto_free_shash(hash_transformation);
 		return error;
 	}
