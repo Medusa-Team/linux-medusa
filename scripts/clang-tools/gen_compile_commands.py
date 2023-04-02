@@ -226,4 +226,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-    print('Random change to modify this file')
