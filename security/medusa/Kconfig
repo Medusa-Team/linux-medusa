@@ -80,13 +80,13 @@ config SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
 	depends on SECURITY_MEDUSA
 	default 3
 	help
-	  Determines the number of hash table buckets (exponent) the FUCK hash table stored in
-	  inode_security has.
-
+	  Determines the number of hash table buckets (exponent) the FUCK hash
+	  table stored ininode_security has.
 	  Increasing the size should help in cases where there are many files
 	  being protected against FUCK attack.
 
-# All of the options must have a matching elif branch in file include/l2/kobject_fuck_hash.h
+# All of the options must have a matching elif branch in file
+# include/l2/kobject_fuck_hash.h
 choice
 	prompt "FUCK Hashing function"
 	help
