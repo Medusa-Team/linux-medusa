@@ -43,14 +43,15 @@ struct fuck_path {
 
 /**
  * Calculate hash of @path and save it into @hash_result.
- * Returns %true if the function fails.
+ *
+ * Return 0 if the path was hashed successfully; < 0 if an error occured.
  */
-static void calc_hash(char *path, char hash_result[FUCK_HASH_DIGEST_SIZE])
+static int calc_hash(char *path, char hash_result[FUCK_HASH_DIGEST_SIZE])
 {
 	SHASH_DESC_ON_STACK(sdesc, hash_transformation);
 
 	sdesc->tfm = hash_transformation;
-	crypto_shash_digest(sdesc, path, strlen(path), hash_result);
+	return crypto_shash_digest(sdesc, path, strlen(path), hash_result);
 }
 
 /**
@@ -124,8 +125,13 @@ static bool do_allowed_path(char *path, struct medusa_l1_inode_s *inode,
 	struct hlist_node *tmp;
 	u64 hash;
 	char path_hash[FUCK_HASH_DIGEST_SIZE];
+	int err;
 
-	calc_hash(path, path_hash);
+	err = calc_hash(path, path_hash);
+	if (!err) {
+		med_pr_err("%s: hashing path failed, error=%d", __func__, err);
+		return false;
+	}
 	hash = *(u64 *)path_hash;
 	hash_for_each_possible_safe(inode->fuck, secure_path, tmp, list, hash) {
 		if (memcmp(path_hash, secure_path->path_hash, FUCK_HASH_DIGEST_SIZE) == 0) {
