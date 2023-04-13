@@ -18,13 +18,6 @@
     #include <crypto/blake2b.h>
     #define FUCK_HASH_NAME "blake2b-512" // crypto/blake2b_generic.c
     #define FUCK_HASH_DIGEST_SIZE BLAKE2B_512_HASH_SIZE
-#elif defined CONFIG_SECURITY_MEDUSA_FUCK_BLAKE2S_256 // BLAKE2S_256
-    #if !IS_BUILTIN(CONFIG_CRYPTO_BLAKE2S)
-		#error "You selected Blake2s for FUCK hash, but it is not configured to be builtin."
-    #endif
-    #include <crypto/blake2s.h> // crypto/blake2s_generic.c
-    #define FUCK_HASH_NAME "blake2s-256"
-    #define FUCK_HASH_DIGEST_SIZE BLAKE2S_256_HASH_SIZE
 #elif defined CONFIG_SECURITY_MEDUSA_FUCK_SHA2_256 // SHA2-256
     #if !IS_BUILTIN(CONFIG_CRYPTO_SHA256)
 		#error "You selected sha256 for FUCK hash, but it is not configured to be builtin."

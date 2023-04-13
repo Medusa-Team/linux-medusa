@@ -16,8 +16,8 @@ menuconfig SECURITY_MEDUSA_SUPPORT
 config SECURITY_MEDUSA_MET_DEPENDENCIES
 	def_bool y
 	depends on SECURITY_MEDUSA_SUPPORT=y
-	depends on CRYPTO_BLAKE2B=y || CRYPTO_BLAKE2S=y || CRYPTO_SHA256=y || \
-		   CRYPTO_SHA512=y || CRYPTO_SHA3=y
+	depends on CRYPTO_BLAKE2B=y || CRYPTO_SHA256=y || CRYPTO_SHA512=y || \
+		   CRYPTO_SHA3=y
 
 if SECURITY_MEDUSA_SUPPORT && !SECURITY_MEDUSA_MET_DEPENDENCIES
 	comment "Please  select  at least one  of the hashing functions"
@@ -127,15 +127,6 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_512
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
 	  latest standard SHA-3.
 	  Optimized for 64-bit platforms. Produces 64 bytes long digests.
-
-config SECURITY_MEDUSA_FUCK_BLAKE2S_256
-	bool "Blake2s-256"
-	depends on CRYPTO_BLAKE2S=y
-	help
-	  According to www.blake2.net: A cryptographic hash function faster
-	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
-	  latest standard SHA-3.
-	  Optimized for 8- to 32-bit platforms. Produces 32 bytes long digests.
 
 config SECURITY_MEDUSA_FUCK_SHA2_256
 	bool "SHA2-256"
