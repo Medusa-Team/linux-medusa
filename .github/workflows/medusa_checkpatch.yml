@@ -1,0 +1,28 @@
+name: Medusa checkpatch
+
+on:
+  pull_request:
+    branches: master
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    name: Check changed Medusa files with checkpatch
+    steps:
+      - name: Download checkpatch
+        run: |
+          SCRIPTS_URL=https://raw.githubusercontent.com/Medusa-Team/linux-medusa/master/scripts
+          wget $SCRIPTS_URL/checkpatch.pl
+          wget $SCRIPTS_URL/spelling.txt
+          wget $SCRIPTS_URL/const_structs.checkpatch
+          chmod +x checkpatch.pl
+      - name: Install checkpatch dependencies
+        run: |
+          pip3 install ply GitPython
+      - name: Run checkpatch on PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # FILE_PATH_CHANGES are ignored to suppres "does MAINTAINERS need updating?" warning
+        run: >
+          gh pr diff ${{ github.event.pull_request.html_url }} |
+          ./checkpatch.pl --strict --no-tree --color=always --ignore FILE_PATH_CHANGES --show-types
