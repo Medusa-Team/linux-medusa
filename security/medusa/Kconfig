@@ -30,8 +30,8 @@ if SECURITY_MEDUSA_MET_DEPENDENCIES
 
 config SECURITY_MEDUSA_VS
         int "Number of bits representing Virtual Spaces (VS)"
-	# read default value from Medusa's config.h, if any; otherwise set default to 64
-	default $(shell,grep -E "#define CONFIG_MEDUSA_VS [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 64)
+	# read default value from Medusa's config.h, if any; otherwise set default to 96
+	default $(shell,grep -E "#define CONFIG_MEDUSA_VS [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 96)
         range 32 512
         help
 	  Medusa Communication Protocol transfers size of attributes in Bytes.
@@ -40,8 +40,8 @@ config SECURITY_MEDUSA_VS
 
 config SECURITY_MEDUSA_ACT
         int "Number of bits representing triggered security hooks"
-	# read default value from Medusa's config.h, if any; otherwise set default to 96
-	default $(shell,grep -E "#define CONFIG_MEDUSA_ACT [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 96)
+	# read default value from Medusa's config.h, if any; otherwise set default to 128
+	default $(shell,grep -E "#define CONFIG_MEDUSA_ACT [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 128)
         range 32 512
         help
 	  Medusa Communication Protocol transfers size of attributes in Bytes.
