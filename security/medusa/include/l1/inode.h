@@ -73,7 +73,7 @@ struct medusa_l1_inode_s {
 	/* for kobject_file.c - don't touch! */
 	struct inode *next_live;
 	int use_count;
-	DECLARE_HASHTABLE(fuck, CONFIG_SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE);
+	DECLARE_HASHTABLE(fuck, CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE);
 };
 
 #endif

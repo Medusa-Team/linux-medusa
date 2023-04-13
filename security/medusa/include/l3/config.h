@@ -5,6 +5,10 @@
 
 #include <linux/spinlock.h>
 
+#ifndef CONFIG_SECURITY_MEDUSA_MET_DEPENDENCIES
+#error "There are not met .config dependencies to builtin Medusa LSM. For more details see 'Security options ---> MEDUSA support' .config section."
+#endif
+
 #define IS_NOT_MULTIPLY_OF_8(val) (val & 7 != 0)
 
 #ifdef CONFIG_SECURITY_MEDUSA_VS
@@ -45,6 +49,16 @@
  */
 #if (CONFIG_MEDUSA_ACT >= 0x3fff)
 #error "CONFIG_MEDUSA_ACT should be < (2^14-1)"
+#endif
+
+/*
+ * The number of a FUCK hash table (stored in medusa_l1_inode_s, see
+ * include/l1/inode.h) buckets is 2^N. The default value of N is 3.
+ */
+#ifdef CONFIG_SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
+#define CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE CONFIG_SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
+#else
+#define CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE 3
 #endif
 
 #define CONFIG_MEDUSA_FILE_CAPABILITIES

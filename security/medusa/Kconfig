@@ -1,20 +1,38 @@
 source "security/medusa/testing/Kconfig"
 
 config SECURITY_MEDUSA
-	bool "MEDUSA Support"
+	def_bool y
+	depends on SECURITY_MEDUSA_SUPPORT
+	depends on SECURITY_MEDUSA_MET_DEPENDENCIES
+
+menuconfig SECURITY_MEDUSA_SUPPORT
+	bool "MEDUSA support"
 	depends on SECURITY && AUDIT
 	select NETWORK_SECMARK
 	default n
 	help
 	  This selects MEDUSA LSM.
 
-if SECURITY_MEDUSA
+config SECURITY_MEDUSA_MET_DEPENDENCIES
+	def_bool y
+	depends on SECURITY_MEDUSA_SUPPORT=y
+	depends on CRYPTO_BLAKE2B=y || CRYPTO_BLAKE2S=y || CRYPTO_SHA256=y || \
+		   CRYPTO_SHA512=y || CRYPTO_SHA3=y
+
+if SECURITY_MEDUSA_SUPPORT && !SECURITY_MEDUSA_MET_DEPENDENCIES
+	comment "Please  select  at least one  of the hashing functions"
+	comment "(BLAKE2b, SHA-256, SHA-512, SHA-3) as _builtin_ in the"
+	comment "'Cryptographic API  --->  Hashes,  digests,  and MACs'"
+	comment "section and then return here to configure Medusa LSM."
+endif
+
+if SECURITY_MEDUSA_MET_DEPENDENCIES
 
 config SECURITY_MEDUSA_VS
         int "Number of bits representing Virtual Spaces (VS)"
-        default 96
+	# read default value from Medusa's config.h, if any; otherwise set default to 64
+	default $(shell,grep -E "#define CONFIG_MEDUSA_VS [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 64)
         range 32 512
-        depends on SECURITY_MEDUSA
         help
 	  Medusa Communication Protocol transfers size of attributes in Bytes.
 	  To prevent a mistake and errornous interpretation of bits out of
@@ -22,9 +40,9 @@ config SECURITY_MEDUSA_VS
 
 config SECURITY_MEDUSA_ACT
         int "Number of bits representing triggered security hooks"
-        default 64
+	# read default value from Medusa's config.h, if any; otherwise set default to 96
+	default $(shell,grep -E "#define CONFIG_MEDUSA_ACT [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 96)
         range 32 512
-        depends on SECURITY_MEDUSA
         help
 	  Medusa Communication Protocol transfers size of attributes in Bytes.
 	  To prevent a mistake and errornous interpretation of bits out of
@@ -32,7 +50,6 @@ config SECURITY_MEDUSA_ACT
 
 config SECURITY_MEDUSA_L4_CONSTABLE
         tristate "MEDUSA L4 as MODULE"
-        depends on SECURITY_MEDUSA
         default y
         help
           Compiles l4 on medusa as module. Good for debug purposes.
@@ -41,11 +58,10 @@ config SECURITY_MEDUSA_L4_CONSTABLE
 
 config SECURITY_MEDUSA_TESTING
 	bool "MEDUSA Test Support"
-	depends on SECURITY_MEDUSA && KUNIT
+	depends on KUNIT
 
 config SECURITY_MEDUSA_MONITOR_KTHREADS
 	bool "Monitor kernel threads"
-	depends on SECURITY_MEDUSA
 	default n
 	help
 	  If set, kernel threads are monitored by Medusa LSM.
@@ -53,15 +69,13 @@ config SECURITY_MEDUSA_MONITOR_KTHREADS
 
 config SECURITY_MEDUSA_HOOKS_TASK_KILL
 	bool "Enable LSM hook task_kill"
-	depends on SECURITY_MEDUSA
 	default y
 	help
 	  If set, enables task_kill LSM security hook.
 
 config SECURITY_MEDUSA_KILL_RESCHEDULING
 	bool "Enable rescheduling in task_kill LSM hook"
-	depends on SECURITY_MEDUSA
-	depends on SECURITY_MEDUSA && SECURITY_MEDUSA_HOOKS_TASK_KILL
+	depends on SECURITY_MEDUSA_HOOKS_TASK_KILL
 	imply PREEMPT_CPU
 	imply LOCKDEP
 	default n
@@ -77,17 +91,18 @@ config SECURITY_MEDUSA_KILL_RESCHEDULING
 
 config SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
 	int "FUCK Number of hash table buckets (exponent)"
-	depends on SECURITY_MEDUSA
-	default 3
+	# read default value from Medusa's config.h, if any; otherwise set default to 3
+	default $(shell,grep -E "#define CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 3)
+        range 0 8
 	help
 	  Determines the number of hash table buckets (exponent) the FUCK hash
-	  table stored ininode_security has.
+	  table stored in inode_security has.
 	  Increasing the size should help in cases where there are many files
 	  being protected against FUCK attack.
 
 # All of the options must have a matching elif branch in file
 # include/l2/kobject_fuck_hash.h
-choice
+choice SECURITY_MEDUSA_HASH_NAME_CHOICE
 	prompt "FUCK Hashing function"
 	help
 	  Select a hashing function to be used within the FUCK module.
@@ -97,8 +112,7 @@ choice
 
 config SECURITY_MEDUSA_FUCK_BLAKE2B_256
 	bool "Blake2b-256"
-	depends on SECURITY_MEDUSA
-	imply CRYPTO_BLAKE2B
+	depends on CRYPTO_BLAKE2B=y
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
@@ -107,8 +121,7 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_256
 
 config SECURITY_MEDUSA_FUCK_BLAKE2B_512
 	bool "Blake2b-512"
-	depends on SECURITY_MEDUSA
-	imply CRYPTO_BLAKE2B
+	depends on CRYPTO_BLAKE2B=y
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
@@ -117,8 +130,7 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_512
 
 config SECURITY_MEDUSA_FUCK_BLAKE2S_256
 	bool "Blake2s-256"
-	depends on SECURITY_MEDUSA
-	imply CRYPTO_BLAKE2S
+	depends on CRYPTO_BLAKE2S=y
 	help
 	  According to www.blake2.net: A cryptographic hash function faster
 	  than MD5, SHA-1, SHA-2 and SHA-3, yet is at least as secure as the
@@ -127,34 +139,30 @@ config SECURITY_MEDUSA_FUCK_BLAKE2S_256
 
 config SECURITY_MEDUSA_FUCK_SHA2_256
 	bool "SHA2-256"
-	depends on SECURITY_MEDUSA
-	imply CRYPTO_SHA256
+	depends on CRYPTO_SHA256=y
 	help
 	  Cryptograhpically secure
 
 config SECURITY_MEDUSA_FUCK_SHA2_512
 	bool "SHA2-512"
-	depends on SECURITY_MEDUSA
-	imply CRYPTO_SHA512
+	depends on CRYPTO_SHA512=y
 	help
 	  Cryptographically secure. Usually faster than SHA256 on 64 bit machines
 
 config SECURITY_MEDUSA_FUCK_SHA3_256
 	bool "SHA3-256"
-	depends on SECURITY_MEDUSA
-	imply CRYPTO_SHA3
+	depends on CRYPTO_SHA3=y
 	help
 	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
 	  protection than SHA-2 offers.
 
 config SECURITY_MEDUSA_FUCK_SHA3_512
 	bool "SHA3-512"
-	depends on SECURITY_MEDUSA
-	imply CRYPTO_SHA3
+	depends on CRYPTO_SHA3=y
 	help
 	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
 	  protection than SHA-2 offers.
 
-endchoice
+endchoice # SECURITY_MEDUSA_HASH_NAME_CHOICE
 
-endif # if SECURITY_MEDUSA
+endif # SECURITY_MEDUSA_MET_DEPENDENCIES
