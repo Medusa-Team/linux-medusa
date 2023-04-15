@@ -48,14 +48,6 @@ config SECURITY_MEDUSA_ACT
 	  To prevent a mistake and errornous interpretation of bits out of
 	  bitarray, the array size SEURITY_MEDUSA_ACT must be a multiple of 8.
 
-config SECURITY_MEDUSA_L4_CONSTABLE
-        tristate "MEDUSA L4 as MODULE"
-        default y
-        help
-          Compiles l4 on medusa as module. Good for debug purposes.
-
-          If unsure do not touch.
-
 config SECURITY_MEDUSA_TESTING
 	bool "MEDUSA Test Support"
 	depends on KUNIT
