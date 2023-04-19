@@ -2,6 +2,11 @@
 # Makefile for the Linux kernel part of Medusa DS9 Security System
 #
 
+# for GCOV coverage profiling
+ifdef CONFIG_SECURITY_MEDUSA_GCOV_PROFILE
+GCOV_PROFILE := y
+endif
+
 O_TARGET := l2.o
 
 export-objs :=

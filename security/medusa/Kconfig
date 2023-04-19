@@ -48,10 +48,6 @@ config SECURITY_MEDUSA_ACT
 	  To prevent a mistake and errornous interpretation of bits out of
 	  bitarray, the array size SEURITY_MEDUSA_ACT must be a multiple of 8.
 
-config SECURITY_MEDUSA_TESTING
-	bool "MEDUSA Test Support"
-	depends on KUNIT
-
 config SECURITY_MEDUSA_MONITOR_KTHREADS
 	bool "Monitor kernel threads"
 	default n
@@ -147,5 +143,21 @@ config SECURITY_MEDUSA_FUCK_SHA3_512
 	  protection than SHA-2 offers.
 
 endchoice # SECURITY_MEDUSA_HASH_NAME_CHOICE
+
+config SECURITY_MEDUSA_TESTING
+	bool "MEDUSA Test Support"
+	depends on KUNIT
+
+config SECURITY_MEDUSA_GCOV_PROFILE
+	bool "Enable GCOV profiling on Medusa subsystem"
+	depends on GCOV_KERNEL
+	help
+	  Enable GCOV profiling on Medusa subsystem for checking which
+	  functions/lines are tested.
+
+	  If unsure, say N.
+
+	  Note that on a kernel compiled with this config, Medusa will
+	  run significantly slower.
 
 endif # SECURITY_MEDUSA_MET_DEPENDENCIES
