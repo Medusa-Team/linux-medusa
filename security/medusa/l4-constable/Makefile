@@ -8,6 +8,6 @@ endif
 
 export-objs :=  teleport_cycle teleport_reset
 
-l4-constable-y:= teleport.o chardev.o
+l4-constable-y:= teleport.o chardev.o auth_server.o
 obj-y := l4-constable.o
 

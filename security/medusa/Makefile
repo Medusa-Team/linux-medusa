@@ -9,6 +9,7 @@ LINUXINCLUDE    += -I$(srctree)/security/medusa/include
 subdir-$(CONFIG_SECURITY_MEDUSA)	+= l1
 subdir-$(CONFIG_SECURITY_MEDUSA)        += l2
 subdir-$(CONFIG_SECURITY_MEDUSA)        += l3
+subdir-$(CONFIG_SECURITY_MEDUSA)        += l4-constable
 subdir-$(CONFIG_SECURITY_MEDUSA)        += testing
 
 obj-$(CONFIG_SECURITY_MEDUSA) += l1/

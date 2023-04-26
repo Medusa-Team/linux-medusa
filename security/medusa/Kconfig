@@ -29,7 +29,7 @@ endif
 if SECURITY_MEDUSA_MET_DEPENDENCIES
 
 config SECURITY_MEDUSA_VS
-        int "Number of bits representing Virtual Spaces (VS)"
+	int "Number of bits representing Virtual Spaces (VS)"
 	# read default value from Medusa's config.h, if any; otherwise set default to 96
 	default $(shell,grep -E "#define CONFIG_MEDUSA_VS [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 96)
         range 32 512
@@ -39,7 +39,7 @@ config SECURITY_MEDUSA_VS
 	  bitarray, the array size SEURITY_MEDUSA_VS must be a multiple of 8.
 
 config SECURITY_MEDUSA_ACT
-        int "Number of bits representing triggered security hooks"
+	int "Number of bits representing triggered security hooks"
 	# read default value from Medusa's config.h, if any; otherwise set default to 128
 	default $(shell,grep -E "#define CONFIG_MEDUSA_ACT [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 128)
         range 32 512
@@ -160,11 +160,10 @@ config SECURITY_MEDUSA_GCOV_PROFILE
 	  Note that on a kernel compiled with this config, Medusa will
 	  run significantly slower.
 
-endif # SECURITY_MEDUSA_MET_DEPENDENCIES
+menu "Medusa initialization"
 
 config SECURITY_MEDUSA_INITIALIZATION_TRIGGER
 	string "Medusa initialization trigger"
-	depends on SECURITY_MEDUSA
 	default "/sbin/init"
 	help
 	  Process name used as trigger to start medusa initialization.
@@ -172,15 +171,13 @@ config SECURITY_MEDUSA_INITIALIZATION_TRIGGER
 
 config SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
 	bool "Start auth server during Medusa initialization"
-	depends on SECURITY_MEDUSA
 	default y
 	help
-	  If set, Medusa will start the auth server using the provided auth server
-	  loader.
-
-	  At the moment Medusa waits until the auth server sends a 'ready' message
-	  before proceeding the system startup.
-	  TODO: what to do when server does not respond? Proceed or panic?
+	  If set, Medusa will start an auth server using the provided
+	  AUTH_SERVER_LOADER before the specified INITIALIZATION_TRIGGER
+	  is executed and will wait until the auth server responds with
+	  a MEDUSA_COMM_READY_ANSWER protocol command.
+	  TODO: what to do when server does not respond? Proceed or panic after timeout?
 
 config SECURITY_MEDUSA_AUTH_SERVER_LOADER
 	string "Filepath to the auth server loader"
@@ -189,8 +186,6 @@ config SECURITY_MEDUSA_AUTH_SERVER_LOADER
 	help
 	  Any executable that starts a Medusa auth server.
 
-	  TODO: duplicate explanation or decide at which config option to show it
-	  The started auth server is expected to send a 'ready' message to Medusa
-	  so it can proceed with the system startup.
+endmenu
 
-endif # if SECURITY_MEDUSA
+endif # SECURITY_MEDUSA_MET_DEPENDENCIES

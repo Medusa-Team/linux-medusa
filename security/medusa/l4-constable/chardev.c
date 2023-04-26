@@ -41,6 +41,7 @@
 #include "l3/registry.h"
 #include "l3/server.h"
 #include "l3/med_cache.h"
+#include "l4/auth_server.h"
 #include "l4/comm.h"
 #include "l4/teleport.h"
 
@@ -916,7 +917,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			up_read(&lightswitch);
 			return -EPERM;
 		}
-		med_pr_info("TODO: received MEDUSA_COMM_READY_ANSWER");
+		set_auth_server_ready();
 	} else {
 		up(&take_answer);
 		med_pr_err("Protocol error at write(): unknown command %llx!\n",

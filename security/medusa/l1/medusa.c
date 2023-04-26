@@ -5,9 +5,9 @@
 #include <linux/binfmts.h>
 #include <linux/module.h>
 #include <linux/sched/task.h>
-#include <linux/delay.h>
 #include <linux/namei.h>
 
+#include "l4/auth_server.h"
 #include "l4/comm.h"
 #include "l3/registry.h"
 #include "l3/arch.h"
@@ -64,7 +64,6 @@ static void medusa_l1_start_auth_server(void)
 	char *argv[] = {"/bin/sh", "-c", CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER, NULL};
 	char *envp[] = {"HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 	int error;
-	size_t sleep_millis = 3000;
 
 	if (!medusa_l1_auth_server_loader_exists())
 		return;
@@ -75,8 +74,7 @@ static void medusa_l1_start_auth_server(void)
 		med_pr_err("%s: error starting Constable: %d", __func__, error);
 		// TODO: stop if production Medusa
 	}
-	med_pr_info("%s - sleeping for %d seconds after starting Constable", __func__, sleep_millis / 1000);
-	msleep(sleep_millis);
+	wait_for_auth_server();
 	med_pr_info("%s - Constable initialization complete", __func__);
 }
 #endif
