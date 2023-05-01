@@ -3,7 +3,7 @@ source "security/medusa/testing/Kconfig"
 config SECURITY_MEDUSA
 	def_bool y
 	depends on SECURITY_MEDUSA_SUPPORT
-	depends on SECURITY_MEDUSA_MET_DEPENDENCIES
+	depends on SECURITY_MEDUSA_MET_PRECONDITIONS
 
 menuconfig SECURITY_MEDUSA_SUPPORT
 	bool "MEDUSA support"
@@ -13,13 +13,31 @@ menuconfig SECURITY_MEDUSA_SUPPORT
 	help
 	  This selects MEDUSA LSM.
 
+if SECURITY_MEDUSA_SUPPORT
+
+config SECURITY_MEDUSA_MET_PRECONDITIONS
+	def_bool y
+	depends on SECURITY_MEDUSA_MET_DEPENDENCIES
+	depends on SECURITY_MEDUSA_INIT_POSSIBLE
+
 config SECURITY_MEDUSA_MET_DEPENDENCIES
 	def_bool y
-	depends on SECURITY_MEDUSA_SUPPORT=y
 	depends on CRYPTO_BLAKE2B=y || CRYPTO_SHA256=y || CRYPTO_SHA512=y || \
 		   CRYPTO_SHA3=y
 
-if SECURITY_MEDUSA_SUPPORT && !SECURITY_MEDUSA_MET_DEPENDENCIES
+config SECURITY_MEDUSA_INIT_POSSIBLE
+	def_bool y
+	depends on SECURITY_MEDUSA_INITIALIZATION_TRIGGER != ""
+	depends on SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT=n || \
+		   SECURITY_MEDUSA_AUTH_SERVER_START_POSSIBLE=y
+
+config SECURITY_MEDUSA_AUTH_SERVER_START_POSSIBLE
+	def_bool y
+	depends on SECURITY_MEDUSA_AUTH_SERVER_LOADER != ""
+	depends on STATIC_USERMODEHELPER=n || \
+		   STATIC_USERMODEHELPER_PATH != ""
+
+if !SECURITY_MEDUSA_MET_DEPENDENCIES
 	comment "Please  select  at least one  of the hashing functions"
 	comment "(BLAKE2b, SHA-256, SHA-512, SHA-3) as _builtin_ in the"
 	comment "'Cryptographic API  --->  Hashes,  digests,  and MACs'"
@@ -27,6 +45,63 @@ if SECURITY_MEDUSA_SUPPORT && !SECURITY_MEDUSA_MET_DEPENDENCIES
 endif
 
 if SECURITY_MEDUSA_MET_DEPENDENCIES
+
+menu "Medusa initialization"
+
+if SECURITY_MEDUSA_INITIALIZATION_TRIGGER = ""
+	comment "Medusa will not be activated!"
+	comment "Reason: Medusa initialization trigger must not be empty"
+endif
+
+config SECURITY_MEDUSA_INITIALIZATION_TRIGGER
+	string "Medusa initialization trigger"
+	default "/sbin/init"
+	help
+	  Process name used as trigger to start medusa initialization.
+	  Medusa will initialize before the target process is started.
+
+if SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT && \
+   STATIC_USERMODEHELPER=y && STATIC_USERMODEHELPER_PATH != ""
+	comment "Warning: STATIC_USERMODEHELPER is enabled, that means the   "
+	comment "-------  auth server start will depend on its implementation"
+endif
+
+if SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT && \
+   STATIC_USERMODEHELPER=y && STATIC_USERMODEHELPER_PATH = ""
+	comment "Medusa will not be activated!"
+	comment "Reason: STATIC_USERMODEHELPER is enabled, but its path is empty"
+endif
+
+config SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
+	bool "Start auth server during Medusa initialization"
+	default y
+	help
+	  If set, Medusa will start an auth server using the provided
+	  AUTH_SERVER_LOADER before the specified INITIALIZATION_TRIGGER
+	  is executed and will wait until the auth server responds with
+	  a MEDUSA_COMM_READY_ANSWER protocol command.
+	  TODO: what to do when server does not respond? Proceed or panic after timeout?
+
+if SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
+
+if SECURITY_MEDUSA_AUTH_SERVER_LOADER = ""
+	comment "Medusa will not be activated!"
+	comment "Reason: Filepath to the auth server loader must not be empty"
+endif
+
+config SECURITY_MEDUSA_AUTH_SERVER_LOADER
+	string "Filepath to the auth server loader"
+	default "/sbin/medusa-init"
+	help
+	  Any executable that starts a Medusa auth server.
+
+endif # SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
+
+endmenu
+
+endif # SECURITY_MEDUSA_MET_DEPENDENCIES
+
+if SECURITY_MEDUSA_MET_PRECONDITIONS
 
 config SECURITY_MEDUSA_VS
 	int "Number of bits representing Virtual Spaces (VS)"
@@ -160,32 +235,6 @@ config SECURITY_MEDUSA_GCOV_PROFILE
 	  Note that on a kernel compiled with this config, Medusa will
 	  run significantly slower.
 
-menu "Medusa initialization"
+endif # SECURITY_MEDUSA_SUPPORT && SECURITY_MEDUSA_MET_PRECONDITIONS
 
-config SECURITY_MEDUSA_INITIALIZATION_TRIGGER
-	string "Medusa initialization trigger"
-	default "/sbin/init"
-	help
-	  Process name used as trigger to start medusa initialization.
-	  Medusa will initialize before the target process is started.
-
-config SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
-	bool "Start auth server during Medusa initialization"
-	default y
-	help
-	  If set, Medusa will start an auth server using the provided
-	  AUTH_SERVER_LOADER before the specified INITIALIZATION_TRIGGER
-	  is executed and will wait until the auth server responds with
-	  a MEDUSA_COMM_READY_ANSWER protocol command.
-	  TODO: what to do when server does not respond? Proceed or panic after timeout?
-
-config SECURITY_MEDUSA_AUTH_SERVER_LOADER
-	string "Filepath to the auth server loader"
-	depends on SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
-	default "/sbin/medusa-init"
-	help
-	  Any executable that starts a Medusa auth server.
-
-endmenu
-
-endif # SECURITY_MEDUSA_MET_DEPENDENCIES
+endif # SECURITY_MEDUSA_SUPPORT
