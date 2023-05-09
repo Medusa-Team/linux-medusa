@@ -91,7 +91,7 @@ endif
 
 config SECURITY_MEDUSA_AUTH_SERVER_LOADER
 	string "Filepath to the auth server loader"
-	default "/sbin/medusa-init"
+	default $(shell,grep -E "#define CONFIG_MEDUSA_AUTH_SERVER_LOADER \"[a-zA-Z0-9]+\"" ./security/medusa/include/l3/config.h | grep -o -E "\"[a-zA-Z0-9]+\"" || echo "/sbin/medusa-init")
 	help
 	  Any executable that starts a Medusa auth server.
 

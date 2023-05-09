@@ -9,6 +9,10 @@
 #error "There are not met .config dependencies to builtin Medusa LSM. For more details see 'Security options ---> MEDUSA support' .config section."
 #endif
 
+#ifndef CONFIG_SECURITY_MEDUSA_INIT_POSSIBLE
+#error "Initialization of Medusa LSM is not possible because of incorrect .config settings. For more details see 'Security options ---> MEDUSA support ---> Medusa initialization' .config section"
+#endif
+
 #define IS_NOT_MULTIPLY_OF_8(val) (val & 7 != 0)
 
 #ifdef CONFIG_SECURITY_MEDUSA_VS
@@ -59,6 +63,12 @@
 #define CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE CONFIG_SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
 #else
 #define CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE 3
+#endif
+
+#ifdef CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER
+#define CONFIG_MEDUSA_AUTH_SERVER_LOADER CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER
+#else
+#define CONFIG_MEDUSA_AUTH_SERVER_LOADER "/sbin/medusa-init"
 #endif
 
 #define CONFIG_MEDUSA_FILE_CAPABILITIES

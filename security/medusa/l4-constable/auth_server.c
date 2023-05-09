@@ -5,7 +5,7 @@
 #include "l4/auth_server.h"
 #include "l3/arch.h"
 
-static char *auth_server_loader = CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER;
+static char *auth_server_loader = CONFIG_MEDUSA_AUTH_SERVER_LOADER;
 DECLARE_COMPLETION(auth_server_ready);
 
 void set_auth_server_ready()
