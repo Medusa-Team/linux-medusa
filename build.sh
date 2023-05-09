@@ -153,6 +153,11 @@ function patch_grub {
 the kernel is already compiled, run sudo update-grub."
 }
 
+function generate_compile_commands {
+        echo "Generating compile commands"
+        ./scripts/clang-tools/gen_compile_commands.py
+}
+
 parse_argv $@
 
 if [ $RUN_KUNIT -eq 1 ]; then
@@ -182,8 +187,7 @@ else
 	install_kernel
 fi
 
-echo "Generating compile commands"
-./scripts/clang-tools/gen_compile_commands.py
+generate_compile_commands
 
 [ $USE_RSYNC -eq 1 ] && [ "$DEST" != "NONE" ] && rsync_repo
 
@@ -193,4 +197,3 @@ echo 0 > .minor
 echo $major.$minor >> myversioning
 
 [ $REBOOT -eq 1 ] && sudo reboot
-
