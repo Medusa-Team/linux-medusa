@@ -555,7 +555,6 @@ static inline void teleport_clear(void)
 		teleport_put();
 	}
 	up(&queue_lock);
-
 }
 
 static int send_medusa_is_ready(void)
@@ -974,11 +973,11 @@ static int user_open(struct inode *inode, struct file *file)
 	retval = -ENOMEM;
 	if (med_cache_register(sizeof(struct tele_item)))
 		goto out_free;
-	if (med_cache_register(sizeof(struct teleport_insn_s)*2))
+	if (med_cache_register(sizeof(struct teleport_insn_s) * 2))
 		goto out_free;
-	if (med_cache_register(sizeof(struct teleport_insn_s)*5))
+	if (med_cache_register(sizeof(struct teleport_insn_s) * 5))
 		goto out_free;
-	if (med_cache_register(sizeof(struct teleport_insn_s)*6))
+	if (med_cache_register(sizeof(struct teleport_insn_s) * 6))
 		goto out_free;
 	tele_mem_open = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*3);
 	if (!tele_mem_open)

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
 #ifndef _MEDUSA_AUTH_SERVER_H
 #define _MEDUSA_AUTH_SERVER_H
 
