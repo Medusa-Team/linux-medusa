@@ -60,6 +60,14 @@ config SECURITY_MEDUSA_INITIALIZATION_TRIGGER
 	  Process name used as trigger to start medusa initialization.
 	  Medusa will initialize before the target process is started.
 
+config SECURITY_MEDUSA_REQUIRE_AUTH_SERVER_AT_INIT
+	bool "Require auth server at Medusa initialization"
+	default n
+	help
+	  If set, Medusa will stop before executing process with name equal to
+	  the Medusa initialization trigger and wait for an auth server to be
+	  available before continuing with the boot process.
+
 if SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT && \
    STATIC_USERMODEHELPER=y && STATIC_USERMODEHELPER_PATH != ""
 	comment "Warning: STATIC_USERMODEHELPER is enabled, that means the   "
@@ -75,6 +83,7 @@ endif
 config SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT
 	bool "Start auth server during Medusa initialization"
 	default y
+	depends on SECURITY_MEDUSA_REQUIRE_AUTH_SERVER_AT_INIT
 	help
 	  If set, Medusa will start an auth server using the provided
 	  AUTH_SERVER_LOADER before the specified INITIALIZATION_TRIGGER
@@ -235,6 +244,6 @@ config SECURITY_MEDUSA_GCOV_PROFILE
 	  Note that on a kernel compiled with this config, Medusa will
 	  run significantly slower.
 
-endif # SECURITY_MEDUSA_SUPPORT && SECURITY_MEDUSA_MET_PRECONDITIONS
+endif # SECURITY_MEDUSA_MET_PRECONDITIONS
 
 endif # SECURITY_MEDUSA_SUPPORT

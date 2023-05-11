@@ -50,8 +50,11 @@ static void medusa_l1_initialize_init(const char *filename)
 	init_med_object(&(med->med_object));
 	init_med_subject(&(med->med_subject));
 
-	if (IS_ENABLED(CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT))
-		start_auth_server();
+	if (IS_ENABLED(CONFIG_SECURITY_MEDUSA_REQUIRE_AUTH_SERVER_AT_INIT)) {
+		if (IS_ENABLED(CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT))
+			start_auth_server();
+		wait_for_auth_server();
+	}
 
 	init_loaded = 1;
 }

@@ -7,7 +7,7 @@
 #include "l4/auth_server.h"
 #include "l3/arch.h"
 
-static const char *auth_server_loader = CONFIG_MEDUSA_AUTH_SERVER_LOADER;
+static char *auth_server_loader = CONFIG_MEDUSA_AUTH_SERVER_LOADER;
 DECLARE_COMPLETION(auth_server_ready);
 
 void set_auth_server_ready(void)
@@ -35,8 +35,8 @@ static bool auth_server_loader_exists(void)
 
 void start_auth_server(void)
 {
-	char * const argv[] = { "/bin/sh", "-c", auth_server_loader, NULL };
-	char * const envp[] = { "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL };
+	char *argv[] = { "/bin/sh", "-c", auth_server_loader, NULL };
+	char *envp[] = { "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL };
 	int error;
 
 	if (!auth_server_loader_exists()) {
@@ -52,6 +52,4 @@ void start_auth_server(void)
 		// TODO: stop if production Medusa
 		return;
 	}
-	wait_for_auth_server();
-	med_pr_info("Authorization server started");
 }
