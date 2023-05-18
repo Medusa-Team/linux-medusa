@@ -13,13 +13,14 @@ menuconfig SECURITY_MEDUSA_SUPPORT
 	help
 	  This selects MEDUSA LSM.
 
+if SECURITY_MEDUSA_SUPPORT
+
 config SECURITY_MEDUSA_MET_DEPENDENCIES
 	def_bool y
-	depends on SECURITY_MEDUSA_SUPPORT=y
 	depends on CRYPTO_BLAKE2B=y || CRYPTO_SHA256=y || CRYPTO_SHA512=y || \
 		   CRYPTO_SHA3=y
 
-if SECURITY_MEDUSA_SUPPORT && !SECURITY_MEDUSA_MET_DEPENDENCIES
+if !SECURITY_MEDUSA_MET_DEPENDENCIES
 	comment "Please  select  at least one  of the hashing functions"
 	comment "(BLAKE2b, SHA-256, SHA-512, SHA-3) as _builtin_ in the"
 	comment "'Cryptographic API  --->  Hashes,  digests,  and MACs'"
@@ -28,8 +29,88 @@ endif
 
 if SECURITY_MEDUSA_MET_DEPENDENCIES
 
+menuconfig SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+	bool "Start auth server before init"
+	default n
+	help
+	  If set, Medusa will start an auth server using the provided
+	  AUTH_SERVER_LOADER before the specified AUTH_SERVER_TRIGGER
+	  is executed and will wait until the auth server responds with
+	  a MEDUSA_COMM_READY_ANSWER protocol command.
+	  TODO: what to do when server does not respond? Proceed or panic after timeout?
+
+config SECURITY_MEDUSA_AUTH_SERVER_TRIGGER
+	string
+	default ""
+	depends on !SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+
+if SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+
+config SECURITY_MEDUSA_CONTINUE_BOOTING
+	bool "Continue booting if auth server exec before init failed"
+	default n
+	help
+	  If set, start of the system will be continued after failed
+	  auth server execution (or in the case the auth server does
+	  not respond). This should be used only for debug purposes,
+	  not for a production environment.
+
+	  If unsure, say N.
+
+config SECURITY_MEDUSA_CONTINUE_BOOTING_TIMEOUT
+	int "Timeout (secs) for continue booting if auth server exec failed"
+	default 5
+	range 1 60
+	depends on SECURITY_MEDUSA_CONTINUE_BOOTING
+	help
+	  Determines the amount of time (in secs) while waiting for
+	  auth server response when it is running before init. After
+	  this timeout starting of the system will be continued. This
+	  feature is suitable for debugging purposes only.
+
+	  If unsure, do not touch and turn the previous option
+	  SECURITY_MEDUSA_CONTINUE_BOOTING off.
+
+if SECURITY_MEDUSA_AUTH_SERVER_TRIGGER = ""
+	comment "Error: Medusa initialization trigger must not be empty!"
+	config SECURITY_MEDUSA_AUTH_SERVER_TRIGGER_EMPTY
+		def_bool y
+endif
+
+config SECURITY_MEDUSA_AUTH_SERVER_TRIGGER
+	string "Medusa authorization server trigger"
+	default "/sbin/init"
+	help
+	  Process name used as trigger to start authorization server.
+	  Medusa will be inactive before the target process is started.
+
+if STATIC_USERMODEHELPER=y
+if STATIC_USERMODEHELPER_PATH != ""
+	comment "Warning: auth server start will depend on STATIC_USERMODEHELPER implementation."
+endif
+if STATIC_USERMODEHELPER_PATH = ""
+	comment "Error: auth server cannot be run! Path of the STATIC_USERMODEHELPER is empty."
+	config SECURITY_MEDUSA_STATIC_USERMODEHELPER_PATH_EMPTY
+		def_bool y
+endif
+endif # STATIC_USERMODEHELPER=y
+
+if SECURITY_MEDUSA_AUTH_SERVER_LOADER = ""
+	comment "Error: Filepath to the auth server loader must not be empty!"
+	config SECURITY_MEDUSA_AUTH_SERVER_LOADER_EMPTY
+		def_bool y
+endif
+
+config SECURITY_MEDUSA_AUTH_SERVER_LOADER
+	string "Filepath to the auth server loader"
+	default $(shell,grep -E "#define CONFIG_MEDUSA_AUTH_SERVER_LOADER \"[a-zA-Z0-9]+\"" ./security/medusa/include/l3/config.h | grep -o -E "\"[a-zA-Z0-9]+\"" || echo "/sbin/init-constable.sh")
+	help
+	  Any executable that starts a Medusa auth server.
+
+endif # SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+
 config SECURITY_MEDUSA_VS
-        int "Number of bits representing Virtual Spaces (VS)"
+	int "Number of bits representing Virtual Spaces (VS)"
 	# read default value from Medusa's config.h, if any; otherwise set default to 96
 	default $(shell,grep -E "#define CONFIG_MEDUSA_VS [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 96)
         range 32 512
@@ -39,7 +120,7 @@ config SECURITY_MEDUSA_VS
 	  bitarray, the array size SEURITY_MEDUSA_VS must be a multiple of 8.
 
 config SECURITY_MEDUSA_ACT
-        int "Number of bits representing triggered security hooks"
+	int "Number of bits representing triggered security hooks"
 	# read default value from Medusa's config.h, if any; otherwise set default to 128
 	default $(shell,grep -E "#define CONFIG_MEDUSA_ACT [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 128)
         range 32 512
@@ -161,3 +242,5 @@ config SECURITY_MEDUSA_GCOV_PROFILE
 	  run significantly slower.
 
 endif # SECURITY_MEDUSA_MET_DEPENDENCIES
+
+endif # SECURITY_MEDUSA_SUPPORT

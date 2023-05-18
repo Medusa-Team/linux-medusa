@@ -41,6 +41,7 @@
 #include "l3/registry.h"
 #include "l3/server.h"
 #include "l3/med_cache.h"
+#include "l4/auth_server.h"
 #include "l4/comm.h"
 #include "l4/teleport.h"
 
@@ -491,6 +492,7 @@ static void decrement_counters(struct teleport_insn_s *tele)
 		break;
 	case tp_PUTKCLASS:
 	case tp_PUTEVTYPE:
+	case tp_PUTREADY:
 		atomic_dec(&announce_ready);
 		break;
 	}
@@ -537,6 +539,60 @@ static inline void teleport_put(void)
 	local_list_item = NULL;
 }
 
+// Clear the teleport queue
+static inline void teleport_clear(void)
+{
+	struct list_head *pos, *next;
+
+	left_in_teleport = 0;
+	if (local_list_item)
+		teleport_put();
+	down(&queue_lock);
+	list_for_each_safe(pos, next, &tele_queue) {
+		local_list_item = list_entry(pos, struct tele_item, list);
+		processed_teleport = local_list_item->tele;
+		list_del(&(local_list_item->list));
+		teleport_put();
+	}
+	up(&queue_lock);
+}
+
+static int send_medusa_is_ready(void)
+{
+	struct teleport_insn_s *tele_mem;
+	struct tele_item *local_tele_item;
+
+	tele_mem = (struct teleport_insn_s *)
+		med_cache_alloc_size(sizeof(struct teleport_insn_s) * 4);
+	if (!tele_mem)
+		return -ENOMEM;
+	local_tele_item = (struct tele_item *)
+		med_cache_alloc_size(sizeof(struct tele_item));
+	if (!local_tele_item) {
+		med_cache_free(tele_mem);
+		return -ENOMEM;
+	}
+
+	atomic_inc(&announce_ready);
+	local_tele_item->size = 0;
+	tele_mem[0].opcode = tp_PUTPtr;
+	tele_mem[0].args.putPtr.what = 0;
+	local_tele_item->size += sizeof(MCPptr_t);
+	tele_mem[1].opcode = tp_PUT32;
+	tele_mem[1].args.put32.what = MEDUSA_COMM_READY_REQUEST;
+	local_tele_item->size += sizeof(uint32_t);
+	tele_mem[2].opcode = tp_PUTREADY; /* used only for decrement_counter() */
+	tele_mem[3].opcode = tp_HALT;
+	local_tele_item->tele = tele_mem;
+	local_tele_item->post = med_cache_free;
+	down(&queue_lock);
+	list_add_tail(&local_tele_item->list, &tele_queue);
+	up(&queue_lock);
+	up(&queue_items);
+	wake_up(&userspace_chardev);
+
+	return 0;
+}
 
 /*
  * READ()
@@ -850,6 +906,17 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		else /* update */
 			atomic_inc(&update_requests);
 		wake_up(&userspace_chardev);
+	} else if (recv_type == MEDUSA_COMM_READY_ANSWER) {
+		up(&take_answer);
+
+		/* register auth server */
+		if (med_register_authserver(&chardev_medusa) < 0) {
+			med_pr_warn("Failed to register auth server: "
+				    "no decision request will be send to it!");
+			up_read(&lightswitch);
+			return -EPERM;
+		}
+		set_auth_server_ready();
 	} else {
 		up(&take_answer);
 		med_pr_err("Protocol error at write(): unknown command %llx!\n",
@@ -901,34 +968,23 @@ static int user_open(struct inode *inode, struct file *file)
 
 	down(&constable_openclose);
 	if (atomic_read(&constable_present))
-		goto good_out;
+		goto out;
 
-	if (med_cache_register(sizeof(struct tele_item))) {
-		retval = -ENOMEM;
-		goto out;
-	}
-	if (med_cache_register(sizeof(struct teleport_insn_s)*2)) {
-		retval = -ENOMEM;
-		goto out;
-	}
-	if (med_cache_register(sizeof(struct teleport_insn_s)*5)) {
-		retval = -ENOMEM;
-		goto out;
-	}
-	if (med_cache_register(sizeof(struct teleport_insn_s)*6)) {
-		retval = -ENOMEM;
-		goto out;
-	}
+	retval = -ENOMEM;
+	if (med_cache_register(sizeof(struct tele_item)))
+		goto out_free;
+	if (med_cache_register(sizeof(struct teleport_insn_s) * 2))
+		goto out_free;
+	if (med_cache_register(sizeof(struct teleport_insn_s) * 5))
+		goto out_free;
+	if (med_cache_register(sizeof(struct teleport_insn_s) * 6))
+		goto out_free;
 	tele_mem_open = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*3);
-	if (!tele_mem_open) {
-		retval = -ENOMEM;
-		goto out;
-	}
+	if (!tele_mem_open)
+		goto out_free;
 	local_tele_item = (struct tele_item *) med_cache_alloc_size(sizeof(struct tele_item));
-	if (!local_tele_item) {
-		retval = -ENOMEM;
-		goto out;
-	}
+	if (!local_tele_item)
+		goto out_free;
 
 	constable = current;
 	rcu_read_lock();
@@ -961,18 +1017,32 @@ static int user_open(struct inode *inode, struct file *file)
 	wake_up(&userspace_chardev);
 
 	chardev_medusa.tgid = get_pid(task_tgid(current));
+
+	retval = med_register_authserver_prepare(&chardev_medusa);
+	if (retval < 0) {
+		med_pr_warn("%s: med_register_authserver_prepare() failed with %d",
+			    __func__, retval);
+		teleport_clear();
+		goto out;
+	}
+
+	retval = send_medusa_is_ready();
+	if (retval < 0) {
+		med_pr_warn("%s: send_medusa_is_ready() failed with %d",
+			    __func__, retval);
+		teleport_clear();
+	}
+
 	/* this must be the last thing done */
 	atomic_set(&constable_present, 1);
-	up(&constable_openclose);
-
-	MED_REGISTER_AUTHSERVER(chardev_medusa);
-	return 0; /* success */
 out:
+	up(&constable_openclose);
+	return retval; /* 0 is success */
+
+out_free:
 	if (tele_mem_open)
 		med_cache_free(tele_mem_open);
-good_out:
-	up(&constable_openclose);
-	return retval;
+	goto out;
 }
 
 /*
@@ -980,7 +1050,6 @@ good_out:
  */
 static int user_release(struct inode *inode, struct file *file)
 {
-	struct list_head *pos, *next;
 	int answer_id;
 	struct task_struct *task;
 	DECLARE_WAITQUEUE(waitqueue, current);
@@ -1041,7 +1110,7 @@ static int user_release(struct inode *inode, struct file *file)
 	ctrl_alt_del();
 #endif
 	add_wait_queue(&close_wait, &waitqueue);
-	MED_UNREGISTER_AUTHSERVER(chardev_medusa);
+	med_unregister_authserver(&chardev_medusa);
 	down(&constable_openclose);
 
 	// All threads waiting for an answer will get an error, order of these
@@ -1058,17 +1127,7 @@ static int user_release(struct inode *inode, struct file *file)
 	atomic_set(&announce_ready, 0);
 
 	// Clear the teleport queue
-	left_in_teleport = 0;
-	if (local_list_item)
-		teleport_put();
-	down(&queue_lock);
-	list_for_each_safe(pos, next, &tele_queue) {
-		local_list_item = list_entry(pos, struct tele_item, list);
-		processed_teleport = local_list_item->tele;
-		list_del(&(local_list_item->list));
-		teleport_put();
-	}
-	up(&queue_lock);
+	teleport_clear();
 
 	// locking not needed because lightswitch is locked by one thread running close()
 	idr_for_each_entry(&answer_ids_idr, task, answer_id)

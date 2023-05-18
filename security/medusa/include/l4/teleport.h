@@ -14,6 +14,7 @@ enum teleport_opcode_enum {
 	tp_PUTATTRS,	/* put attributes */
 	tp_PUTKCLASS,	/* put kclass (without attrs) and assign it a number */
 	tp_PUTEVTYPE,	/* put evtype (...) ... */
+	tp_PUTREADY,	/* put ready message; used only for decrement_counter() */
 
 	tp_HALT,	/* end of the routine */
 };

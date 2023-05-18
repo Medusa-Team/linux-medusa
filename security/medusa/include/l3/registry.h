@@ -59,11 +59,8 @@ extern void med_put_authserver(struct medusa_authserver_s *med_authserver);
 extern inline bool med_is_authserver_present(void);
 
 /* interface to L4 */
+extern int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver);
 extern int med_register_authserver(struct medusa_authserver_s *med_authserver);
 extern void med_unregister_authserver(struct medusa_authserver_s *med_authserver);
-#define MED_REGISTER_AUTHSERVER(structname) \
-		med_register_authserver(&structname)
-#define MED_UNREGISTER_AUTHSERVER(structname) \
-		med_unregister_authserver(&structname)
 
 #endif

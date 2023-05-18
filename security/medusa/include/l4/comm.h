@@ -17,7 +17,7 @@
 typedef uint64_t MCPptr_t; // medusa common protocol pointer type this is here because we wanna have one protocol for all architectures JK March 2015
 
 /* version of this communication protocol */
-#define MEDUSA_COMM_VERSION	2ULL
+#define MEDUSA_COMM_VERSION	3ULL
 
 #define MEDUSA_COMM_GREETING 0x66007e5a
 
@@ -34,6 +34,9 @@ typedef uint64_t MCPptr_t; // medusa common protocol pointer type this is here b
 #define MEDUSA_COMM_KCLASSUNDEF		0x03	/* k->c */
 #define MEDUSA_COMM_EVTYPEDEF		0x04	/* k->c */
 #define MEDUSA_COMM_EVTYPEUNDEF		0x05	/* k->c */
+
+#define MEDUSA_COMM_READY_REQUEST	0x06	/* k->c */
+#define MEDUSA_COMM_READY_ANSWER	0x86	/* c->k */
 
 #define MEDUSA_COMM_FETCH_REQUEST	0x88	/* c->k */
 #define MEDUSA_COMM_FETCH_ANSWER	0x08	/* k->c */

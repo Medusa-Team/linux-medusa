@@ -78,6 +78,10 @@ ssize_t teleport_cycle(struct teleport_s *teleport, size_t userlimit)
 				teleport->u.putattrs.current_attr = -1;
 				teleport->remaining = 0;
 				break;
+			case tp_PUTREADY:
+				/* empty cmd; only for decrement_counter() */
+				teleport->remaining = 0;
+				break;
 			case tp_PUTKCLASS:
 				teleport->u.putkclass.cl.kclassid =
 					(MCPptr_t)teleport->ip->args.putkclass.kclassdef; // possiblity for encryption .. JK note march 2015
@@ -138,6 +142,7 @@ tpc_execute:
 			case tp_CUTNPASTE:
 			case tp_PUTKCLASS:
 			case tp_PUTEVTYPE:
+			case tp_PUTREADY:
 				tmp = place_to_user(teleport, &userlimit);
 				if (!teleport->remaining)
 					teleport->cycle = tpc_FETCH;
