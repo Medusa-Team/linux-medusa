@@ -18,8 +18,17 @@ void set_auth_server_ready(void)
 
 void wait_for_auth_server(void)
 {
+	unsigned long timeout = MAX_SCHEDULE_TIMEOUT;
+
+	if (IS_ENABLED(CONFIG_SECURITY_MEDUSA_CONTINUE_BOOTING))
+		timeout = CONFIG_SECURITY_MEDUSA_CONTINUE_BOOTING_TIMEOUT * 1000;
+
 	med_pr_info("Waiting for authorization server to be ready");
-	wait_for_completion(&auth_server_ready);
+	timeout = wait_for_completion_timeout(&auth_server_ready,
+					      msecs_to_jiffies(timeout));
+	if (!timeout)
+		med_pr_err("Start of the authorization server via `%s' failed",
+			   auth_server_loader);
 }
 
 static bool auth_server_loader_exists(void)
@@ -40,16 +49,14 @@ void start_auth_server(void)
 	int error;
 
 	if (!auth_server_loader_exists()) {
-		med_pr_err("Could not start authorization server because the "
-			   "specified loader does not exist!");
+		med_pr_info("Could not start authorization server because the "
+			    "specified loader `%s' does not exist!",
+			    auth_server_loader);
 		return;
 	}
 
 	med_pr_info("Trying to start authorization server");
 	error = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
-	if (error) {
+	if (error)
 		med_pr_err("Error starting authorization server: %d", error);
-		// TODO: stop if production Medusa
-		return;
-	}
 }

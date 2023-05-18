@@ -9,9 +9,21 @@
 #error "There are not met .config dependencies to builtin Medusa LSM. For more details see 'Security options ---> MEDUSA support' .config section."
 #endif
 
-#ifndef CONFIG_SECURITY_MEDUSA_INIT_POSSIBLE
-#error "Initialization of Medusa LSM is not possible because of incorrect .config settings. For more details see 'Security options ---> MEDUSA support ---> Medusa initialization' .config section"
+#ifdef CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
+#ifdef CONFIG_SECURITY_MEDUSA_AUTH_SERVER_TRIGGER_EMPTY
+#error "Medusa initialization trigger must not be an empty string. See 'Security options ---> MEDUSA support ---> Start auth server before init' .config section."
 #endif
+#ifdef CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER_EMPTY
+#error "Path to the auth server loader must not be an empty string. See 'Security options ---> MEDUSA support ---> Start auth server before init' .config section."
+#endif
+#ifdef CONFIG_STATIC_USERMODEHELPER
+#ifdef CONFIG_SECURITY_MEDUSA_STATIC_USERMODEHELPER_PATH_EMPTY
+#error "Auth server cannot be run, path of the STATIC_USERMODEHELPER is empty. See 'Security options ---> Path to the static usermode helper binary' .config section."
+#else
+#warning "Auth server start will depend on STATIC_USERMODEHELPER implementation. See 'Security options ---> Path to the static usermode helper binary' .config section."
+#endif
+#endif // CONFIG_STATIC_USERMODEHELPER
+#endif // CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
 
 #define IS_NOT_MULTIPLY_OF_8(val) (val & 7 != 0)
 
@@ -68,7 +80,7 @@
 #ifdef CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER
 #define CONFIG_MEDUSA_AUTH_SERVER_LOADER CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER
 #else
-#define CONFIG_MEDUSA_AUTH_SERVER_LOADER "/sbin/medusa-init"
+#define CONFIG_MEDUSA_AUTH_SERVER_LOADER "/sbin/init-constable.sh"
 #endif
 
 #define CONFIG_MEDUSA_FILE_CAPABILITIES

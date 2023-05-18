@@ -18,8 +18,7 @@
 #include "../../../../fs/mount.h" /* real_mount(), struct mount */
 
 /* Used by `medusa_l1_creds_for_exec` */
-bool init_loaded;
-const char *init_trigger = CONFIG_SECURITY_MEDUSA_INITIALIZATION_TRIGGER;
+bool trigger_loaded;
 
 int medusa_l1_inode_alloc_security(struct inode *inode);
 
@@ -37,35 +36,29 @@ int medusa_l1_inode_alloc_security(struct inode *inode);
  * }
  */
 
-static void medusa_l1_initialize_init(const char *filename)
-{
-	struct medusa_l1_task_s *med = task_security(current);
-
-	if (strcmp(filename, init_trigger)) {
-		med_pr_warn("Exec of non-init process '%s' happened without init running!",
-			    filename);
-		return;
-	}
-	med_pr_info("Exec of init trigger detected - initializing Medusa", filename);
-	init_med_object(&(med->med_object));
-	init_med_subject(&(med->med_subject));
-
-	if (IS_ENABLED(CONFIG_SECURITY_MEDUSA_REQUIRE_AUTH_SERVER_AT_INIT)) {
-		if (IS_ENABLED(CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_AT_INIT))
-			start_auth_server();
-		wait_for_auth_server();
-	}
-
-	init_loaded = 1;
-}
-
 static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
 {
-	/* If this is the init process, initialize it, so it is monitored. */
-	if (!init_loaded) {
-		medusa_l1_initialize_init(bprm->filename);
+	if (IS_ENABLED(CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT) &&
+	    !trigger_loaded) {
+		/* If bprm->filename isn't the trigger task, do nothing. */
+		if (strcmp(bprm->filename,
+			   CONFIG_SECURITY_MEDUSA_AUTH_SERVER_TRIGGER)) {
+			med_pr_info("Exec of non-trigger task '%s' detected",
+				    bprm->filename);
+
+			/* Medusa will be inactive before running the AS. */
+			return 0;
+		}
+
+		med_pr_info("Exec of trigger task '%s' detected - start AS",
+			    bprm->filename);
+		start_auth_server();
+		wait_for_auth_server();
+
+		trigger_loaded = 1;
 		return 0;
 	}
+
 	if (medusa_exec(bprm) == MED_DENY)
 		return -EACCES;
 	return 0;
