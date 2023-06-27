@@ -720,9 +720,9 @@ static int __init medusa_l1_init(void)
 
 MODULE_LICENSE("GPL");
 
-int medusa_enabled __lsm_ro_after_init = true;
+int medusa_enabled __ro_after_init = true;
 
-struct lsm_blob_sizes medusa_blob_sizes __lsm_ro_after_init = {
+struct lsm_blob_sizes medusa_blob_sizes __ro_after_init = {
 	.lbs_cred = 0,
 	.lbs_file = 0,
 	.lbs_inode = sizeof(struct medusa_l1_inode_s),
