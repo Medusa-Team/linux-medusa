@@ -1165,7 +1165,7 @@ static int chardev_constable_init(void)
 		return -1;
 	}
 
-	medusa_class = class_create(THIS_MODULE, "medusa");
+	medusa_class = class_create("medusa");
 	if (IS_ERR(medusa_class)) {
 		med_pr_err("Failed to register device class '%s'\n", "medusa");
 		return -1;
