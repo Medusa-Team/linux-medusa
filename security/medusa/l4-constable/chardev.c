@@ -58,7 +58,7 @@ static struct teleport_s teleport = {
 static atomic_t constable_present = ATOMIC_INIT(0);
 static struct task_struct *constable;
 static struct task_struct *gdb;
-static DEFINE_SEMAPHORE(constable_openclose);
+static DEFINE_SEMAPHORE(constable_openclose, 1);
 
 
 /* fetch or update answer */
