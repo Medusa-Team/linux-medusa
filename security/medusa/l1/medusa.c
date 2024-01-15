@@ -5,6 +5,7 @@
 #include <linux/binfmts.h>
 #include <linux/module.h>
 #include <linux/sched/task.h>
+#include <uapi/linux/lsm.h>
 
 #include "l4/auth_server.h"
 #include "l4/comm.h"
@@ -704,15 +705,21 @@ struct security_hook_list medusa_l1_hooks_alloc[] = {
 	//LSM_HOOK_INIT(msg_msg_free_security, medusa_l1_msg_msg_free_security),
 };
 
+const struct lsm_id medusa_lsmid = {
+	.name = "medusa",
+	.id = LSM_ID_MEDUSA,
+};
+
 static int __init medusa_l1_init(void)
 {
 	/* set the security info for the task pid 0 on boot cpu */
 	medusa_l1_task_alloc(current, 0);
 
 	/* register the hooks */
-	security_add_hooks(medusa_l1_hooks, ARRAY_SIZE(medusa_l1_hooks), "medusa");
+	security_add_hooks(medusa_l1_hooks,
+			   ARRAY_SIZE(medusa_l1_hooks), &medusa_lsmid);
 	security_add_hooks(medusa_l1_hooks_alloc,
-			   ARRAY_SIZE(medusa_l1_hooks_alloc), "medusa");
+			   ARRAY_SIZE(medusa_l1_hooks_alloc), &medusa_lsmid);
 	med_pr_info("l1 registered with the kernel\n");
 
 	return 0;

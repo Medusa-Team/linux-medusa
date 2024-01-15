@@ -51,6 +51,7 @@ struct lsm_ctx {
  * future use.
  */
 #define LSM_ID_UNDEF		0
+#define LSM_ID_MEDUSA		1
 #define LSM_ID_CAPABILITY	100
 #define LSM_ID_SELINUX		101
 #define LSM_ID_SMACK		102
