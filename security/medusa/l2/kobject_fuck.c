@@ -89,7 +89,7 @@ restart_mnt:
 	rcu_read_lock();
 restart:
 	read_seqbegin_or_lock(&rename_lock, &seq);
-	ret = prepend(buf, buflen, &d_backing_dentry(dentry)->d_name);
+	ret = prepend(buf, buflen, &dentry->d_name);
 	if (!(seq & 1))
 		rcu_read_unlock();
 	if (need_seqretry(&rename_lock, seq)) {
