@@ -49,6 +49,7 @@ struct medusa_l1_task_s {
 	kuid_t luid;
 	struct medusa_subject_s med_subject;
 	struct medusa_object_s med_object;
+	enum medusa_answer_t decision_answer;	/* decision answer from AS */
 	char cmdline[128];
 #ifdef CONFIG_MEDUSA_FORCE
 	void *force_code;       /* code to force or NULL, kfree */

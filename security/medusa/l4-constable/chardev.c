@@ -37,6 +37,7 @@
 #include <linux/rwsem.h>
 #include <linux/mm.h>
 
+#include "l1/task.h"
 #include "l3/arch.h"
 #include "l3/registry.h"
 #include "l3/server.h"
@@ -77,8 +78,6 @@ static atomic_t announce_ready = ATOMIC_INIT(0);
 /* a question from kernel to constable */
 static atomic_t questions = ATOMIC_INIT(0);
 static atomic_t questions_waiting = ATOMIC_INIT(0);
-/* and the answer */
-static enum medusa_answer_t user_answer = MED_ERR;
 /* idr for storing answer ids */
 static DEFINE_SPINLOCK(answer_ids_idr_lock);
 static DEFINE_IDR(answer_ids_idr);
@@ -387,8 +386,10 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	med_pr_debug("task pid %d ('%s'), new question 0x%x for '%s'",
 		    current->pid, debug_cmdline, answer_id, decision_evtype->name);
 
-	// prepare for next decision
 #undef decision_evtype
+	// prepare for next decision
+	task_security(current)->decision_answer = MED_ERR;
+
 	// insert teleport structure to the queue
 	down(&queue_lock);
 	list_add_tail(&local_tele_item->list, &tele_queue);
@@ -420,7 +421,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		idr_remove(&answer_ids_idr, answer_id);
 		spin_unlock(&answer_ids_idr_lock);
 		atomic_dec(&questions_waiting);
-		retval = user_answer;
+		retval = task_security(current)->decision_answer;
 		med_pr_debug("task pid %d, question 0x%x answer %d",
 			    current->pid, answer_id, retval);
 	} else {
@@ -758,7 +759,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		buf += sizeof(int16_t) + sizeof(MCPptr_t);
 		count -= sizeof(int16_t) + sizeof(MCPptr_t);
 
-		user_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
 		// space for decision_request_id is 64 bit, but idr uses only 32 bit
 		answered_task_id = *(int *)(recv_buf);
 		rcu_read_lock();
@@ -770,6 +770,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			med_pr_err("decision_answer: invalid decision_request_id: %llx\n", *(uint64_t *)(recv_buf));
 			return -100;
 		}
+		task_security(answered_task)->decision_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
 		med_pr_debug("answer received for %llx pid %d\n", *(uint64_t *)(recv_buf), answered_task->pid);
 		// wake up correct process
 		while (!wake_up_process(answered_task))
@@ -1115,7 +1116,6 @@ static int user_release(struct inode *inode, struct file *file)
 
 	// All threads waiting for an answer will get an error, order of these
 	// functions is important!
-	user_answer = MED_ERR;
 	atomic_set(&constable_present, 0);
 	put_pid(chardev_medusa.tgid);
 	chardev_medusa.tgid = NULL;
