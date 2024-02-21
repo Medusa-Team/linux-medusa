@@ -23,7 +23,7 @@ MED_ACCTYPE(mkdir_access, "mkdir",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init mkdir_acctype_init(void)
+static int __init mkdir_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(mkdir_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

@@ -24,7 +24,7 @@ MED_ACCTYPE(symlink_access, "symlink",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init symlink_acctype_init(void)
+static int __init symlink_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(symlink_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

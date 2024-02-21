@@ -21,7 +21,7 @@ MED_ACCTYPE(open_access, "open",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init open_acctype_init(void)
+static int __init open_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(open_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

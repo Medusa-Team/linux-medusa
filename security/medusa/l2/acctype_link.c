@@ -23,7 +23,7 @@ MED_ATTRS(link_access) {
 MED_ACCTYPE(link_access, "link", process_kobject, "process",
 	    file_kobject, "file");
 
-int __init link_acctype_init(void)
+static int __init link_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(link_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

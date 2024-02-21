@@ -21,7 +21,7 @@ MED_ACCTYPE(truncate_access, "truncate",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init truncate_acctype_init(void)
+static int __init truncate_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(truncate_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

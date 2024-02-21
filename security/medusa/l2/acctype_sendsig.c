@@ -2,7 +2,7 @@
 
 #include "l2/kobject_process.h"
 
-bool refcount_inc_if_zero(refcount_t *r)
+static bool refcount_inc_if_zero(refcount_t *r)
 {
 	int val = 0;
 

@@ -25,7 +25,7 @@ MED_ACCTYPE(fcntl_access, "fcntl",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init fcntl_acctype_init(void)
+static int __init fcntl_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(fcntl_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

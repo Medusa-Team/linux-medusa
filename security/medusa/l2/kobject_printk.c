@@ -40,9 +40,9 @@ MED_KCLASS(printk_kobject) {
 static int printk_kobject_unload_check(void)__exit;
 #endif
 
-void printk_kobject_rmmod(void);
+static void printk_kobject_rmmod(void);
 
-int __init printk_kobject_init(void)
+static int __init printk_kobject_init(void)
 {
 #ifdef MODULE
 	THIS_MODULE->can_unload = printk_kobject_unload_check;
@@ -59,7 +59,7 @@ static int __exit printk_kobject_unload_check(void)
 	return 0;
 }
 
-void __exit printk_kobject_rmmod(void)
+static void __exit printk_kobject_rmmod(void)
 {
 	MED_UNREGISTER_KCLASS(printk_kobject);
 }

@@ -320,7 +320,7 @@ MED_KCLASS(file_kobject) {
 	file_unmonitor,	/* disable all monitoring on kobj. */
 };
 
-int __init file_kobject_init(void)
+static int __init file_kobject_init(void)
 {
 	MED_REGISTER_KCLASS(file_kobject);
 	return 0;

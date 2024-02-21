@@ -51,7 +51,7 @@ MED_KCLASS(cstrmem_kobject) {
 static int cstrmem_kobject_unload_check(void)__exit;
 #endif
 
-int __init cstrmem_kobject_init(void)
+static int __init cstrmem_kobject_init(void)
 {
 #ifdef MODULE
 	THIS_MODULE->can_unload = cstrmem_kobject_unload_check;
@@ -68,7 +68,7 @@ static int __exit cstrmem_kobject_unload_check(void)
 	return 0;
 }
 
-void __exit cstrmem_kobject_rmmod(void)
+static void __exit cstrmem_kobject_rmmod(void)
 {
 	MED_UNREGISTER_KCLASS(cstrmem_kobject);
 }

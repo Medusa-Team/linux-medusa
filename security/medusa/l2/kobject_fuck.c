@@ -339,7 +339,7 @@ MED_KCLASS(fuck_kobject) {
 	NULL,		/* unmonitor */
 };
 
-int __init fuck_kobject_init(void)
+static int __init fuck_kobject_init(void)
 {
 	int error;
 

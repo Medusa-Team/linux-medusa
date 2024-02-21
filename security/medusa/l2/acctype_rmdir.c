@@ -21,7 +21,7 @@ MED_ACCTYPE(rmdir_access, "rmdir",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init rmdir_acctype_init(void)
+static int __init rmdir_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(rmdir_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

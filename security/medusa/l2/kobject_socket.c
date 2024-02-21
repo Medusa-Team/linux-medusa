@@ -141,7 +141,7 @@ MED_KCLASS(socket_kobject) {
 	NULL,		/* unmonitor */
 };
 
-int __init socket_kobject_init(void)
+static int __init socket_kobject_init(void)
 {
 	MED_REGISTER_KCLASS(socket_kobject);
 	return 0;

@@ -436,7 +436,7 @@ MED_KCLASS(process_kobject) {
 /**
  * process_kobject_init() - Init function of the module.
  */
-int __init process_kobject_init(void)
+static int __init process_kobject_init(void)
 {
 	MED_REGISTER_KCLASS(process_kobject);
 	return 0;

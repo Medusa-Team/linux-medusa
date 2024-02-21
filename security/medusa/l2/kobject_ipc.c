@@ -309,7 +309,7 @@ MED_KCLASS(ipc_kobject) {
 	NULL,		/* unmonitor */
 };
 
-int __init ipc_kobject_init(void)
+static int __init ipc_kobject_init(void)
 {
 	MED_REGISTER_KCLASS(ipc_kobject);
 	return 0;

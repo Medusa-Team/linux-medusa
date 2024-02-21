@@ -20,7 +20,7 @@ MED_ACCTYPE(socket_recvmsg_access, "socket_recvmsg_access",
 	    process_kobject, "process",
 	    socket_kobject, "socket");
 
-int __init socket_recvmsg_access_init(void)
+static int __init socket_recvmsg_access_init(void)
 {
 	MED_REGISTER_ACCTYPE(socket_recvmsg_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;

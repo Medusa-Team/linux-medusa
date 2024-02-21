@@ -21,7 +21,7 @@ MED_ACCTYPE(afterexec_access, "after_exec",
 	    process_kobject, "process",
 	    process_kobject, "process");
 
-int __init afterexec_acctype_init(void)
+static int __init afterexec_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(afterexec_access,
 			     MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);

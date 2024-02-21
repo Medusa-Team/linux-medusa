@@ -22,13 +22,13 @@ MED_ACCTYPE(socket_bind_access, "socket_bind_access",
 	    process_kobject, "process",
 	    socket_kobject, "socket");
 
-int __init socket_bind_access_init(void)
+static int __init socket_bind_access_init(void)
 {
 	MED_REGISTER_ACCTYPE(socket_bind_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 
-enum medusa_answer_t medusa_socket_bind_security(struct socket *sock,
+static enum medusa_answer_t medusa_socket_bind_security(struct socket *sock,
 						 struct socket_bind_access *access)
 {
 	struct process_kobject process;

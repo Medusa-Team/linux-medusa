@@ -62,7 +62,7 @@ static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
  *
  * Are there in the kernel some inodes defined statically?
  */
-int medusa_l1_inode_alloc_security(struct inode *inode)
+static int medusa_l1_inode_alloc_security(struct inode *inode)
 {
 	struct medusa_l1_inode_s *med = inode_security(inode);
 
@@ -72,7 +72,7 @@ int medusa_l1_inode_alloc_security(struct inode *inode)
 	return 0;
 }
 
-void medusa_l1_inode_free_security(struct inode *inode)
+static void medusa_l1_inode_free_security(struct inode *inode)
 {
 	struct medusa_l1_inode_s *med = inode_security(inode);
 
@@ -250,7 +250,7 @@ static int medusa_l1_task_fix_setuid(struct cred *new,
  * allocated, if its size is not zero. Implication: no checks for Medusa's
  * task security blob are required.
  */
-int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
+static int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 {
 	struct medusa_l1_task_s *old = task_security(current);
 	struct medusa_l1_task_s *med = task_security(task);
@@ -279,7 +279,7 @@ int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
 	return 0;
 }
 
-void medusa_l1_task_free(struct task_struct *task)
+static void medusa_l1_task_free(struct task_struct *task)
 {
 }
 
@@ -326,7 +326,7 @@ static int medusa_l1_task_kill(struct task_struct *p, struct kernel_siginfo *inf
  * a LSM is not zero. Implication: no checks for Medusa's IPC security blob
  * are required.
  */
-int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
+static int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
 				 unsigned int ipc_class)
 {
 	struct medusa_l1_ipc_s *med = ipc_security(ipcp);
@@ -355,47 +355,47 @@ int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
 	 */
 //}
 
-int medusa_l1_msg_queue_alloc_security(struct kern_ipc_perm *msq)
+static int medusa_l1_msg_queue_alloc_security(struct kern_ipc_perm *msq)
 {
 	return medusa_l1_ipc_alloc_security(msq, MED_IPC_MSG);
 }
 
-int medusa_l1_shm_alloc_security(struct kern_ipc_perm *shp)
+static int medusa_l1_shm_alloc_security(struct kern_ipc_perm *shp)
 {
 	return medusa_l1_ipc_alloc_security(shp, MED_IPC_SHM);
 }
 
-int medusa_l1_sem_alloc_security(struct kern_ipc_perm *sma)
+static int medusa_l1_sem_alloc_security(struct kern_ipc_perm *sma)
 {
 	return medusa_l1_ipc_alloc_security(sma, MED_IPC_SEM);
 }
 
-int medusa_queue_associate(struct kern_ipc_perm *ipcp, int flag)
+static int medusa_queue_associate(struct kern_ipc_perm *ipcp, int flag)
 {
 	return medusa_ipc_associate(ipcp, flag, "queue_associate");
 }
 
-int medusa_shm_associate(struct kern_ipc_perm *ipcp, int flag)
+static int medusa_shm_associate(struct kern_ipc_perm *ipcp, int flag)
 {
 	return medusa_ipc_associate(ipcp, flag, "shm_associate");
 }
 
-int medusa_sem_associate(struct kern_ipc_perm *ipcp, int flag)
+static int medusa_sem_associate(struct kern_ipc_perm *ipcp, int flag)
 {
 	return medusa_ipc_associate(ipcp, flag, "sem_associate");
 }
 
-int medusa_queue_ctl(struct kern_ipc_perm *ipcp, int cmd)
+static int medusa_queue_ctl(struct kern_ipc_perm *ipcp, int cmd)
 {
 	return medusa_ipc_ctl(ipcp, cmd, "msgctl");
 }
 
-int medusa_shm_ctl(struct kern_ipc_perm *ipcp, int cmd)
+static int medusa_shm_ctl(struct kern_ipc_perm *ipcp, int cmd)
 {
 	return medusa_ipc_ctl(ipcp, cmd, "shmctl");
 }
 
-int medusa_sem_ctl(struct kern_ipc_perm *ipcp, int cmd)
+static int medusa_sem_ctl(struct kern_ipc_perm *ipcp, int cmd)
 {
 	return medusa_ipc_ctl(ipcp, cmd, "semctl");
 }

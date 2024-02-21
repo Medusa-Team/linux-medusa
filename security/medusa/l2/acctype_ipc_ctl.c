@@ -27,7 +27,7 @@ MED_ATTRS(ipc_ctl_access) {
 
 MED_ACCTYPE(ipc_ctl_access, "ipc_ctl", process_kobject, "process", ipc_kobject, "object");
 
-int __init ipc_acctype_ctl_init(void)
+static int __init ipc_acctype_ctl_init(void)
 {
 	MED_REGISTER_ACCTYPE(ipc_ctl_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

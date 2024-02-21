@@ -19,7 +19,7 @@ MED_ATTRS(getfuck_event) {
  *               fuck_kobject, "parent");
  */
 
-int __init getfuck_evtype_init(void)
+static int __init getfuck_evtype_init(void)
 {
 	//MED_REGISTER_EVTYPE(getfuck_event,
 	//                MEDUSA_EVTYPE_TRIGGEREDBYOBJECTTBIT);

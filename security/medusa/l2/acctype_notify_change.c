@@ -31,7 +31,7 @@ MED_ATTRS(notify_change_access) {
 MED_ACCTYPE(notify_change_access, "notify_change", process_kobject, "process",
 	    file_kobject, "file");
 
-int __init notify_change_acctype_init(void)
+static int __init notify_change_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(notify_change_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

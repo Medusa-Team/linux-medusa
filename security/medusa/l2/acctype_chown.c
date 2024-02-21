@@ -25,7 +25,7 @@ MED_ACCTYPE(chown_access, "chown",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init chown_acctype_init(void)
+static int __init chown_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(chown_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

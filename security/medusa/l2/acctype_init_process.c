@@ -14,7 +14,7 @@ MED_ATTRS(init_process) {
 
 MED_ACCTYPE(init_process, "init", process_kobject, "process", process_kobject, "parent");
 
-int __init init_process_acctype_init(void)
+static int __init init_process_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(init_process, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;

@@ -132,7 +132,7 @@ out:
 	return ret;
 }
 
-int __init getprocess_evtype_init(void)
+static int __init getprocess_evtype_init(void)
 {
 	/*
 	 * Triggering of this event can be turned off to permit VS model

@@ -37,7 +37,7 @@ MED_ATTRS(syscall_access) {
 
 MED_ACCTYPE(syscall_access, "syscall", process_kobject, "process", process_kobject, "process");
 
-int __init syscall_acctype_init(void)
+static int __init syscall_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(syscall_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;

@@ -50,18 +50,12 @@ extern int medusa_ipc_semop(struct kern_ipc_perm *ipcp, struct sembuf *sops, uns
 extern int medusa_ipc_shmat(struct kern_ipc_perm *ipcp, char __user *shmaddr, int shmflg);
 extern int medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp, struct msg_msg *msg, int msgflg);
 extern int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp, struct msg_msg *msg, struct task_struct *target, long type, int mode);
-extern int medusa_queue_associate(struct kern_ipc_perm *ipcp, int flag);
-extern int medusa_shm_associate(struct kern_ipc_perm *ipcp, int flag);
-extern int medusa_sem_associate(struct kern_ipc_perm *ipcp, int flag);
-extern int medusa_queue_ctl(struct kern_ipc_perm *ipcp, int cmd);
-extern int medusa_shm_ctl(struct kern_ipc_perm *ipcp, int cmd);
-extern int medusa_sem_ctl(struct kern_ipc_perm *ipcp, int cmd);
 
 /*
  * The following routine makes a support for many of access types,
  * and it is used both in L1 and L2 code. It is defined in
  * l2/evtype_getipc.c.
  */
-extern enum medusa_answer_t ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp);
+extern int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp);
 
 #endif // _MEDUSA_L1_IPC_H

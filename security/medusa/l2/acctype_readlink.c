@@ -21,7 +21,7 @@ MED_ACCTYPE(readlink_access, "readlink",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init readlink_acctype_init(void)
+static int __init readlink_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(readlink_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

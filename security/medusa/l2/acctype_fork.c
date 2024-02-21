@@ -17,7 +17,7 @@ MED_ATTRS(fork_access) {
 
 MED_ACCTYPE(fork_access, "fork", process_kobject, "parent", process_kobject, "parent");
 
-int __init fork_acctype_init(void)
+static int __init fork_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(fork_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;

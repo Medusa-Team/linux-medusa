@@ -23,7 +23,7 @@ MED_ACCTYPE(permission_access, "permission",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init permission_acctype_init(void)
+static int __init permission_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(permission_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
@@ -37,7 +37,7 @@ static void medusa_permission_pacb(struct audit_buffer *ab, void *pcad)
 	audit_log_format(ab, " mask=%d", mad->mask);
 }
 
-enum medusa_answer_t medusa_do_permission(struct dentry *dentry, struct inode *inode, int mask)
+static enum medusa_answer_t medusa_do_permission(struct dentry *dentry, struct inode *inode, int mask)
 {
 	struct permission_access access;
 	struct process_kobject process;

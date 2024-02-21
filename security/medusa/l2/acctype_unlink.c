@@ -21,7 +21,7 @@ MED_ACCTYPE(unlink_access, "unlink",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init unlink_acctype_init(void)
+static int __init unlink_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(unlink_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

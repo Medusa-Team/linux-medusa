@@ -44,7 +44,7 @@ MED_EVTYPE(getfile_event, "getfile", file_kobject, "file",
  * it right; and we try to avoid recursion 'cause we value the stack.
  */
 
-struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
+static struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
 {
 	int depth, last_depth, maxdepth, can_nest;
 	struct mount *p;
@@ -125,12 +125,12 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 							 struct path *ndupper,
 							 struct path *ndparent);
 
-void medusa_clean_inode(struct inode *inode)
+static void medusa_clean_inode(struct inode *inode)
 {
 	init_med_object(&inode_security(inode)->med_object);
 }
 
-inline void info_mnt(struct mount *mnt)
+static inline void info_mnt(struct mount *mnt)
 {
 	med_pr_info("mountpoint: %pd, vfs mnt root: %pd\n", mnt->mnt_mountpoint, mnt->mnt.mnt_root);
 }
@@ -217,7 +217,7 @@ void medusa_put_upper_and_parent(struct path *ndupper, struct path *ndparent)
  * Checks for correctness of current, upper and parent.
  * @returns: new dir for next dentry computed from ndparent
  */
-struct path check(struct dentry *dentry,
+static struct path check(struct dentry *dentry,
 		  struct path *dir,
 		  struct path *c,
 		  struct path *u,
@@ -351,7 +351,6 @@ int file_kobj_validate_dentry_dir(const struct vfsmount *mnt, struct dentry *den
 	return -1;
 }
 
-int medusa_l1_inode_alloc_security(struct inode *inode);
 /**
  * file_kobj_validate_dentry - get dentry security information from auth. server
  * @dentry: dentry to get the information for.
@@ -461,7 +460,7 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 	return retval;
 }
 
-int __init getfile_evtype_init(void)
+static int __init getfile_evtype_init(void)
 {
 	/*
 	 * Triggering of this event can be turned off to permit VS model

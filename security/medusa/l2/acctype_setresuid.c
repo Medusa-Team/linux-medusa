@@ -26,7 +26,7 @@ MED_ATTRS(setresuid) {
 
 MED_ACCTYPE(setresuid, "setresuid", process_kobject, "process", process_kobject, "process");
 
-int __init setresuid_acctype_init(void)
+static int __init setresuid_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(setresuid, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;

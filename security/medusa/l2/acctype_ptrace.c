@@ -17,7 +17,7 @@ MED_ACCTYPE(ptrace_access, "ptrace",
 	    process_kobject, "tracer",
 	    process_kobject, "tracee");
 
-int __init ptrace_acctype_init(void)
+static int __init ptrace_acctype_init(void)
 {
 	/* to object or not to object? now THAT is a question ;). */
 	MED_REGISTER_ACCTYPE(ptrace_access,

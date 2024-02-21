@@ -30,7 +30,7 @@ MED_ACCTYPE(sexec_access, "sexec",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init sexec_acctype_init(void)
+static int __init sexec_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(sexec_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;

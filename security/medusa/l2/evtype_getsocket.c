@@ -13,7 +13,7 @@ MED_ATTRS(socket_event) {
 
 MED_EVTYPE(socket_event, "getsocket", socket_kobject, "socket", socket_kobject, "socket");
 
-int __init socket_evtype_init(void)
+static int __init socket_evtype_init(void)
 {
 	MED_REGISTER_EVTYPE(socket_event,
 			    MEDUSA_EVTYPE_TRIGGEREDATSUBJECT |

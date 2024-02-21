@@ -21,7 +21,7 @@ MED_ACCTYPE(chroot_access, "chroot",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init chroot_acctype_init(void)
+static int __init chroot_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(chroot_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;

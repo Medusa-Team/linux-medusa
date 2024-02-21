@@ -22,7 +22,7 @@ MED_ATTRS(rename_access) {
 MED_ACCTYPE(rename_access, "rename", process_kobject, "process",
 	    file_kobject, "file");
 
-int __init rename_acctype_init(void)
+static int __init rename_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(rename_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;

@@ -7,6 +7,7 @@
  */
 
 #include <linux/slab.h>
+#include "l3/med_cache.h"
 
 #define FAT_PTR_OFFSET_TYPE uint32_t
 #define FAT_PTR_OFFSET sizeof(FAT_PTR_OFFSET_TYPE)

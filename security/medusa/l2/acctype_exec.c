@@ -39,7 +39,7 @@ MED_ACCTYPE(exec_paccess, "pexec",
 	    process_kobject, "process",
 	    file_kobject, "file");
 
-int __init exec_acctype_init(void)
+static int __init exec_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(exec_faccess, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	MED_REGISTER_ACCTYPE(exec_paccess, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);

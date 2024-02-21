@@ -22,7 +22,7 @@ MED_ACCTYPE(capable_access, "capable",
 	    process_kobject, "process",
 	    process_kobject, "process");
 
-int __init capable_acctype_init(void)
+static int __init capable_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(capable_access, MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;

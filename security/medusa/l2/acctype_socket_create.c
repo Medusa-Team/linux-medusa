@@ -23,7 +23,7 @@ MED_ACCTYPE(socket_create_access, "socket_create",
 	    process_kobject, "process",
 	    process_kobject, "process");
 
-int __init socket_create_acctype_init(void)
+static int __init socket_create_acctype_init(void)
 {
 	MED_REGISTER_ACCTYPE(socket_create_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
 	return 0;
