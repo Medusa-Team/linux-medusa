@@ -85,7 +85,6 @@ static DEFINE_IDR(answer_ids_idr);
 static DECLARE_WAIT_QUEUE_HEAD(close_wait);
 
 static DECLARE_WAIT_QUEUE_HEAD(userspace_chardev);
-static struct semaphore take_answer;
 static struct semaphore user_read_lock;
 static struct semaphore queue_items;
 static struct semaphore queue_lock;
@@ -429,7 +428,6 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		med_pr_err("task pid %d, question 0x%x for '%s' not answered, authorization server disconnected",
 			current->pid, answer_id, event->evtype_id->name);
 	}
-	up(&take_answer);
 	up_read(&lightswitch);
 	return retval;
 }
@@ -748,10 +746,8 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	count -= sizeof(MCPptr_t);
 
 	// Type of the message is received
-	down(&take_answer);
 	if (recv_type == MEDUSA_COMM_AUTHANSWER) {
 		if (__copy_from_user(recv_buf, buf, sizeof(int16_t) + sizeof(MCPptr_t))) {
-			up(&take_answer);
 			up_read(&lightswitch);
 			med_pr_err("write: can't copy buffer\n");
 			return -EFAULT;
@@ -765,7 +761,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		answered_task = (struct task_struct *) idr_find(&answer_ids_idr, answered_task_id);
 		rcu_read_unlock();
 		if (answered_task == NULL) {
-			up(&take_answer);
 			up_read(&lightswitch);
 			med_pr_err("decision_answer: invalid decision_request_id: %llx\n", *(uint64_t *)(recv_buf));
 			return -100;
@@ -779,7 +774,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
-		up(&take_answer);
 		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t)*2)) {
 			up_read(&lightswitch);
 			med_pr_err("write: can't copy buffer\n");
@@ -908,8 +902,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			atomic_inc(&update_requests);
 		wake_up(&userspace_chardev);
 	} else if (recv_type == MEDUSA_COMM_READY_ANSWER) {
-		up(&take_answer);
-
 		/* register auth server */
 		if (med_register_authserver(&chardev_medusa) < 0) {
 			med_pr_warn("Failed to register auth server: "
@@ -919,7 +911,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		}
 		set_auth_server_ready();
 	} else {
-		up(&take_answer);
 		med_pr_err("Protocol error at write(): unknown command %llx!\n",
 			(MCPptr_t)recv_type);
 #ifdef ERRORS_CAUSE_SEGFAULT
@@ -998,7 +989,6 @@ static int user_open(struct inode *inode, struct file *file)
 
 	teleport.cycle = tpc_HALT;
 	// Reset semaphores
-	sema_init(&take_answer, 1);
 	sema_init(&user_read_lock, 1);
 	sema_init(&queue_items, 0);
 	sema_init(&queue_lock, 1);
