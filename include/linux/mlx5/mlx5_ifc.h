@@ -1103,7 +1103,7 @@ struct mlx5_ifc_roce_cap_bits {
 	u8         sw_r_roce_src_udp_port[0x1];
 	u8         fl_rc_qp_when_roce_disabled[0x1];
 	u8         fl_rc_qp_when_roce_enabled[0x1];
-	u8         reserved_at_7[0x1];
+	u8         roce_cc_general[0x1];
 	u8	   qp_ooo_transmit_default[0x1];
 	u8         reserved_at_9[0x15];
 	u8	   qp_ts_format[0x2];
@@ -3576,7 +3576,7 @@ struct mlx5_ifc_flow_context_bits {
 	u8         action[0x10];
 
 	u8         extended_destination[0x1];
-	u8         reserved_at_81[0x1];
+	u8         uplink_hairpin_en[0x1];
 	u8         flow_source[0x2];
 	u8         encrypt_decrypt_type[0x4];
 	u8         destination_list_size[0x18];
@@ -4036,8 +4036,13 @@ struct mlx5_ifc_nic_vport_context_bits {
 	u8	   affiliation_criteria[0x4];
 	u8	   affiliated_vhca_id[0x10];
 
-	u8	   reserved_at_60[0xd0];
+	u8	   reserved_at_60[0xa0];
 
+	u8	   reserved_at_100[0x1];
+	u8         sd_group[0x3];
+	u8	   reserved_at_104[0x1c];
+
+	u8	   reserved_at_120[0x10];
 	u8         mtu[0x10];
 
 	u8         system_image_guid[0x40];
@@ -10122,8 +10127,7 @@ struct mlx5_ifc_mpir_reg_bits {
 	u8         reserved_at_20[0x20];
 
 	u8         local_port[0x8];
-	u8         reserved_at_28[0x15];
-	u8         sd_group[0x3];
+	u8         reserved_at_28[0x18];
 
 	u8         reserved_at_60[0x20];
 };
@@ -10257,7 +10261,9 @@ struct mlx5_ifc_mcam_access_reg_bits {
 
 	u8         regs_63_to_46[0x12];
 	u8         mrtc[0x1];
-	u8         regs_44_to_32[0xd];
+	u8         regs_44_to_41[0x4];
+	u8         mfrl[0x1];
+	u8         regs_39_to_32[0x8];
 
 	u8         regs_31_to_10[0x16];
 	u8         mtmp[0x1];

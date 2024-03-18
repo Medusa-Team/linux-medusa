@@ -336,7 +336,7 @@ int netdev_name_node_alt_create(struct net_device *dev, const char *name)
 		return -ENOMEM;
 	netdev_name_node_add(net, name_node);
 	/* The node that holds dev->name acts as a head of per-device list. */
-	list_add_tail(&name_node->list, &dev->name_node->list);
+	list_add_tail_rcu(&name_node->list, &dev->name_node->list);
 
 	return 0;
 }
@@ -9074,28 +9074,6 @@ bool netdev_port_same_parent_id(struct net_device *a, struct net_device *b)
 }
 EXPORT_SYMBOL(netdev_port_same_parent_id);
 
-static void netdev_dpll_pin_assign(struct net_device *dev, struct dpll_pin *dpll_pin)
-{
-#if IS_ENABLED(CONFIG_DPLL)
-	rtnl_lock();
-	dev->dpll_pin = dpll_pin;
-	rtnl_unlock();
-#endif
-}
-
-void netdev_dpll_pin_set(struct net_device *dev, struct dpll_pin *dpll_pin)
-{
-	WARN_ON(!dpll_pin);
-	netdev_dpll_pin_assign(dev, dpll_pin);
-}
-EXPORT_SYMBOL(netdev_dpll_pin_set);
-
-void netdev_dpll_pin_clear(struct net_device *dev)
-{
-	netdev_dpll_pin_assign(dev, NULL);
-}
-EXPORT_SYMBOL(netdev_dpll_pin_clear);
-
 /**
  *	dev_change_proto_down - set carrier according to proto_down.
  *
@@ -11551,6 +11529,7 @@ static struct pernet_operations __net_initdata netdev_net_ops = {
 
 static void __net_exit default_device_exit_net(struct net *net)
 {
+	struct netdev_name_node *name_node, *tmp;
 	struct net_device *dev, *aux;
 	/*
 	 * Push all migratable network devices back to the
@@ -11573,6 +11552,14 @@ static void __net_exit default_device_exit_net(struct net *net)
 		snprintf(fb_name, IFNAMSIZ, "dev%d", dev->ifindex);
 		if (netdev_name_in_use(&init_net, fb_name))
 			snprintf(fb_name, IFNAMSIZ, "dev%%d");
+
+		netdev_for_each_altname_safe(dev, name_node, tmp)
+			if (netdev_name_in_use(&init_net, name_node->name)) {
+				netdev_name_node_del(name_node);
+				synchronize_rcu();
+				__netdev_name_node_alt_destroy(name_node);
+			}
+
 		err = dev_change_net_namespace(dev, &init_net, fb_name);
 		if (err) {
 			pr_emerg("%s: failed to move %s to init_net: %d\n",
@@ -11643,11 +11630,12 @@ static void __init net_dev_struct_check(void)
 	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_tx, 160);
 
 	/* TXRX read-mostly hotpath */
+	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, lstats);
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, flags);
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, hard_header_len);
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, features);
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_txrx, ip6_ptr);
-	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_txrx, 30);
+	CACHELINE_ASSERT_GROUP_SIZE(struct net_device, net_device_read_txrx, 38);
 
 	/* RX read-mostly hotpath */
 	CACHELINE_ASSERT_GROUP_MEMBER(struct net_device, net_device_read_rx, ptype_specific);
