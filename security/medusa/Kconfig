@@ -171,7 +171,7 @@ config SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
 
 # All of the options must have a matching elif branch in file
 # include/l2/kobject_fuck_hash.h
-choice SECURITY_MEDUSA_HASH_NAME_CHOICE
+choice
 	prompt "FUCK Hashing function"
 	help
 	  Select a hashing function to be used within the FUCK module.
@@ -223,7 +223,7 @@ config SECURITY_MEDUSA_FUCK_SHA3_512
 	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
 	  protection than SHA-2 offers.
 
-endchoice # SECURITY_MEDUSA_HASH_NAME_CHOICE
+endchoice
 
 config SECURITY_MEDUSA_TESTING
 	bool "MEDUSA Test Support"

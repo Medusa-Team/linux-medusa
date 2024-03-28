@@ -1118,7 +1118,7 @@ static inline void free_copy(struct msg_msg *copy)
 }
 #endif
 
-struct msg_msg *find_msg(struct msg_queue *msq, long *msgtyp, int mode)
+static struct msg_msg *find_msg(struct msg_queue *msq, long *msgtyp, int mode)
 {
 	struct msg_msg *msg, *found = NULL;
 	long count = 0;
@@ -1183,7 +1183,7 @@ out_find_msg:
 	return found ?: ERR_PTR(-EAGAIN);
 }
 
-long do_msgrcv(int msqid, void __user *buf, size_t bufsz, long msgtyp, int msgflg,
+static long do_msgrcv(int msqid, void __user *buf, size_t bufsz, long msgtyp, int msgflg,
 	       long (*msg_handler)(void __user *, struct msg_msg *, size_t))
 {
 	int mode;
