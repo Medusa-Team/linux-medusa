@@ -722,15 +722,15 @@ static int invoke_bpf_prog(struct bpf_tramp_link *l, int args_off, int retval_of
 	if (ret)
 		return ret;
 
+	/* store prog start time */
+	emit_mv(RV_REG_S1, RV_REG_A0, ctx);
+
 	/* if (__bpf_prog_enter(prog) == 0)
 	 *	goto skip_exec_of_prog;
 	 */
 	branch_off = ctx->ninsns;
 	/* nop reserved for conditional jump */
 	emit(rv_nop(), ctx);
-
-	/* store prog start time */
-	emit_mv(RV_REG_S1, RV_REG_A0, ctx);
 
 	/* arg1: &args_off */
 	emit_addi(RV_REG_A0, RV_REG_FP, -args_off, ctx);
@@ -1462,6 +1462,22 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
 					    &addr, &fixed_addr);
 		if (ret < 0)
 			return ret;
+
+		if (insn->src_reg == BPF_PSEUDO_KFUNC_CALL) {
+			const struct btf_func_model *fm;
+			int idx;
+
+			fm = bpf_jit_find_kfunc_model(ctx->prog, insn);
+			if (!fm)
+				return -EINVAL;
+
+			for (idx = 0; idx < fm->nr_args; idx++) {
+				u8 reg = bpf_to_rv_reg(BPF_REG_1 + idx, ctx);
+
+				if (fm->arg_size[idx] == sizeof(int))
+					emit_sextw(reg, reg, ctx);
+			}
+		}
 
 		ret = emit_call(addr, fixed_addr, ctx);
 		if (ret)

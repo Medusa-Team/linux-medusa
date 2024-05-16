@@ -120,6 +120,7 @@ static void guc_ct_fini(struct drm_device *drm, void *arg)
 {
 	struct xe_guc_ct *ct = arg;
 
+	destroy_workqueue(ct->g2h_wq);
 	xa_destroy(&ct->fence_lookup);
 }
 
@@ -145,12 +146,19 @@ int xe_guc_ct_init(struct xe_guc_ct *ct)
 
 	xe_assert(xe, !(guc_ct_size() % PAGE_SIZE));
 
-	drmm_mutex_init(&xe->drm, &ct->lock);
+	ct->g2h_wq = alloc_ordered_workqueue("xe-g2h-wq", 0);
+	if (!ct->g2h_wq)
+		return -ENOMEM;
+
 	spin_lock_init(&ct->fast_lock);
 	xa_init(&ct->fence_lookup);
 	INIT_WORK(&ct->g2h_worker, g2h_worker_func);
 	init_waitqueue_head(&ct->wq);
 	init_waitqueue_head(&ct->g2h_fence_wq);
+
+	err = drmm_mutex_init(&xe->drm, &ct->lock);
+	if (err)
+		return err;
 
 	primelockdep(ct);
 
@@ -1054,10 +1062,10 @@ static int process_g2h_msg(struct xe_guc_ct *ct, u32 *msg, u32 len)
 							   adj_len);
 		break;
 	case XE_GUC_ACTION_GUC2PF_RELAY_FROM_VF:
-		ret = xe_guc_relay_process_guc2pf(&guc->relay, payload, adj_len);
+		ret = xe_guc_relay_process_guc2pf(&guc->relay, hxg, hxg_len);
 		break;
 	case XE_GUC_ACTION_GUC2VF_RELAY_FROM_PF:
-		ret = xe_guc_relay_process_guc2vf(&guc->relay, payload, adj_len);
+		ret = xe_guc_relay_process_guc2vf(&guc->relay, hxg, hxg_len);
 		break;
 	default:
 		drm_err(&xe->drm, "unexpected action 0x%04x\n", action);
