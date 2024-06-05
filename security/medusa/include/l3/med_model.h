@@ -72,34 +72,39 @@ static inline void unmonitor_med_subject(struct medusa_subject_s *med_subject)
 	act_clear(med_subject->act);
 }
 
-static inline int _is_med_magic_valid(struct medusa_object_s *med_object, int expected_magic)
+static inline bool is_med_magic_valid(struct medusa_object_s *med_object)
 {
-	return (med_object->magic == MAGIC_NOT_MONITORED) || (med_object->magic == expected_magic);
+	return (med_object->magic == MAGIC_NOT_MONITORED) ||
+		(med_object->magic == medusa_authserver_magic);
 }
 
-static inline int is_med_magic_valid(struct medusa_object_s *med_object)
+static inline void _med_magic_set(struct medusa_object_s *med_object, int magic,
+				  bool force)
 {
-	return _is_med_magic_valid(med_object, medusa_authserver_magic);
-}
-
-static inline void _med_magic_validate(struct medusa_object_s *med_object, int magic)
-{
+	// Do not change magic of not monitored tasks, if not forced
+	if (!force && med_object->magic == MAGIC_NOT_MONITORED)
+		return;
 	med_object->magic = magic;
 }
 
 static inline void med_magic_validate(struct medusa_object_s *med_object)
 {
-	_med_magic_validate(med_object, medusa_authserver_magic);
+	_med_magic_set(med_object, medusa_authserver_magic, false);
 }
 
 static inline void med_magic_not_monitored(struct medusa_object_s *med_object)
 {
-	_med_magic_validate(med_object, MAGIC_NOT_MONITORED);
+	_med_magic_set(med_object, MAGIC_NOT_MONITORED, false);
+}
+
+static inline void med_magic_invalidate_force(struct medusa_object_s *med_object)
+{
+	_med_magic_set(med_object, 0, true);
 }
 
 static inline void med_magic_invalidate(struct medusa_object_s *med_object)
 {
-	med_object->magic = 0;
+	_med_magic_set(med_object, 0, false);
 }
 
 #endif /* _MEDUSA_MODEL_H */
