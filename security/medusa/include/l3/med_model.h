@@ -72,6 +72,11 @@ static inline void unmonitor_med_subject(struct medusa_subject_s *med_subject)
 	act_clear(med_subject->act);
 }
 
+static inline bool is_med_magic_monitored(struct medusa_object_s *med_object)
+{
+	return med_object->magic != MAGIC_NOT_MONITORED;
+}
+
 static inline bool is_med_magic_valid(struct medusa_object_s *med_object)
 {
 	return (med_object->magic == MAGIC_NOT_MONITORED) ||
