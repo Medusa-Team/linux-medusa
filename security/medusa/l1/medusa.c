@@ -244,33 +244,92 @@ static int medusa_l1_task_fix_setuid(struct cred *new,
 }
 
 /*
- * Function security_task_alloc() is called only from fork().
- * If there is no memory for security blob allocation, -ENOMEM is returned
- * to fork(). Invariant: each task *must have* a task security blob
- * allocated, if its size is not zero. Implication: no checks for Medusa's
- * task security blob are required.
- */
-static int medusa_l1_task_alloc(struct task_struct *task, unsigned long clone_flags)
+* A task can be monitored or not monitored:
+* *) User thread should be always monitored.
+* *) Kernel thread can be not monitored, if the config option
+*    SECURITY_MEDUSA_MONITOR_KTHREADS is not set.
+*
+* The first task in the system is a task with pid 0 on boot CPU
+* (swapper or idle). It's a kernel thread and it is always excluded from
+* the security model (see validation of a task in evtype_getprocess.c
+* process_kobj_validate_task() function; the validation process goes
+* up to global init, i.e. up to task with pid 1). But all processes
+* (i.e. init with pid 1, kthreadd with pid 2, ...) are derived from it,
+* so:
+* 1) the swapper's security context should be set (to monitored or not
+* monitored, based on SECURITY_MEDUSA_MONITOR_KTHREADS);
+* 2) each kernel thread inherites its state, so based on the swapper's
+* security context state will be monitored or not monitored;
+* 3) each user thread will be monitored, so if the parent of the user
+* thread is not monitored, the state of user's security context should be
+* set to monitored.
+*
+* Transitions between kernel and user threads:
+*
+* (swapper/0)                  (init/1)			 (init/1)
+* -----------> kernel thread ----------> user thread -----------> swapper/0
+*                   ^         |              ^         |    on all CPUs
+*                   |         |              |         |    except the
+*                    ---------                ---------     boot CPU
+*
+* Observation: a user thread can never become a kernel thread with one
+* exception: init (PID 1) starts swapper on each CPU (except the boot
+* CPU, of course).
+*
+* security_task_alloc() hook is called from copy_process() function
+* (i.e. fork). The parent is @current. The need to set user thread
+* monitoring is detected based on the transition between the type of
+* the parent thread (i.e. @current) and the @task which is actually
+* being created.
+*/
+static int medusa_l1_task_alloc(struct task_struct *task,
+				unsigned long clone_flags)
 {
-	struct medusa_l1_task_s *old = task_security(current);
 	struct medusa_l1_task_s *med = task_security(task);
 
-	/*  current == task iff initializing task with pid == 0  */
-	if (unlikely(current == task)) {
-		init_med_object(&med->med_object);
-		init_med_subject(&med->med_subject);
-	} else {
-		*med = *old;
+	/* swapper(s) or a new user thread */
+	if (task == current ||
+	    ((task->flags & PF_KTHREAD) != (current->flags & PF_KTHREAD))) {
+		/*
+		 * Kernel threads have a superpower... Don't try to restrict them!
+		 * This branch can be applied only if kernel threads shouldn't
+		 * be monitored:
+		 * 1) swapper (PID 0) on boot CPU (@task == @current),
+		 * 2) swappers (idle threads) on all others CPUs; idle threads
+		 * are running from init (PID 1) thread in kernel_init() ->
+		 * kernel_init_freeable() -> smp_init() -> idle_threads_init()
+		 *
+		 * Due to task->flags & PF_KTHREAD test never applies to a new
+		 * user thread.
+		 */
+		if (!IS_ENABLED(CONFIG_SECURITY_MEDUSA_MONITOR_KTHREADS) &&
+		    (task->flags & PF_KTHREAD)) {
+			med_magic_not_monitored(&med->med_object);
+			unmonitor_med_object(&med->med_object);
+			unmonitor_med_subject(&med->med_subject);
+		}
+		/*
+		 * This branch applies on:
+		 * a) swapper(s), if kernel threads *should be* monitored
+		 * b) a new user thread
+		 */
+		else {
+			med_magic_invalidate(&med->med_object);
+			init_med_object(&med->med_object);
+			init_med_subject(&med->med_subject);
+		}
+	}
+	/*
+	 * Inheritance of the security context state if the type of the newly
+	 * created thread is the same as the type of its parent.
+	 */
+	else {
+		*med = *task_security(current);
 	}
 
 	mutex_init(&med->validation_in_progress);
 	med->validation_depth_nesting = 1;
 
-#ifndef CONFIG_SECURITY_MEDUSA_MONITOR_KTHREADS
-	/* Kernel threads have a superpower... Don't try to restrict them! */
-	if ((task->flags & PF_KTHREAD) || !task->mm)
-		med_magic_not_monitored(&med->med_object);
-#endif
 #ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
 	med->self = NULL;
 	refcount_set(&med->rcu_cb_set, 0);
@@ -712,7 +771,7 @@ const struct lsm_id medusa_lsmid = {
 
 static int __init medusa_l1_init(void)
 {
-	/* set the security info for the task pid 0 on boot cpu */
+	/* set the security info for the task pid 0 on boot cpu (swapper) */
 	medusa_l1_task_alloc(current, 0);
 
 	/* register the hooks */
