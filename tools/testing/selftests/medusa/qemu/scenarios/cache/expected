@@ -1,0 +1,2 @@
+MEDUSA_RESULT cache delegated_once PASS
+MEDUSA_RESULT cache second_operation_cached PASS

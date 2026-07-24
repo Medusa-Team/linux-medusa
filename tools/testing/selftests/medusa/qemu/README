@@ -1,17 +1,17 @@
-Medusa Constable QEMU smoke test
-================================
+Medusa Constable QEMU integration scenarios
+============================================
 
-This test boots an x86-64 Medusa kernel with the Constable reference
-authorization server in a minimal initramfs.  It verifies all of the
-behavior-preserving migration boundary:
+The scenario runner boots an x86-64 Medusa kernel with the Constable
+reference authorization server in a minimal initramfs. Each scenario owns:
 
-  * Linux reaches /sbin/init with Medusa enabled.
-  * The kernel starts Constable before init.
-  * Constable connects to /dev/medusa using protocol version 3.
-  * The first mkdir decision is delegated to Constable.
-  * Constable updates the parent directory's med_oact cache bitmap.
-  * A second mkdir on the same parent does not produce another delegated
-    decision.
+  * `init`: guest operations and machine-readable result lines;
+  * `medusa.conf`: the Constable policy under test;
+  * `expected`: exact result lines that must appear on the guest console.
+
+The default `cache` scenario verifies that Linux reaches init with Medusa
+enabled, Constable connects using protocol version 3, the first `mkdir`
+decision is delegated, and clearing the parent directory's monitoring bitmap
+caches the second decision in the kernel.
 
 The kernel must be configured with:
 
@@ -25,10 +25,11 @@ Build Constable and BusyBox as static x86-64 executables, then run:
   tools/testing/selftests/medusa/qemu/run.sh \
     path/to/arch/x86/boot/bzImage \
     path/to/constable \
-    path/to/busybox
+    path/to/busybox \
+    cache
 
-The test exits successfully only after observing:
-
-  MEDUSA_QEMU_PASS: delegated=1 cached=1
+If the optional scenario argument is omitted, `cache` is used. The runner
+exits successfully only after every non-comment line in the scenario's
+`expected` file is observed on the console.
 
 QEMU_ACCEL, QEMU_CPU, and QEMU_TIMEOUT may be overridden in the environment.
