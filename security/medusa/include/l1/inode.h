@@ -75,4 +75,10 @@ struct medusa_l1_inode_s {
 	DECLARE_HASHTABLE(fuck, CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE);
 };
 
+static inline void medusa_inode_context_init(struct medusa_l1_inode_s *context)
+{
+	hash_init(context->fuck);
+	init_med_object(&context->med_object);
+}
+
 #endif

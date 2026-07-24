@@ -66,8 +66,7 @@ static int medusa_l1_inode_alloc_security(struct inode *inode)
 {
 	struct medusa_l1_inode_s *med = inode_security(inode);
 
-	hash_init(med->fuck);
-	init_med_object(&med->med_object);
+	medusa_inode_context_init(med);
 
 	return 0;
 }
@@ -373,8 +372,7 @@ static int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
 {
 	struct medusa_l1_ipc_s *med = ipc_security(ipcp);
 
-	init_med_object(&med->med_object);
-	med->ipc_class = ipc_class;
+	medusa_ipc_context_init(med, ipc_class);
 	return 0;
 }
 

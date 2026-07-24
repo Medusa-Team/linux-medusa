@@ -43,6 +43,13 @@ struct medusa_l1_ipc_s {
 	struct medusa_object_s med_object;
 };
 
+static inline void medusa_ipc_context_init(struct medusa_l1_ipc_s *context,
+					   unsigned int ipc_class)
+{
+	init_med_object(&context->med_object);
+	context->ipc_class = ipc_class;
+}
+
 extern int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag);
 extern int medusa_ipc_ctl(struct kern_ipc_perm *ipcp, int cmd, char *operation);
 extern int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation);
