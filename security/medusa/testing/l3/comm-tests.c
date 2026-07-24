@@ -3,6 +3,7 @@
 #include <kunit/test.h>
 
 #include "l3/registry.h"
+#include "l4/protocol.h"
 
 static enum medusa_answer_t delegated_answer;
 static int decide_calls;
@@ -119,12 +120,57 @@ static void decide_denies_unsupported_server_answer(struct kunit *test)
 	expect_delegated_answer(test, (enum medusa_answer_t)2, MED_DENY);
 }
 
+static void protocol_accepts_supported_answers(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test, 0, medusa_comm_validate_authanswer(
+		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_ALLOW, true));
+	KUNIT_EXPECT_EQ(test, 0, medusa_comm_validate_authanswer(
+		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_DENY, true));
+	KUNIT_EXPECT_EQ(test, 0, medusa_comm_validate_authanswer(
+		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_ERR, true));
+}
+
+static void protocol_rejects_malformed_answer_lengths(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test, -EMSGSIZE, medusa_comm_validate_authanswer(
+		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE - 1, MED_ALLOW, true));
+	KUNIT_EXPECT_EQ(test, -EMSGSIZE, medusa_comm_validate_authanswer(
+		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE + 1, MED_ALLOW, true));
+}
+
+static void protocol_rejects_unknown_answer_code(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test, -EINVAL, medusa_comm_validate_authanswer(
+		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, 2, true));
+}
+
+static void protocol_rejects_unknown_request_id(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test, -ENOENT, medusa_comm_validate_authanswer(
+		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_ALLOW, false));
+}
+
+static void protocol_rejects_stale_request_id(struct kunit *test)
+{
+	bool request_pending = true;
+
+	request_pending = false;
+	KUNIT_EXPECT_EQ(test, -ENOENT, medusa_comm_validate_authanswer(
+		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_DENY,
+		request_pending));
+}
+
 static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(decide_without_server_allows_and_uncaches),
 	KUNIT_CASE(decide_propagates_allow),
 	KUNIT_CASE(decide_propagates_deny),
 	KUNIT_CASE(decide_fails_open_when_server_is_unreachable),
 	KUNIT_CASE(decide_denies_unsupported_server_answer),
+	KUNIT_CASE(protocol_accepts_supported_answers),
+	KUNIT_CASE(protocol_rejects_malformed_answer_lengths),
+	KUNIT_CASE(protocol_rejects_unknown_answer_code),
+	KUNIT_CASE(protocol_rejects_unknown_request_id),
+	KUNIT_CASE(protocol_rejects_stale_request_id),
 	{}
 };
 
