@@ -74,4 +74,40 @@ struct medusa_l1_task_s {
 	int audit;
 };
 
+enum medusa_task_context_mode {
+	MEDUSA_TASK_CONTEXT_MONITORED,
+	MEDUSA_TASK_CONTEXT_UNMONITORED,
+	MEDUSA_TASK_CONTEXT_INHERIT,
+};
+
+static inline void
+medusa_task_context_init(struct medusa_l1_task_s *context,
+			 const struct medusa_l1_task_s *parent,
+			 enum medusa_task_context_mode mode)
+{
+	switch (mode) {
+	case MEDUSA_TASK_CONTEXT_INHERIT:
+		*context = *parent;
+		break;
+	case MEDUSA_TASK_CONTEXT_UNMONITORED:
+		med_magic_not_monitored(&context->med_object);
+		unmonitor_med_object(&context->med_object);
+		unmonitor_med_subject(&context->med_subject);
+		break;
+	case MEDUSA_TASK_CONTEXT_MONITORED:
+		med_magic_invalidate(&context->med_object);
+		init_med_object(&context->med_object);
+		init_med_subject(&context->med_subject);
+		break;
+	}
+
+	mutex_init(&context->validation_in_progress);
+	context->validation_depth_nesting = 1;
+
+#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
+	context->self = NULL;
+	refcount_set(&context->rcu_cb_set, 0);
+#endif
+}
+
 #endif
