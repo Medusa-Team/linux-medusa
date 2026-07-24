@@ -4,7 +4,8 @@ Medusa Constable QEMU integration scenarios
 The scenario runner boots an x86-64 Medusa kernel with the Constable
 reference authorization server in a minimal initramfs. Each scenario owns:
 
-  * `init`: guest operations and machine-readable result lines;
+  * `init` or `init.c`: guest operations and machine-readable result lines;
+  * optional `guest.c`: a separately runnable static test program;
   * `medusa.conf`: the Constable policy under test;
   * `expected`: exact result lines that must appear on the guest console.
 
@@ -12,6 +13,13 @@ The default `cache` scenario verifies that Linux reaches init with Medusa
 enabled, Constable connects using protocol version 3, the first `mkdir`
 decision is delegated, and clearing the parent directory's monitoring bitmap
 caches the second decision in the kernel.
+
+The `access` scenario covers filesystem operations, process creation,
+execution, credentials, signals, and all three supported SysV IPC classes.
+Its expected results deliberately record the current `EACCES` behavior when
+re-associating with an existing SysV IPC object. Filesystem and process
+operations are behavior checks; the console event assertions identify the
+SysV operations that demonstrably reached Constable.
 
 The kernel must be configured with:
 
@@ -32,4 +40,7 @@ If the optional scenario argument is omitted, `cache` is used. The runner
 exits successfully only after every non-comment line in the scenario's
 `expected` file is observed on the console.
 
-QEMU_ACCEL, QEMU_CPU, and QEMU_TIMEOUT may be overridden in the environment.
+`GUEST_CC` selects the static compiler for scenario C programs. Prebuilt
+programs may instead be supplied with `INIT_TEST_BINARY` and
+`GUEST_TEST_BINARY`. `QEMU_ACCEL`, `QEMU_CPU`, and `QEMU_TIMEOUT` may also be
+overridden in the environment.

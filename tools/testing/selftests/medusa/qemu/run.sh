@@ -47,10 +47,37 @@ done
 mkdir -p "$work_dir/input"
 cp "$constable" "$work_dir/input/constable"
 cp "$busybox" "$work_dir/input/busybox"
-cp "$scenario_dir/init" "$work_dir/input/init"
 cp "$self_dir/init-constable.sh" "$work_dir/input/init-constable.sh"
 cp "$scenario_dir/medusa.conf" "$work_dir/input/medusa.conf"
 cp "$self_dir/constable.conf" "$work_dir/input/constable.conf"
+
+guest_cc="${GUEST_CC:-cc}"
+if [ -f "$scenario_dir/init.c" ] || [ -f "$scenario_dir/guest.c" ]; then
+	if ! command -v "$guest_cc" >/dev/null; then
+		echo "missing guest compiler: $guest_cc" >&2
+		exit 2
+	fi
+fi
+
+if [ -f "$scenario_dir/init.c" ]; then
+	if [ -n "${INIT_TEST_BINARY:-}" ]; then
+		cp "$(realpath "$INIT_TEST_BINARY")" "$work_dir/input/init"
+	else
+		"$guest_cc" -static -O2 -Wall -Wextra \
+			-o "$work_dir/input/init" "$scenario_dir/init.c"
+	fi
+else
+	cp "$scenario_dir/init" "$work_dir/input/init"
+fi
+
+if [ -f "$scenario_dir/guest.c" ]; then
+	if [ -n "${GUEST_TEST_BINARY:-}" ]; then
+		cp "$(realpath "$GUEST_TEST_BINARY")" "$work_dir/input/medusa-guest"
+	else
+		"$guest_cc" -static -O2 -Wall -Wextra \
+			-o "$work_dir/input/medusa-guest" "$scenario_dir/guest.c"
+	fi
+fi
 
 cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 
@@ -65,7 +92,8 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	echo "file /bin/busybox $work_dir/input/busybox 0755 0 0"
 	for applet in awk cat chmod chown chroot cp dd dmesg echo fgrep grep \
 		kill killall link ln mkdir mkfifo mknod mv pidof poweroff ps \
-		mount readlink rm rmdir sed sh sleep stat touch truncate unlink; do
+		mount readlink rm rmdir sed sh sleep stat touch true truncate \
+		unlink; do
 		echo "slink /bin/$applet busybox 0755 0 0"
 	done
 	echo "file /sbin/constable $work_dir/input/constable 0755 0 0"
@@ -73,6 +101,9 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	echo "file /sbin/init-constable.sh $work_dir/input/init-constable.sh 0755 0 0"
 	echo "file /etc/medusa.conf $work_dir/input/medusa.conf 0644 0 0"
 	echo "file /etc/constable.conf $work_dir/input/constable.conf 0644 0 0"
+	if [ -f "$work_dir/input/medusa-guest" ]; then
+		echo "file /bin/medusa-guest $work_dir/input/medusa-guest 0755 0 0"
+	fi
 	echo "nod /dev/console 0600 0 0 c 5 1"
 	echo "nod /dev/null 0666 0 0 c 1 3"
 	echo "nod /dev/medusa 0600 0 0 c 111 0"

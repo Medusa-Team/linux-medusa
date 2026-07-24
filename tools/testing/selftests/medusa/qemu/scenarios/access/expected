@@ -1,0 +1,42 @@
+MEDUSA_RESULT access mkdir PASS
+MEDUSA_RESULT access validate_directory PASS
+MEDUSA_RESULT access create_open PASS
+MEDUSA_RESULT access fcntl PASS
+MEDUSA_RESULT access chmod PASS
+MEDUSA_RESULT access chown PASS
+MEDUSA_RESULT access truncate PASS
+MEDUSA_RESULT access symlink PASS
+MEDUSA_RESULT access link PASS
+MEDUSA_RESULT access rename PASS
+MEDUSA_RESULT access mknod_fifo PASS
+MEDUSA_RESULT access rmdir PASS
+MEDUSA_RESULT access validate_jail_directory PASS
+MEDUSA_RESULT access chroot PASS
+MEDUSA_RESULT access fork PASS
+MEDUSA_RESULT access validate_exec PASS
+MEDUSA_RESULT access exec PASS
+MEDUSA_RESULT access signal PASS
+MEDUSA_RESULT access credentials PASS
+MEDUSA_RESULT access msg_create PASS
+MEDUSA_RESULT access msg_associate_expected_deny PASS
+MEDUSA_RESULT access msg_send PASS
+MEDUSA_RESULT access msg_receive PASS
+MEDUSA_RESULT access msg_stat PASS
+MEDUSA_RESULT access msg_remove PASS
+MEDUSA_RESULT access sem_create PASS
+MEDUSA_RESULT access sem_associate_expected_deny PASS
+MEDUSA_RESULT access sem_op PASS
+MEDUSA_RESULT access sem_remove PASS
+MEDUSA_RESULT access shm_create PASS
+MEDUSA_RESULT access shm_associate_expected_deny PASS
+MEDUSA_RESULT access shm_attach PASS
+MEDUSA_RESULT access shm_detach PASS
+MEDUSA_RESULT access shm_stat PASS
+MEDUSA_RESULT access shm_remove PASS
+MEDUSA_RESULT access complete PASS
+MEDUSA_EVENT ipc_perm
+MEDUSA_EVENT ipc_ctl
+MEDUSA_EVENT ipc_semop
+MEDUSA_EVENT ipc_shmat
+MEDUSA_EVENT ipc_msgsnd
+MEDUSA_EVENT ipc_msgrcv
