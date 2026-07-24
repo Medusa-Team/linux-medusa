@@ -85,6 +85,20 @@ fi
 if expected_lsms="$(scenario_file expected-lsms)"; then
 	cp "$expected_lsms" "$work_dir/input/expected-lsms"
 fi
+if apparmor_profile="$(scenario_file apparmor.profile)"; then
+	if [ -n "${APPARMOR_POLICY:-}" ]; then
+		cp "$(realpath "$APPARMOR_POLICY")" \
+			"$work_dir/input/apparmor.policy"
+	else
+		apparmor_parser="${APPARMOR_PARSER:-apparmor_parser}"
+		if ! command -v "$apparmor_parser" >/dev/null; then
+			echo "missing AppArmor parser: $apparmor_parser" >&2
+			exit 2
+		fi
+		"$apparmor_parser" --skip-kernel-load --skip-cache --stdout \
+			"$apparmor_profile" >"$work_dir/input/apparmor.policy"
+	fi
+fi
 
 guest_cc="${GUEST_CC:-cc}"
 init_c="$(scenario_file init.c || true)"
@@ -144,6 +158,9 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	fi
 	if [ -f "$work_dir/input/expected-lsms" ]; then
 		echo "file /etc/expected-lsms $work_dir/input/expected-lsms 0644 0 0"
+	fi
+	if [ -f "$work_dir/input/apparmor.policy" ]; then
+		echo "file /etc/apparmor.policy $work_dir/input/apparmor.policy 0600 0 0"
 	fi
 	if [ -f "$work_dir/input/medusa-guest" ]; then
 		echo "file /bin/medusa-guest $work_dir/input/medusa-guest 0755 0 0"

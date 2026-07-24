@@ -34,6 +34,19 @@ static void mount_one(const char *source, const char *target, const char *type)
 		perror(target);
 }
 
+static bool disable_printk_ratelimit(void)
+{
+	static const char value[] = "0\n";
+	int fd = open("/proc/sys/kernel/printk_ratelimit", O_WRONLY);
+	bool passed;
+
+	if (fd < 0)
+		return false;
+	passed = write(fd, value, sizeof(value) - 1) == sizeof(value) - 1;
+	close(fd);
+	return passed;
+}
+
 static bool list_has_token(const char *list, const char *token)
 {
 	char wrapped_list[1024];
@@ -82,6 +95,58 @@ static bool expected_lsms_are_active(void)
 	for (token = strtok(expected, ","); token; token = strtok(NULL, ","))
 		passed &= list_has_token(active, token);
 	return passed;
+}
+
+static bool load_apparmor_policy(void)
+{
+	struct stat status;
+	char *policy;
+	ssize_t count;
+	int input;
+	int load;
+	bool passed = false;
+
+	input = open("/etc/apparmor.policy", O_RDONLY);
+	if (input < 0 || fstat(input, &status) < 0 || status.st_size <= 0 ||
+	    status.st_size > 1024 * 1024)
+		goto out_input;
+
+	policy = malloc(status.st_size);
+	if (!policy)
+		goto out_input;
+	count = read(input, policy, status.st_size);
+	if (count != status.st_size)
+		goto out_policy;
+
+	load = open("/sys/kernel/security/apparmor/.load", O_WRONLY);
+	if (load < 0)
+		goto out_policy;
+	count = write(load, policy, status.st_size);
+	passed = count == status.st_size;
+	close(load);
+
+out_policy:
+	free(policy);
+out_input:
+	if (input >= 0)
+		close(input);
+	return passed;
+}
+
+static bool run_apparmor_guest(void)
+{
+	pid_t child;
+	int status;
+
+	child = fork();
+	if (child == 0) {
+		execl("/bin/medusa-guest", "medusa-guest", NULL);
+		perror("run AppArmor guest");
+		_exit(127);
+	}
+	if (child < 0 || waitpid(child, &status, 0) != child)
+		return false;
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 static pid_t read_initial_pid(void)
@@ -171,9 +236,11 @@ int main(void)
 {
 	pid_t initial;
 	pid_t replacement;
+	bool unlimited_audit_console;
 
 	setvbuf(stdout, NULL, _IONBF, 0);
 	mount_one("proc", "/proc", "proc");
+	unlimited_audit_console = disable_printk_ratelimit();
 	mount_one("sysfs", "/sys", "sysfs");
 	mount_one("devtmpfs", "/dev", "devtmpfs");
 	if (access("/etc/expected-lsms", F_OK) == 0)
@@ -184,6 +251,13 @@ int main(void)
 	if (initial <= 0 || kill(initial, 0) < 0)
 		initial = find_constable_pid();
 	result("startup", initial > 0 && kill(initial, 0) == 0);
+	if (access("/etc/apparmor.policy", F_OK) == 0) {
+		result("unlimited_audit_console", unlimited_audit_console);
+		result("apparmor_policy_load", load_apparmor_policy());
+		result("apparmor_independent_deny", run_apparmor_guest());
+		result("constable_after_apparmor_deny",
+		       initial > 0 && kill(initial, 0) == 0);
+	}
 	result("connected_operation",
 	       mkdir("/tmp/medusa-connected", 0700) == 0);
 	result("disconnect", stop_process(initial));

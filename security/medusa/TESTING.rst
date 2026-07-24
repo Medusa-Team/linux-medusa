@@ -44,8 +44,10 @@ QEMU scenario coverage
 ``stacking.config``
   Enables AppArmor before Medusa in ``CONFIG_LSM``.  The ``stacking`` scenario
   requires both names in the kernel's runtime LSM list and inherits the full
-  lifecycle scenario. AppArmor reports the init process as ``unconfined``
-  while Medusa continues to reconnect and enforce its replacement policy.
+  lifecycle scenario. A confined helper proves an audited AppArmor ``mkdir``
+  denial while Constable remains connected and a subsequent operation
+  succeeds. The reconnected Constable then proves an audited Medusa
+  ``ipc_msgsnd`` denial while AppArmor permits the unconfined init process.
 
 Wired access paths
 ------------------
