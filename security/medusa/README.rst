@@ -79,3 +79,6 @@ continues booting after a five-second startup timeout.
 The immutable pre-revival revision is tagged ``medusa-v6.11-legacy``.  Changes
 after that tag should first make the baseline reproducible; protocol redesign
 and LSM stacking belong to later phases.
+
+The Linux 7.1 test inventory, wired/unwired access list, and known defects are
+recorded in ``security/medusa/TESTING.rst``.
