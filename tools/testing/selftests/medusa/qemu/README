@@ -1,0 +1,34 @@
+Medusa Constable QEMU smoke test
+================================
+
+This test boots an x86-64 Medusa kernel with the Constable reference
+authorization server in a minimal initramfs.  It verifies all of the
+behavior-preserving migration boundary:
+
+  * Linux reaches /sbin/init with Medusa enabled.
+  * The kernel starts Constable before init.
+  * Constable connects to /dev/medusa using protocol version 3.
+  * The first mkdir decision is delegated to Constable.
+  * Constable updates the parent directory's med_oact cache bitmap.
+  * A second mkdir on the same parent does not produce another delegated
+    decision.
+
+The kernel must be configured with:
+
+  CONFIG_SECURITY_MEDUSA=y
+  CONFIG_SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT=y
+  CONFIG_SECURITY_MEDUSA_AUTH_SERVER_TRIGGER="/sbin/init"
+  CONFIG_SECURITY_MEDUSA_AUTH_SERVER_LOADER="/sbin/init-constable.sh"
+
+Build Constable and BusyBox as static x86-64 executables, then run:
+
+  tools/testing/selftests/medusa/qemu/run.sh \
+    path/to/arch/x86/boot/bzImage \
+    path/to/constable \
+    path/to/busybox
+
+The test exits successfully only after observing:
+
+  MEDUSA_QEMU_PASS: delegated=1 cached=1
+
+QEMU_ACCEL, QEMU_CPU, and QEMU_TIMEOUT may be overridden in the environment.

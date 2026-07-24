@@ -1,0 +1,34 @@
+#!/bin/sh
+
+export PATH=/sbin:/bin
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+
+mkdir -p /tmp
+
+timeout=20
+while [ ! -c /dev/medusa ] && [ "$timeout" -gt 0 ]; do
+	sleep 1
+	timeout=$((timeout - 1))
+done
+
+if [ ! -c /dev/medusa ]; then
+	echo "MEDUSA_QEMU_FAIL: missing /dev/medusa"
+	poweroff -f
+fi
+
+sleep 2
+mkdir /tmp/delegated
+mkdir /tmp/cached
+sleep 1
+
+delegated="$(dmesg | grep -c MEDUSA_QEMU_DELEGATED_MKDIR)"
+if [ "$delegated" -eq 1 ]; then
+	echo "MEDUSA_QEMU_PASS: delegated=1 cached=1"
+else
+	echo "MEDUSA_QEMU_FAIL: delegated event count=$delegated"
+fi
+
+poweroff -f
