@@ -6,3 +6,4 @@
 
 obj-$(CONFIG_MEDUSA_L3_TESTING) := vs_model-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += med_model-tests.o
+obj-$(CONFIG_MEDUSA_L3_TESTING) += registry-tests.o
