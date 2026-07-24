@@ -51,6 +51,12 @@ If the optional scenario argument is omitted, `cache` is used. The runner
 exits successfully only after every non-comment line in the scenario's
 `expected` file is observed on the console.
 
+To exercise major-LSM stacking, merge `stacking.config` into the kernel
+configuration before building, then run the `lifecycle` scenario. This enables
+AppArmor before Medusa in `CONFIG_LSM`; a successful lifecycle run verifies
+that AppArmor initializes and Medusa still reconnects and enforces the
+replacement policy.
+
 `GUEST_CC` selects the static compiler for scenario C programs. Prebuilt
 programs may instead be supplied with `INIT_TEST_BINARY` and
 `GUEST_TEST_BINARY`. `QEMU_ACCEL`, `QEMU_CPU`, and `QEMU_TIMEOUT` may also be

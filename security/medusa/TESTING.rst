@@ -41,6 +41,12 @@ QEMU scenario coverage
   for a server-requested IPC operation, and the disconnected ``mkdir``
   stale-context fail-open audit path.
 
+``stacking.config``
+  Enables AppArmor before Medusa in ``CONFIG_LSM``.  The lifecycle scenario
+  passes with both major LSMs initialized; AppArmor reports the init process
+  as ``unconfined`` while Medusa continues to reconnect and enforce its
+  replacement policy.
+
 Wired access paths
 ------------------
 
