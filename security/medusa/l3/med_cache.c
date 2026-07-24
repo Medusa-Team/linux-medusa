@@ -96,7 +96,8 @@ static struct kmem_cache **realloc_med_cache_array(size_t size)
 		krealloc(med_cache_array, sizeof(struct kmem_cache *) * size, GFP_KERNEL);
 	if (new_cache_array) {
 		for (i = cache_array_size; i < size; i++)
-			med_cache_array[i] = NULL;
+			new_cache_array[i] = NULL;
+		med_cache_array = new_cache_array;
 		cache_array_size = size;
 	}
 	return new_cache_array;
@@ -116,7 +117,7 @@ int med_cache_register(size_t size)
 
 	idx = get_mem_cache_index(size);
 	if (idx >= cache_array_size)
-		if (!realloc_med_cache_array(idx))
+		if (!realloc_med_cache_array(idx + 1))
 			return -ENOMEM;
 	if (!med_cache_array[idx])
 		if (!med_cache_create(idx))

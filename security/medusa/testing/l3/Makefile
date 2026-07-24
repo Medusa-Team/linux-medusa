@@ -10,3 +10,4 @@ obj-$(CONFIG_MEDUSA_L3_TESTING) += registry-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += task-context-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += object-context-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += comm-tests.o
+obj-$(CONFIG_MEDUSA_L3_TESTING) += med_cache-tests.o
