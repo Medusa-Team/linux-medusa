@@ -1,0 +1,5 @@
+MEDUSA_RESULT lifecycle startup PASS
+MEDUSA_RESULT lifecycle disconnect PASS
+MEDUSA_RESULT lifecycle disconnected_fail_open PASS
+MEDUSA_RESULT lifecycle restart PASS
+MEDUSA_RESULT lifecycle policy_reload_known_defect PASS

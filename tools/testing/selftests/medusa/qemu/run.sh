@@ -50,6 +50,11 @@ cp "$busybox" "$work_dir/input/busybox"
 cp "$self_dir/init-constable.sh" "$work_dir/input/init-constable.sh"
 cp "$scenario_dir/medusa.conf" "$work_dir/input/medusa.conf"
 cp "$self_dir/constable.conf" "$work_dir/input/constable.conf"
+: >"$work_dir/input/constable.pid"
+if [ -f "$scenario_dir/medusa-reload.conf" ]; then
+	cp "$scenario_dir/medusa-reload.conf" \
+		"$work_dir/input/medusa-reload.conf"
+fi
 
 guest_cc="${GUEST_CC:-cc}"
 if [ -f "$scenario_dir/init.c" ] || [ -f "$scenario_dir/guest.c" ]; then
@@ -99,8 +104,12 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	echo "file /sbin/constable $work_dir/input/constable 0755 0 0"
 	echo "file /sbin/init $work_dir/input/init 0755 0 0"
 	echo "file /sbin/init-constable.sh $work_dir/input/init-constable.sh 0755 0 0"
+	echo "file /constable.pid $work_dir/input/constable.pid 0644 0 0"
 	echo "file /etc/medusa.conf $work_dir/input/medusa.conf 0644 0 0"
 	echo "file /etc/constable.conf $work_dir/input/constable.conf 0644 0 0"
+	if [ -f "$work_dir/input/medusa-reload.conf" ]; then
+		echo "file /etc/medusa-reload.conf $work_dir/input/medusa-reload.conf 0644 0 0"
+	fi
 	if [ -f "$work_dir/input/medusa-guest" ]; then
 		echo "file /bin/medusa-guest $work_dir/input/medusa-guest 0755 0 0"
 	fi

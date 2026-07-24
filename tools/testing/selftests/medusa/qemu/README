@@ -21,6 +21,14 @@ re-associating with an existing SysV IPC object. Filesystem and process
 operations are behavior checks; the console event assertions identify the
 SysV operations that demonstrably reached Constable.
 
+The `lifecycle` scenario verifies initial Constable registration, clean
+disconnect, the configured fail-open behavior without a server, and
+registration of a replacement server. It also characterizes a known defect:
+after restart, policy rules for the already-running init process and newly
+created IPC objects return `MED_ERR`, so a reloaded deny rule fails open.
+The scenario names this result `policy_reload_known_defect`; it must not be
+read as successful enforcement of the replacement policy.
+
 The kernel must be configured with:
 
   CONFIG_SECURITY_MEDUSA=y
