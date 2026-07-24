@@ -20,8 +20,9 @@ void wait_for_auth_server(void)
 {
 	unsigned long timeout = MAX_SCHEDULE_TIMEOUT;
 
-	if (IS_ENABLED(CONFIG_SECURITY_MEDUSA_CONTINUE_BOOTING))
-		timeout = CONFIG_SECURITY_MEDUSA_CONTINUE_BOOTING_TIMEOUT * 1000;
+#ifdef CONFIG_SECURITY_MEDUSA_CONTINUE_BOOTING
+	timeout = CONFIG_SECURITY_MEDUSA_CONTINUE_BOOTING_TIMEOUT * 1000;
+#endif
 
 	med_pr_info("Waiting for authorization server to be ready");
 	timeout = wait_for_completion_timeout(&auth_server_ready,
