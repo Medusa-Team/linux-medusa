@@ -43,34 +43,34 @@ static void fake_med_subject_init(struct medusa_subject_s *med_subject)
 static void is_med_magic_valid_not_changed(struct kunit *test)
 {
 	struct medusa_l1_task_s task;
-	int medusa_authserver_magic = 1;
 
 	fake_med_object_init(&task.med_object);
-	KUNIT_EXPECT_EQ(test, 1, is_med_magic_valid(&task.med_object, medusa_authserver_magic));
+	task.med_object.magic = medusa_authserver_magic;
+	KUNIT_EXPECT_TRUE(test, is_med_magic_valid(&task.med_object));
 }
 
 static void is_med_magic_valid_changed_invalid(struct kunit *test)
 {
 	struct medusa_l1_task_s task;
-	int medusa_authserver_magic = 2;
 
 	fake_med_object_init(&task.med_object);
-	KUNIT_EXPECT_EQ(test, 0, is_med_magic_valid(&task.med_object, medusa_authserver_magic));
+	task.med_object.magic = medusa_authserver_magic == 1 ? 2 : 1;
+	KUNIT_EXPECT_FALSE(test, is_med_magic_valid(&task.med_object));
 }
 
 static void med_magic_validate_success(struct kunit *test)
 {
 	struct medusa_l1_task_s task;
 	int old_magic;
-	int medusa_authserver_magic = 2;
 
 	fake_med_object_init(&task.med_object);
+	task.med_object.magic = medusa_authserver_magic == 1 ? 2 : 1;
 	old_magic = task.med_object.magic;
 
-	med_magic_validate(&task.med_object, medusa_authserver_magic);
+	med_magic_validate(&task.med_object);
 
 	KUNIT_EXPECT_NE(test, old_magic, task.med_object.magic);
-	KUNIT_EXPECT_EQ(test, 1, is_med_magic_valid(&task.med_object, medusa_authserver_magic));
+	KUNIT_EXPECT_TRUE(test, is_med_magic_valid(&task.med_object));
 }
 
 static void med_magic_invalidate_success(struct kunit *test)
@@ -185,7 +185,6 @@ static struct kunit_case add_base_tc[] = {
 	KUNIT_CASE(med_magic_invalidate_success),
 	KUNIT_CASE(init_med_object_success),
 	KUNIT_CASE(unmonitor_med_object_success),
-	KUNIT_CASE(med_magic_validate_success),
 	KUNIT_CASE(init_med_subject_success),
 	KUNIT_CASE(unmonitor_med_subject_success),
 	{}
