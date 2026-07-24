@@ -130,6 +130,8 @@ int main(void)
 	if (initial <= 0 || kill(initial, 0) < 0)
 		initial = find_constable_pid();
 	result("startup", initial > 0 && kill(initial, 0) == 0);
+	result("connected_operation",
+	       mkdir("/tmp/medusa-connected", 0700) == 0);
 	result("disconnect", stop_process(initial));
 
 	errno = 0;

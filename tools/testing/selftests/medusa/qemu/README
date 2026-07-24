@@ -9,6 +9,10 @@ reference authorization server in a minimal initramfs. Each scenario owns:
   * `medusa.conf`: the Constable policy under test;
   * `expected`: exact result lines that must appear on the guest console.
 
+Blank lines and lines beginning with `#` in `expected` are ignored. A line
+beginning with `!` is a negative assertion: the remaining text must not occur
+on the console.
+
 The default `cache` scenario verifies that Linux reaches init with Medusa
 enabled, Constable connects using protocol version 3, the first `mkdir`
 decision is delegated, and clearing the parent directory's monitoring bitmap
@@ -27,7 +31,9 @@ registration of a replacement server. It also characterizes a known defect:
 after restart, policy rules for the already-running init process and newly
 created IPC objects return `MED_ERR`, so a reloaded deny rule fails open.
 The scenario names this result `policy_reload_known_defect`; it must not be
-read as successful enforcement of the replacement policy.
+read as successful enforcement of the replacement policy. It also verifies
+normal connected audit output and records the known absence of an audit record
+when stale-context validation takes the disconnected fail-open path.
 
 The kernel must be configured with:
 

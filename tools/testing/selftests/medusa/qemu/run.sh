@@ -127,13 +127,21 @@ timeout "${QEMU_TIMEOUT:-90}" qemu-system-x86_64 \
 	-m 1024 \
 	-kernel "$kernel_image" \
 	-initrd "$work_dir/initramfs.cpio.gz" \
-	-append "console=ttyS0 rdinit=/sbin/init panic=-1" \
+	-append "console=ttyS0 rdinit=/sbin/init panic=-1 audit=1" \
 	-nographic \
 	-no-reboot 2>&1 | tee "$work_dir/console.log"
 
 while IFS= read -r expected || [ -n "$expected" ]; do
 	case "$expected" in
 		''|'#'*) continue ;;
+		'!'*)
+			unexpected="${expected#!}"
+			if grep -Fq "$unexpected" "$work_dir/console.log"; then
+				echo "scenario '$scenario' observed forbidden result: $unexpected" >&2
+				exit 1
+			fi
+			continue
+			;;
 	esac
 	if ! grep -Fq "$expected" "$work_dir/console.log"; then
 		echo "scenario '$scenario' missing expected result: $expected" >&2
