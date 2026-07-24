@@ -28,7 +28,8 @@ static int __init open_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_open(struct path *path, struct inode *inode)
+static enum medusa_answer_t medusa_do_open(const struct path *path,
+					   struct inode *inode)
 {
 	struct open_access access;
 	struct process_kobject process;
@@ -49,7 +50,7 @@ enum medusa_answer_t medusa_open(struct file *file)
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 
-	struct path *path = &file->f_path;
+	const struct path *path = &file->f_path;
 	const u8 acc_mode = ACC_MODE(file->f_flags);
 	// TODO: Can we use file_inode?
 	struct inode *inode = d_backing_inode(path->dentry);
