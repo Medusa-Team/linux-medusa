@@ -9,6 +9,11 @@ reference authorization server in a minimal initramfs. Each scenario owns:
   * `medusa.conf`: the Constable policy under test;
   * `expected`: exact result lines that must appear on the guest console.
 
+An optional `base` file names another scenario whose programs, policies, and
+expected results are inherited. Programs and policies can be overridden by
+adding the corresponding file to the derived scenario; derived expectations
+are checked in addition to the base expectations.
+
 Blank lines and lines beginning with `#` in `expected` are ignored. A line
 beginning with `!` is a negative assertion: the remaining text must not occur
 on the console.
@@ -32,6 +37,10 @@ policy and proves that its `ipc_msgsnd` deny rule is enforced. The scenario
 also verifies that stale-context validation emits an audit record when it
 takes the disconnected fail-open path for `mkdir`.
 
+The `stacking` scenario inherits the complete lifecycle test and additionally
+mounts securityfs and verifies that the kernel's runtime LSM list contains
+both AppArmor and Medusa.
+
 The kernel must be configured with:
 
   CONFIG_SECURITY_MEDUSA=y
@@ -52,10 +61,20 @@ exits successfully only after every non-comment line in the scenario's
 `expected` file is observed on the console.
 
 To exercise major-LSM stacking, merge `stacking.config` into the kernel
-configuration before building, then run the `lifecycle` scenario. This enables
-AppArmor before Medusa in `CONFIG_LSM`; a successful lifecycle run verifies
-that AppArmor initializes and Medusa still reconnects and enforces the
-replacement policy.
+configuration before building, verify the resulting configuration, then run
+the `stacking` scenario:
+
+  tools/testing/selftests/medusa/qemu/check-stacking-config.sh \
+    path/to/.config
+  tools/testing/selftests/medusa/qemu/run.sh \
+    path/to/arch/x86/boot/bzImage \
+    path/to/constable \
+    path/to/busybox \
+    stacking
+
+This enables AppArmor before Medusa in `CONFIG_LSM`. A successful run proves
+that both are present in the runtime LSM list and that Medusa still reconnects
+and enforces the replacement policy.
 
 `GUEST_CC` selects the static compiler for scenario C programs. Prebuilt
 programs may instead be supplied with `INIT_TEST_BINARY` and

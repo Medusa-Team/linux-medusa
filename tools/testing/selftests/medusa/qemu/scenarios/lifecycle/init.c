@@ -34,6 +34,56 @@ static void mount_one(const char *source, const char *target, const char *type)
 		perror(target);
 }
 
+static bool list_has_token(const char *list, const char *token)
+{
+	char wrapped_list[1024];
+	char wrapped_token[128];
+
+	if (snprintf(wrapped_list, sizeof(wrapped_list), ",%s,", list) >=
+	    (int)sizeof(wrapped_list))
+		return false;
+	if (snprintf(wrapped_token, sizeof(wrapped_token), ",%s,", token) >=
+	    (int)sizeof(wrapped_token))
+		return false;
+	return strstr(wrapped_list, wrapped_token);
+}
+
+static bool expected_lsms_are_active(void)
+{
+	char active[1000];
+	char expected[1000];
+	char *token;
+	FILE *file;
+	bool passed = true;
+
+	file = fopen("/etc/expected-lsms", "r");
+	if (!file)
+		return true;
+	if (!fgets(expected, sizeof(expected), file)) {
+		fclose(file);
+		return false;
+	}
+	fclose(file);
+	expected[strcspn(expected, "\r\n")] = '\0';
+
+	mkdir("/sys/kernel/security", 0755);
+	mount_one("securityfs", "/sys/kernel/security", "securityfs");
+	file = fopen("/sys/kernel/security/lsm", "r");
+	if (!file)
+		return false;
+	if (!fgets(active, sizeof(active), file)) {
+		fclose(file);
+		return false;
+	}
+	fclose(file);
+	active[strcspn(active, "\r\n")] = '\0';
+	printf("MEDUSA_LSMS %s\n", active);
+
+	for (token = strtok(expected, ","); token; token = strtok(NULL, ","))
+		passed &= list_has_token(active, token);
+	return passed;
+}
+
 static pid_t read_initial_pid(void)
 {
 	FILE *file = fopen("/constable.pid", "r");
@@ -126,6 +176,8 @@ int main(void)
 	mount_one("proc", "/proc", "proc");
 	mount_one("sysfs", "/sys", "sysfs");
 	mount_one("devtmpfs", "/dev", "devtmpfs");
+	if (access("/etc/expected-lsms", F_OK) == 0)
+		result("active_lsms", expected_lsms_are_active());
 	sleep(2);
 
 	initial = read_initial_pid();
