@@ -6,6 +6,7 @@ on:
     branches:
       - master
       - codex/medusa-revival-phase-0
+      - codex/medusa-linux-7.1-migration
 
 permissions:
   contents: read
@@ -48,3 +49,23 @@ jobs:
           python3 tools/testing/kunit/kunit.py run \
             --arch=um \
             --kunitconfig=.kunitconfig
+
+  clang-x86-build:
+    name: Linux 7.1 x86-64 Clang build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            bc bison build-essential clang flex libelf-dev libssl-dev lld llvm
+      - name: Prepare the checked-in Medusa configuration
+        run: |
+          cp .config /tmp/medusa.config
+          make ARCH=x86_64 mrproper
+          cp /tmp/medusa.config .config
+          make ARCH=x86_64 LLVM=1 olddefconfig
+      - name: Build the bootable kernel
+        run: make ARCH=x86_64 LLVM=1 -j2 bzImage
