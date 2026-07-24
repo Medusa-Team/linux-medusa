@@ -52,6 +52,7 @@ enum medusa_answer_t medusa_open(struct file *file)
 
 	const struct path *path = &file->f_path;
 	const u8 acc_mode = ACC_MODE(file->f_flags);
+	unsigned int requested = MEDUSA_VS_SEE;
 	// TODO: Can we use file_inode?
 	struct inode *inode = d_backing_inode(path->dentry);
 
@@ -63,11 +64,14 @@ enum medusa_answer_t medusa_open(struct file *file)
 	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
 		return mad.ans;
 
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
-	    (acc_mode & MAY_READ &&
-		    !vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))) ||
-	    (acc_mode & MAY_WRITE &&
-		    !vs_intersects(VSW(task_security(current)), VS(inode_security(inode))))) {
+	if (acc_mode & MAY_READ)
+		requested |= MEDUSA_VS_READ;
+	if (acc_mode & MAY_WRITE)
+		requested |= MEDUSA_VS_WRITE;
+
+	if (!medusa_vs_access_allowed(&task_security(current)->med_subject,
+				      &inode_security(inode)->med_object,
+				      requested)) {
 		mad.vs.sw.vst = VS(inode_security(inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));

@@ -19,6 +19,12 @@
 struct vs_t { DECLARE_BITMAP(pack, CONFIG_MEDUSA_VS); };
 struct act_t { DECLARE_BITMAP(pack, CONFIG_MEDUSA_ACT); };
 
+enum medusa_vs_access {
+	MEDUSA_VS_SEE	= BIT(0),
+	MEDUSA_VS_READ	= BIT(1),
+	MEDUSA_VS_WRITE	= BIT(2),
+};
+
 /* VS bitmap */
 
 #define vs_intersects(X, Y) \
