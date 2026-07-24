@@ -799,7 +799,7 @@ struct lsm_blob_sizes medusa_blob_sizes __ro_after_init = {
 };
 
 DEFINE_LSM(medusa) = {
-	.name = "medusa",
+	.id = &medusa_lsmid,
 	.order = LSM_ORDER_MUTABLE,
 	.flags = LSM_FLAG_LEGACY_MAJOR | LSM_FLAG_EXCLUSIVE,
 	.enabled = &medusa_enabled,
