@@ -283,7 +283,7 @@ static int medusa_l1_task_fix_setuid(struct cred *new,
 * being created.
 */
 static int medusa_l1_task_alloc(struct task_struct *task,
-				unsigned long clone_flags)
+				u64 clone_flags)
 {
 	struct medusa_l1_task_s *med = task_security(task);
 
