@@ -27,13 +27,10 @@ SysV operations that demonstrably reached Constable.
 
 The `lifecycle` scenario verifies initial Constable registration, clean
 disconnect, the configured fail-open behavior without a server, and
-registration of a replacement server. It also characterizes a known defect:
-after restart, policy rules for the already-running init process and newly
-created IPC objects return `MED_ERR`, so a reloaded deny rule fails open.
-The scenario names this result `policy_reload_known_defect`; it must not be
-read as successful enforcement of the replacement policy. It also verifies
-normal connected audit output and records the known absence of an audit record
-when stale-context validation takes the disconnected fail-open path.
+registration of a replacement server. The replacement loads a different
+policy and proves that its `ipc_msgsnd` deny rule is enforced. The scenario
+also records the known absence of an audit record when stale-context
+validation takes the disconnected fail-open path.
 
 The kernel must be configured with:
 

@@ -99,20 +99,22 @@ static bool stop_process(pid_t pid)
 	return false;
 }
 
-static bool exercise_reloaded_policy(void)
+static bool reloaded_policy_denies_message(void)
 {
 	struct {
 		long type;
 		char text[8];
 	} message = { 1, "reload" };
 	int id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
-	bool passed;
+	bool denied;
 
 	if (id < 0)
 		return false;
-	passed = msgsnd(id, &message, sizeof(message.text), 0) == 0;
+	errno = 0;
+	denied = msgsnd(id, &message, sizeof(message.text), 0) < 0 &&
+		 errno == EACCES;
 	msgctl(id, IPC_RMID, NULL);
-	return passed;
+	return denied;
 }
 
 int main(void)
@@ -147,7 +149,7 @@ int main(void)
 	}
 	sleep(2);
 	result("restart", replacement > 0 && kill(replacement, 0) == 0);
-	result("policy_reload_known_defect", exercise_reloaded_policy());
+	result("policy_reload", reloaded_policy_denies_message());
 
 	sleep(1);
 	sync();

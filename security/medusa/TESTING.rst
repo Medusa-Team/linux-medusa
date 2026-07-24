@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 38 tests in seven suites:
+The KUnit configuration runs 39 tests in seven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -37,10 +37,10 @@ QEMU scenario coverage
 
 ``lifecycle``
   Covers initial registration, disconnect, fail-open operation, replacement
-  registration, attempted policy reload, positive audit output for a
-  server-requested IPC operation, and the known missing audit record on the
-  disconnected stale-context path.  Negative expected-result lines make the
-  missing record an explicit assertion.
+  registration, enforcement of a reloaded deny policy, positive audit output
+  for a server-requested IPC operation, and the known missing audit record on
+  the disconnected stale-context path.  Negative expected-result lines make
+  the missing record an explicit assertion.
 
 Wired access paths
 ------------------
@@ -84,9 +84,6 @@ Known defects kept separate from expected behaviour
 * Re-associating with an existing message queue, semaphore set, or shared
   memory object returns ``EACCES`` even when ``ipc_perm`` is allowed.
   ``ipc_associate`` is not observed.
-* A replacement Constable registers after disconnect, but rules for the
-  already-running init process and new IPC objects return ``MED_ERR``.  The
-  lifecycle deny policy therefore fails open.
 * The disconnected stale-context validation path returns before the access
   callback's audit block, so its fail-open decision has no Medusa audit record.
 * Multiple ``getfile`` callbacks can overwrite one another's object snapshot;
