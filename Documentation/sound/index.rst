@@ -13,10 +13,5 @@ Sound Subsystem Documentation
    alsa-configuration
    hd-audio/index
    cards/index
-
-.. only::  subproject and html
-
-   Indices
-   =======
-
-   * :ref:`genindex`
+   codecs/index
+   utimers

@@ -22,12 +22,17 @@ properties:
   interrupts:
     maxItems: 1
 
+  "#clock-cells":
+    const: 0
+
   trickle-resistor-ohms:
     enum:
       - 3000
       - 5000
       - 9000
       - 15000
+
+  vdd-supply: true
 
 required:
   - compatible

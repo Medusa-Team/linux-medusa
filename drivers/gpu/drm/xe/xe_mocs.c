@@ -6,7 +6,6 @@
 #include "xe_mocs.h"
 
 #include "regs/xe_gt_regs.h"
-#include "xe_bo.h"
 #include "xe_device.h"
 #include "xe_exec_queue.h"
 #include "xe_force_wake.h"
@@ -17,7 +16,6 @@
 #include "xe_platform_types.h"
 #include "xe_pm.h"
 #include "xe_sriov.h"
-#include "xe_step_types.h"
 
 #if IS_ENABLED(CONFIG_DRM_XE_DEBUG)
 #define mocs_dbg xe_gt_dbg
@@ -278,7 +276,7 @@ static void xelp_lncf_dump(struct xe_mocs_info *info, struct xe_gt *gt, struct d
 		if (regs_are_mcr(gt))
 			reg_val = xe_gt_mcr_unicast_read_any(gt, XEHP_LNCFCMOCS(i));
 		else
-			reg_val = xe_mmio_read32(gt, XELP_LNCFCMOCS(i));
+			reg_val = xe_mmio_read32(&gt->mmio, XELP_LNCFCMOCS(i));
 
 		drm_printf(p, "LNCFCMOCS[%2d] = [%u, %u, %u] (%#8x)\n",
 			   j++,
@@ -310,7 +308,7 @@ static void xelp_mocs_dump(struct xe_mocs_info *info, unsigned int flags,
 			if (regs_are_mcr(gt))
 				reg_val = xe_gt_mcr_unicast_read_any(gt, XEHP_GLOBAL_MOCS(i));
 			else
-				reg_val = xe_mmio_read32(gt, XELP_GLOBAL_MOCS(i));
+				reg_val = xe_mmio_read32(&gt->mmio, XELP_GLOBAL_MOCS(i));
 
 			drm_printf(p, "GLOB_MOCS[%2d] = [%u, %u, %u, %u, %u, %u, %u, %u, %u, %u ] (%#8x)\n",
 				   i,
@@ -383,7 +381,7 @@ static void xehp_lncf_dump(struct xe_mocs_info *info, unsigned int flags,
 		if (regs_are_mcr(gt))
 			reg_val = xe_gt_mcr_unicast_read_any(gt, XEHP_LNCFCMOCS(i));
 		else
-			reg_val = xe_mmio_read32(gt, XELP_LNCFCMOCS(i));
+			reg_val = xe_mmio_read32(&gt->mmio, XELP_LNCFCMOCS(i));
 
 		drm_printf(p, "LNCFCMOCS[%2d] = [%u, %u, %u] (%#8x)\n",
 			   j++,
@@ -428,7 +426,7 @@ static void pvc_mocs_dump(struct xe_mocs_info *info, unsigned int flags, struct 
 		if (regs_are_mcr(gt))
 			reg_val = xe_gt_mcr_unicast_read_any(gt, XEHP_LNCFCMOCS(i));
 		else
-			reg_val = xe_mmio_read32(gt, XELP_LNCFCMOCS(i));
+			reg_val = xe_mmio_read32(&gt->mmio, XELP_LNCFCMOCS(i));
 
 		drm_printf(p, "LNCFCMOCS[%2d] = [ %u ] (%#8x)\n",
 			   j++,
@@ -510,7 +508,7 @@ static void mtl_mocs_dump(struct xe_mocs_info *info, unsigned int flags,
 		if (regs_are_mcr(gt))
 			reg_val = xe_gt_mcr_unicast_read_any(gt, XEHP_GLOBAL_MOCS(i));
 		else
-			reg_val = xe_mmio_read32(gt, XELP_GLOBAL_MOCS(i));
+			reg_val = xe_mmio_read32(&gt->mmio, XELP_GLOBAL_MOCS(i));
 
 		drm_printf(p, "GLOB_MOCS[%2d] = [%u, %u]  (%#8x)\n",
 			   i,
@@ -553,7 +551,7 @@ static void xe2_mocs_dump(struct xe_mocs_info *info, unsigned int flags,
 		if (regs_are_mcr(gt))
 			reg_val = xe_gt_mcr_unicast_read_any(gt, XEHP_GLOBAL_MOCS(i));
 		else
-			reg_val = xe_mmio_read32(gt, XELP_GLOBAL_MOCS(i));
+			reg_val = xe_mmio_read32(&gt->mmio, XELP_GLOBAL_MOCS(i));
 
 		drm_printf(p, "GLOB_MOCS[%2d] = [%u, %u, %u]  (%#8x)\n",
 			   i,
@@ -568,6 +566,23 @@ static const struct xe_mocs_ops xe2_mocs_ops = {
 	.dump = xe2_mocs_dump,
 };
 
+/*
+ * Note that the "L3" and "L4" register fields actually control the L2 and L3
+ * caches respectively on this platform.
+ */
+static const struct xe_mocs_entry xe3p_xpc_mocs_table[] = {
+	/* Defer to PAT */
+	MOCS_ENTRY(0, XE2_L3_0_WB | L4_3_UC, 0),
+	/* UC */
+	MOCS_ENTRY(1, IG_PAT | XE2_L3_3_UC | L4_3_UC, 0),
+	/* L2 */
+	MOCS_ENTRY(2, IG_PAT | XE2_L3_0_WB | L4_3_UC, 0),
+	/* L3 */
+	MOCS_ENTRY(3, IG_PAT | XE2_L3_3_UC | L4_0_WB, 0),
+	/* L2 + L3 */
+	MOCS_ENTRY(4, IG_PAT | XE2_L3_0_WB | L4_0_WB, 0),
+};
+
 static unsigned int get_mocs_settings(struct xe_device *xe,
 				      struct xe_mocs_info *info)
 {
@@ -576,6 +591,18 @@ static unsigned int get_mocs_settings(struct xe_device *xe,
 	memset(info, 0, sizeof(struct xe_mocs_info));
 
 	switch (xe->info.platform) {
+	case XE_CRESCENTISLAND:
+		info->ops = &xe2_mocs_ops;
+		info->table_size = ARRAY_SIZE(xe3p_xpc_mocs_table);
+		info->table = xe3p_xpc_mocs_table;
+		info->num_mocs_regs = XE2_NUM_MOCS_ENTRIES;
+		info->uc_index = 1;
+		info->wb_index = 4;
+		info->unused_entries_index = 4;
+		break;
+	case XE_NOVALAKE_P:
+	case XE_NOVALAKE_S:
+	case XE_PANTHERLAKE:
 	case XE_LUNARLAKE:
 	case XE_BATTLEMAGE:
 		info->ops = &xe2_mocs_ops;
@@ -690,7 +717,7 @@ static void __init_mocs_table(struct xe_gt *gt,
 		if (regs_are_mcr(gt))
 			xe_gt_mcr_multicast_write(gt, XEHP_GLOBAL_MOCS(i), mocs);
 		else
-			xe_mmio_write32(gt, XELP_GLOBAL_MOCS(i), mocs);
+			xe_mmio_write32(&gt->mmio, XELP_GLOBAL_MOCS(i), mocs);
 	}
 }
 
@@ -730,7 +757,7 @@ static void init_l3cc_table(struct xe_gt *gt,
 		if (regs_are_mcr(gt))
 			xe_gt_mcr_multicast_write(gt, XEHP_LNCFCMOCS(i), l3cc);
 		else
-			xe_mmio_write32(gt, XELP_LNCFCMOCS(i), l3cc);
+			xe_mmio_write32(&gt->mmio, XELP_LNCFCMOCS(i), l3cc);
 	}
 }
 
@@ -771,28 +798,32 @@ void xe_mocs_init(struct xe_gt *gt)
 		init_l3cc_table(gt, &table);
 }
 
-void xe_mocs_dump(struct xe_gt *gt, struct drm_printer *p)
+/**
+ * xe_mocs_dump() - Dump MOCS table.
+ * @gt: the &xe_gt with MOCS table
+ * @p: the &drm_printer to dump info to
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int xe_mocs_dump(struct xe_gt *gt, struct drm_printer *p)
 {
+	struct xe_device *xe = gt_to_xe(gt);
+	enum xe_force_wake_domains domain;
 	struct xe_mocs_info table;
 	unsigned int flags;
-	u32 ret;
-	struct xe_device *xe = gt_to_xe(gt);
 
 	flags = get_mocs_settings(xe, &table);
 
-	xe_pm_runtime_get_noresume(xe);
-	ret = xe_force_wake_get(gt_to_fw(gt), XE_FW_GT);
+	domain = flags & HAS_LNCF_MOCS ? XE_FORCEWAKE_ALL : XE_FW_GT;
 
-	if (ret)
-		goto err_fw;
+	guard(xe_pm_runtime_noresume)(xe);
+	CLASS(xe_force_wake, fw_ref)(gt_to_fw(gt), domain);
+	if (!xe_force_wake_ref_has_domain(fw_ref.domains, domain))
+		return -ETIMEDOUT;
 
 	table.ops->dump(&table, flags, gt, p);
 
-	xe_force_wake_put(gt_to_fw(gt), XE_FW_GT);
-
-err_fw:
-	xe_assert(xe, !ret);
-	xe_pm_runtime_put(xe);
+	return 0;
 }
 
 #if IS_ENABLED(CONFIG_DRM_XE_KUNIT_TEST)

@@ -91,7 +91,7 @@ struct ps3_lpm_shadow_regs {
  * struct ps3_lpm_priv - Private lpm device data.
  *
  * @open: An atomic variable indicating the lpm driver has been opened.
- * @rights: The lpm rigths granted by the system policy module.  A logical
+ * @rights: The lpm rights granted by the system policy module.  A logical
  *  OR of enum ps3_lpm_rights.
  * @node_id: The node id of a BE processor whose performance monitor this
  *  lpar has the right to use.
@@ -1181,7 +1181,7 @@ static int ps3_lpm_probe(struct ps3_system_bus_device *dev)
 		return -EBUSY;
 	}
 
-	lpm_priv = kzalloc(sizeof(*lpm_priv), GFP_KERNEL);
+	lpm_priv = kzalloc_obj(*lpm_priv);
 
 	if (!lpm_priv)
 		return -ENOMEM;

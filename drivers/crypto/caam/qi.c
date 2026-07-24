@@ -122,12 +122,12 @@ int caam_qi_enqueue(struct device *qidev, struct caam_drv_req *req)
 	qm_fd_addr_set64(&fd, addr);
 
 	do {
+		refcount_inc(&req->drv_ctx->refcnt);
 		ret = qman_enqueue(req->drv_ctx->req_fq, &fd);
-		if (likely(!ret)) {
-			refcount_inc(&req->drv_ctx->refcnt);
+		if (likely(!ret))
 			return 0;
-		}
 
+		refcount_dec(&req->drv_ctx->refcnt);
 		if (ret != -EBUSY)
 			break;
 		num_retries++;
@@ -181,7 +181,7 @@ static struct qman_fq *create_caam_req_fq(struct device *qidev,
 	struct qman_fq *req_fq;
 	struct qm_mcc_initfq opts;
 
-	req_fq = kzalloc(sizeof(*req_fq), GFP_ATOMIC);
+	req_fq = kzalloc_obj(*req_fq, GFP_ATOMIC);
 	if (!req_fq)
 		return ERR_PTR(-ENOMEM);
 
@@ -416,7 +416,7 @@ struct caam_drv_ctx *caam_drv_ctx_init(struct device *qidev,
 		return ERR_PTR(-EINVAL);
 	}
 
-	drv_ctx = kzalloc(sizeof(*drv_ctx), GFP_ATOMIC);
+	drv_ctx = kzalloc_obj(*drv_ctx, GFP_ATOMIC);
 	if (!drv_ctx)
 		return ERR_PTR(-ENOMEM);
 
@@ -442,11 +442,8 @@ struct caam_drv_ctx *caam_drv_ctx_init(struct device *qidev,
 	if (!cpumask_test_cpu(*cpu, cpus)) {
 		int *pcpu = &get_cpu_var(last_cpu);
 
-		*pcpu = cpumask_next(*pcpu, cpus);
-		if (*pcpu >= nr_cpu_ids)
-			*pcpu = cpumask_first(cpus);
+		*pcpu = cpumask_next_wrap(*pcpu, cpus);
 		*cpu = *pcpu;
-
 		put_cpu_var(last_cpu);
 	}
 	drv_ctx->cpu = *cpu;
@@ -622,7 +619,7 @@ static int alloc_rsp_fq_cpu(struct device *qidev, unsigned int cpu)
 	struct qman_fq *fq;
 	int ret;
 
-	fq = kzalloc(sizeof(*fq), GFP_KERNEL);
+	fq = kzalloc_obj(*fq);
 	if (!fq)
 		return -ENOMEM;
 
@@ -733,30 +730,30 @@ static void free_caam_qi_pcpu_netdev(const cpumask_t *cpus)
 int caam_qi_init(struct platform_device *caam_pdev)
 {
 	int err, i;
-	struct device *ctrldev = &caam_pdev->dev, *qidev;
+	struct device *qidev = &caam_pdev->dev;
 	struct caam_drv_private *ctrlpriv;
 	const cpumask_t *cpus = qman_affine_cpus();
-	cpumask_t clean_mask;
+	cpumask_var_t clean_mask;
 
-	ctrlpriv = dev_get_drvdata(ctrldev);
-	qidev = ctrldev;
+	err = -ENOMEM;
+	if (!zalloc_cpumask_var(&clean_mask, GFP_KERNEL))
+		goto fail_cpumask;
+
+	ctrlpriv = dev_get_drvdata(qidev);
 
 	/* Initialize the congestion detection */
 	err = init_cgr(qidev);
 	if (err) {
 		dev_err(qidev, "CGR initialization failed: %d\n", err);
-		return err;
+		goto fail_cgr;
 	}
 
 	/* Initialise response FQs */
 	err = alloc_rsp_fqs(qidev);
 	if (err) {
 		dev_err(qidev, "Can't allocate CAAM response FQs: %d\n", err);
-		free_rsp_fqs();
-		return err;
+		goto fail_fqs;
 	}
-
-	cpumask_clear(&clean_mask);
 
 	/*
 	 * Enable the NAPI contexts on each of the core which has an affine
@@ -773,7 +770,7 @@ int caam_qi_init(struct platform_device *caam_pdev)
 			err = -ENOMEM;
 			goto fail;
 		}
-		cpumask_set_cpu(i, &clean_mask);
+		cpumask_set_cpu(i, clean_mask);
 		priv->net_dev = net_dev;
 		net_dev->dev = *qidev;
 
@@ -788,21 +785,29 @@ int caam_qi_init(struct platform_device *caam_pdev)
 	if (!qi_cache) {
 		dev_err(qidev, "Can't allocate CAAM cache\n");
 		err = -ENOMEM;
-		goto fail2;
+		goto fail;
 	}
 
 	caam_debugfs_qi_init(ctrlpriv);
 
-	err = devm_add_action_or_reset(qidev, caam_qi_shutdown, ctrlpriv);
+	err = devm_add_action_or_reset(qidev, caam_qi_shutdown, qidev);
 	if (err)
 		goto fail2;
 
 	dev_info(qidev, "Linux CAAM Queue I/F driver initialised\n");
-	return 0;
+	goto free_cpumask;
 
 fail2:
-	free_rsp_fqs();
+	kmem_cache_destroy(qi_cache);
 fail:
-	free_caam_qi_pcpu_netdev(&clean_mask);
+	free_caam_qi_pcpu_netdev(clean_mask);
+fail_fqs:
+	free_rsp_fqs();
+	qman_delete_cgr_safe(&qipriv.cgr);
+	qman_release_cgrid(qipriv.cgr.cgrid);
+fail_cgr:
+free_cpumask:
+	free_cpumask_var(clean_mask);
+fail_cpumask:
 	return err;
 }

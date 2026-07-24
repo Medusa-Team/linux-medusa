@@ -248,7 +248,7 @@ static int telem_open(struct inode *inode, struct file *filp)
 
 	get_device(&dev_data->dev);
 
-	sess_data = kzalloc(sizeof(*sess_data), GFP_KERNEL);
+	sess_data = kzalloc_obj(*sess_data);
 	if (!sess_data) {
 		atomic_set(&dev_data->available, 1);
 		return -ENOMEM;
@@ -330,7 +330,6 @@ static const struct file_operations telem_fops = {
 	.write = telem_write,
 	.read = telem_read,
 	.release = telem_release,
-	.llseek = no_llseek,
 	.owner = THIS_MODULE,
 };
 
@@ -371,7 +370,7 @@ static int telem_device_probe(struct platform_device *pdev)
 		return error;
 	}
 
-	dev_data = kzalloc(sizeof(*dev_data), GFP_KERNEL);
+	dev_data = kzalloc_obj(*dev_data);
 	if (!dev_data) {
 		ida_free(&telem_ida, minor);
 		return -ENOMEM;
@@ -389,7 +388,7 @@ static int telem_device_probe(struct platform_device *pdev)
 	dev_set_name(&dev_data->dev, TELEM_DEV_NAME_FMT, minor);
 	device_initialize(&dev_data->dev);
 
-	/* Initialize the character device and add it to userspace */;
+	/* Initialize the character device and add it to userspace */
 	cdev_init(&dev_data->cdev, &telem_fops);
 	error = cdev_device_add(&dev_data->cdev, &dev_data->dev);
 	if (error) {
@@ -418,7 +417,7 @@ MODULE_DEVICE_TABLE(platform, telem_id);
 
 static struct platform_driver telem_driver = {
 	.probe = telem_device_probe,
-	.remove_new = telem_device_remove,
+	.remove = telem_device_remove,
 	.driver = {
 		.name = DRV_NAME,
 	},

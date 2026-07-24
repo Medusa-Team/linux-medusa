@@ -3,7 +3,7 @@
  * Xilinx Zynq MPSoC Firmware layer
  *
  *  Copyright (C) 2014-2022 Xilinx, Inc.
- *  Copyright (C) 2022 - 2023, Advanced Micro Devices, Inc.
+ *  Copyright (C) 2022 - 2025 Advanced Micro Devices, Inc.
  *
  *  Michal Simek <michal.simek@amd.com>
  *  Davorin Mista <davorin.mista@aggios.com>
@@ -20,6 +20,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/pm_domain.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/hashtable.h>
@@ -46,6 +47,7 @@ static DEFINE_HASHTABLE(pm_api_features_map, PM_API_FEATURE_CHECK_MAX_ORDER);
 static u32 ioctl_features[FEATURE_PAYLOAD_SIZE];
 static u32 query_features[FEATURE_PAYLOAD_SIZE];
 
+static u32 sip_svc_version;
 static struct platform_device *em_dev;
 
 /**
@@ -69,6 +71,15 @@ struct pm_api_feature_data {
 	int feature_status;
 	struct hlist_node hentry;
 };
+
+struct platform_fw_data {
+	/*
+	 * Family code for platform.
+	 */
+	const u32 family_code;
+};
+
+static struct platform_fw_data *active_platform_fw_data;
 
 static const struct mfd_cell firmware_devs[] = {
 	{
@@ -151,6 +162,9 @@ static noinline int do_fw_call_smc(u32 *ret_payload, u32 num_args, ...)
 		ret_payload[1] = upper_32_bits(res.a0);
 		ret_payload[2] = lower_32_bits(res.a1);
 		ret_payload[3] = upper_32_bits(res.a1);
+		ret_payload[4] = lower_32_bits(res.a2);
+		ret_payload[5] = upper_32_bits(res.a2);
+		ret_payload[6] = lower_32_bits(res.a3);
 	}
 
 	return zynqmp_pm_ret_code((enum pm_ret_status)res.a0);
@@ -191,6 +205,9 @@ static noinline int do_fw_call_hvc(u32 *ret_payload, u32 num_args, ...)
 		ret_payload[1] = upper_32_bits(res.a0);
 		ret_payload[2] = lower_32_bits(res.a1);
 		ret_payload[3] = upper_32_bits(res.a1);
+		ret_payload[4] = lower_32_bits(res.a2);
+		ret_payload[5] = upper_32_bits(res.a2);
+		ret_payload[6] = lower_32_bits(res.a3);
 	}
 
 	return zynqmp_pm_ret_code((enum pm_ret_status)res.a0);
@@ -218,11 +235,14 @@ static int __do_feature_check_call(const u32 api_id, u32 *ret_payload)
 	 * Feature check of TF-A APIs is done in the TF-A layer and it expects for
 	 * MODULE_ID_MASK bits of SMC's arg[0] to be the same as PM_MODULE_ID.
 	 */
-	if (module_id == TF_A_MODULE_ID)
+	if (module_id == TF_A_MODULE_ID) {
 		module_id = PM_MODULE_ID;
+		smc_arg[1] = api_id;
+	} else {
+		smc_arg[1] = (api_id & API_ID_MASK);
+	}
 
 	smc_arg[0] = PM_SIP_SVC | FIELD_PREP(MODULE_ID_MASK, module_id) | feature_check_api_id;
-	smc_arg[1] = (api_id & API_ID_MASK);
 
 	ret = do_fw_call(ret_payload, 2, smc_arg[0], smc_arg[1]);
 	if (ret)
@@ -247,7 +267,7 @@ static int do_feature_check_call(const u32 api_id)
 	}
 
 	/* Add new entry if not present */
-	feature_data = kmalloc(sizeof(*feature_data), GFP_ATOMIC);
+	feature_data = kmalloc_obj(*feature_data, GFP_ATOMIC);
 	if (!feature_data)
 		return -ENOMEM;
 
@@ -332,6 +352,70 @@ int zynqmp_pm_is_function_supported(const u32 api_id, const u32 id)
 EXPORT_SYMBOL_GPL(zynqmp_pm_is_function_supported);
 
 /**
+ * zynqmp_pm_invoke_fw_fn() - Invoke the system-level platform management layer
+ *			caller function depending on the configuration
+ * @pm_api_id:		Requested PM-API call
+ * @ret_payload:	Returned value array
+ * @num_args:		Number of arguments to requested PM-API call
+ *
+ * Invoke platform management function for SMC or HVC call, depending on
+ * configuration.
+ * Following SMC Calling Convention (SMCCC) for SMC64:
+ * Pm Function Identifier,
+ * PM_SIP_SVC + PASS_THROUGH_FW_CMD_ID =
+ *	((SMC_TYPE_FAST << FUNCID_TYPE_SHIFT)
+ *	((SMC_64) << FUNCID_CC_SHIFT)
+ *	((SIP_START) << FUNCID_OEN_SHIFT)
+ *	(PASS_THROUGH_FW_CMD_ID))
+ *
+ * PM_SIP_SVC - Registered ZynqMP SIP Service Call.
+ * PASS_THROUGH_FW_CMD_ID - Fixed SiP SVC call ID for FW specific calls.
+ *
+ * Return: Returns status, either success or error+reason
+ */
+int zynqmp_pm_invoke_fw_fn(u32 pm_api_id, u32 *ret_payload, u32 num_args, ...)
+{
+	/*
+	 * Added SIP service call Function Identifier
+	 * Make sure to stay in x0 register
+	 */
+	u64 smc_arg[SMC_ARG_CNT_64];
+	int ret, i;
+	va_list arg_list;
+	u32 args[SMC_ARG_CNT_32] = {0};
+	u32 module_id;
+
+	if (num_args > SMC_ARG_CNT_32)
+		return -EINVAL;
+
+	va_start(arg_list, num_args);
+
+	/* Check if feature is supported or not */
+	ret = zynqmp_pm_feature(pm_api_id);
+	if (ret < 0)
+		return ret;
+
+	for (i = 0; i < num_args; i++)
+		args[i] = va_arg(arg_list, u32);
+
+	va_end(arg_list);
+
+	module_id = FIELD_GET(PLM_MODULE_ID_MASK, pm_api_id);
+
+	if (module_id == 0)
+		module_id = XPM_MODULE_ID;
+
+	smc_arg[0] = PM_SIP_SVC | PASS_THROUGH_FW_CMD_ID;
+	smc_arg[1] = ((u64)args[0] << 32U) | FIELD_PREP(PLM_MODULE_ID_MASK, module_id) |
+		      (pm_api_id & API_ID_MASK);
+	for (i = 1; i < (SMC_ARG_CNT_64 - 1); i++)
+		smc_arg[i + 1] = ((u64)args[(i * 2)] << 32U) | args[(i * 2) - 1];
+
+	return do_fw_call(ret_payload, 8, smc_arg[0], smc_arg[1], smc_arg[2], smc_arg[3],
+			  smc_arg[4], smc_arg[5], smc_arg[6], smc_arg[7]);
+}
+
+/**
  * zynqmp_pm_invoke_fn() - Invoke the system-level platform management layer
  *			   caller function depending on the configuration
  * @pm_api_id:		Requested PM-API call
@@ -389,8 +473,6 @@ int zynqmp_pm_invoke_fn(u32 pm_api_id, u32 *ret_payload, u32 num_args, ...)
 
 static u32 pm_api_version;
 static u32 pm_tz_version;
-static u32 pm_family_code;
-static u32 pm_sub_family_code;
 
 int zynqmp_pm_register_sgi(u32 sgi_num, u32 reset)
 {
@@ -457,36 +539,51 @@ EXPORT_SYMBOL_GPL(zynqmp_pm_get_chipid);
 /**
  * zynqmp_pm_get_family_info() - Get family info of platform
  * @family:	Returned family code value
- * @subfamily:	Returned sub-family code value
  *
  * Return: Returns status, either success or error+reason
  */
-int zynqmp_pm_get_family_info(u32 *family, u32 *subfamily)
+int zynqmp_pm_get_family_info(u32 *family)
 {
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	u32 idcode;
-	int ret;
+	if (!active_platform_fw_data)
+		return -ENODEV;
 
-	/* Check is family or sub-family code already received */
-	if (pm_family_code && pm_sub_family_code) {
-		*family = pm_family_code;
-		*subfamily = pm_sub_family_code;
-		return 0;
-	}
+	if (!family)
+		return -EINVAL;
 
-	ret = zynqmp_pm_invoke_fn(PM_GET_CHIPID, ret_payload, 0);
-	if (ret < 0)
-		return ret;
-
-	idcode = ret_payload[1];
-	pm_family_code = FIELD_GET(FAMILY_CODE_MASK, idcode);
-	pm_sub_family_code = FIELD_GET(SUB_FAMILY_CODE_MASK, idcode);
-	*family = pm_family_code;
-	*subfamily = pm_sub_family_code;
+	*family = active_platform_fw_data->family_code;
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(zynqmp_pm_get_family_info);
+
+/**
+ * zynqmp_pm_get_sip_svc_version() - Get SiP service call version
+ * @version:	Returned version value
+ *
+ * Return: Returns status, either success or error+reason
+ */
+static int zynqmp_pm_get_sip_svc_version(u32 *version)
+{
+	struct arm_smccc_res res;
+	u64 args[SMC_ARG_CNT_64] = {0};
+
+	if (!version)
+		return -EINVAL;
+
+	/* Check if SiP SVC version already verified */
+	if (sip_svc_version > 0) {
+		*version = sip_svc_version;
+		return 0;
+	}
+
+	args[0] = GET_SIP_SVC_VERSION;
+
+	arm_smccc_smc(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], &res);
+
+	*version = ((lower_32_bits(res.a0) << 16U) | lower_32_bits(res.a1));
+
+	return zynqmp_pm_ret_code(XST_PM_SUCCESS);
+}
 
 /**
  * zynqmp_pm_get_trustzone_version() - Get secure trustzone firmware version
@@ -552,10 +649,34 @@ static int get_set_conduit_method(struct device_node *np)
  */
 int zynqmp_pm_query_data(struct zynqmp_pm_query_data qdata, u32 *out)
 {
-	int ret;
+	int ret, i = 0;
+	u32 ret_payload[PAYLOAD_ARG_CNT] = {0};
 
-	ret = zynqmp_pm_invoke_fn(PM_QUERY_DATA, out, 4, qdata.qid, qdata.arg1, qdata.arg2,
-				  qdata.arg3);
+	if (sip_svc_version >= SIP_SVC_PASSTHROUGH_VERSION) {
+		ret = zynqmp_pm_invoke_fw_fn(PM_QUERY_DATA, ret_payload, 4,
+					     qdata.qid, qdata.arg1,
+					     qdata.arg2, qdata.arg3);
+		/* To support backward compatibility */
+		if (!ret && !ret_payload[0]) {
+			/*
+			 * TF-A passes return status on 0th index but
+			 * api to get clock name reads data from 0th
+			 * index so pass data at 0th index instead of
+			 * return status
+			 */
+			if (qdata.qid == PM_QID_CLOCK_GET_NAME ||
+			    qdata.qid == PM_QID_PINCTRL_GET_FUNCTION_NAME)
+				i = 1;
+
+			for (; i < PAYLOAD_ARG_CNT; i++, out++)
+				*out = ret_payload[i];
+
+			return ret;
+		}
+	}
+
+	ret = zynqmp_pm_invoke_fn(PM_QUERY_DATA, out, 4, qdata.qid,
+				  qdata.arg1, qdata.arg2, qdata.arg3);
 
 	/*
 	 * For clock name query, all bytes in SMC response are clock name
@@ -920,7 +1041,7 @@ int zynqmp_pm_set_boot_health_status(u32 value)
  *
  * Return: Returns status, either success or error+reason
  */
-int zynqmp_pm_reset_assert(const enum zynqmp_pm_reset reset,
+int zynqmp_pm_reset_assert(const u32 reset,
 			   const enum zynqmp_pm_reset_action assert_flag)
 {
 	return zynqmp_pm_invoke_fn(PM_RESET_ASSERT, NULL, 2, reset, assert_flag);
@@ -934,7 +1055,7 @@ EXPORT_SYMBOL_GPL(zynqmp_pm_reset_assert);
  *
  * Return: Returns status, either success or error+reason
  */
-int zynqmp_pm_reset_get_status(const enum zynqmp_pm_reset reset, u32 *status)
+int zynqmp_pm_reset_get_status(const u32 reset, u32 *status)
 {
 	u32 ret_payload[PAYLOAD_ARG_CNT];
 	int ret;
@@ -1012,17 +1133,13 @@ EXPORT_SYMBOL_GPL(zynqmp_pm_fpga_get_status);
 int zynqmp_pm_fpga_get_config_status(u32 *value)
 {
 	u32 ret_payload[PAYLOAD_ARG_CNT];
-	u32 buf, lower_addr, upper_addr;
 	int ret;
 
 	if (!value)
 		return -EINVAL;
 
-	lower_addr = lower_32_bits((u64)&buf);
-	upper_addr = upper_32_bits((u64)&buf);
-
 	ret = zynqmp_pm_invoke_fn(PM_FPGA_READ, ret_payload, 4,
-				  XILINX_ZYNQMP_PM_FPGA_CONFIG_STAT_OFFSET, lower_addr, upper_addr,
+				  XILINX_ZYNQMP_PM_FPGA_CONFIG_STAT_OFFSET, 0, 0,
 				  XILINX_ZYNQMP_PM_FPGA_READ_CONFIG_REG);
 
 	*value = ret_payload[1];
@@ -1114,12 +1231,20 @@ int zynqmp_pm_pinctrl_set_config(const u32 pin, const u32 param,
 				 u32 value)
 {
 	int ret;
+	u32 pm_family_code;
 
-	if (pm_family_code == ZYNQMP_FAMILY_CODE &&
+	ret = zynqmp_pm_get_family_info(&pm_family_code);
+	if (ret)
+		return ret;
+
+	if (pm_family_code == PM_ZYNQMP_FAMILY_CODE &&
 	    param == PM_PINCTRL_CONFIG_TRI_STATE) {
 		ret = zynqmp_pm_feature(PM_PINCTRL_CONFIG_PARAM_SET);
-		if (ret < PM_PINCTRL_PARAM_SET_VERSION)
+		if (ret < PM_PINCTRL_PARAM_SET_VERSION) {
+			pr_warn("The requested pinctrl feature is not supported in the current firmware.\n"
+				"Expected firmware version is 2023.1 and above for this feature to work.\r\n");
 			return -EOPNOTSUPP;
+		}
 	}
 
 	return zynqmp_pm_invoke_fn(PM_PINCTRL_CONFIG_PARAM_SET, NULL, 3, pin, param, value);
@@ -1173,11 +1298,10 @@ EXPORT_SYMBOL_GPL(zynqmp_pm_bootmode_write);
  * This API function is to be used for notify the power management controller
  * about the completed power management initialization.
  */
-int zynqmp_pm_init_finalize(void)
+static int zynqmp_pm_init_finalize(void)
 {
 	return zynqmp_pm_invoke_fn(PM_PM_INIT_FINALIZE, NULL, 0);
 }
-EXPORT_SYMBOL_GPL(zynqmp_pm_init_finalize);
 
 /**
  * zynqmp_pm_set_suspend_mode()	- Set system suspend mode
@@ -1288,6 +1412,45 @@ int zynqmp_pm_set_tcm_config(u32 node_id, enum rpu_tcm_comb tcm_mode)
 EXPORT_SYMBOL_GPL(zynqmp_pm_set_tcm_config);
 
 /**
+ * zynqmp_pm_get_node_status - PM call to request a node's current power state
+ * @node:		ID of the component or sub-system in question
+ * @status:		Current operating state of the requested node
+ * @requirements:	Current requirements asserted on the node,
+ *			used for slave nodes only.
+ * @usage:		Usage information, used for slave nodes only:
+ *			PM_USAGE_NO_MASTER	- No master is currently using
+ *						  the node
+ *			PM_USAGE_CURRENT_MASTER	- Only requesting master is
+ *						  currently using the node
+ *			PM_USAGE_OTHER_MASTER	- Only other masters are
+ *						  currently using the node
+ *			PM_USAGE_BOTH_MASTERS	- Both the current and at least
+ *						  one other master is currently
+ *						  using the node
+ *
+ * Return:		Returns status, either success or error+reason
+ */
+int zynqmp_pm_get_node_status(const u32 node, u32 *const status,
+			      u32 *const requirements, u32 *const usage)
+{
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	int ret;
+
+	if (!status || !requirements || !usage)
+		return -EINVAL;
+
+	ret = zynqmp_pm_invoke_fn(PM_GET_NODE_STATUS, ret_payload, 1, node);
+	if (ret_payload[0] == XST_PM_SUCCESS) {
+		*status = ret_payload[1];
+		*requirements = ret_payload[2];
+		*usage = ret_payload[3];
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(zynqmp_pm_get_node_status);
+
+/**
  * zynqmp_pm_force_pwrdwn - PM call to request for another PU or subsystem to
  *             be powered down forcefully
  * @node:  Node ID of the targeted PU or subsystem
@@ -1359,30 +1522,6 @@ int zynqmp_pm_load_pdi(const u32 src, const u64 address)
 EXPORT_SYMBOL_GPL(zynqmp_pm_load_pdi);
 
 /**
- * zynqmp_pm_aes_engine - Access AES hardware to encrypt/decrypt the data using
- * AES-GCM core.
- * @address:	Address of the AesParams structure.
- * @out:	Returned output value
- *
- * Return:	Returns status, either success or error code.
- */
-int zynqmp_pm_aes_engine(const u64 address, u32 *out)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	int ret;
-
-	if (!out)
-		return -EINVAL;
-
-	ret = zynqmp_pm_invoke_fn(PM_SECURE_AES, ret_payload, 2, upper_32_bits(address),
-				  lower_32_bits(address));
-	*out = ret_payload[1];
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(zynqmp_pm_aes_engine);
-
-/**
  * zynqmp_pm_efuse_access - Provides access to efuse memory.
  * @address:	Address of the efuse params structure
  * @out:		Returned output value
@@ -1405,31 +1544,6 @@ int zynqmp_pm_efuse_access(const u64 address, u32 *out)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(zynqmp_pm_efuse_access);
-
-/**
- * zynqmp_pm_sha_hash - Access the SHA engine to calculate the hash
- * @address:	Address of the data/ Address of output buffer where
- *		hash should be stored.
- * @size:	Size of the data.
- * @flags:
- *	BIT(0) - for initializing csudma driver and SHA3(Here address
- *		 and size inputs can be NULL).
- *	BIT(1) - to call Sha3_Update API which can be called multiple
- *		 times when data is not contiguous.
- *	BIT(2) - to get final hash of the whole updated data.
- *		 Hash will be overwritten at provided address with
- *		 48 bytes.
- *
- * Return:	Returns status, either success or error code.
- */
-int zynqmp_pm_sha_hash(const u64 address, const u32 size, const u32 flags)
-{
-	u32 lower_addr = lower_32_bits(address);
-	u32 upper_addr = upper_32_bits(address);
-
-	return zynqmp_pm_invoke_fn(PM_SECURE_SHA, NULL, 4, upper_addr, lower_addr, size, flags);
-}
-EXPORT_SYMBOL_GPL(zynqmp_pm_sha_hash);
 
 /**
  * zynqmp_pm_register_notifier() - PM API for register a subsystem
@@ -1489,6 +1603,52 @@ int zynqmp_pm_get_feature_config(enum pm_feature_config_id id,
 {
 	return zynqmp_pm_invoke_fn(PM_IOCTL, payload, 3, 0, IOCTL_GET_FEATURE_CONFIG, id);
 }
+
+/**
+ * zynqmp_pm_sec_read_reg - PM call to securely read from given offset
+ *		of the node
+ * @node_id:	Node Id of the device
+ * @offset:	Offset to be used (20-bit)
+ * @ret_value:	Output data read from the given offset after
+ *		firmware access policy is successfully enforced
+ *
+ * Return:	Returns 0 on success or error value on failure
+ */
+int zynqmp_pm_sec_read_reg(u32 node_id, u32 offset, u32 *ret_value)
+{
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	u32 count = 1;
+	int ret;
+
+	if (!ret_value)
+		return -EINVAL;
+
+	ret = zynqmp_pm_invoke_fn(PM_IOCTL, ret_payload, 4, node_id, IOCTL_READ_REG,
+				  offset, count);
+
+	*ret_value = ret_payload[1];
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(zynqmp_pm_sec_read_reg);
+
+/**
+ * zynqmp_pm_sec_mask_write_reg - PM call to securely write to given offset
+ *		of the node
+ * @node_id:	Node Id of the device
+ * @offset:	Offset to be used (20-bit)
+ * @mask:	Mask to be used
+ * @value:	Value to be written
+ *
+ * Return:	Returns 0 on success or error value on failure
+ */
+int zynqmp_pm_sec_mask_write_reg(const u32 node_id, const u32 offset, u32 mask,
+				 u32 value)
+{
+	return zynqmp_pm_invoke_fn(PM_IOCTL, NULL, 5, node_id, IOCTL_MASK_WRITE_REG,
+				   offset, mask, value);
+}
+EXPORT_SYMBOL_GPL(zynqmp_pm_sec_mask_write_reg);
 
 /**
  * zynqmp_pm_set_sd_config - PM call to set value of SD config registers
@@ -1881,9 +2041,20 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct zynqmp_devinfo *devinfo;
+	u32 pm_family_code;
 	int ret;
 
 	ret = get_set_conduit_method(dev->of_node);
+	if (ret)
+		return ret;
+
+	/* Get platform-specific firmware data from device tree match */
+	active_platform_fw_data = (struct platform_fw_data *)device_get_match_data(dev);
+	if (!active_platform_fw_data)
+		return -EINVAL;
+
+	/* Get SiP SVC version number */
+	ret = zynqmp_pm_get_sip_svc_version(&sip_svc_version);
 	if (ret)
 		return ret;
 
@@ -1914,8 +2085,8 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 	pr_info("%s Platform Management API v%d.%d\n", __func__,
 		pm_api_version >> 16, pm_api_version & 0xFFFF);
 
-	/* Get the Family code and sub family code of platform */
-	ret = zynqmp_pm_get_family_info(&pm_family_code, &pm_sub_family_code);
+	/* Get the Family code of platform */
+	ret = zynqmp_pm_get_family_info(&pm_family_code);
 	if (ret < 0)
 		return ret;
 
@@ -1942,7 +2113,7 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 
 	zynqmp_pm_api_debugfs_init();
 
-	if (pm_family_code == VERSAL_FAMILY_CODE) {
+	if (pm_family_code != PM_ZYNQMP_FAMILY_CODE) {
 		em_dev = platform_device_register_data(&pdev->dev, "xlnx_event_manager",
 						       -1, NULL, 0);
 		if (IS_ERR(em_dev))
@@ -1969,9 +2140,35 @@ static void zynqmp_firmware_remove(struct platform_device *pdev)
 	platform_device_unregister(em_dev);
 }
 
+static void zynqmp_firmware_sync_state(struct device *dev)
+{
+	struct device_node *np = dev->of_node;
+
+	if (!of_device_is_compatible(np, "xlnx,zynqmp-firmware"))
+		return;
+
+	of_genpd_sync_state(np);
+
+	if (zynqmp_pm_init_finalize())
+		dev_warn(dev, "failed to release power management to firmware\n");
+}
+
+static const struct platform_fw_data platform_fw_data_versal = {
+	.family_code = PM_VERSAL_FAMILY_CODE,
+};
+
+static const struct platform_fw_data platform_fw_data_versal_net = {
+	.family_code = PM_VERSAL_NET_FAMILY_CODE,
+};
+
+static const struct platform_fw_data platform_fw_data_zynqmp = {
+	.family_code = PM_ZYNQMP_FAMILY_CODE,
+};
+
 static const struct of_device_id zynqmp_firmware_of_match[] = {
-	{.compatible = "xlnx,zynqmp-firmware"},
-	{.compatible = "xlnx,versal-firmware"},
+	{.compatible = "xlnx,zynqmp-firmware", .data = &platform_fw_data_zynqmp},
+	{.compatible = "xlnx,versal-firmware", .data = &platform_fw_data_versal},
+	{.compatible = "xlnx,versal-net-firmware", .data = &platform_fw_data_versal_net},
 	{},
 };
 MODULE_DEVICE_TABLE(of, zynqmp_firmware_of_match);
@@ -1981,8 +2178,9 @@ static struct platform_driver zynqmp_firmware_driver = {
 		.name = "zynqmp_firmware",
 		.of_match_table = zynqmp_firmware_of_match,
 		.dev_groups = zynqmp_firmware_groups,
+		.sync_state = zynqmp_firmware_sync_state,
 	},
 	.probe = zynqmp_firmware_probe,
-	.remove_new = zynqmp_firmware_remove,
+	.remove = zynqmp_firmware_remove,
 };
 module_platform_driver(zynqmp_firmware_driver);

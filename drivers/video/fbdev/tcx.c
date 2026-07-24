@@ -236,7 +236,7 @@ tcx_blank(int blank, struct fb_info *info)
 	return 0;
 }
 
-static struct sbus_mmap_map __tcx_mmap_map[TCX_MMAP_ENTRIES] = {
+static const struct sbus_mmap_map __tcx_mmap_map[TCX_MMAP_ENTRIES] = {
 	{
 		.voff	= TCX_RAM8BIT,
 		.size	= SBUS_MMAP_FBSIZE(1)
@@ -428,7 +428,7 @@ static int tcx_probe(struct platform_device *op)
 			j = i;
 			break;
 		}
-		par->mmap_map[i].poff = op->resource[j].start;
+		par->mmap_map[i].poff = op->resource[j].start - info->fix.smem_start;
 	}
 
 	info->fbops = &tcx_ops;
@@ -505,7 +505,7 @@ static struct platform_driver tcx_driver = {
 		.of_match_table = tcx_match,
 	},
 	.probe		= tcx_probe,
-	.remove_new	= tcx_remove,
+	.remove		= tcx_remove,
 };
 
 static int __init tcx_init(void)

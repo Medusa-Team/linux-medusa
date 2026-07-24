@@ -3,16 +3,8 @@
 #define _LINUX_NUMA_H
 #include <linux/init.h>
 #include <linux/types.h>
+#include <linux/nodemask.h>
 
-#ifdef CONFIG_NODES_SHIFT
-#define NODES_SHIFT     CONFIG_NODES_SHIFT
-#else
-#define NODES_SHIFT     0
-#endif
-
-#define MAX_NUMNODES    (1 << NODES_SHIFT)
-
-#define	NUMA_NO_NODE	(-1)
 #define	NUMA_NO_MEMBLK	(-1)
 
 static inline bool numa_valid_node(int nid)
@@ -30,8 +22,16 @@ static inline bool numa_valid_node(int nid)
 #ifdef CONFIG_NUMA
 #include <asm/sparsemem.h>
 
+extern struct pglist_data *node_data[];
+#define NODE_DATA(nid)	(node_data[nid])
+
+void __init alloc_node_data(int nid);
+void __init alloc_offline_node_data(int nid);
+
 /* Generic implementation available */
 int numa_nearest_node(int node, unsigned int state);
+
+int nearest_node_nodemask(int node, nodemask_t *mask);
 
 #ifndef memory_add_physaddr_to_nid
 int memory_add_physaddr_to_nid(u64 start);
@@ -49,6 +49,11 @@ static inline int numa_nearest_node(int node, unsigned int state)
 	return NUMA_NO_NODE;
 }
 
+static inline int nearest_node_nodemask(int node, nodemask_t *mask)
+{
+	return NUMA_NO_NODE;
+}
+
 static inline int memory_add_physaddr_to_nid(u64 start)
 {
 	return 0;
@@ -57,6 +62,8 @@ static inline int phys_to_target_node(u64 start)
 {
 	return 0;
 }
+
+static inline void alloc_offline_node_data(int nid) {}
 #endif
 
 #define numa_map_to_online_node(node) numa_nearest_node(node, N_ONLINE)

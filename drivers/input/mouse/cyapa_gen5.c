@@ -17,7 +17,7 @@
 #include <linux/mutex.h>
 #include <linux/completion.h>
 #include <linux/slab.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/crc-itu-t.h>
 #include <linux/pm_runtime.h>
 #include "cyapa.h"
@@ -2833,7 +2833,6 @@ static int cyapa_pip_event_process(struct cyapa *cyapa,
 		 * process.
 		 */
 		pm_runtime_get_sync(dev);
-		pm_runtime_mark_last_busy(dev);
 		pm_runtime_put_sync_autosuspend(dev);
 		return 0;
 	} else if (report_id != PIP_TOUCH_REPORT_ID &&

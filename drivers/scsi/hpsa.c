@@ -51,7 +51,7 @@
 #include <linux/jiffies.h>
 #include <linux/percpu-defs.h>
 #include <linux/percpu.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <asm/div64.h>
 #include "hpsa_cmd.h"
 #include "hpsa.h"
@@ -276,16 +276,18 @@ static void hpsa_free_cmd_pool(struct ctlr_info *h);
 #define VPD_PAGE (1 << 8)
 #define HPSA_SIMPLE_ERROR_BITS 0x03
 
-static int hpsa_scsi_queue_command(struct Scsi_Host *h, struct scsi_cmnd *cmd);
+static enum scsi_qc_status hpsa_scsi_queue_command(struct Scsi_Host *h,
+						   struct scsi_cmnd *cmd);
 static void hpsa_scan_start(struct Scsi_Host *);
 static int hpsa_scan_finished(struct Scsi_Host *sh,
 	unsigned long elapsed_time);
 static int hpsa_change_queue_depth(struct scsi_device *sdev, int qdepth);
 
 static int hpsa_eh_device_reset_handler(struct scsi_cmnd *scsicmd);
-static int hpsa_slave_alloc(struct scsi_device *sdev);
-static int hpsa_slave_configure(struct scsi_device *sdev);
-static void hpsa_slave_destroy(struct scsi_device *sdev);
+static int hpsa_sdev_init(struct scsi_device *sdev);
+static int hpsa_sdev_configure(struct scsi_device *sdev,
+			       struct queue_limits *lim);
+static void hpsa_sdev_destroy(struct scsi_device *sdev);
 
 static void hpsa_update_scsi_devices(struct ctlr_info *h);
 static int check_for_unit_attention(struct ctlr_info *h,
@@ -452,17 +454,13 @@ static ssize_t host_store_hp_ssd_smart_path_status(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
 {
-	int status, len;
+	int status;
 	struct ctlr_info *h;
 	struct Scsi_Host *shost = class_to_shost(dev);
-	char tmpbuf[10];
 
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
 		return -EACCES;
-	len = count > sizeof(tmpbuf) - 1 ? sizeof(tmpbuf) - 1 : count;
-	strncpy(tmpbuf, buf, len);
-	tmpbuf[len] = '\0';
-	if (sscanf(tmpbuf, "%d", &status) != 1)
+	if (kstrtoint(buf, 10, &status))
 		return -EINVAL;
 	h = shost_to_hba(shost);
 	h->acciopath_status = !!status;
@@ -476,17 +474,13 @@ static ssize_t host_store_raid_offload_debug(struct device *dev,
 					 struct device_attribute *attr,
 					 const char *buf, size_t count)
 {
-	int debug_level, len;
+	int debug_level;
 	struct ctlr_info *h;
 	struct Scsi_Host *shost = class_to_shost(dev);
-	char tmpbuf[10];
 
 	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
 		return -EACCES;
-	len = count > sizeof(tmpbuf) - 1 ? sizeof(tmpbuf) - 1 : count;
-	strncpy(tmpbuf, buf, len);
-	tmpbuf[len] = '\0';
-	if (sscanf(tmpbuf, "%d", &debug_level) != 1)
+	if (kstrtoint(buf, 10, &debug_level))
 		return -EINVAL;
 	if (debug_level < 0)
 		debug_level = 0;
@@ -978,9 +972,9 @@ static const struct scsi_host_template hpsa_driver_template = {
 	.this_id		= -1,
 	.eh_device_reset_handler = hpsa_eh_device_reset_handler,
 	.ioctl			= hpsa_ioctl,
-	.slave_alloc		= hpsa_slave_alloc,
-	.slave_configure	= hpsa_slave_configure,
-	.slave_destroy		= hpsa_slave_destroy,
+	.sdev_init		= hpsa_sdev_init,
+	.sdev_configure		= hpsa_sdev_configure,
+	.sdev_destroy		= hpsa_sdev_destroy,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl		= hpsa_compat_ioctl,
 #endif
@@ -1603,7 +1597,7 @@ static void hpsa_monitor_offline_device(struct ctlr_info *h,
 	spin_unlock_irqrestore(&h->offline_device_lock, flags);
 
 	/* Device is not on the list, add it. */
-	device = kmalloc(sizeof(*device), GFP_KERNEL);
+	device = kmalloc_obj(*device);
 	if (!device)
 		return;
 
@@ -1942,8 +1936,8 @@ static void adjust_hpsa_scsi_table(struct ctlr_info *h,
 	}
 	spin_unlock_irqrestore(&h->reset_lock, flags);
 
-	added = kcalloc(HPSA_MAX_DEVICES, sizeof(*added), GFP_KERNEL);
-	removed = kcalloc(HPSA_MAX_DEVICES, sizeof(*removed), GFP_KERNEL);
+	added = kzalloc_objs(*added, HPSA_MAX_DEVICES);
+	removed = kzalloc_objs(*removed, HPSA_MAX_DEVICES);
 
 	if (!added || !removed) {
 		dev_warn(&h->pdev->dev, "out of memory in "
@@ -2107,7 +2101,7 @@ static struct hpsa_scsi_dev_t *lookup_hpsa_scsi_dev(struct ctlr_info *h,
 	return NULL;
 }
 
-static int hpsa_slave_alloc(struct scsi_device *sdev)
+static int hpsa_sdev_init(struct scsi_device *sdev)
 {
 	struct hpsa_scsi_dev_t *sd = NULL;
 	unsigned long flags;
@@ -2142,7 +2136,8 @@ static int hpsa_slave_alloc(struct scsi_device *sdev)
 
 /* configure scsi device based on internal per-device structure */
 #define CTLR_TIMEOUT (120 * HZ)
-static int hpsa_slave_configure(struct scsi_device *sdev)
+static int hpsa_sdev_configure(struct scsi_device *sdev,
+			       struct queue_limits *lim)
 {
 	struct hpsa_scsi_dev_t *sd;
 	int queue_depth;
@@ -2173,7 +2168,7 @@ static int hpsa_slave_configure(struct scsi_device *sdev)
 	return 0;
 }
 
-static void hpsa_slave_destroy(struct scsi_device *sdev)
+static void hpsa_sdev_destroy(struct scsi_device *sdev)
 {
 	struct hpsa_scsi_dev_t *hdev = NULL;
 
@@ -2205,15 +2200,13 @@ static int hpsa_allocate_ioaccel2_sg_chain_blocks(struct ctlr_info *h)
 		return 0;
 
 	h->ioaccel2_cmd_sg_list =
-		kcalloc(h->nr_cmds, sizeof(*h->ioaccel2_cmd_sg_list),
-					GFP_KERNEL);
+		kzalloc_objs(*h->ioaccel2_cmd_sg_list, h->nr_cmds);
 	if (!h->ioaccel2_cmd_sg_list)
 		return -ENOMEM;
 	for (i = 0; i < h->nr_cmds; i++) {
 		h->ioaccel2_cmd_sg_list[i] =
-			kmalloc_array(h->maxsgentries,
-				      sizeof(*h->ioaccel2_cmd_sg_list[i]),
-				      GFP_KERNEL);
+			kmalloc_objs(*h->ioaccel2_cmd_sg_list[i],
+				     h->maxsgentries);
 		if (!h->ioaccel2_cmd_sg_list[i])
 			goto clean;
 	}
@@ -2245,15 +2238,13 @@ static int hpsa_alloc_sg_chain_blocks(struct ctlr_info *h)
 	if (h->chainsize <= 0)
 		return 0;
 
-	h->cmd_sg_list = kcalloc(h->nr_cmds, sizeof(*h->cmd_sg_list),
-				 GFP_KERNEL);
+	h->cmd_sg_list = kzalloc_objs(*h->cmd_sg_list, h->nr_cmds);
 	if (!h->cmd_sg_list)
 		return -ENOMEM;
 
 	for (i = 0; i < h->nr_cmds; i++) {
-		h->cmd_sg_list[i] = kmalloc_array(h->chainsize,
-						  sizeof(*h->cmd_sg_list[i]),
-						  GFP_KERNEL);
+		h->cmd_sg_list[i] = kmalloc_objs(*h->cmd_sg_list[i],
+						 h->chainsize);
 		if (!h->cmd_sg_list[i])
 			goto clean;
 
@@ -2668,10 +2659,8 @@ static void complete_scsi_command(struct CommandList *cp)
 	case CMD_TARGET_STATUS:
 		cmd->result |= ei->ScsiStatus;
 		/* copy the sense data */
-		if (SCSI_SENSE_BUFFERSIZE < sizeof(ei->SenseInfo))
-			sense_data_size = SCSI_SENSE_BUFFERSIZE;
-		else
-			sense_data_size = sizeof(ei->SenseInfo);
+		sense_data_size = min_t(unsigned long, SCSI_SENSE_BUFFERSIZE,
+					sizeof(ei->SenseInfo));
 		if (ei->SenseLen < sense_data_size)
 			sense_data_size = ei->SenseLen;
 		memcpy(cmd->sense_buffer, ei->SenseInfo, sense_data_size);
@@ -3476,11 +3465,11 @@ static void hpsa_get_enclosure_info(struct ctlr_info *h,
 		goto out;
 	}
 
-	bssbp = kzalloc(sizeof(*bssbp), GFP_KERNEL);
+	bssbp = kzalloc_obj(*bssbp);
 	if (!bssbp)
 		goto out;
 
-	id_phys = kzalloc(sizeof(*id_phys), GFP_KERNEL);
+	id_phys = kzalloc_obj(*id_phys);
 	if (!id_phys)
 		goto out;
 
@@ -3541,7 +3530,7 @@ static u64 hpsa_get_sas_address_from_report_physical(struct ctlr_info *h,
 	u64 sa = 0;
 	int i;
 
-	physdev = kzalloc(sizeof(*physdev), GFP_KERNEL);
+	physdev = kzalloc_obj(*physdev);
 	if (!physdev)
 		return 0;
 
@@ -3572,7 +3561,7 @@ static void hpsa_get_sas_address(struct ctlr_info *h, unsigned char *scsi3addr,
 	if (is_hba_lunid(scsi3addr)) {
 		struct bmic_sense_subsystem_info *ssi;
 
-		ssi = kzalloc(sizeof(*ssi), GFP_KERNEL);
+		ssi = kzalloc_obj(*ssi);
 		if (!ssi)
 			return;
 
@@ -3634,10 +3623,7 @@ static bool hpsa_vpd_page_supported(struct ctlr_info *h,
 	if (rc != 0)
 		goto exit_unsupported;
 	pages = buf[3];
-	if ((pages + HPSA_VPD_HEADER_SZ) <= 255)
-		bufsize = pages + HPSA_VPD_HEADER_SZ;
-	else
-		bufsize = 255;
+	bufsize = min(pages + HPSA_VPD_HEADER_SZ, 255);
 
 	/* Get the whole VPD page list */
 	rc = hpsa_scsi_do_inquiry(h, scsi3addr,
@@ -3799,7 +3785,7 @@ static inline int hpsa_scsi_do_report_phys_luns(struct ctlr_info *h,
 		return rc;
 
 	/* REPORT PHYS EXTENDED is not supported */
-	lbuf = kzalloc(sizeof(*lbuf), GFP_KERNEL);
+	lbuf = kzalloc_obj(*lbuf);
 	if (!lbuf)
 		return -ENOMEM;
 
@@ -4270,7 +4256,7 @@ static bool hpsa_is_disk_spare(struct ctlr_info *h, u8 *lunaddrbytes)
 	bool is_spare = false;
 	int rc;
 
-	id_phys = kzalloc(sizeof(*id_phys), GFP_KERNEL);
+	id_phys = kzalloc_obj(*id_phys);
 	if (!id_phys)
 		return false;
 
@@ -4355,12 +4341,12 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h)
 	int raid_ctlr_position;
 	bool physical_device;
 
-	currentsd = kcalloc(HPSA_MAX_DEVICES, sizeof(*currentsd), GFP_KERNEL);
-	physdev_list = kzalloc(sizeof(*physdev_list), GFP_KERNEL);
-	logdev_list = kzalloc(sizeof(*logdev_list), GFP_KERNEL);
-	tmpdevice = kzalloc(sizeof(*tmpdevice), GFP_KERNEL);
-	id_phys = kzalloc(sizeof(*id_phys), GFP_KERNEL);
-	id_ctlr = kzalloc(sizeof(*id_ctlr), GFP_KERNEL);
+	currentsd = kzalloc_objs(*currentsd, HPSA_MAX_DEVICES);
+	physdev_list = kzalloc_obj(*physdev_list);
+	logdev_list = kzalloc_obj(*logdev_list);
+	tmpdevice = kzalloc_obj(*tmpdevice);
+	id_phys = kzalloc_obj(*id_phys);
+	id_ctlr = kzalloc_obj(*id_ctlr);
 
 	if (!currentsd || !physdev_list || !logdev_list ||
 		!tmpdevice || !id_phys || !id_ctlr) {
@@ -4400,7 +4386,7 @@ static void hpsa_update_scsi_devices(struct ctlr_info *h)
 			break;
 		}
 
-		currentsd[i] = kzalloc(sizeof(*currentsd[i]), GFP_KERNEL);
+		currentsd[i] = kzalloc_obj(*currentsd[i]);
 		if (!currentsd[i]) {
 			h->drv_req_rescan = 1;
 			goto out;
@@ -5678,7 +5664,8 @@ static void hpsa_command_resubmit_worker(struct work_struct *work)
 }
 
 /* Running in struct Scsi_Host->host_lock less mode */
-static int hpsa_scsi_queue_command(struct Scsi_Host *sh, struct scsi_cmnd *cmd)
+static enum scsi_qc_status hpsa_scsi_queue_command(struct Scsi_Host *sh,
+						   struct scsi_cmnd *cmd)
 {
 	struct ctlr_info *h;
 	struct hpsa_scsi_dev_t *dev;
@@ -6413,18 +6400,14 @@ static int hpsa_passthru_ioctl(struct ctlr_info *h,
 		return -EINVAL;
 	}
 	if (iocommand->buf_size > 0) {
-		buff = kmalloc(iocommand->buf_size, GFP_KERNEL);
-		if (buff == NULL)
-			return -ENOMEM;
 		if (iocommand->Request.Type.Direction & XFER_WRITE) {
-			/* Copy the data into the buffer we created */
-			if (copy_from_user(buff, iocommand->buf,
-				iocommand->buf_size)) {
-				rc = -EFAULT;
-				goto out_kfree;
-			}
+			buff = memdup_user(iocommand->buf, iocommand->buf_size);
+			if (IS_ERR(buff))
+				return PTR_ERR(buff);
 		} else {
-			memset(buff, 0, iocommand->buf_size);
+			buff = kzalloc(iocommand->buf_size, GFP_KERNEL);
+			if (!buff)
+				return -ENOMEM;
 		}
 	}
 	c = cmd_alloc(h);
@@ -6484,7 +6467,6 @@ static int hpsa_passthru_ioctl(struct ctlr_info *h,
 	}
 out:
 	cmd_free(h, c);
-out_kfree:
 	kfree(buff);
 	return rc;
 }
@@ -6518,7 +6500,7 @@ static int hpsa_big_passthru_ioctl(struct ctlr_info *h,
 		status = -ENOMEM;
 		goto cleanup1;
 	}
-	buff_size = kmalloc_array(SG_ENTRIES_IN_CMD, sizeof(int), GFP_KERNEL);
+	buff_size = kmalloc_objs(int, SG_ENTRIES_IN_CMD);
 	if (!buff_size) {
 		status = -ENOMEM;
 		goto cleanup1;
@@ -6528,18 +6510,21 @@ static int hpsa_big_passthru_ioctl(struct ctlr_info *h,
 	while (left) {
 		sz = (left > ioc->malloc_size) ? ioc->malloc_size : left;
 		buff_size[sg_used] = sz;
-		buff[sg_used] = kmalloc(sz, GFP_KERNEL);
-		if (buff[sg_used] == NULL) {
-			status = -ENOMEM;
-			goto cleanup1;
-		}
+
 		if (ioc->Request.Type.Direction & XFER_WRITE) {
-			if (copy_from_user(buff[sg_used], data_ptr, sz)) {
-				status = -EFAULT;
+			buff[sg_used] = memdup_user(data_ptr, sz);
+			if (IS_ERR(buff[sg_used])) {
+				status = PTR_ERR(buff[sg_used]);
 				goto cleanup1;
 			}
-		} else
-			memset(buff[sg_used], 0, sz);
+		} else {
+			buff[sg_used] = kzalloc(sz, GFP_KERNEL);
+			if (!buff[sg_used]) {
+				status = -ENOMEM;
+				goto cleanup1;
+			}
+		}
+
 		left -= sz;
 		data_ptr += sz;
 		sg_used++;
@@ -7236,8 +7221,7 @@ static int hpsa_controller_hard_reset(struct pci_dev *pdev,
 
 static void init_driver_version(char *driver_version, int len)
 {
-	memset(driver_version, 0, len);
-	strncpy(driver_version, HPSA " " HPSA_DRIVER_VERSION, len - 1);
+	strscpy_pad(driver_version, HPSA " " HPSA_DRIVER_VERSION, len);
 }
 
 static int write_driver_ver_to_cfgtable(struct CfgTable __iomem *cfgtable)
@@ -7639,8 +7623,8 @@ static void hpsa_free_cfgtables(struct ctlr_info *h)
 }
 
 /* Find and map CISS config table and transfer table
-+ * several items must be unmapped (freed) later
-+ * */
+ * several items must be unmapped (freed) later
+ */
 static int hpsa_find_cfgtables(struct ctlr_info *h)
 {
 	u64 cfg_offset;
@@ -8506,7 +8490,7 @@ static int hpsa_luns_changed(struct ctlr_info *h)
 	if (!h->lastlogicals)
 		return rc;
 
-	logdev = kzalloc(sizeof(*logdev), GFP_KERNEL);
+	logdev = kzalloc_obj(*logdev);
 	if (!logdev)
 		return rc;
 
@@ -8647,7 +8631,7 @@ static struct ctlr_info *hpda_alloc_ctlr_info(void)
 {
 	struct ctlr_info *h;
 
-	h = kzalloc(sizeof(*h), GFP_KERNEL);
+	h = kzalloc_obj(*h);
 	if (!h)
 		return NULL;
 
@@ -8868,7 +8852,7 @@ reinit_after_soft_reset:
 
 	hpsa_hba_inquiry(h);
 
-	h->lastlogicals = kzalloc(sizeof(*(h->lastlogicals)), GFP_KERNEL);
+	h->lastlogicals = kzalloc_obj(*(h->lastlogicals));
 	if (!h->lastlogicals)
 		dev_info(&h->pdev->dev,
 			"Can't track change to report lun data\n");
@@ -8972,7 +8956,7 @@ static void hpsa_disable_rld_caching(struct ctlr_info *h)
 	if (unlikely(h->lockup_detected))
 		return;
 
-	options = kzalloc(sizeof(*options), GFP_KERNEL);
+	options = kzalloc_obj(*options);
 	if (!options)
 		return;
 
@@ -9569,7 +9553,7 @@ static struct hpsa_sas_phy *hpsa_alloc_sas_phy(
 	struct hpsa_sas_phy *hpsa_sas_phy;
 	struct sas_phy *phy;
 
-	hpsa_sas_phy = kzalloc(sizeof(*hpsa_sas_phy), GFP_KERNEL);
+	hpsa_sas_phy = kzalloc_obj(*hpsa_sas_phy);
 	if (!hpsa_sas_phy)
 		return NULL;
 
@@ -9654,7 +9638,7 @@ static struct hpsa_sas_port
 	struct hpsa_sas_port *hpsa_sas_port;
 	struct sas_port *port;
 
-	hpsa_sas_port = kzalloc(sizeof(*hpsa_sas_port), GFP_KERNEL);
+	hpsa_sas_port = kzalloc_obj(*hpsa_sas_port);
 	if (!hpsa_sas_port)
 		return NULL;
 
@@ -9702,7 +9686,7 @@ static struct hpsa_sas_node *hpsa_alloc_sas_node(struct device *parent_dev)
 {
 	struct hpsa_sas_node *hpsa_sas_node;
 
-	hpsa_sas_node = kzalloc(sizeof(*hpsa_sas_node), GFP_KERNEL);
+	hpsa_sas_node = kzalloc_obj(*hpsa_sas_node);
 	if (hpsa_sas_node) {
 		hpsa_sas_node->parent_dev = parent_dev;
 		INIT_LIST_HEAD(&hpsa_sas_node->port_list_head);

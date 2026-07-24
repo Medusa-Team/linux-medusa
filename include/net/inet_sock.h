@@ -19,11 +19,14 @@
 #include <linux/netdevice.h>
 
 #include <net/flow.h>
+#include <net/inet_dscp.h>
 #include <net/sock.h>
 #include <net/request_sock.h>
 #include <net/netns/hash.h>
 #include <net/tcp_states.h>
 #include <net/l3mdev.h>
+
+#define IP_OPTIONS_DATA_FIXED_SIZE 40
 
 /** struct ip_options - IP Options
  *
@@ -57,12 +60,9 @@ struct ip_options {
 
 struct ip_options_rcu {
 	struct rcu_head rcu;
-	struct ip_options opt;
-};
 
-struct ip_options_data {
-	struct ip_options_rcu	opt;
-	char			data[40];
+	/* Must be last as it ends in a flexible-array member. */
+	struct ip_options opt;
 };
 
 struct inet_request_sock {
@@ -100,10 +100,7 @@ struct inet_request_sock {
 	};
 };
 
-static inline struct inet_request_sock *inet_rsk(const struct request_sock *sk)
-{
-	return (struct inet_request_sock *)sk;
-}
+#define inet_rsk(ptr) container_of_const(ptr, struct inet_request_sock, req)
 
 static inline u32 inet_request_mark(const struct sock *sk, struct sk_buff *skb)
 {
@@ -150,7 +147,8 @@ static inline bool inet_bound_dev_eq(bool l3mdev_accept, int bound_dev_if,
 	return bound_dev_if == dif || bound_dev_if == sdif;
 }
 
-static inline bool inet_sk_bound_dev_eq(struct net *net, int bound_dev_if,
+static inline bool inet_sk_bound_dev_eq(const struct net *net,
+					int bound_dev_if,
 					int dif, int sdif)
 {
 #if IS_ENABLED(CONFIG_NET_L3_MASTER_DEV)
@@ -160,6 +158,13 @@ static inline bool inet_sk_bound_dev_eq(struct net *net, int bound_dev_if,
 	return inet_bound_dev_eq(true, bound_dev_if, dif, sdif);
 #endif
 }
+
+struct inet6_cork {
+	struct ipv6_txoptions *opt;
+	u8 hop_limit;
+	u8 tclass;
+	u8 dontfrag:1;
+};
 
 struct inet_cork {
 	unsigned int		flags;
@@ -171,8 +176,9 @@ struct inet_cork {
 	u8			tx_flags;
 	__u8			ttl;
 	__s16			tos;
-	char			priority;
+	u32			priority;
 	__u16			gso_size;
+	u32			ts_opt_id;
 	u64			transmit_time;
 	u32			mark;
 };
@@ -180,6 +186,9 @@ struct inet_cork {
 struct inet_cork_full {
 	struct inet_cork	base;
 	struct flowi		fl;
+#if IS_ENABLED(CONFIG_IPV6)
+	struct inet6_cork	base6;
+#endif
 };
 
 struct ip_mc_socklist;
@@ -211,6 +220,7 @@ struct inet_sock {
 	struct sock		sk;
 #if IS_ENABLED(CONFIG_IPV6)
 	struct ipv6_pinfo	*pinet6;
+	struct ipv6_fl_socklist __rcu *ipv6_fl_list;
 #endif
 	/* Socket demultiplex comparisons on incoming packets. */
 #define inet_daddr		sk.__sk_common.skc_daddr
@@ -240,7 +250,8 @@ struct inet_sock {
 	struct inet_cork_full	cork;
 };
 
-#define IPCORK_OPT	1	/* ip-options has been held in ipcork.opt */
+#define IPCORK_OPT		1	/* ip-options has been held in ipcork.opt */
+#define IPCORK_TS_OPT_ID	2	/* ts_opt_id field is valid, overriding sk_tskey */
 
 enum {
 	INET_FLAGS_PKTINFO	= 0,
@@ -299,6 +310,11 @@ static inline unsigned long inet_cmsg_flags(const struct inet_sock *inet)
 	return READ_ONCE(inet->inet_flags) & IP_CMSG_ALL;
 }
 
+static inline dscp_t inet_sk_dscp(const struct inet_sock *inet)
+{
+	return inet_dsfield_to_dscp(READ_ONCE(inet->tos));
+}
+
 #define inet_test_bit(nr, sk)			\
 	test_bit(INET_FLAGS_##nr, &inet_sk(sk)->inet_flags)
 #define inet_set_bit(nr, sk)			\
@@ -318,8 +334,10 @@ static inline unsigned long inet_cmsg_flags(const struct inet_sock *inet)
 static inline struct sock *sk_to_full_sk(struct sock *sk)
 {
 #ifdef CONFIG_INET
-	if (sk && sk->sk_state == TCP_NEW_SYN_RECV)
+	if (sk && READ_ONCE(sk->sk_state) == TCP_NEW_SYN_RECV)
 		sk = inet_reqsk(sk)->rsk_listener;
+	if (sk && READ_ONCE(sk->sk_state) == TCP_TIME_WAIT)
+		sk = NULL;
 #endif
 	return sk;
 }
@@ -328,8 +346,10 @@ static inline struct sock *sk_to_full_sk(struct sock *sk)
 static inline const struct sock *sk_const_to_full_sk(const struct sock *sk)
 {
 #ifdef CONFIG_INET
-	if (sk && sk->sk_state == TCP_NEW_SYN_RECV)
+	if (sk && READ_ONCE(sk->sk_state) == TCP_NEW_SYN_RECV)
 		sk = ((const struct request_sock *)sk)->rsk_listener;
+	if (sk && READ_ONCE(sk->sk_state) == TCP_TIME_WAIT)
+		sk = NULL;
 #endif
 	return sk;
 }
@@ -340,14 +360,6 @@ static inline struct sock *skb_to_full_sk(const struct sk_buff *skb)
 }
 
 #define inet_sk(ptr) container_of_const(ptr, struct inet_sock, sk)
-
-static inline void __inet_sk_copy_descendant(struct sock *sk_to,
-					     const struct sock *sk_from,
-					     const int ancestor_size)
-{
-	memcpy(inet_sk(sk_to) + 1, inet_sk(sk_from) + 1,
-	       sk_from->sk_prot->obj_size - ancestor_size);
-}
 
 int inet_sk_rebuild_header(struct sock *sk);
 

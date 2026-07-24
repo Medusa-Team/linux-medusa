@@ -64,8 +64,7 @@ struct i915_params i915_modparams __read_mostly = {
  */
 
 i915_param_named(modeset, int, 0400,
-	"Use kernel modesetting [KMS] (0=disable, "
-	"1=on, -1=force vga console preference [default])");
+	"Deprecated. Use the 'nomodeset' kernel parameter instead.");
 
 i915_param_named_unsafe(reset, uint, 0400,
 	"Attempt GPU resets (0=disabled, 1=full gpu reset, 2=engine reset [default])");
@@ -110,11 +109,6 @@ i915_param_named_unsafe(huc_firmware_path, charp, 0400,
 
 i915_param_named_unsafe(gsc_firmware_path, charp, 0400,
 	"GSC firmware path to use instead of the default one");
-
-#if IS_ENABLED(CONFIG_DRM_I915_DEBUG)
-i915_param_named_unsafe(inject_probe_failure, uint, 0400,
-	"Force an error after a number of failure check points (0:disabled (default), N:force failure at the Nth failure check point)");
-#endif
 
 #if IS_ENABLED(CONFIG_DRM_I915_GVT)
 i915_param_named(enable_gvt, bool, 0400,

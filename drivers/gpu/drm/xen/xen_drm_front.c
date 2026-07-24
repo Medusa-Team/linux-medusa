@@ -18,6 +18,7 @@
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_file.h>
 #include <drm/drm_gem.h>
+#include <drm/drm_print.h>
 
 #include <xen/platform_pci.h>
 #include <xen/xen.h>
@@ -170,7 +171,7 @@ int xen_drm_front_dbuf_create(struct xen_drm_front_info *front_info,
 	if (unlikely(!evtchnl))
 		return -EIO;
 
-	dbuf = kzalloc(sizeof(*dbuf), GFP_KERNEL);
+	dbuf = kzalloc_obj(*dbuf);
 	if (!dbuf)
 		return -ENOMEM;
 
@@ -478,7 +479,6 @@ static const struct drm_driver xen_drm_driver = {
 	.fops                      = &xen_drm_dev_fops,
 	.name                      = "xendrm-du",
 	.desc                      = "Xen PV DRM Display Unit",
-	.date                      = "20180221",
 	.major                     = 1,
 	.minor                     = 0,
 
@@ -496,7 +496,7 @@ static int xen_drm_drv_init(struct xen_drm_front_info *front_info)
 
 	DRM_INFO("Creating %s\n", xen_drm_driver.desc);
 
-	drm_info = kzalloc(sizeof(*drm_info), GFP_KERNEL);
+	drm_info = kzalloc_obj(*drm_info);
 	if (!drm_info) {
 		ret = -ENOMEM;
 		goto fail;
@@ -524,11 +524,6 @@ static int xen_drm_drv_init(struct xen_drm_front_info *front_info)
 	ret = drm_dev_register(drm_dev, 0);
 	if (ret)
 		goto fail_register;
-
-	DRM_INFO("Initialized %s %d.%d.%d %s on minor %d\n",
-		 xen_drm_driver.name, xen_drm_driver.major,
-		 xen_drm_driver.minor, xen_drm_driver.patchlevel,
-		 xen_drm_driver.date, drm_dev->primary->index);
 
 	return 0;
 

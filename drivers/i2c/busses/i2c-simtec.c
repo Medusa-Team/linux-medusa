@@ -64,7 +64,7 @@ static int simtec_i2c_probe(struct platform_device *dev)
 	int size;
 	int ret;
 
-	pd = kzalloc(sizeof(struct simtec_i2c_data), GFP_KERNEL);
+	pd = kzalloc_obj(struct simtec_i2c_data);
 	if (pd == NULL)
 		return -ENOMEM;
 
@@ -144,7 +144,7 @@ static struct platform_driver simtec_i2c_driver = {
 		.name		= "simtec-i2c",
 	},
 	.probe		= simtec_i2c_probe,
-	.remove_new	= simtec_i2c_remove,
+	.remove		= simtec_i2c_remove,
 };
 
 module_platform_driver(simtec_i2c_driver);

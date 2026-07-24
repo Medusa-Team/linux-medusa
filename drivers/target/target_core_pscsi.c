@@ -20,7 +20,7 @@
 #include <linux/cdrom.h>
 #include <linux/ratelimit.h>
 #include <linux/module.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
@@ -39,7 +39,8 @@ static inline struct pscsi_dev_virt *PSCSI_DEV(struct se_device *dev)
 }
 
 static sense_reason_t pscsi_execute_cmd(struct se_cmd *cmd);
-static enum rq_end_io_ret pscsi_req_done(struct request *, blk_status_t);
+static enum rq_end_io_ret pscsi_req_done(struct request *, blk_status_t,
+					 const struct io_comp_batch *);
 
 /*	pscsi_attach_hba():
  *
@@ -50,7 +51,7 @@ static int pscsi_attach_hba(struct se_hba *hba, u32 host_id)
 {
 	struct pscsi_hba_virt *phv;
 
-	phv = kzalloc(sizeof(struct pscsi_hba_virt), GFP_KERNEL);
+	phv = kzalloc_obj(struct pscsi_hba_virt);
 	if (!phv) {
 		pr_err("Unable to allocate struct pscsi_hba_virt\n");
 		return -ENOMEM;
@@ -246,7 +247,7 @@ pscsi_get_inquiry_vpd_device_ident(struct scsi_device *sdev,
 		}
 		pr_debug("T10 VPD Identifier Length: %d\n", ident_len);
 
-		vpd = kzalloc(sizeof(struct t10_vpd), GFP_KERNEL);
+		vpd = kzalloc_obj(struct t10_vpd);
 		if (!vpd) {
 			pr_err("Unable to allocate memory for"
 					" struct t10_vpd\n");
@@ -333,7 +334,7 @@ static struct se_device *pscsi_alloc_device(struct se_hba *hba,
 {
 	struct pscsi_dev_virt *pdv;
 
-	pdv = kzalloc(sizeof(struct pscsi_dev_virt), GFP_KERNEL);
+	pdv = kzalloc_obj(struct pscsi_dev_virt);
 	if (!pdv) {
 		pr_err("Unable to allocate memory for struct pscsi_dev_virt\n");
 		return NULL;
@@ -369,7 +370,7 @@ static int pscsi_create_type_disk(struct se_device *dev, struct scsi_device *sd)
 	bdev_file = bdev_file_open_by_path(dev->udev_path,
 				BLK_OPEN_WRITE | BLK_OPEN_READ, pdv, NULL);
 	if (IS_ERR(bdev_file)) {
-		pr_err("pSCSI: bdev_open_by_path() failed\n");
+		pr_err("pSCSI: bdev_file_open_by_path() failed\n");
 		scsi_device_put(sd);
 		return PTR_ERR(bdev_file);
 	}
@@ -823,7 +824,6 @@ static sense_reason_t
 pscsi_map_sg(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 		struct request *req)
 {
-	struct pscsi_dev_virt *pdv = PSCSI_DEV(cmd->se_dev);
 	struct bio *bio = NULL;
 	struct page *page;
 	struct scatterlist *sg;
@@ -862,7 +862,7 @@ new_bio:
 				bio = bio_kmalloc(nr_vecs, GFP_KERNEL);
 				if (!bio)
 					goto fail;
-				bio_init(bio, NULL, bio->bi_inline_vecs, nr_vecs,
+				bio_init_inline(bio, NULL, nr_vecs,
 					 rw ? REQ_OP_WRITE : REQ_OP_READ);
 				bio->bi_end_io = pscsi_bi_endio;
 
@@ -871,12 +871,11 @@ new_bio:
 					(rw) ? "rw" : "r", nr_vecs);
 			}
 
-			pr_debug("PSCSI: Calling bio_add_pc_page() i: %d"
+			pr_debug("PSCSI: Calling bio_add_page() i: %d"
 				" bio: %p page: %p len: %d off: %d\n", i, bio,
 				page, len, off);
 
-			rc = bio_add_pc_page(pdv->pdv_sd->request_queue,
-					bio, page, bytes, off);
+			rc = bio_add_page(bio, page, bytes, off);
 			pr_debug("PSCSI: bio->bi_vcnt: %d nr_vecs: %d\n",
 				bio_segments(bio), nr_vecs);
 			if (rc != bytes) {
@@ -1003,7 +1002,8 @@ static sector_t pscsi_get_blocks(struct se_device *dev)
 }
 
 static enum rq_end_io_ret pscsi_req_done(struct request *req,
-					 blk_status_t status)
+					 blk_status_t status,
+					 const struct io_comp_batch *iob)
 {
 	struct se_cmd *cmd = req->end_io_data;
 	struct scsi_cmnd *scmd = blk_mq_rq_to_pdu(req);

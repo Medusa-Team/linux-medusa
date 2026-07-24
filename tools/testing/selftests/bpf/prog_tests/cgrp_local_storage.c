@@ -63,14 +63,14 @@ static void test_tp_btf(int cgroup_fd)
 	if (!ASSERT_OK(err, "map_delete_elem"))
 		goto out;
 
-	skel->bss->target_pid = syscall(SYS_gettid);
+	skel->bss->target_pid = sys_gettid();
 
 	err = cgrp_ls_tp_btf__attach(skel);
 	if (!ASSERT_OK(err, "skel_attach"))
 		goto out;
 
-	syscall(SYS_gettid);
-	syscall(SYS_gettid);
+	sys_gettid();
+	sys_gettid();
 
 	skel->bss->target_pid = 0;
 
@@ -154,7 +154,7 @@ static void test_recursion(int cgroup_fd)
 		goto out;
 
 	/* trigger sys_enter, make sure it does not cause deadlock */
-	syscall(SYS_gettid);
+	sys_gettid();
 
 out:
 	cgrp_ls_recursion__destroy(skel);
@@ -202,7 +202,7 @@ static void test_cgroup_iter_sleepable(int cgroup_fd, __u64 cgroup_id)
 
 	iter_fd = bpf_iter_create(bpf_link__fd(link));
 	if (!ASSERT_GE(iter_fd, 0, "iter_create"))
-		goto out;
+		goto out_link;
 
 	/* trigger the program run */
 	(void)read(iter_fd, buf, sizeof(buf));
@@ -210,6 +210,8 @@ static void test_cgroup_iter_sleepable(int cgroup_fd, __u64 cgroup_id)
 	ASSERT_EQ(skel->bss->cgroup_id, cgroup_id, "cgroup_id");
 
 	close(iter_fd);
+out_link:
+	bpf_link__destroy(link);
 out:
 	cgrp_ls_sleepable__destroy(skel);
 }
@@ -224,7 +226,7 @@ static void test_yes_rcu_lock(__u64 cgroup_id)
 		return;
 
 	CGROUP_MODE_SET(skel);
-	skel->bss->target_pid = syscall(SYS_gettid);
+	skel->bss->target_pid = sys_gettid();
 
 	bpf_program__set_autoload(skel->progs.yes_rcu_lock, true);
 	err = cgrp_ls_sleepable__load(skel);

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
+#include <elf.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +18,7 @@
 #include "symbol.h"
 #include "unwind.h"
 #include "callchain.h"
+#include "dwarf-regs.h"
 
 #include <api/fs/fs.h>
 
@@ -38,6 +41,7 @@ int thread__init_maps(struct thread *thread, struct machine *machine)
 }
 
 struct thread *thread__new(pid_t pid, pid_t tid)
+	NO_THREAD_SAFETY_ANALYSIS /* Allocation/creation is inherently single threaded. */
 {
 	RC_STRUCT(thread) *_thread = zalloc(sizeof(*_thread));
 	struct thread *thread;
@@ -51,6 +55,7 @@ struct thread *thread__new(pid_t pid, pid_t tid)
 		thread__set_ppid(thread, -1);
 		thread__set_cpu(thread, -1);
 		thread__set_guest_cpu(thread, -1);
+		thread__set_e_machine(thread, EM_NONE);
 		thread__set_lbr_stitch_enable(thread, false);
 		INIT_LIST_HEAD(thread__namespaces_list(thread));
 		INIT_LIST_HEAD(thread__comm_list(thread));
@@ -196,7 +201,8 @@ int thread__set_namespaces(struct thread *thread, u64 timestamp,
 	return ret;
 }
 
-struct comm *thread__comm(struct thread *thread)
+static struct comm *__thread__comm(struct thread *thread)
+	SHARED_LOCKS_REQUIRED(thread__comm_lock(thread))
 {
 	if (list_empty(thread__comm_list(thread)))
 		return NULL;
@@ -204,16 +210,30 @@ struct comm *thread__comm(struct thread *thread)
 	return list_first_entry(thread__comm_list(thread), struct comm, list);
 }
 
+struct comm *thread__comm(struct thread *thread)
+{
+	struct comm *res = NULL;
+
+	down_read(thread__comm_lock(thread));
+	res = __thread__comm(thread);
+	up_read(thread__comm_lock(thread));
+	return res;
+}
+
 struct comm *thread__exec_comm(struct thread *thread)
 {
 	struct comm *comm, *last = NULL, *second_last = NULL;
 
+	down_read(thread__comm_lock(thread));
 	list_for_each_entry(comm, thread__comm_list(thread), list) {
-		if (comm->exec)
+		if (comm->exec) {
+			up_read(thread__comm_lock(thread));
 			return comm;
+		}
 		second_last = last;
 		last = comm;
 	}
+	up_read(thread__comm_lock(thread));
 
 	/*
 	 * 'last' with no start time might be the parent's comm of a synthesized
@@ -229,8 +249,9 @@ struct comm *thread__exec_comm(struct thread *thread)
 
 static int ____thread__set_comm(struct thread *thread, const char *str,
 				u64 timestamp, bool exec)
+	EXCLUSIVE_LOCKS_REQUIRED(thread__comm_lock(thread))
 {
-	struct comm *new, *curr = thread__comm(thread);
+	struct comm *new, *curr = __thread__comm(thread);
 
 	/* Override the default :tid entry */
 	if (!thread__comm_set(thread)) {
@@ -281,8 +302,9 @@ int thread__set_comm_from_proc(struct thread *thread)
 }
 
 static const char *__thread__comm_str(struct thread *thread)
+	SHARED_LOCKS_REQUIRED(thread__comm_lock(thread))
 {
-	const struct comm *comm = thread__comm(thread);
+	const struct comm *comm = __thread__comm(thread);
 
 	if (!comm)
 		return NULL;
@@ -406,7 +428,7 @@ int thread__fork(struct thread *thread, struct thread *parent, u64 timestamp, bo
 }
 
 void thread__find_cpumode_addr_location(struct thread *thread, u64 addr,
-					struct addr_location *al)
+					bool symbols, struct addr_location *al)
 {
 	size_t i;
 	const u8 cpumodes[] = {
@@ -417,10 +439,116 @@ void thread__find_cpumode_addr_location(struct thread *thread, u64 addr,
 	};
 
 	for (i = 0; i < ARRAY_SIZE(cpumodes); i++) {
-		thread__find_symbol(thread, cpumodes[i], addr, al);
+		if (symbols)
+			thread__find_symbol(thread, cpumodes[i], addr, al);
+		else
+			thread__find_map(thread, cpumodes[i], addr, al);
+
 		if (al->map)
 			break;
 	}
+}
+
+static uint16_t read_proc_e_machine_for_pid(pid_t pid, uint32_t *e_flags)
+{
+	char path[6 /* "/proc/" */ + 11 /* max length of pid */ + 5 /* "/exe\0" */];
+	int fd;
+	uint16_t e_machine = EM_NONE;
+
+	snprintf(path, sizeof(path), "/proc/%d/exe", pid);
+	fd = open(path, O_RDONLY);
+	if (fd >= 0) {
+		e_machine = dso__read_e_machine(/*optional_dso=*/NULL, fd, e_flags);
+		close(fd);
+	}
+	return e_machine;
+}
+
+struct thread__e_machine_callback_args {
+	struct machine *machine;
+	uint32_t e_flags;
+	uint16_t e_machine;
+};
+
+static int thread__e_machine_callback(struct map *map, void *_args)
+{
+	struct thread__e_machine_callback_args *args = _args;
+	struct dso *dso = map__dso(map);
+
+	if (!dso)
+		return 0; // No dso, continue search.
+
+	args->e_machine = dso__e_machine(dso, args->machine, &args->e_flags);
+	return args->e_machine != EM_NONE ? 1 /* stop search */ : 0 /* continue search */;
+}
+
+uint16_t thread__e_machine(struct thread *thread, struct machine *machine, uint32_t *e_flags)
+{
+	pid_t tid, pid;
+	uint16_t e_machine = RC_CHK_ACCESS(thread)->e_machine;
+	uint32_t local_e_flags = 0;
+	struct thread__e_machine_callback_args args = {
+		.machine = machine,
+		.e_flags = 0,
+		.e_machine = EM_NONE,
+	};
+
+	if (e_machine != EM_NONE) {
+		if (e_flags)
+			*e_flags = thread__e_flags(thread);
+		return e_machine;
+	}
+
+	if (machine == NULL) {
+		struct maps *maps = thread__maps(thread);
+
+		machine = maps__machine(maps);
+	}
+	tid = thread__tid(thread);
+	pid = thread__pid(thread);
+	if (pid != tid) {
+		struct thread *parent = machine__findnew_thread(machine, pid, pid);
+
+		if (parent) {
+			e_machine = thread__e_machine(parent, machine, &local_e_flags);
+			thread__put(parent);
+			goto out;
+		}
+		/* Something went wrong, fallback. */
+	}
+	/* Reading on the PID thread. First try to find from the maps. */
+	maps__for_each_map(thread__maps(thread), thread__e_machine_callback, &args);
+
+	if (args.e_machine != EM_NONE) {
+		e_machine = args.e_machine;
+		local_e_flags = args.e_flags;
+	} else {
+		/* Maps failed, perhaps we're live with map events disabled. */
+		bool is_live = machine->machines == NULL;
+
+		if (!is_live) {
+			/* Check if the session has a data file. */
+			struct perf_session *session = container_of(machine->machines,
+								    struct perf_session,
+								    machines);
+
+			is_live = !!session->data;
+		}
+		/* Read from /proc/pid/exe if live. */
+		if (is_live)
+			e_machine = read_proc_e_machine_for_pid(pid, &local_e_flags);
+	}
+out:
+	if (e_machine != EM_NONE) {
+		thread__set_e_machine(thread, e_machine);
+		thread__set_e_flags(thread, local_e_flags);
+	} else {
+		e_machine = EM_HOST;
+		local_e_flags = EF_HOST;
+	}
+	if (e_flags)
+		*e_flags = local_e_flags;
+	return e_machine;
 }
 
 struct thread *thread__main_thread(struct machine *machine, struct thread *thread)
@@ -476,6 +604,7 @@ void thread__free_stitch_list(struct thread *thread)
 		return;
 
 	list_for_each_entry_safe(pos, tmp, &lbr_stitch->lists, node) {
+		map_symbol__exit(&pos->cursor.ms);
 		list_del_init(&pos->node);
 		free(pos);
 	}
@@ -484,6 +613,9 @@ void thread__free_stitch_list(struct thread *thread)
 		list_del_init(&pos->node);
 		free(pos);
 	}
+
+	for (unsigned int i = 0 ; i < lbr_stitch->prev_lbr_cursor_size; i++)
+		map_symbol__exit(&lbr_stitch->prev_lbr_cursor[i].ms);
 
 	zfree(&lbr_stitch->prev_lbr_cursor);
 	free(thread__lbr_stitch(thread));

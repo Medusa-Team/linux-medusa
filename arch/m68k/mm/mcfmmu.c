@@ -39,23 +39,14 @@ void __init paging_init(void)
 	pte_t *pg_table;
 	unsigned long address, size;
 	unsigned long next_pgtable;
-	unsigned long max_zone_pfn[MAX_NR_ZONES] = { 0 };
 	int i;
-
-	empty_zero_page = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-	if (!empty_zero_page)
-		panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
-		      __func__, PAGE_SIZE, PAGE_SIZE);
 
 	pg_dir = swapper_pg_dir;
 	memset(swapper_pg_dir, 0, sizeof(swapper_pg_dir));
 
 	size = num_pages * sizeof(pte_t);
 	size = (size + PAGE_SIZE) & ~(PAGE_SIZE-1);
-	next_pgtable = (unsigned long) memblock_alloc(size, PAGE_SIZE);
-	if (!next_pgtable)
-		panic("%s: Failed to allocate %lu bytes align=0x%lx\n",
-		      __func__, size, PAGE_SIZE);
+	next_pgtable = (unsigned long) memblock_alloc_or_panic(size, PAGE_SIZE);
 
 	pg_dir += PAGE_OFFSET >> PGDIR_SHIFT;
 
@@ -79,8 +70,6 @@ void __init paging_init(void)
 	}
 
 	current->mm = NULL;
-	max_zone_pfn[ZONE_DMA] = PFN_DOWN(_ramend);
-	free_area_init(max_zone_pfn);
 }
 
 int cf_tlb_miss(struct pt_regs *regs, int write, int dtlb, int extension_word)

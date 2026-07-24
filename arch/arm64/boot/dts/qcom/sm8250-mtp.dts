@@ -484,11 +484,10 @@
 
 &gpu {
 	status = "okay";
+};
 
-	zap-shader {
-		memory-region = <&gpu_mem>;
-		firmware-name = "qcom/sm8250/a650_zap.mbn";
-	};
+&gpu_zap_shader {
+	firmware-name = "qcom/sm8250/a650_zap.mbn";
 };
 
 &i2c1 {
@@ -625,6 +624,11 @@
 		qcom,hw-settle-time = <200>;
 		label = "pa_therm2";
 	};
+};
+
+&pon {
+	mode-bootloader = <0x2>;
+	mode-recovery = <0x1>;
 };
 
 &qupv3_id_0 {

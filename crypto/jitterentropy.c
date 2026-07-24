@@ -68,7 +68,7 @@ struct rand_data {
 	 * of the RNG are marked as SENSITIVE. A user must not
 	 * access that information while the RNG executes its loops to
 	 * calculate the next random value. */
-	void *hash_state;		/* SENSITIVE hash state entropy pool */
+	struct sha3_ctx *hash_state;	/* SENSITIVE hash state entropy pool */
 	__u64 prev_time;		/* SENSITIVE Previous time stamp */
 	__u64 last_delta;		/* SENSITIVE stuck test */
 	__s64 last_delta2;		/* SENSITIVE stuck test */
@@ -145,7 +145,9 @@ struct rand_data {
  */
 #define JENT_ENTROPY_SAFETY_FACTOR	64
 
+#include <linux/array_size.h>
 #include <linux/fips.h>
+#include <linux/minmax.h>
 #include "jitterentropy.h"
 
 /***************************************************************************
@@ -177,7 +179,6 @@ static const unsigned int jent_apt_cutoff_lookup[15] = {
 static const unsigned int jent_apt_cutoff_permanent_lookup[15] = {
 	355, 447, 479, 494, 502, 507, 510, 512,
 	512, 512, 512, 512, 512, 512, 512 };
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 static void jent_apt_init(struct rand_data *ec, unsigned int osr)
 {
@@ -416,10 +417,9 @@ static __u64 jent_loop_shuffle(unsigned int bits, unsigned int min)
  * time [in] time stamp to be injected
  * stuck [in] Is the time stamp identified as stuck?
  *
- * Output:
- * updated hash context in the entropy collector or error code
+ * Output: updated hash context in the entropy collector
  */
-static int jent_condition_data(struct rand_data *ec, __u64 time, int stuck)
+static void jent_condition_data(struct rand_data *ec, __u64 time, int stuck)
 {
 #define SHA3_HASH_LOOP (1<<3)
 	struct {
@@ -434,8 +434,8 @@ static int jent_condition_data(struct rand_data *ec, __u64 time, int stuck)
 		ec->apt_base
 	};
 
-	return jent_hash_time(ec->hash_state, time, (u8 *)&addtl, sizeof(addtl),
-			      SHA3_HASH_LOOP, stuck);
+	jent_hash_time(ec->hash_state, time, (u8 *)&addtl, sizeof(addtl),
+		       SHA3_HASH_LOOP, stuck);
 }
 
 /*
@@ -537,8 +537,7 @@ static int jent_measure_jitter(struct rand_data *ec, __u64 *ret_current_delta)
 	stuck = jent_stuck(ec, current_delta);
 
 	/* Now call the next noise sources which also injects the data */
-	if (jent_condition_data(ec, current_delta, stuck))
-		stuck = 1;
+	jent_condition_data(ec, current_delta, stuck);
 
 	/* return the raw entropy value */
 	if (ret_current_delta)
@@ -596,7 +595,7 @@ static void jent_gen_entropy(struct rand_data *ec)
  * @return 0 when request is fulfilled or an error
  *
  * The following error codes can occur:
- *	-1	entropy_collector is NULL or the generation failed
+ *	-1	entropy_collector is NULL
  *	-2	Intermittent health failure
  *	-3	Permanent health failure
  */
@@ -638,12 +637,8 @@ int jent_read_entropy(struct rand_data *ec, unsigned char *data,
 			return -2;
 		}
 
-		if ((DATA_SIZE_BITS / 8) < len)
-			tocopy = (DATA_SIZE_BITS / 8);
-		else
-			tocopy = len;
-		if (jent_read_random_block(ec->hash_state, p, tocopy))
-			return -1;
+		tocopy = min(DATA_SIZE_BITS / 8, len);
+		jent_read_random_block(ec->hash_state, p, tocopy);
 
 		len -= tocopy;
 		p += tocopy;
@@ -658,7 +653,7 @@ int jent_read_entropy(struct rand_data *ec, unsigned char *data,
 
 struct rand_data *jent_entropy_collector_alloc(unsigned int osr,
 					       unsigned int flags,
-					       void *hash_state)
+					       struct sha3_ctx *hash_state)
 {
 	struct rand_data *entropy_collector;
 
@@ -706,8 +701,8 @@ void jent_entropy_collector_free(struct rand_data *entropy_collector)
 	jent_zfree(entropy_collector);
 }
 
-int jent_entropy_init(unsigned int osr, unsigned int flags, void *hash_state,
-		      struct rand_data *p_ec)
+int jent_entropy_init(unsigned int osr, unsigned int flags,
+		      struct sha3_ctx *hash_state, struct rand_data *p_ec)
 {
 	/*
 	 * If caller provides an allocated ec, reuse it which implies that the

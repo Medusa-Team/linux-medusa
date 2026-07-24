@@ -56,7 +56,7 @@ static int live_nop_switch(void *arg)
 	if (IS_ERR(file))
 		return PTR_ERR(file);
 
-	ctx = kcalloc(nctx, sizeof(*ctx), GFP_KERNEL);
+	ctx = kzalloc_objs(*ctx, nctx);
 	if (!ctx) {
 		err = -ENOMEM;
 		goto out_file;
@@ -317,7 +317,7 @@ static int live_parallel_switch(void *arg)
 	engines = i915_gem_context_lock_engines(ctx);
 	count = engines->num_engines;
 
-	data = kcalloc(count, sizeof(*data), GFP_KERNEL);
+	data = kzalloc_objs(*data, count);
 	if (!data) {
 		i915_gem_context_unlock_engines(ctx);
 		err = -ENOMEM;
@@ -369,7 +369,7 @@ static int live_parallel_switch(void *arg)
 		if (!data[n].ce[0])
 			continue;
 
-		worker = kthread_create_worker(0, "igt/parallel:%s",
+		worker = kthread_run_worker(0, "igt/parallel:%s",
 					       data[n].ce[0]->engine->name);
 		if (IS_ERR(worker)) {
 			err = PTR_ERR(worker);
@@ -962,13 +962,14 @@ emit_rpcs_query(struct drm_i915_gem_object *obj,
 	if (IS_ERR(rpcs))
 		return PTR_ERR(rpcs);
 
+	i915_gem_ww_ctx_init(&ww, false);
+
 	batch = i915_vma_instance(rpcs, ce->vm, NULL);
 	if (IS_ERR(batch)) {
 		err = PTR_ERR(batch);
 		goto err_put;
 	}
 
-	i915_gem_ww_ctx_init(&ww, false);
 retry:
 	err = i915_gem_object_lock(obj, &ww);
 	if (!err)
@@ -1053,7 +1054,7 @@ __sseu_prepare(const char *name,
 	if (!(flags & (TEST_BUSY | TEST_RESET)))
 		return 0;
 
-	*spin = kzalloc(sizeof(**spin), GFP_KERNEL);
+	*spin = kzalloc_obj(**spin);
 	if (!*spin)
 		return -ENOMEM;
 

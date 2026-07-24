@@ -192,7 +192,7 @@ milbeaut_xdmac_prep_memcpy(struct dma_chan *chan, dma_addr_t dst,
 	struct virt_dma_chan *vc = to_virt_chan(chan);
 	struct milbeaut_xdmac_desc *md;
 
-	md = kzalloc(sizeof(*md), GFP_NOWAIT);
+	md = kzalloc_obj(*md, GFP_NOWAIT);
 	if (!md)
 		return NULL;
 
@@ -409,7 +409,7 @@ MODULE_DEVICE_TABLE(of, milbeaut_xdmac_match);
 
 static struct platform_driver milbeaut_xdmac_driver = {
 	.probe = milbeaut_xdmac_probe,
-	.remove_new = milbeaut_xdmac_remove,
+	.remove = milbeaut_xdmac_remove,
 	.driver = {
 		.name = "milbeaut-m10v-xdmac",
 		.of_match_table = milbeaut_xdmac_match,

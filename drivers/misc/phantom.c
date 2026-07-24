@@ -279,7 +279,6 @@ static const struct file_operations phantom_file_ops = {
 	.unlocked_ioctl = phantom_ioctl,
 	.compat_ioctl = phantom_compat_ioctl,
 	.poll = phantom_poll,
-	.llseek = no_llseek,
 };
 
 static irqreturn_t phantom_isr(int irq, void *data)
@@ -363,7 +362,7 @@ static int phantom_probe(struct pci_dev *pdev,
 	}
 
 	retval = -ENOMEM;
-	pht = kzalloc(sizeof(*pht), GFP_KERNEL);
+	pht = kzalloc_obj(*pht);
 	if (pht == NULL) {
 		dev_err(&pdev->dev, "unable to allocate device\n");
 		goto err_reg;

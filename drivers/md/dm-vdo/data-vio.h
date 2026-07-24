@@ -88,8 +88,8 @@ struct zoned_pbn {
 };
 
 /*
- * Where a data_vio is on the compression path; advance_compression_stage() depends on the order of
- * this enum.
+ * Where a data_vio is on the compression path; advance_data_vio_compression_stage()
+ * depends on the order of this enum.
  */
 enum data_vio_compression_stage {
 	/* A data_vio which has not yet entered the compression path */
@@ -336,11 +336,6 @@ void drain_data_vio_pool(struct data_vio_pool *pool, struct vdo_completion *comp
 void resume_data_vio_pool(struct data_vio_pool *pool, struct vdo_completion *completion);
 
 void dump_data_vio_pool(struct data_vio_pool *pool, bool dump_vios);
-data_vio_count_t get_data_vio_pool_active_discards(struct data_vio_pool *pool);
-data_vio_count_t get_data_vio_pool_discard_limit(struct data_vio_pool *pool);
-data_vio_count_t get_data_vio_pool_maximum_discards(struct data_vio_pool *pool);
-int __must_check set_data_vio_pool_discard_limit(struct data_vio_pool *pool,
-						 data_vio_count_t limit);
 data_vio_count_t get_data_vio_pool_active_requests(struct data_vio_pool *pool);
 data_vio_count_t get_data_vio_pool_request_limit(struct data_vio_pool *pool);
 data_vio_count_t get_data_vio_pool_maximum_requests(struct data_vio_pool *pool);

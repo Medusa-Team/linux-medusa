@@ -237,7 +237,7 @@ jz4780_dma_desc_alloc(struct jz4780_dma_chan *jzchan, unsigned int count,
 	if (count > JZ_DMA_MAX_DESC)
 		return NULL;
 
-	desc = kzalloc(sizeof(*desc), GFP_NOWAIT);
+	desc = kzalloc_obj(*desc, GFP_NOWAIT);
 	if (!desc)
 		return NULL;
 
@@ -1122,7 +1122,7 @@ MODULE_DEVICE_TABLE(of, jz4780_dma_dt_match);
 
 static struct platform_driver jz4780_dma_driver = {
 	.probe		= jz4780_dma_probe,
-	.remove_new	= jz4780_dma_remove,
+	.remove		= jz4780_dma_remove,
 	.driver	= {
 		.name	= "jz4780-dma",
 		.of_match_table = jz4780_dma_dt_match,

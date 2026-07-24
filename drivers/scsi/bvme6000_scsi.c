@@ -44,7 +44,7 @@ bvme6000_probe(struct platform_device *dev)
 	if (!MACH_IS_BVME6000)
 		goto out;
 
-	hostdata = kzalloc(sizeof(struct NCR_700_Host_Parameters), GFP_KERNEL);
+	hostdata = kzalloc_obj(struct NCR_700_Host_Parameters);
 	if (!hostdata) {
 		printk(KERN_ERR "bvme6000-scsi: "
 				"Failed to allocate host data\n");
@@ -106,7 +106,7 @@ static struct platform_driver bvme6000_scsi_driver = {
 		.name		= "bvme6000-scsi",
 	},
 	.probe		= bvme6000_probe,
-	.remove_new	= bvme6000_device_remove,
+	.remove		= bvme6000_device_remove,
 };
 
 static int __init bvme6000_scsi_init(void)

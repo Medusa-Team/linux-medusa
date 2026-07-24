@@ -51,7 +51,7 @@ static int pxa2xx_flash_probe(struct platform_device *pdev)
 	if (!res)
 		return -ENODEV;
 
-	info = kzalloc(sizeof(struct pxa2xx_flash_info), GFP_KERNEL);
+	info = kzalloc_obj(struct pxa2xx_flash_info);
 	if (!info)
 		return -ENOMEM;
 
@@ -128,7 +128,7 @@ static struct platform_driver pxa2xx_flash_driver = {
 		.name		= "pxa2xx-flash",
 	},
 	.probe		= pxa2xx_flash_probe,
-	.remove_new	= pxa2xx_flash_remove,
+	.remove		= pxa2xx_flash_remove,
 	.shutdown	= pxa2xx_flash_shutdown,
 };
 

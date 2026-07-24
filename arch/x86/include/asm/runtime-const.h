@@ -2,11 +2,27 @@
 #ifndef _ASM_RUNTIME_CONST_H
 #define _ASM_RUNTIME_CONST_H
 
+#ifdef MODULE
+  #error "Cannot use runtime-const infrastructure from modules"
+#endif
+
+#ifdef __ASSEMBLER__
+
+.macro RUNTIME_CONST_PTR sym reg
+	movq	$0x0123456789abcdef, %\reg
+	1:
+	.pushsection runtime_ptr_\sym, "a"
+	.long	1b - 8 - .
+	.popsection
+.endm
+
+#else /* __ASSEMBLER__ */
+
 #define runtime_const_ptr(sym) ({				\
 	typeof(sym) __ret;					\
 	asm_inline("mov %1,%0\n1:\n"				\
 		".pushsection runtime_ptr_" #sym ",\"a\"\n\t"	\
-		".long 1b - %c2 - .\n\t"			\
+		".long 1b - %c2 - .\n"				\
 		".popsection"					\
 		:"=r" (__ret)					\
 		:"i" ((unsigned long)0x0123456789abcdefull),	\
@@ -20,7 +36,7 @@
 	typeof(0u+(val)) __ret = (val);				\
 	asm_inline("shrl $12,%k0\n1:\n"				\
 		".pushsection runtime_shift_" #sym ",\"a\"\n\t"	\
-		".long 1b - 1 - .\n\t"				\
+		".long 1b - 1 - .\n"				\
 		".popsection"					\
 		:"+r" (__ret));					\
 	__ret; })
@@ -58,4 +74,5 @@ static inline void runtime_const_fixup(void (*fn)(void *, unsigned long),
 	}
 }
 
+#endif /* __ASSEMBLER__ */
 #endif

@@ -32,7 +32,7 @@ static void ext4_rcu_ptr_callback(struct rcu_head *head)
 
 void ext4_kvfree_array_rcu(void *to_free)
 {
-	struct ext4_rcu_ptr *ptr = kzalloc(sizeof(*ptr), GFP_KERNEL);
+	struct ext4_rcu_ptr *ptr = kzalloc_obj(*ptr);
 
 	if (ptr) {
 		ptr->ptr = to_free;
@@ -230,8 +230,8 @@ struct ext4_new_flex_group_data {
 #define MAX_RESIZE_BG				16384
 
 /*
- * alloc_flex_gd() allocates a ext4_new_flex_group_data with size of
- * @flexbg_size.
+ * alloc_flex_gd() allocates an ext4_new_flex_group_data that satisfies the
+ * resizing from @o_group to @n_group, its size is typically @flexbg_size.
  *
  * Returns NULL on failure otherwise address of the allocated structure.
  */
@@ -239,28 +239,29 @@ static struct ext4_new_flex_group_data *alloc_flex_gd(unsigned int flexbg_size,
 				ext4_group_t o_group, ext4_group_t n_group)
 {
 	ext4_group_t last_group;
+	unsigned int max_resize_bg;
 	struct ext4_new_flex_group_data *flex_gd;
 
-	flex_gd = kmalloc(sizeof(*flex_gd), GFP_NOFS);
+	flex_gd = kmalloc_obj(*flex_gd, GFP_NOFS);
 	if (flex_gd == NULL)
 		goto out3;
 
-	if (unlikely(flexbg_size > MAX_RESIZE_BG))
-		flex_gd->resize_bg = MAX_RESIZE_BG;
-	else
-		flex_gd->resize_bg = flexbg_size;
+	max_resize_bg = umin(flexbg_size, MAX_RESIZE_BG);
+	flex_gd->resize_bg = max_resize_bg;
 
 	/* Avoid allocating large 'groups' array if not needed */
 	last_group = o_group | (flex_gd->resize_bg - 1);
 	if (n_group <= last_group)
-		flex_gd->resize_bg = 1 << fls(n_group - o_group + 1);
+		flex_gd->resize_bg = 1 << fls(n_group - o_group);
 	else if (n_group - last_group < flex_gd->resize_bg)
-		flex_gd->resize_bg = 1 << max(fls(last_group - o_group + 1),
+		flex_gd->resize_bg = 1 << max(fls(last_group - o_group),
 					      fls(n_group - last_group));
 
-	flex_gd->groups = kmalloc_array(flex_gd->resize_bg,
-					sizeof(struct ext4_new_group_data),
-					GFP_NOFS);
+	if (WARN_ON_ONCE(flex_gd->resize_bg > max_resize_bg))
+		flex_gd->resize_bg = max_resize_bg;
+
+	flex_gd->groups = kmalloc_objs(struct ext4_new_group_data,
+				       flex_gd->resize_bg, GFP_NOFS);
 	if (flex_gd->groups == NULL)
 		goto out2;
 
@@ -1029,7 +1030,7 @@ static int reserve_backup_gdb(handle_t *handle, struct inode *inode,
 	int res, i;
 	int err;
 
-	primary = kmalloc_array(reserved_gdb, sizeof(*primary), GFP_NOFS);
+	primary = kmalloc_objs(*primary, reserved_gdb, GFP_NOFS);
 	if (!primary)
 		return -ENOMEM;
 
@@ -1116,8 +1117,8 @@ static inline void ext4_set_block_group_nr(struct super_block *sb, char *data,
 	struct ext4_super_block *es = (struct ext4_super_block *) data;
 
 	es->s_block_group_nr = cpu_to_le16(group);
-	if (ext4_has_metadata_csum(sb))
-		es->s_checksum = ext4_superblock_csum(sb, es);
+	if (ext4_has_feature_metadata_csum(sb))
+		es->s_checksum = ext4_superblock_csum(es);
 }
 
 /*
@@ -1298,7 +1299,7 @@ static struct buffer_head *ext4_get_bitmap(struct super_block *sb, __u64 block)
 	if (unlikely(!bh))
 		return NULL;
 	if (!bh_uptodate_or_lock(bh)) {
-		if (ext4_read_bh(bh, 0, NULL) < 0) {
+		if (ext4_read_bh(bh, 0, NULL, false) < 0) {
 			brelse(bh);
 			return NULL;
 		}
@@ -1313,14 +1314,13 @@ static int ext4_set_bitmap_checksums(struct super_block *sb,
 {
 	struct buffer_head *bh;
 
-	if (!ext4_has_metadata_csum(sb))
+	if (!ext4_has_feature_metadata_csum(sb))
 		return 0;
 
 	bh = ext4_get_bitmap(sb, group_data->inode_bitmap);
 	if (!bh)
 		return -EIO;
-	ext4_inode_bitmap_csum_set(sb, gdp, bh,
-				   EXT4_INODES_PER_GROUP(sb) / 8);
+	ext4_inode_bitmap_csum_set(sb, gdp, bh);
 	brelse(bh);
 
 	bh = ext4_get_bitmap(sb, group_data->block_bitmap);
@@ -1478,7 +1478,7 @@ static void ext4_update_super(struct super_block *sb,
 
 	/* Update the global fs size fields */
 	sbi->s_groups_count += flex_gd->count;
-	sbi->s_blockfile_groups = min_t(ext4_group_t, sbi->s_groups_count,
+	sbi->s_blockfile_groups = min(sbi->s_groups_count,
 			(EXT4_MAX_BLOCK_FILE_PHYS / EXT4_BLOCKS_PER_GROUP(sb)));
 
 	/* Update the reserved block counts only once the new group is

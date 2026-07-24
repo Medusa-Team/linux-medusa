@@ -3,7 +3,7 @@
 #include <network_helpers.h>
 #include <bpf/btf.h>
 #include <linux/if_link.h>
-#include <linux/udp.h>
+#include <netinet/udp.h>
 #include <net/if.h>
 #include <unistd.h>
 
@@ -67,7 +67,7 @@ void test_xdp_flowtable(void)
 	struct nstoken *tok = NULL;
 	int iifindex, stats_fd;
 	__u32 value, key = 0;
-	struct bpf_link *link;
+	struct bpf_link *link = NULL;
 
 	if (SYS_NOFAIL("nft -v")) {
 		fprintf(stdout, "Missing required nft tool\n");
@@ -160,6 +160,7 @@ void test_xdp_flowtable(void)
 
 	ASSERT_GE(value, N_PACKETS - 2, "bpf_xdp_flow_lookup failed");
 out:
+	bpf_link__destroy(link);
 	xdp_flowtable__destroy(skel);
 	if (tok)
 		close_netns(tok);

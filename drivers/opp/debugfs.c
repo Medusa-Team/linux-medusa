@@ -130,22 +130,24 @@ void opp_debug_create_one(struct dev_pm_opp *opp, struct opp_table *opp_table)
 {
 	struct dentry *pdentry = opp_table->dentry;
 	struct dentry *d;
-	unsigned long id;
-	char name[25];	/* 20 chars for 64 bit value + 5 (opp:\0) */
+	char name[36];	/* "opp:"(4) + u64(20) + "-" (1) + u32(10) + NULL(1) */
 
 	/*
 	 * Get directory name for OPP.
 	 *
-	 * - Normally rate is unique to each OPP, use it to get unique opp-name.
+	 * - Normally rate is unique to each OPP, use it to get unique opp-name,
+	 *   together with performance level if available.
 	 * - For some devices rate isn't available or there are multiple, use
 	 *   index instead for them.
 	 */
-	if (likely(opp_table->clk_count == 1 && opp->rates[0]))
-		id = opp->rates[0];
-	else
-		id = _get_opp_count(opp_table);
-
-	snprintf(name, sizeof(name), "opp:%lu", id);
+	if (likely(opp_table->clk_count == 1 && opp->rates[0])) {
+		if (opp->level == OPP_LEVEL_UNSET)
+			snprintf(name, sizeof(name), "opp:%lu", opp->rates[0]);
+		else
+			snprintf(name, sizeof(name), "opp:%lu-%u", opp->rates[0], opp->level);
+	} else {
+		snprintf(name, sizeof(name), "opp:%u", _get_opp_count(opp_table));
+	}
 
 	/* Create per-opp directory */
 	d = debugfs_create_dir(name, pdentry);
@@ -217,7 +219,7 @@ static void opp_migrate_dentry(struct opp_device *opp_dev,
 {
 	struct opp_device *new_dev = NULL, *iter;
 	const struct device *dev;
-	struct dentry *dentry;
+	int err;
 
 	/* Look for next opp-dev */
 	list_for_each_entry(iter, &opp_table->dev_list, node)
@@ -234,16 +236,14 @@ static void opp_migrate_dentry(struct opp_device *opp_dev,
 
 	opp_set_dev_name(dev, opp_table->dentry_name);
 
-	dentry = debugfs_rename(rootdir, opp_dev->dentry, rootdir,
-				opp_table->dentry_name);
-	if (IS_ERR(dentry)) {
+	err = debugfs_change_name(opp_dev->dentry, "%s", opp_table->dentry_name);
+	if (err) {
 		dev_err(dev, "%s: Failed to rename link from: %s to %s\n",
 			__func__, dev_name(opp_dev->dev), dev_name(dev));
 		return;
 	}
 
-	new_dev->dentry = dentry;
-	opp_table->dentry = dentry;
+	new_dev->dentry = opp_table->dentry = opp_dev->dentry;
 }
 
 /**

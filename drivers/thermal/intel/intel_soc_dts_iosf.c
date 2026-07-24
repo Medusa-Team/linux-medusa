@@ -320,7 +320,7 @@ intel_soc_dts_iosf_init(enum intel_soc_dts_interrupt_type intr_type,
 	if (tj_max < 0)
 		return ERR_PTR(tj_max);
 
-	sensors = kzalloc(sizeof(*sensors), GFP_KERNEL);
+	sensors = kzalloc_obj(*sensors);
 	if (!sensors)
 		return ERR_PTR(-ENOMEM);
 
@@ -388,6 +388,6 @@ void intel_soc_dts_iosf_exit(struct intel_soc_dts_sensors *sensors)
 }
 EXPORT_SYMBOL_GPL(intel_soc_dts_iosf_exit);
 
-MODULE_IMPORT_NS(INTEL_TCC);
+MODULE_IMPORT_NS("INTEL_TCC");
 MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("SoC DTS driver using side band interface");

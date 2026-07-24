@@ -2,6 +2,17 @@
 #ifndef BUILTIN_H
 #define BUILTIN_H
 
+struct feature_status {
+	const char *name;
+	const char *macro;
+	const char *tip;
+	int is_builtin;
+};
+
+extern struct feature_status supported_features[];
+
+void feature_status__printf(const struct feature_status *feature);
+
 struct cmdnames;
 
 void list_common_cmds_help(void);
@@ -11,6 +22,7 @@ int cmd_annotate(int argc, const char **argv);
 int cmd_bench(int argc, const char **argv);
 int cmd_buildid_cache(int argc, const char **argv);
 int cmd_buildid_list(int argc, const char **argv);
+int cmd_check(int argc, const char **argv);
 int cmd_config(int argc, const char **argv);
 int cmd_c2c(int argc, const char **argv);
 int cmd_diff(int argc, const char **argv);
@@ -39,6 +51,4 @@ int cmd_ftrace(int argc, const char **argv);
 int cmd_daemon(int argc, const char **argv);
 int cmd_kwork(int argc, const char **argv);
 
-int find_scripts(char **scripts_array, char **scripts_path_array, int num,
-		 int pathlen);
 #endif

@@ -16,7 +16,7 @@
 
 #include "vde.h"
 
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 
 struct tegra_vde_cache_entry {
 	enum dma_data_direction dma_dir;
@@ -115,7 +115,7 @@ int tegra_vde_dmabuf_cache_map(struct tegra_vde *vde,
 		goto err_unmap;
 	}
 
-	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kzalloc_obj(*entry);
 	if (!entry) {
 		err = -ENOMEM;
 		goto err_unmap;

@@ -82,7 +82,7 @@ static struct clk *clk_sp810_timerclken_of_get(struct of_phandle_args *clkspec,
 
 static void __init clk_sp810_of_setup(struct device_node *node)
 {
-	struct clk_sp810 *sp810 = kzalloc(sizeof(*sp810), GFP_KERNEL);
+	struct clk_sp810 *sp810 = kzalloc_obj(*sp810);
 	const char *parent_names[2];
 	int num = ARRAY_SIZE(parent_names);
 	char name[12];
@@ -110,7 +110,7 @@ static void __init clk_sp810_of_setup(struct device_node *node)
 	init.parent_names = parent_names;
 	init.num_parents = num;
 
-	deprecated = !of_find_property(node, "assigned-clock-parents", NULL);
+	deprecated = !of_property_present(node, "assigned-clock-parents");
 
 	for (i = 0; i < ARRAY_SIZE(sp810->timerclken); i++) {
 		snprintf(name, sizeof(name), "sp810_%d_%d", instance, i);

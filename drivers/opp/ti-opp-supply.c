@@ -127,8 +127,7 @@ static int _store_optimized_voltages(struct device *dev,
 		goto out;
 	}
 
-	table = kcalloc(data->num_vdd_table, sizeof(*data->vdd_table),
-			GFP_KERNEL);
+	table = kzalloc_objs(*data->vdd_table, data->num_vdd_table);
 	if (!table) {
 		ret = -ENOMEM;
 		goto out;
@@ -405,7 +404,7 @@ static struct platform_driver ti_opp_supply_driver = {
 	.probe = ti_opp_supply_probe,
 	.driver = {
 		   .name = "ti_opp_supply",
-		   .of_match_table = of_match_ptr(ti_opp_supply_of_match),
+		   .of_match_table = ti_opp_supply_of_match,
 		   },
 };
 module_platform_driver(ti_opp_supply_driver);

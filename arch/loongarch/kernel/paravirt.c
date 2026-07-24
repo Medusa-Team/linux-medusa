@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <linux/export.h>
 #include <linux/types.h>
 #include <linux/interrupt.h>
 #include <linux/irq_work.h>
@@ -7,19 +6,13 @@
 #include <linux/kvm_para.h>
 #include <linux/reboot.h>
 #include <linux/static_call.h>
+#include <linux/sched/cputime.h>
 #include <asm/paravirt.h>
 
 static int has_steal_clock;
-struct static_key paravirt_steal_enabled;
-struct static_key paravirt_steal_rq_enabled;
-static DEFINE_PER_CPU(struct kvm_steal_time, steal_time) __aligned(64);
-
-static u64 native_steal_clock(int cpu)
-{
-	return 0;
-}
-
-DEFINE_STATIC_CALL(pv_steal_clock, native_steal_clock);
+DEFINE_STATIC_KEY_FALSE(virt_preempt_key);
+DEFINE_STATIC_KEY_FALSE(virt_spin_lock_key);
+DEFINE_PER_CPU(struct kvm_steal_time, steal_time) __aligned(64);
 
 static bool steal_acc = true;
 
@@ -50,10 +43,17 @@ static u64 paravt_steal_clock(int cpu)
 }
 
 #ifdef CONFIG_SMP
+static struct smp_ops native_ops;
+
 static void pv_send_ipi_single(int cpu, unsigned int action)
 {
 	int min, old;
 	irq_cpustat_t *info = &per_cpu(irq_stat, cpu);
+
+	if (unlikely(action == ACTION_BOOT_CPU)) {
+		native_ops.send_ipi_single(cpu, action);
+		return;
+	}
 
 	old = atomic_fetch_or(BIT(action), &info->message);
 	if (old)
@@ -73,6 +73,11 @@ static void pv_send_ipi_mask(const struct cpumask *mask, unsigned int action)
 
 	if (cpumask_empty(mask))
 		return;
+
+	if (unlikely(action == ACTION_BOOT_CPU)) {
+		native_ops.send_ipi_mask(mask, action);
+		return;
+	}
 
 	action = BIT(action);
 	for_each_cpu(i, mask) {
@@ -134,6 +139,11 @@ static irqreturn_t pv_ipi_interrupt(int irq, void *dev)
 		info->ipi_irqs[IPI_IRQ_WORK]++;
 	}
 
+	if (action & SMP_CLEAR_VECTOR) {
+		complete_irq_moving();
+		info->ipi_irqs[IPI_CLEAR_VECTOR]++;
+	}
+
 	return IRQ_HANDLED;
 }
 
@@ -141,6 +151,8 @@ static void pv_init_ipi(void)
 {
 	int r, swi;
 
+	/* Init native ipi irq for ACTION_BOOT_CPU */
+	native_ops.init_ipi();
 	swi = get_percpu_irq(INT_SWI0);
 	if (swi < 0)
 		panic("SWI0 IRQ mapping failed\n");
@@ -151,10 +163,13 @@ static void pv_init_ipi(void)
 }
 #endif
 
-static bool kvm_para_available(void)
+bool kvm_para_available(void)
 {
 	int config;
 	static int hypervisor_type;
+
+	if (!cpu_has_hypervisor)
+		return false;
 
 	if (!hypervisor_type) {
 		config = read_cpucfg(CPUCFG_KVM_SIG);
@@ -165,20 +180,26 @@ static bool kvm_para_available(void)
 	return hypervisor_type == HYPERVISOR_KVM;
 }
 
-int __init pv_ipi_init(void)
+unsigned int kvm_arch_para_features(void)
 {
-	int feature;
+	static unsigned int feature;
 
-	if (!cpu_has_hypervisor)
-		return 0;
 	if (!kvm_para_available())
 		return 0;
 
-	feature = read_cpucfg(CPUCFG_KVM_FEATURE);
-	if (!(feature & KVM_FEATURE_IPI))
+	if (!feature)
+		feature = read_cpucfg(CPUCFG_KVM_FEATURE);
+
+	return feature;
+}
+
+int __init pv_ipi_init(void)
+{
+	if (!kvm_para_has_feature(KVM_FEATURE_IPI))
 		return 0;
 
 #ifdef CONFIG_SMP
+	native_ops		= mp_ops;
 	mp_ops.init_ipi		= pv_init_ipi;
 	mp_ops.send_ipi_single	= pv_send_ipi_single;
 	mp_ops.send_ipi_mask	= pv_send_ipi_mask;
@@ -206,7 +227,7 @@ static int pv_enable_steal_time(void)
 	}
 
 	addr |= KVM_STEAL_PHYS_VALID;
-	kvm_hypercall2(KVM_HCALL_FUNC_NOTIFY, KVM_FEATURE_STEAL_TIME, addr);
+	kvm_hypercall2(KVM_HCALL_FUNC_NOTIFY, BIT(KVM_FEATURE_STEAL_TIME), addr);
 
 	return 0;
 }
@@ -214,7 +235,7 @@ static int pv_enable_steal_time(void)
 static void pv_disable_steal_time(void)
 {
 	if (has_steal_clock)
-		kvm_hypercall2(KVM_HCALL_FUNC_NOTIFY, KVM_FEATURE_STEAL_TIME, 0);
+		kvm_hypercall2(KVM_HCALL_FUNC_NOTIFY, BIT(KVM_FEATURE_STEAL_TIME), 0);
 }
 
 #ifdef CONFIG_SMP
@@ -258,15 +279,9 @@ static struct notifier_block pv_reboot_nb = {
 
 int __init pv_time_init(void)
 {
-	int r, feature;
+	int r;
 
-	if (!cpu_has_hypervisor)
-		return 0;
-	if (!kvm_para_available())
-		return 0;
-
-	feature = read_cpucfg(CPUCFG_KVM_FEATURE);
-	if (!(feature & KVM_FEATURE_STEAL_TIME))
+	if (!kvm_para_has_feature(KVM_FEATURE_STEAL_TIME))
 		return 0;
 
 	has_steal_clock = 1;
@@ -286,6 +301,9 @@ int __init pv_time_init(void)
 		pr_err("Failed to install cpu hotplug callbacks\n");
 		return r;
 	}
+
+	if (kvm_para_has_feature(KVM_FEATURE_PREEMPT))
+		static_branch_enable(&virt_preempt_key);
 #endif
 
 	static_call_update(pv_steal_clock, paravt_steal_clock);
@@ -296,7 +314,20 @@ int __init pv_time_init(void)
 		static_key_slow_inc(&paravirt_steal_rq_enabled);
 #endif
 
-	pr_info("Using paravirt steal-time\n");
+	if (static_key_enabled(&virt_preempt_key))
+		pr_info("Using paravirt steal-time with preempt enabled\n");
+	else
+		pr_info("Using paravirt steal-time with preempt disabled\n");
+
+	return 0;
+}
+
+int __init pv_spinlock_init(void)
+{
+	if (!cpu_has_hypervisor)
+		return 0;
+
+	static_branch_enable(&virt_spin_lock_key);
 
 	return 0;
 }

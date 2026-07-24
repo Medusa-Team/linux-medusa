@@ -4,58 +4,83 @@
 
 #define MUTEX		mutex
 #define MUTEX_WAITER	mutex_waiter
+#define WAIT_LOCK	wait_lock
+
+/*
+ *           +--------+
+ *           | first  |
+ *           +--------+
+ *                |
+ *                v
+ *  +----+     +----+     +----+
+ *  | W3 | <-> | W1 | <-> | W2 |
+ *  +----+     +----+     +----+
+ *    ^                     ^
+ *    +---------------------+
+ */
 
 static inline struct mutex_waiter *
 __ww_waiter_first(struct mutex *lock)
+	__must_hold(&lock->wait_lock)
 {
-	struct mutex_waiter *w;
-
-	w = list_first_entry(&lock->wait_list, struct mutex_waiter, list);
-	if (list_entry_is_head(w, &lock->wait_list, list))
-		return NULL;
-
-	return w;
+	return lock->first_waiter;
 }
 
+/*
+ * for (cur = __ww_waiter_first(); cur; cur = __ww_waiter_next())
+ *
+ * Should iterate like: W1, W2, W3
+ */
 static inline struct mutex_waiter *
 __ww_waiter_next(struct mutex *lock, struct mutex_waiter *w)
+	__must_hold(&lock->wait_lock)
 {
 	w = list_next_entry(w, list);
-	if (list_entry_is_head(w, &lock->wait_list, list))
+	/*
+	 * Terminate if the next entry is the first again, that has already
+	 * been observed.
+	 */
+	if (lock->first_waiter == w)
 		return NULL;
 
 	return w;
 }
 
+/*
+ * for (cur = __ww_waiter_last(); cur; cur = __ww_waiter_prev())
+ *
+ * Should iterate like: W3, W2, W1
+ */
 static inline struct mutex_waiter *
 __ww_waiter_prev(struct mutex *lock, struct mutex_waiter *w)
+	__must_hold(&lock->wait_lock)
 {
-	w = list_prev_entry(w, list);
-	if (list_entry_is_head(w, &lock->wait_list, list))
+	/*
+	 * Terminate at the first entry, the previous entry of first is the
+	 * last and that has already been observed.
+	 */
+	if (lock->first_waiter == w)
 		return NULL;
 
-	return w;
+	return list_prev_entry(w, list);
 }
 
 static inline struct mutex_waiter *
 __ww_waiter_last(struct mutex *lock)
+	__must_hold(&lock->wait_lock)
 {
-	struct mutex_waiter *w;
+	struct mutex_waiter *w = lock->first_waiter;
 
-	w = list_last_entry(&lock->wait_list, struct mutex_waiter, list);
-	if (list_entry_is_head(w, &lock->wait_list, list))
-		return NULL;
-
+	if (w)
+		w = list_prev_entry(w, list);
 	return w;
 }
 
 static inline void
 __ww_waiter_add(struct mutex *lock, struct mutex_waiter *waiter, struct mutex_waiter *pos)
+	__must_hold(&lock->wait_lock)
 {
-	struct list_head *p = &lock->wait_list;
-	if (pos)
-		p = &pos->list;
-	__mutex_add_waiter(lock, waiter, p);
+	__mutex_add_waiter(lock, waiter, pos);
 }
 
 static inline struct task_struct *
@@ -70,17 +95,20 @@ __ww_mutex_has_waiters(struct mutex *lock)
 	return atomic_long_read(&lock->owner) & MUTEX_FLAG_WAITERS;
 }
 
-static inline void lock_wait_lock(struct mutex *lock)
+static inline void lock_wait_lock(struct mutex *lock, unsigned long *flags)
+	__acquires(&lock->wait_lock)
 {
-	raw_spin_lock(&lock->wait_lock);
+	raw_spin_lock_irqsave(&lock->wait_lock, *flags);
 }
 
-static inline void unlock_wait_lock(struct mutex *lock)
+static inline void unlock_wait_lock(struct mutex *lock, unsigned long *flags)
+	__releases(&lock->wait_lock)
 {
-	raw_spin_unlock(&lock->wait_lock);
+	raw_spin_unlock_irqrestore(&lock->wait_lock, *flags);
 }
 
 static inline void lockdep_assert_wait_lock_held(struct mutex *lock)
+	__must_hold(&lock->wait_lock)
 {
 	lockdep_assert_held(&lock->wait_lock);
 }
@@ -89,9 +117,11 @@ static inline void lockdep_assert_wait_lock_held(struct mutex *lock)
 
 #define MUTEX		rt_mutex
 #define MUTEX_WAITER	rt_mutex_waiter
+#define WAIT_LOCK	rtmutex.wait_lock
 
 static inline struct rt_mutex_waiter *
 __ww_waiter_first(struct rt_mutex *lock)
+	__must_hold(&lock->rtmutex.wait_lock)
 {
 	struct rb_node *n = rb_first(&lock->rtmutex.waiters.rb_root);
 	if (!n)
@@ -119,6 +149,7 @@ __ww_waiter_prev(struct rt_mutex *lock, struct rt_mutex_waiter *w)
 
 static inline struct rt_mutex_waiter *
 __ww_waiter_last(struct rt_mutex *lock)
+	__must_hold(&lock->rtmutex.wait_lock)
 {
 	struct rb_node *n = rb_last(&lock->rtmutex.waiters.rb_root);
 	if (!n)
@@ -140,21 +171,25 @@ __ww_mutex_owner(struct rt_mutex *lock)
 
 static inline bool
 __ww_mutex_has_waiters(struct rt_mutex *lock)
+	__must_hold(&lock->rtmutex.wait_lock)
 {
 	return rt_mutex_has_waiters(&lock->rtmutex);
 }
 
-static inline void lock_wait_lock(struct rt_mutex *lock)
+static inline void lock_wait_lock(struct rt_mutex *lock, unsigned long *flags)
+	__acquires(&lock->rtmutex.wait_lock)
 {
-	raw_spin_lock(&lock->rtmutex.wait_lock);
+	raw_spin_lock_irqsave(&lock->rtmutex.wait_lock, *flags);
 }
 
-static inline void unlock_wait_lock(struct rt_mutex *lock)
+static inline void unlock_wait_lock(struct rt_mutex *lock, unsigned long *flags)
+	__releases(&lock->rtmutex.wait_lock)
 {
-	raw_spin_unlock(&lock->rtmutex.wait_lock);
+	raw_spin_unlock_irqrestore(&lock->rtmutex.wait_lock, *flags);
 }
 
 static inline void lockdep_assert_wait_lock_held(struct rt_mutex *lock)
+	__must_hold(&lock->rtmutex.wait_lock)
 {
 	lockdep_assert_held(&lock->rtmutex.wait_lock);
 }
@@ -237,7 +272,7 @@ __ww_ctx_less(struct ww_acquire_ctx *a, struct ww_acquire_ctx *b)
 	int a_prio = a->task->prio;
 	int b_prio = b->task->prio;
 
-	if (rt_prio(a_prio) || rt_prio(b_prio)) {
+	if (rt_or_dl_prio(a_prio) || rt_or_dl_prio(b_prio)) {
 
 		if (a_prio > b_prio)
 			return true;
@@ -275,7 +310,7 @@ __ww_ctx_less(struct ww_acquire_ctx *a, struct ww_acquire_ctx *b)
  */
 static bool
 __ww_mutex_die(struct MUTEX *lock, struct MUTEX_WAITER *waiter,
-	       struct ww_acquire_ctx *ww_ctx)
+	       struct ww_acquire_ctx *ww_ctx, struct wake_q_head *wake_q)
 {
 	if (!ww_ctx->is_wait_die)
 		return false;
@@ -284,7 +319,13 @@ __ww_mutex_die(struct MUTEX *lock, struct MUTEX_WAITER *waiter,
 #ifndef WW_RT
 		debug_mutex_wake_waiter(lock, waiter);
 #endif
-		wake_up_process(waiter->task);
+		/*
+		 * When waking up the task to die, be sure to set the
+		 * blocked_on to PROXY_WAKING. Otherwise we can see
+		 * circular blocked_on relationships that can't resolve.
+		 */
+		set_task_blocked_on_waking(waiter->task, lock);
+		wake_q_add(wake_q, waiter->task);
 	}
 
 	return true;
@@ -299,7 +340,9 @@ __ww_mutex_die(struct MUTEX *lock, struct MUTEX_WAITER *waiter,
  */
 static bool __ww_mutex_wound(struct MUTEX *lock,
 			     struct ww_acquire_ctx *ww_ctx,
-			     struct ww_acquire_ctx *hold_ctx)
+			     struct ww_acquire_ctx *hold_ctx,
+			     struct wake_q_head *wake_q)
+	__must_hold(&lock->WAIT_LOCK)
 {
 	struct task_struct *owner = __ww_mutex_owner(lock);
 
@@ -330,9 +373,19 @@ static bool __ww_mutex_wound(struct MUTEX *lock,
 		 * it's wounded in __ww_mutex_check_kill() or has a
 		 * wakeup pending to re-read the wounded state.
 		 */
-		if (owner != current)
-			wake_up_process(owner);
-
+		if (owner != current) {
+			/*
+			 * When waking up the task to wound, be sure to set the
+			 * blocked_on to PROXY_WAKING. Otherwise we can see
+			 * circular blocked_on relationships that can't resolve.
+			 *
+			 * NOTE: We pass NULL here instead of lock, because we
+			 * are waking the mutex owner, who may be currently
+			 * blocked on a different mutex.
+			 */
+			set_task_blocked_on_waking(owner, NULL);
+			wake_q_add(wake_q, owner);
+		}
 		return true;
 	}
 
@@ -352,7 +405,9 @@ static bool __ww_mutex_wound(struct MUTEX *lock,
  * The current task must not be on the wait list.
  */
 static void
-__ww_mutex_check_waiters(struct MUTEX *lock, struct ww_acquire_ctx *ww_ctx)
+__ww_mutex_check_waiters(struct MUTEX *lock, struct ww_acquire_ctx *ww_ctx,
+			 struct wake_q_head *wake_q)
+	__must_hold(&lock->WAIT_LOCK)
 {
 	struct MUTEX_WAITER *cur;
 
@@ -364,8 +419,8 @@ __ww_mutex_check_waiters(struct MUTEX *lock, struct ww_acquire_ctx *ww_ctx)
 		if (!cur->ww_ctx)
 			continue;
 
-		if (__ww_mutex_die(lock, cur, ww_ctx) ||
-		    __ww_mutex_wound(lock, cur->ww_ctx, ww_ctx))
+		if (__ww_mutex_die(lock, cur, ww_ctx, wake_q) ||
+		    __ww_mutex_wound(lock, cur->ww_ctx, ww_ctx, wake_q))
 			break;
 	}
 }
@@ -377,6 +432,10 @@ __ww_mutex_check_waiters(struct MUTEX *lock, struct ww_acquire_ctx *ww_ctx)
 static __always_inline void
 ww_mutex_set_context_fastpath(struct ww_mutex *lock, struct ww_acquire_ctx *ctx)
 {
+	DEFINE_WAKE_Q(wake_q);
+	unsigned long flags;
+	bool has_waiters;
+
 	ww_mutex_lock_acquired(lock, ctx);
 
 	/*
@@ -397,16 +456,20 @@ ww_mutex_set_context_fastpath(struct ww_mutex *lock, struct ww_acquire_ctx *ctx)
 	 * __ww_mutex_add_waiter() and makes sure we either observe ww->ctx
 	 * and/or !empty list.
 	 */
-	if (likely(!__ww_mutex_has_waiters(&lock->base)))
+	has_waiters = data_race(__ww_mutex_has_waiters(&lock->base));
+	if (likely(!has_waiters))
 		return;
 
 	/*
 	 * Uh oh, we raced in fastpath, check if any of the waiters need to
 	 * die or wound us.
 	 */
-	lock_wait_lock(&lock->base);
-	__ww_mutex_check_waiters(&lock->base, ctx);
-	unlock_wait_lock(&lock->base);
+	lock_wait_lock(&lock->base, &flags);
+	__ww_mutex_check_waiters(&lock->base, ctx, &wake_q);
+	preempt_disable();
+	unlock_wait_lock(&lock->base, &flags);
+	wake_up_q(&wake_q);
+	preempt_enable();
 }
 
 static __always_inline int
@@ -440,6 +503,7 @@ __ww_mutex_kill(struct MUTEX *lock, struct ww_acquire_ctx *ww_ctx)
 static inline int
 __ww_mutex_check_kill(struct MUTEX *lock, struct MUTEX_WAITER *waiter,
 		      struct ww_acquire_ctx *ctx)
+	__must_hold(&lock->WAIT_LOCK)
 {
 	struct ww_mutex *ww = container_of(lock, struct ww_mutex, base);
 	struct ww_acquire_ctx *hold_ctx = READ_ONCE(ww->ctx);
@@ -488,7 +552,9 @@ __ww_mutex_check_kill(struct MUTEX *lock, struct MUTEX_WAITER *waiter,
 static inline int
 __ww_mutex_add_waiter(struct MUTEX_WAITER *waiter,
 		      struct MUTEX *lock,
-		      struct ww_acquire_ctx *ww_ctx)
+		      struct ww_acquire_ctx *ww_ctx,
+		      struct wake_q_head *wake_q)
+	__must_hold(&lock->WAIT_LOCK)
 {
 	struct MUTEX_WAITER *cur, *pos = NULL;
 	bool is_wait_die;
@@ -532,7 +598,7 @@ __ww_mutex_add_waiter(struct MUTEX_WAITER *waiter,
 		pos = cur;
 
 		/* Wait-Die: ensure younger waiters die. */
-		__ww_mutex_die(lock, cur, ww_ctx);
+		__ww_mutex_die(lock, cur, ww_ctx, wake_q);
 	}
 
 	__ww_waiter_add(lock, waiter, pos);
@@ -550,7 +616,7 @@ __ww_mutex_add_waiter(struct MUTEX_WAITER *waiter,
 		 * such that either we or the fastpath will wound @ww->ctx.
 		 */
 		smp_mb();
-		__ww_mutex_wound(lock, ww_ctx, ww->ctx);
+		__ww_mutex_wound(lock, ww_ctx, ww->ctx, wake_q);
 	}
 
 	return 0;

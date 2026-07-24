@@ -164,18 +164,18 @@ static void ttm_resource_init_pinned(struct kunit *test)
 
 	res = kunit_kzalloc(test, sizeof(*res), GFP_KERNEL);
 	KUNIT_ASSERT_NOT_NULL(test, res);
-	KUNIT_ASSERT_TRUE(test, list_empty(&bo->bdev->pinned));
+	KUNIT_ASSERT_TRUE(test, list_empty(&bo->bdev->unevictable));
 
 	dma_resv_lock(bo->base.resv, NULL);
 	ttm_bo_pin(bo);
 	ttm_resource_init(bo, place, res);
-	KUNIT_ASSERT_TRUE(test, list_is_singular(&bo->bdev->pinned));
+	KUNIT_ASSERT_TRUE(test, list_is_singular(&bo->bdev->unevictable));
 
 	ttm_bo_unpin(bo);
 	ttm_resource_fini(man, res);
 	dma_resv_unlock(bo->base.resv);
 
-	KUNIT_ASSERT_TRUE(test, list_empty(&bo->bdev->pinned));
+	KUNIT_ASSERT_TRUE(test, list_empty(&bo->bdev->unevictable));
 }
 
 static void ttm_resource_fini_basic(struct kunit *test)
@@ -198,7 +198,7 @@ static void ttm_resource_fini_basic(struct kunit *test)
 	ttm_resource_init(bo, place, res);
 	ttm_resource_fini(man, res);
 
-	KUNIT_ASSERT_TRUE(test, list_empty(&res->lru));
+	KUNIT_ASSERT_TRUE(test, list_empty(&res->lru.link));
 	KUNIT_ASSERT_EQ(test, man->usage, 0);
 }
 
@@ -207,6 +207,7 @@ static void ttm_resource_manager_init_basic(struct kunit *test)
 	struct ttm_resource_test_priv *priv = test->priv;
 	struct ttm_resource_manager *man;
 	size_t size = SZ_16K;
+	int i;
 
 	man = kunit_kzalloc(test, sizeof(*man), GFP_KERNEL);
 	KUNIT_ASSERT_NOT_NULL(test, man);
@@ -216,8 +217,8 @@ static void ttm_resource_manager_init_basic(struct kunit *test)
 	KUNIT_ASSERT_PTR_EQ(test, man->bdev, priv->devs->ttm_dev);
 	KUNIT_ASSERT_EQ(test, man->size, size);
 	KUNIT_ASSERT_EQ(test, man->usage, 0);
-	KUNIT_ASSERT_NULL(test, man->move);
-	KUNIT_ASSERT_NOT_NULL(test, &man->move_lock);
+	for (i = 0; i < TTM_NUM_MOVE_FENCES; i++)
+		KUNIT_ASSERT_NULL(test, man->eviction_fences[i]);
 
 	for (int i = 0; i < TTM_MAX_BO_PRIORITY; ++i)
 		KUNIT_ASSERT_TRUE(test, list_empty(&man->lru[i]));
@@ -302,7 +303,7 @@ static void ttm_sys_man_free_basic(struct kunit *test)
 	res = kunit_kzalloc(test, sizeof(*res), GFP_KERNEL);
 	KUNIT_ASSERT_NOT_NULL(test, res);
 
-	ttm_resource_alloc(bo, place, &res);
+	ttm_resource_alloc(bo, place, &res, NULL);
 
 	man = ttm_manager_type(priv->devs->ttm_dev, mem_type);
 	man->func->free(man, res);

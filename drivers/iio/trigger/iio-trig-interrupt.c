@@ -48,7 +48,7 @@ static int iio_interrupt_trigger_probe(struct platform_device *pdev)
 		goto error_ret;
 	}
 
-	trig_info = kzalloc(sizeof(*trig_info), GFP_KERNEL);
+	trig_info = kzalloc_obj(*trig_info);
 	if (!trig_info) {
 		ret = -ENOMEM;
 		goto error_free_trigger;
@@ -96,7 +96,7 @@ static void iio_interrupt_trigger_remove(struct platform_device *pdev)
 
 static struct platform_driver iio_interrupt_trigger_driver = {
 	.probe = iio_interrupt_trigger_probe,
-	.remove_new = iio_interrupt_trigger_remove,
+	.remove = iio_interrupt_trigger_remove,
 	.driver = {
 		.name = "iio_interrupt_trigger",
 	},

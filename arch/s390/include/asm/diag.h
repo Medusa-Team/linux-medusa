@@ -36,8 +36,11 @@ enum diag_stat_enum {
 	DIAG_STAT_X2FC,
 	DIAG_STAT_X304,
 	DIAG_STAT_X308,
+	DIAG_STAT_X310,
 	DIAG_STAT_X318,
 	DIAG_STAT_X320,
+	DIAG_STAT_X324,
+	DIAG_STAT_X49C,
 	DIAG_STAT_X500,
 	NR_DIAG_STAT
 };
@@ -63,7 +66,7 @@ static inline void diag10_range(unsigned long start_pfn, unsigned long num_pfn)
 	end_addr = pfn_to_phys(start_pfn + num_pfn - 1);
 
 	diag_stat_inc(DIAG_STAT_X010);
-	asm volatile(
+	asm_inline volatile(
 		"0:	diag	%0,%1,0x10\n"
 		"1:	nopr	%%r7\n"
 		EX_TABLE(0b, 1b)
@@ -362,5 +365,13 @@ int _diag14_amode31(unsigned long rx, unsigned long ry1, unsigned long subcode);
 void _diag0c_amode31(unsigned long rx);
 void _diag308_reset_amode31(void);
 int _diag8c_amode31(struct diag8c *addr, struct ccw_dev_id *devno, size_t len);
+
+/* diag 49c subcodes */
+enum diag49c_sc {
+	DIAG49C_SUBC_ACK = 0,
+	DIAG49C_SUBC_REG = 1
+};
+
+int diag49c(unsigned long subcode);
 
 #endif /* _ASM_S390_DIAG_H */

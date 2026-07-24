@@ -80,7 +80,7 @@ static int da9052_onkey_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	onkey = kzalloc(sizeof(*onkey), GFP_KERNEL);
+	onkey = kzalloc_obj(*onkey);
 	input_dev = input_allocate_device();
 	if (!onkey || !input_dev) {
 		dev_err(&pdev->dev, "Failed to allocate memory\n");
@@ -140,8 +140,8 @@ static void da9052_onkey_remove(struct platform_device *pdev)
 
 static struct platform_driver da9052_onkey_driver = {
 	.probe	= da9052_onkey_probe,
-	.remove_new = da9052_onkey_remove,
-	.driver = {
+	.remove	= da9052_onkey_remove,
+	.driver	= {
 		.name	= "da9052-onkey",
 	},
 };

@@ -151,8 +151,8 @@ err_add_decoder:
 	media_device_cleanup(&vpu->mdev);
 	v4l2_device_unregister(&vpu->v4l2_dev);
 err_vpu_deinit:
-	pm_runtime_set_suspended(dev);
 	pm_runtime_disable(dev);
+	pm_runtime_set_suspended(dev);
 
 	return ret;
 }
@@ -174,31 +174,6 @@ static void vpu_remove(struct platform_device *pdev)
 	v4l2_device_unregister(&vpu->v4l2_dev);
 	mutex_destroy(&vpu->lock);
 }
-
-static int __maybe_unused vpu_runtime_resume(struct device *dev)
-{
-	return 0;
-}
-
-static int __maybe_unused vpu_runtime_suspend(struct device *dev)
-{
-	return 0;
-}
-
-static int __maybe_unused vpu_resume(struct device *dev)
-{
-	return 0;
-}
-
-static int __maybe_unused vpu_suspend(struct device *dev)
-{
-	return 0;
-}
-
-static const struct dev_pm_ops vpu_pm_ops = {
-	SET_RUNTIME_PM_OPS(vpu_runtime_suspend, vpu_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(vpu_suspend, vpu_resume)
-};
 
 static struct vpu_resources imx8qxp_res = {
 	.plat_type = IMX8QXP,
@@ -227,11 +202,10 @@ MODULE_DEVICE_TABLE(of, vpu_dt_match);
 
 static struct platform_driver amphion_vpu_driver = {
 	.probe = vpu_probe,
-	.remove_new = vpu_remove,
+	.remove = vpu_remove,
 	.driver = {
 		.name = "amphion-vpu",
 		.of_match_table = vpu_dt_match,
-		.pm = &vpu_pm_ops,
 	},
 };
 

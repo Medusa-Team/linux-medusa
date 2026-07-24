@@ -49,7 +49,7 @@ static int mvme16x_probe(struct platform_device *dev)
 		goto out;
 	}
 
-	hostdata = kzalloc(sizeof(struct NCR_700_Host_Parameters), GFP_KERNEL);
+	hostdata = kzalloc_obj(struct NCR_700_Host_Parameters);
 	if (hostdata == NULL) {
 		printk(KERN_ERR "mvme16x-scsi: "
 				"Failed to allocate host data\n");
@@ -127,7 +127,7 @@ static struct platform_driver mvme16x_scsi_driver = {
 		.name           = "mvme16x-scsi",
 	},
 	.probe          = mvme16x_probe,
-	.remove_new     = mvme16x_device_remove,
+	.remove         = mvme16x_device_remove,
 };
 
 static int __init mvme16x_scsi_init(void)

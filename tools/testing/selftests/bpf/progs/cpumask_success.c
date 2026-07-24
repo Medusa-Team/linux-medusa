@@ -31,11 +31,59 @@ struct kptr_nested_deep {
 	struct kptr_nested_pair ptr_pairs[3];
 };
 
+struct kptr_nested_deep_array_1_2 {
+	int dummy;
+	struct bpf_cpumask __kptr * mask[CPUMASK_KPTR_FIELDS_MAX];
+};
+
+struct kptr_nested_deep_array_1_1 {
+	int dummy;
+	struct kptr_nested_deep_array_1_2 d_2;
+};
+
+struct kptr_nested_deep_array_1 {
+	long dummy;
+	struct kptr_nested_deep_array_1_1 d_1;
+};
+
+struct kptr_nested_deep_array_2_2 {
+	long dummy[2];
+	struct bpf_cpumask __kptr * mask;
+};
+
+struct kptr_nested_deep_array_2_1 {
+	int dummy;
+	struct kptr_nested_deep_array_2_2 d_2[CPUMASK_KPTR_FIELDS_MAX];
+};
+
+struct kptr_nested_deep_array_2 {
+	long dummy;
+	struct kptr_nested_deep_array_2_1 d_1;
+};
+
+struct kptr_nested_deep_array_3_2 {
+	long dummy[2];
+	struct bpf_cpumask __kptr * mask;
+};
+
+struct kptr_nested_deep_array_3_1 {
+	int dummy;
+	struct kptr_nested_deep_array_3_2 d_2;
+};
+
+struct kptr_nested_deep_array_3 {
+	long dummy;
+	struct kptr_nested_deep_array_3_1 d_1[CPUMASK_KPTR_FIELDS_MAX];
+};
+
 private(MASK) static struct bpf_cpumask __kptr * global_mask_array[2];
 private(MASK) static struct bpf_cpumask __kptr * global_mask_array_l2[2][1];
 private(MASK) static struct bpf_cpumask __kptr * global_mask_array_one[1];
 private(MASK) static struct kptr_nested global_mask_nested[2];
 private(MASK_DEEP) static struct kptr_nested_deep global_mask_nested_deep;
+private(MASK_1) static struct kptr_nested_deep_array_1 global_mask_nested_deep_array_1;
+private(MASK_2) static struct kptr_nested_deep_array_2 global_mask_nested_deep_array_2;
+private(MASK_3) static struct kptr_nested_deep_array_3 global_mask_nested_deep_array_3;
 
 static bool is_test_task(void)
 {
@@ -543,9 +591,18 @@ static int _global_mask_array_rcu(struct bpf_cpumask **mask0,
 		goto err_exit;
 	}
 
-	/* [<mask 0>, NULL] */
-	if (!*mask0 || *mask1) {
+	/* [<mask 0>, *] */
+	if (!*mask0) {
 		err = 2;
+		goto err_exit;
+	}
+
+	if (!mask1)
+		goto err_exit;
+
+	/* [*, NULL] */
+	if (*mask1) {
+		err = 3;
 		goto err_exit;
 	}
 
@@ -632,6 +689,23 @@ int BPF_PROG(test_global_mask_nested_deep_rcu, struct task_struct *task, u64 clo
 }
 
 SEC("tp_btf/task_newtask")
+int BPF_PROG(test_global_mask_nested_deep_array_rcu, struct task_struct *task, u64 clone_flags)
+{
+	int i;
+
+	for (i = 0; i < CPUMASK_KPTR_FIELDS_MAX; i++)
+		_global_mask_array_rcu(&global_mask_nested_deep_array_1.d_1.d_2.mask[i], NULL);
+
+	for (i = 0; i < CPUMASK_KPTR_FIELDS_MAX; i++)
+		_global_mask_array_rcu(&global_mask_nested_deep_array_2.d_1.d_2[i].mask, NULL);
+
+	for (i = 0; i < CPUMASK_KPTR_FIELDS_MAX; i++)
+		_global_mask_array_rcu(&global_mask_nested_deep_array_3.d_1[i].d_2.mask, NULL);
+
+	return 0;
+}
+
+SEC("tp_btf/task_newtask")
 int BPF_PROG(test_cpumask_weight, struct task_struct *task, u64 clone_flags)
 {
 	struct bpf_cpumask *local;
@@ -675,7 +749,6 @@ out:
 }
 
 SEC("tp_btf/task_newtask")
-__success
 int BPF_PROG(test_refcount_null_tracking, struct task_struct *task, u64 clone_flags)
 {
 	struct bpf_cpumask *mask1, *mask2;
@@ -696,3 +769,122 @@ free_masks_return:
 		bpf_cpumask_release(mask2);
 	return 0;
 }
+
+SEC("tp_btf/task_newtask")
+int BPF_PROG(test_populate_reject_small_mask, struct task_struct *task, u64 clone_flags)
+{
+	struct bpf_cpumask *local;
+	u8 toofewbits;
+	int ret;
+
+	if (!is_test_task())
+		return 0;
+
+	local = create_cpumask();
+	if (!local)
+		return 0;
+
+	/* The kfunc should prevent this operation */
+	ret = bpf_cpumask_populate((struct cpumask *)local, &toofewbits, sizeof(toofewbits));
+	if (ret != -EACCES)
+		err = 2;
+
+	bpf_cpumask_release(local);
+
+	return 0;
+}
+
+/* Mask is guaranteed to be large enough for bpf_cpumask_t. */
+#define CPUMASK_TEST_MASKLEN (sizeof(cpumask_t))
+
+/* Add an extra word for the test_populate_reject_unaligned test. */
+u64 bits[CPUMASK_TEST_MASKLEN / 8 + 1];
+extern bool CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS __kconfig __weak;
+
+SEC("tp_btf/task_newtask")
+int BPF_PROG(test_populate_reject_unaligned, struct task_struct *task, u64 clone_flags)
+{
+	struct bpf_cpumask *mask;
+	char *src;
+	int ret;
+
+	if (!is_test_task())
+		return 0;
+
+	/* Skip if unaligned accesses are fine for this arch.  */
+	if (CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS)
+		return 0;
+
+	mask = bpf_cpumask_create();
+	if (!mask) {
+		err = 1;
+		return 0;
+	}
+
+	/* Misalign the source array by a byte. */
+	src = &((char *)bits)[1];
+
+	ret = bpf_cpumask_populate((struct cpumask *)mask, src, CPUMASK_TEST_MASKLEN);
+	if (ret != -EINVAL)
+		err = 2;
+
+	bpf_cpumask_release(mask);
+
+	return 0;
+}
+
+
+SEC("tp_btf/task_newtask")
+int BPF_PROG(test_populate, struct task_struct *task, u64 clone_flags)
+{
+	struct bpf_cpumask *mask;
+	bool bit;
+	int ret;
+	int i;
+
+	if (!is_test_task())
+		return 0;
+
+	/* Set only odd bits. */
+	__builtin_memset(bits, 0xaa, CPUMASK_TEST_MASKLEN);
+
+	mask = bpf_cpumask_create();
+	if (!mask) {
+		err = 1;
+		return 0;
+	}
+
+	/* Pass the entire bits array, the kfunc will only copy the valid bits. */
+	ret = bpf_cpumask_populate((struct cpumask *)mask, bits, CPUMASK_TEST_MASKLEN);
+	if (ret) {
+		err = 2;
+		goto out;
+	}
+
+	/*
+	 * Test is there to appease the verifier. We cannot directly
+	 * access NR_CPUS, the upper bound for nr_cpus, so we infer
+	 * it from the size of cpumask_t.
+	 */
+	if (nr_cpus < 0 || nr_cpus >= CPUMASK_TEST_MASKLEN * 8) {
+		err = 3;
+		goto out;
+	}
+
+	bpf_for(i, 0, nr_cpus) {
+		/* Odd-numbered bits should be set, even ones unset. */
+		bit = bpf_cpumask_test_cpu(i, (const struct cpumask *)mask);
+		if (bit == (i % 2 != 0))
+			continue;
+
+		err = 4;
+		break;
+	}
+
+out:
+	bpf_cpumask_release(mask);
+
+	return 0;
+}
+
+#undef CPUMASK_TEST_MASKLEN

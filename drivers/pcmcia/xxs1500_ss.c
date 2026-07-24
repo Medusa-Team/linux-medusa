@@ -212,7 +212,7 @@ static int xxs1500_pcmcia_probe(struct platform_device *pdev)
 	struct resource *r;
 	int ret, irq;
 
-	sock = kzalloc(sizeof(struct xxs1500_pcmcia_sock), GFP_KERNEL);
+	sock = kzalloc_obj(struct xxs1500_pcmcia_sock);
 	if (!sock)
 		return -ENOMEM;
 
@@ -316,7 +316,7 @@ static struct platform_driver xxs1500_pcmcia_socket_driver = {
 		.name	= "xxs1500_pcmcia",
 	},
 	.probe		= xxs1500_pcmcia_probe,
-	.remove_new	= xxs1500_pcmcia_remove,
+	.remove		= xxs1500_pcmcia_remove,
 };
 
 module_platform_driver(xxs1500_pcmcia_socket_driver);

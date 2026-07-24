@@ -57,7 +57,8 @@ static int clk_mt8135_apmixed_probe(struct platform_device *pdev)
 	if (!clk_data)
 		return -ENOMEM;
 
-	ret = mtk_clk_register_plls(node, plls, ARRAY_SIZE(plls), clk_data);
+	ret = mtk_clk_register_plls(&pdev->dev, plls, ARRAY_SIZE(plls),
+				    clk_data);
 	if (ret)
 		goto free_clk_data;
 
@@ -93,7 +94,7 @@ MODULE_DEVICE_TABLE(of, of_match_clk_mt8135_apmixed);
 
 static struct platform_driver clk_mt8135_apmixed_drv = {
 	.probe = clk_mt8135_apmixed_probe,
-	.remove_new = clk_mt8135_apmixed_remove,
+	.remove = clk_mt8135_apmixed_remove,
 	.driver = {
 		.name = "clk-mt8135-apmixed",
 		.of_match_table = of_match_clk_mt8135_apmixed,

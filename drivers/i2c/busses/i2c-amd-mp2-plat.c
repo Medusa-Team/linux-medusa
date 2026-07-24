@@ -179,7 +179,7 @@ static u32 i2c_amd_func(struct i2c_adapter *a)
 }
 
 static const struct i2c_algorithm i2c_amd_algorithm = {
-	.master_xfer = i2c_amd_xfer,
+	.xfer = i2c_amd_xfer,
 	.functionality = i2c_amd_func,
 };
 
@@ -340,13 +340,13 @@ static void i2c_amd_remove(struct platform_device *pdev)
 
 static const struct acpi_device_id i2c_amd_acpi_match[] = {
 	{ "AMDI0011" },
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(acpi, i2c_amd_acpi_match);
 
 static struct platform_driver i2c_amd_plat_driver = {
 	.probe = i2c_amd_probe,
-	.remove_new = i2c_amd_remove,
+	.remove = i2c_amd_remove,
 	.driver = {
 		.name = "i2c_amd_mp2",
 		.acpi_match_table = ACPI_PTR(i2c_amd_acpi_match),

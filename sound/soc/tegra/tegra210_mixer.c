@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2021-2024 NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
 //
 // tegra210_mixer.c - Tegra210 MIXER driver
-//
-// Copyright (c) 2021 NVIDIA CORPORATION.  All rights reserved.
 
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -73,7 +73,7 @@ static const struct tegra210_mixer_gain_params gain_params = {
 	{ 0, 0, 0x400, 0x8000000 },
 };
 
-static int __maybe_unused tegra210_mixer_runtime_suspend(struct device *dev)
+static int tegra210_mixer_runtime_suspend(struct device *dev)
 {
 	struct tegra210_mixer *mixer = dev_get_drvdata(dev);
 
@@ -83,7 +83,7 @@ static int __maybe_unused tegra210_mixer_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused tegra210_mixer_runtime_resume(struct device *dev)
+static int tegra210_mixer_runtime_resume(struct device *dev)
 {
 	struct tegra210_mixer *mixer = dev_get_drvdata(dev);
 
@@ -178,7 +178,7 @@ static int tegra210_mixer_get_gain(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_mixer *mixer = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int reg = mc->reg;
 	unsigned int i;
@@ -197,7 +197,7 @@ static int tegra210_mixer_apply_gain(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_mixer *mixer = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int reg = mc->reg, id;
 	int err;
@@ -248,6 +248,7 @@ static int tegra210_mixer_set_audio_cif(struct tegra210_mixer *mixer,
 	case SNDRV_PCM_FORMAT_S16_LE:
 		audio_bits = TEGRA_ACIF_BITS_16;
 		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
 	case SNDRV_PCM_FORMAT_S32_LE:
 		audio_bits = TEGRA_ACIF_BITS_32;
 		break;
@@ -312,6 +313,7 @@ static const struct snd_soc_dai_ops tegra210_mixer_in_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				SNDRV_PCM_FMTBIT_S16_LE |	\
+				SNDRV_PCM_FMTBIT_S24_LE |	\
 				SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.capture = {					\
@@ -321,6 +323,7 @@ static const struct snd_soc_dai_ops tegra210_mixer_in_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				SNDRV_PCM_FMTBIT_S16_LE |	\
+				SNDRV_PCM_FMTBIT_S24_LE |	\
 				SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.ops = &tegra210_mixer_in_dai_ops,		\
@@ -336,6 +339,7 @@ static const struct snd_soc_dai_ops tegra210_mixer_in_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				SNDRV_PCM_FMTBIT_S16_LE |	\
+				SNDRV_PCM_FMTBIT_S24_LE |	\
 				SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.capture = {					\
@@ -345,6 +349,7 @@ static const struct snd_soc_dai_ops tegra210_mixer_in_dai_ops = {
 			.rates = SNDRV_PCM_RATE_8000_192000,	\
 			.formats = SNDRV_PCM_FMTBIT_S8 |	\
 				SNDRV_PCM_FMTBIT_S16_LE |	\
+				SNDRV_PCM_FMTBIT_S24_LE |	\
 				SNDRV_PCM_FMTBIT_S32_LE,	\
 		},						\
 		.ops = &tegra210_mixer_out_dai_ops,		\
@@ -603,6 +608,7 @@ static const struct regmap_config tegra210_mixer_regmap_config = {
 	.precious_reg		= tegra210_mixer_precious_reg,
 	.reg_defaults		= tegra210_mixer_reg_defaults,
 	.num_reg_defaults	= ARRAY_SIZE(tegra210_mixer_reg_defaults),
+	.reg_default_cb		= regmap_default_zero_cb,
 	.cache_type		= REGCACHE_FLAT,
 };
 
@@ -635,20 +641,18 @@ static int tegra210_mixer_platform_probe(struct platform_device *pdev)
 
 	mixer->regmap = devm_regmap_init_mmio(dev, regs,
 					      &tegra210_mixer_regmap_config);
-	if (IS_ERR(mixer->regmap)) {
-		dev_err(dev, "regmap init failed\n");
-		return PTR_ERR(mixer->regmap);
-	}
+	if (IS_ERR(mixer->regmap))
+		return dev_err_probe(dev, PTR_ERR(mixer->regmap),
+				     "regmap init failed\n");
 
 	regcache_cache_only(mixer->regmap, true);
 
 	err = devm_snd_soc_register_component(dev, &tegra210_mixer_cmpnt,
 					      tegra210_mixer_dais,
 					      ARRAY_SIZE(tegra210_mixer_dais));
-	if (err) {
-		dev_err(dev, "can't register MIXER component, err: %d\n", err);
-		return err;
-	}
+	if (err)
+		return dev_err_probe(dev, err,
+				     "can't register MIXER component\n");
 
 	pm_runtime_enable(dev);
 
@@ -661,20 +665,19 @@ static void tegra210_mixer_platform_remove(struct platform_device *pdev)
 }
 
 static const struct dev_pm_ops tegra210_mixer_pm_ops = {
-	SET_RUNTIME_PM_OPS(tegra210_mixer_runtime_suspend,
-			   tegra210_mixer_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	RUNTIME_PM_OPS(tegra210_mixer_runtime_suspend,
+		       tegra210_mixer_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static struct platform_driver tegra210_mixer_driver = {
 	.driver = {
 		.name = "tegra210_mixer",
 		.of_match_table = tegra210_mixer_of_match,
-		.pm = &tegra210_mixer_pm_ops,
+		.pm = pm_ptr(&tegra210_mixer_pm_ops),
 	},
 	.probe = tegra210_mixer_platform_probe,
-	.remove_new = tegra210_mixer_platform_remove,
+	.remove = tegra210_mixer_platform_remove,
 };
 module_platform_driver(tegra210_mixer_driver);
 

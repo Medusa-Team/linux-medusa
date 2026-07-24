@@ -16,6 +16,7 @@
 #include <linux/atomic.h>
 #include <linux/kstrtox.h>
 #include <linux/proc_fs.h>
+#include <linux/wait.h>
 
 /*
  * Each cache requires:
@@ -112,7 +113,11 @@ struct cache_detail {
 	int			entries;
 
 	/* fields for communication over channel */
-	struct list_head	queue;
+	struct list_head	requests;
+	struct list_head	readers;
+	spinlock_t		queue_lock;
+	wait_queue_head_t	queue_wait;
+	u64			next_seqno;
 
 	atomic_t		writers;		/* how many time is /channel open */
 	time64_t		last_close;		/* if no writers, when did last close */
@@ -222,6 +227,8 @@ static inline bool cache_is_expired(struct cache_detail *detail, struct cache_he
 	return detail->flush_time >= h->last_refresh;
 }
 
+extern int cache_check_rcu(struct cache_detail *detail,
+		       struct cache_head *h, struct cache_req *rqstp);
 extern int cache_check(struct cache_detail *detail,
 		       struct cache_head *h, struct cache_req *rqstp);
 extern void cache_flush(void);

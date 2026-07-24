@@ -139,11 +139,11 @@ static int ioc3kbd_probe(struct platform_device *pdev)
 	if (!d)
 		return -ENOMEM;
 
-	sk = kzalloc(sizeof(*sk), GFP_KERNEL);
+	sk = kzalloc_obj(*sk);
 	if (!sk)
 		return -ENOMEM;
 
-	sa = kzalloc(sizeof(*sa), GFP_KERNEL);
+	sa = kzalloc_obj(*sa);
 	if (!sa) {
 		kfree(sk);
 		return -ENOMEM;
@@ -208,7 +208,7 @@ MODULE_DEVICE_TABLE(platform, ioc3kbd_id_table);
 
 static struct platform_driver ioc3kbd_driver = {
 	.probe          = ioc3kbd_probe,
-	.remove_new     = ioc3kbd_remove,
+	.remove         = ioc3kbd_remove,
 	.id_table	= ioc3kbd_id_table,
 	.driver = {
 		.name = "ioc3-kbd",

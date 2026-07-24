@@ -5,18 +5,16 @@
 
 #include "ivpu_drv.h"
 #include "ivpu_fw.h"
+#include "ivpu_gem.h"
 #include "ivpu_hw.h"
 #include "ivpu_hw_37xx_reg.h"
 #include "ivpu_hw_40xx_reg.h"
+#include "ivpu_hw_btrs.h"
 #include "ivpu_hw_ip.h"
 #include "ivpu_hw_reg_io.h"
 #include "ivpu_mmu.h"
 #include "ivpu_pm.h"
 
-#define PWR_ISLAND_EN_POST_DLY_FREQ_DEFAULT 0
-#define PWR_ISLAND_EN_POST_DLY_FREQ_HIGH    18
-#define PWR_ISLAND_STATUS_DLY_FREQ_DEFAULT  3
-#define PWR_ISLAND_STATUS_DLY_FREQ_HIGH	    46
 #define PWR_ISLAND_STATUS_TIMEOUT_US        (5 * USEC_PER_MSEC)
 
 #define TIM_SAFE_ENABLE		            0xf1d0dead
@@ -268,20 +266,15 @@ void ivpu_hw_ip_idle_gen_disable(struct ivpu_device *vdev)
 		idle_gen_drive_40xx(vdev, false);
 }
 
-static void pwr_island_delay_set_50xx(struct ivpu_device *vdev)
+static void
+pwr_island_delay_set_50xx(struct ivpu_device *vdev, u32 post, u32 post1, u32 post2, u32 status)
 {
-	u32 val, post, status;
-
-	if (vdev->hw->pll.profiling_freq == PLL_PROFILING_FREQ_DEFAULT) {
-		post = PWR_ISLAND_EN_POST_DLY_FREQ_DEFAULT;
-		status = PWR_ISLAND_STATUS_DLY_FREQ_DEFAULT;
-	} else {
-		post = PWR_ISLAND_EN_POST_DLY_FREQ_HIGH;
-		status = PWR_ISLAND_STATUS_DLY_FREQ_HIGH;
-	}
+	u32 val;
 
 	val = REGV_RD32(VPU_50XX_HOST_SS_AON_PWR_ISLAND_EN_POST_DLY);
 	val = REG_SET_FLD_NUM(VPU_50XX_HOST_SS_AON_PWR_ISLAND_EN_POST_DLY, POST_DLY, post, val);
+	val = REG_SET_FLD_NUM(VPU_50XX_HOST_SS_AON_PWR_ISLAND_EN_POST_DLY, POST1_DLY, post1, val);
+	val = REG_SET_FLD_NUM(VPU_50XX_HOST_SS_AON_PWR_ISLAND_EN_POST_DLY, POST2_DLY, post2, val);
 	REGV_WR32(VPU_50XX_HOST_SS_AON_PWR_ISLAND_EN_POST_DLY, val);
 
 	val = REGV_RD32(VPU_50XX_HOST_SS_AON_PWR_ISLAND_STATUS_DLY);
@@ -311,9 +304,6 @@ static void pwr_island_trickle_drive_40xx(struct ivpu_device *vdev, bool enable)
 		val = REG_CLR_FLD(VPU_40XX_HOST_SS_AON_PWR_ISLAND_TRICKLE_EN0, CSS_CPU, val);
 
 	REGV_WR32(VPU_40XX_HOST_SS_AON_PWR_ISLAND_TRICKLE_EN0, val);
-
-	if (enable)
-		ndelay(500);
 }
 
 static void pwr_island_drive_37xx(struct ivpu_device *vdev, bool enable)
@@ -326,9 +316,6 @@ static void pwr_island_drive_37xx(struct ivpu_device *vdev, bool enable)
 		val = REG_CLR_FLD(VPU_40XX_HOST_SS_AON_PWR_ISLAND_EN0, CSS_CPU, val);
 
 	REGV_WR32(VPU_40XX_HOST_SS_AON_PWR_ISLAND_EN0, val);
-
-	if (!enable)
-		ndelay(500);
 }
 
 static void pwr_island_drive_40xx(struct ivpu_device *vdev, bool enable)
@@ -347,9 +334,11 @@ static void pwr_island_enable(struct ivpu_device *vdev)
 {
 	if (ivpu_hw_ip_gen(vdev) == IVPU_HW_IP_37XX) {
 		pwr_island_trickle_drive_37xx(vdev, true);
+		ndelay(500);
 		pwr_island_drive_37xx(vdev, true);
 	} else {
 		pwr_island_trickle_drive_40xx(vdev, true);
+		ndelay(500);
 		pwr_island_drive_40xx(vdev, true);
 	}
 }
@@ -686,13 +675,44 @@ static void dpu_active_drive_37xx(struct ivpu_device *vdev, bool enable)
 	REGV_WR32(VPU_37XX_HOST_SS_AON_DPU_ACTIVE, val);
 }
 
+static void pwr_island_delay_set(struct ivpu_device *vdev)
+{
+	bool high = vdev->hw->pll.profiling_freq == PLL_PROFILING_FREQ_HIGH;
+	u32 post, post1, post2, status;
+
+	if (ivpu_hw_ip_gen(vdev) < IVPU_HW_IP_50XX)
+		return;
+
+	switch (ivpu_device_id(vdev)) {
+	case PCI_DEVICE_ID_WCL:
+	case PCI_DEVICE_ID_PTL_P:
+		post = high ? 18 : 0;
+		post1 = 0;
+		post2 = 0;
+		status = high ? 46 : 3;
+		break;
+
+	case PCI_DEVICE_ID_NVL:
+		post = high ? 198 : 17;
+		post1 = 0;
+		post2 = high ? 198 : 17;
+		status = 0;
+		break;
+
+	default:
+		dump_stack();
+		ivpu_err(vdev, "Unknown device ID\n");
+		return;
+	}
+
+	pwr_island_delay_set_50xx(vdev, post, post1, post2, status);
+}
+
 int ivpu_hw_ip_pwr_domain_enable(struct ivpu_device *vdev)
 {
 	int ret;
 
-	if (ivpu_hw_ip_gen(vdev) == IVPU_HW_IP_50XX)
-		pwr_island_delay_set_50xx(vdev);
-
+	pwr_island_delay_set(vdev);
 	pwr_island_enable(vdev);
 
 	ret = wait_for_pwr_island_status(vdev, 0x1);
@@ -797,6 +817,14 @@ void ivpu_hw_ip_tbu_mmu_enable(struct ivpu_device *vdev)
 		return ivpu_hw_ip_tbu_mmu_enable_40xx(vdev);
 }
 
+static inline u64 get_entry_point_addr(struct ivpu_device *vdev)
+{
+	if (ivpu_fw_is_warm_boot(vdev))
+		return vdev->fw->warm_boot_entry_point;
+	else
+		return vdev->fw->cold_boot_entry_point;
+}
+
 static int soc_cpu_boot_37xx(struct ivpu_device *vdev)
 {
 	u32 val;
@@ -813,14 +841,11 @@ static int soc_cpu_boot_37xx(struct ivpu_device *vdev)
 	val = REG_CLR_FLD(VPU_37XX_CPU_SS_MSSCPU_CPR_LEON_RT_VEC, IRQI_RESUME0, val);
 	REGV_WR32(VPU_37XX_CPU_SS_MSSCPU_CPR_LEON_RT_VEC, val);
 
-	val = vdev->fw->entry_point >> 9;
+	val = get_entry_point_addr(vdev) >> 9;
 	REGV_WR32(VPU_37XX_HOST_SS_LOADING_ADDRESS_LO, val);
 
 	val = REG_SET_FLD(VPU_37XX_HOST_SS_LOADING_ADDRESS_LO, DONE, val);
 	REGV_WR32(VPU_37XX_HOST_SS_LOADING_ADDRESS_LO, val);
-
-	ivpu_dbg(vdev, PM, "Booting firmware, mode: %s\n",
-		 vdev->fw->entry_point == vdev->fw->cold_boot_entry_point ? "cold boot" : "resume");
 
 	return 0;
 }
@@ -875,43 +900,67 @@ static int soc_cpu_drive_40xx(struct ivpu_device *vdev, bool enable)
 	return ret;
 }
 
-static int soc_cpu_enable(struct ivpu_device *vdev)
+static void soc_cpu_set_entry_point_40xx(struct ivpu_device *vdev, u64 entry_point)
 {
-	return soc_cpu_drive_40xx(vdev, true);
-}
-
-static int soc_cpu_boot_40xx(struct ivpu_device *vdev)
-{
-	int ret;
-	u32 val;
 	u64 val64;
+	u32 val;
 
-	ret = soc_cpu_enable(vdev);
-	if (ret) {
-		ivpu_err(vdev, "Failed to enable SOC CPU: %d\n", ret);
-		return ret;
-	}
-
-	val64 = vdev->fw->entry_point;
+	val64 = entry_point;
 	val64 <<= ffs(VPU_40XX_HOST_SS_VERIFICATION_ADDRESS_LO_IMAGE_LOCATION_MASK) - 1;
 	REGV_WR64(VPU_40XX_HOST_SS_VERIFICATION_ADDRESS_LO, val64);
 
 	val = REGV_RD32(VPU_40XX_HOST_SS_VERIFICATION_ADDRESS_LO);
 	val = REG_SET_FLD(VPU_40XX_HOST_SS_VERIFICATION_ADDRESS_LO, DONE, val);
 	REGV_WR32(VPU_40XX_HOST_SS_VERIFICATION_ADDRESS_LO, val);
+}
 
-	ivpu_dbg(vdev, PM, "Booting firmware, mode: %s\n",
-		 ivpu_fw_is_cold_boot(vdev) ? "cold boot" : "resume");
+static int soc_cpu_boot_40xx(struct ivpu_device *vdev)
+{
+	int ret;
+
+	ret = soc_cpu_drive_40xx(vdev, true);
+	if (ret) {
+		ivpu_err(vdev, "Failed to enable SOC CPU: %d\n", ret);
+		return ret;
+	}
+
+	soc_cpu_set_entry_point_40xx(vdev, get_entry_point_addr(vdev));
+
+	return 0;
+}
+
+static int soc_cpu_boot_60xx(struct ivpu_device *vdev)
+{
+	soc_cpu_set_entry_point_40xx(vdev, vdev->fw->cold_boot_entry_point);
 
 	return 0;
 }
 
 int ivpu_hw_ip_soc_cpu_boot(struct ivpu_device *vdev)
 {
-	if (ivpu_hw_ip_gen(vdev) == IVPU_HW_IP_37XX)
-		return soc_cpu_boot_37xx(vdev);
-	else
-		return soc_cpu_boot_40xx(vdev);
+	int ret;
+
+	switch (ivpu_hw_ip_gen(vdev)) {
+	case IVPU_HW_IP_37XX:
+		ret = soc_cpu_boot_37xx(vdev);
+		break;
+
+	case IVPU_HW_IP_40XX:
+	case IVPU_HW_IP_50XX:
+		ret = soc_cpu_boot_40xx(vdev);
+		break;
+
+	default:
+		ret = soc_cpu_boot_60xx(vdev);
+	}
+
+	if (ret)
+		return ret;
+
+	ivpu_dbg(vdev, PM, "Booting firmware, mode: %s\n",
+		 ivpu_fw_is_warm_boot(vdev) ? "warm boot" : "cold boot");
+
+	return 0;
 }
 
 static void wdt_disable_37xx(struct ivpu_device *vdev)
@@ -957,14 +1006,14 @@ void ivpu_hw_ip_wdt_disable(struct ivpu_device *vdev)
 
 static u32 ipc_rx_count_get_37xx(struct ivpu_device *vdev)
 {
-	u32 count = REGV_RD32_SILENT(VPU_37XX_HOST_SS_TIM_IPC_FIFO_STAT);
+	u32 count = readl(vdev->regv + VPU_37XX_HOST_SS_TIM_IPC_FIFO_STAT);
 
 	return REG_GET_FLD(VPU_37XX_HOST_SS_TIM_IPC_FIFO_STAT, FILL_LEVEL, count);
 }
 
 static u32 ipc_rx_count_get_40xx(struct ivpu_device *vdev)
 {
-	u32 count = REGV_RD32_SILENT(VPU_40XX_HOST_SS_TIM_IPC_FIFO_STAT);
+	u32 count = readl(vdev->regv + VPU_40XX_HOST_SS_TIM_IPC_FIFO_STAT);
 
 	return REG_GET_FLD(VPU_40XX_HOST_SS_TIM_IPC_FIFO_STAT, FILL_LEVEL, count);
 }
@@ -1062,7 +1111,10 @@ static void irq_wdt_mss_handler(struct ivpu_device *vdev)
 
 static void irq_noc_firewall_handler(struct ivpu_device *vdev)
 {
-	ivpu_pm_trigger_recovery(vdev, "NOC Firewall IRQ");
+	atomic_inc(&vdev->hw->firewall_irq_counter);
+
+	ivpu_dbg(vdev, IRQ, "NOC Firewall interrupt detected, counter %d\n",
+		 atomic_read(&vdev->hw->firewall_irq_counter));
 }
 
 /* Handler for IRQs from NPU core */

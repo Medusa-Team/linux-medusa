@@ -34,28 +34,9 @@ static struct attribute_group iommu_pmu_events_attr_group = {
 	.attrs = attrs_empty,
 };
 
-static cpumask_t iommu_pmu_cpu_mask;
-
-static ssize_t
-cpumask_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return cpumap_print_to_pagebuf(true, buf, &iommu_pmu_cpu_mask);
-}
-static DEVICE_ATTR_RO(cpumask);
-
-static struct attribute *iommu_pmu_cpumask_attrs[] = {
-	&dev_attr_cpumask.attr,
-	NULL
-};
-
-static struct attribute_group iommu_pmu_cpumask_attr_group = {
-	.attrs = iommu_pmu_cpumask_attrs,
-};
-
 static const struct attribute_group *iommu_pmu_attr_groups[] = {
 	&iommu_pmu_format_attr_group,
 	&iommu_pmu_events_attr_group,
-	&iommu_pmu_cpumask_attr_group,
 	NULL
 };
 
@@ -118,20 +99,20 @@ IOMMU_PMU_ATTR(filter_page_table,	"config2:32-36",	IOMMU_PMU_FILTER_PAGE_TABLE);
 #define iommu_pmu_set_filter(_name, _config, _filter, _idx, _econfig)		\
 {										\
 	if ((iommu_pmu->filter & _filter) && iommu_pmu_en_##_name(_econfig)) {	\
-		dmar_writel(iommu_pmu->cfg_reg + _idx * IOMMU_PMU_CFG_OFFSET +	\
-			    IOMMU_PMU_CFG_SIZE +				\
-			    (ffs(_filter) - 1) * IOMMU_PMU_CFG_FILTERS_OFFSET,	\
-			    iommu_pmu_get_##_name(_config) | IOMMU_PMU_FILTER_EN);\
+		writel(iommu_pmu_get_##_name(_config) | IOMMU_PMU_FILTER_EN,	\
+		       iommu_pmu->cfg_reg + _idx * IOMMU_PMU_CFG_OFFSET +	\
+		       IOMMU_PMU_CFG_SIZE +					\
+		       (ffs(_filter) - 1) * IOMMU_PMU_CFG_FILTERS_OFFSET);	\
 	}									\
 }
 
 #define iommu_pmu_clear_filter(_filter, _idx)					\
 {										\
 	if (iommu_pmu->filter & _filter) {					\
-		dmar_writel(iommu_pmu->cfg_reg + _idx * IOMMU_PMU_CFG_OFFSET +	\
-			    IOMMU_PMU_CFG_SIZE +				\
-			    (ffs(_filter) - 1) * IOMMU_PMU_CFG_FILTERS_OFFSET,	\
-			    0);							\
+		writel(0,							\
+		       iommu_pmu->cfg_reg + _idx * IOMMU_PMU_CFG_OFFSET +	\
+		       IOMMU_PMU_CFG_SIZE +					\
+		       (ffs(_filter) - 1) * IOMMU_PMU_CFG_FILTERS_OFFSET);	\
 	}									\
 }
 
@@ -326,7 +307,7 @@ static void iommu_pmu_event_update(struct perf_event *event)
 
 again:
 	prev_count = local64_read(&hwc->prev_count);
-	new_count = dmar_readq(iommu_event_base(iommu_pmu, hwc->idx));
+	new_count = readq(iommu_event_base(iommu_pmu, hwc->idx));
 	if (local64_xchg(&hwc->prev_count, new_count) != prev_count)
 		goto again;
 
@@ -359,7 +340,7 @@ static void iommu_pmu_start(struct perf_event *event, int flags)
 	hwc->state = 0;
 
 	/* Always reprogram the period */
-	count = dmar_readq(iommu_event_base(iommu_pmu, hwc->idx));
+	count = readq(iommu_event_base(iommu_pmu, hwc->idx));
 	local64_set((&hwc->prev_count), count);
 
 	/*
@@ -430,7 +411,7 @@ static int iommu_pmu_assign_event(struct iommu_pmu *iommu_pmu,
 	hwc->idx = idx;
 
 	/* config events */
-	dmar_writeq(iommu_config_base(iommu_pmu, idx), hwc->config);
+	writeq(hwc->config, iommu_config_base(iommu_pmu, idx));
 
 	iommu_pmu_set_filter(requester_id, event->attr.config1,
 			     IOMMU_PMU_FILTER_REQUESTER_ID, idx,
@@ -515,7 +496,7 @@ static void iommu_pmu_counter_overflow(struct iommu_pmu *iommu_pmu)
 	 * Two counters may be overflowed very close. Always check
 	 * whether there are more to handle.
 	 */
-	while ((status = dmar_readq(iommu_pmu->overflow))) {
+	while ((status = readq(iommu_pmu->overflow))) {
 		for_each_set_bit(i, (unsigned long *)&status, iommu_pmu->num_cntr) {
 			/*
 			 * Find the assigned event of the counter.
@@ -529,7 +510,7 @@ static void iommu_pmu_counter_overflow(struct iommu_pmu *iommu_pmu)
 			iommu_pmu_event_update(event);
 		}
 
-		dmar_writeq(iommu_pmu->overflow, status);
+		writeq(status, iommu_pmu->overflow);
 	}
 }
 
@@ -537,13 +518,13 @@ static irqreturn_t iommu_pmu_irq_handler(int irq, void *dev_id)
 {
 	struct intel_iommu *iommu = dev_id;
 
-	if (!dmar_readl(iommu->reg + DMAR_PERFINTRSTS_REG))
+	if (!readl(iommu->reg + DMAR_PERFINTRSTS_REG))
 		return IRQ_NONE;
 
 	iommu_pmu_counter_overflow(iommu->pmu);
 
 	/* Clear the status bit */
-	dmar_writel(iommu->reg + DMAR_PERFINTRSTS_REG, DMA_PERFINTRSTS_PIS);
+	writel(DMA_PERFINTRSTS_PIS, iommu->reg + DMAR_PERFINTRSTS_REG);
 
 	return IRQ_HANDLED;
 }
@@ -565,6 +546,7 @@ static int __iommu_pmu_register(struct intel_iommu *iommu)
 	iommu_pmu->pmu.attr_groups	= iommu_pmu_attr_groups;
 	iommu_pmu->pmu.attr_update	= iommu_pmu_attr_update;
 	iommu_pmu->pmu.capabilities	= PERF_PMU_CAP_NO_EXCLUDE;
+	iommu_pmu->pmu.scope		= PERF_PMU_SCOPE_SYS_WIDE;
 	iommu_pmu->pmu.module		= THIS_MODULE;
 
 	return perf_pmu_register(&iommu_pmu->pmu, iommu_pmu->pmu.name, -1);
@@ -573,7 +555,7 @@ static int __iommu_pmu_register(struct intel_iommu *iommu)
 static inline void __iomem *
 get_perf_reg_address(struct intel_iommu *iommu, u32 offset)
 {
-	u32 off = dmar_readl(iommu->reg + offset);
+	u32 off = readl(iommu->reg + offset);
 
 	return iommu->reg + off;
 }
@@ -592,7 +574,7 @@ int alloc_iommu_pmu(struct intel_iommu *iommu)
 	if (!cap_ecmds(iommu->cap))
 		return -ENODEV;
 
-	perfcap = dmar_readq(iommu->reg + DMAR_PERFCAP_REG);
+	perfcap = readq(iommu->reg + DMAR_PERFCAP_REG);
 	/* The performance monitoring is not supported. */
 	if (!perfcap)
 		return -ENODEV;
@@ -609,7 +591,7 @@ int alloc_iommu_pmu(struct intel_iommu *iommu)
 	if (!ecmd_has_pmu_essential(iommu))
 		return -ENODEV;
 
-	iommu_pmu = kzalloc(sizeof(*iommu_pmu), GFP_KERNEL);
+	iommu_pmu = kzalloc_obj(*iommu_pmu);
 	if (!iommu_pmu)
 		return -ENOMEM;
 
@@ -635,8 +617,8 @@ int alloc_iommu_pmu(struct intel_iommu *iommu)
 	for (i = 0; i < iommu_pmu->num_eg; i++) {
 		u64 pcap;
 
-		pcap = dmar_readq(iommu->reg + DMAR_PERFEVNTCAP_REG +
-				  i * IOMMU_PMU_CAP_REGS_STEP);
+		pcap = readq(iommu->reg + DMAR_PERFEVNTCAP_REG +
+			     i * IOMMU_PMU_CAP_REGS_STEP);
 		iommu_pmu->evcap[i] = pecap_es(pcap);
 	}
 
@@ -669,9 +651,9 @@ int alloc_iommu_pmu(struct intel_iommu *iommu)
 	 * Width.
 	 */
 	for (i = 0; i < iommu_pmu->num_cntr; i++) {
-		cap = dmar_readl(iommu_pmu->cfg_reg +
-				 i * IOMMU_PMU_CFG_OFFSET +
-				 IOMMU_PMU_CFG_CNTRCAP_OFFSET);
+		cap = readl(iommu_pmu->cfg_reg +
+			    i * IOMMU_PMU_CFG_OFFSET +
+			    IOMMU_PMU_CFG_CNTRCAP_OFFSET);
 		if (!iommu_cntrcap_pcc(cap))
 			continue;
 
@@ -693,9 +675,9 @@ int alloc_iommu_pmu(struct intel_iommu *iommu)
 
 		/* Override with per-counter event capabilities */
 		for (j = 0; j < iommu_cntrcap_egcnt(cap); j++) {
-			cap = dmar_readl(iommu_pmu->cfg_reg + i * IOMMU_PMU_CFG_OFFSET +
-					 IOMMU_PMU_CFG_CNTREVCAP_OFFSET +
-					 (j * IOMMU_PMU_OFF_REGS_STEP));
+			cap = readl(iommu_pmu->cfg_reg + i * IOMMU_PMU_CFG_OFFSET +
+				    IOMMU_PMU_CFG_CNTREVCAP_OFFSET +
+				    (j * IOMMU_PMU_OFF_REGS_STEP));
 			iommu_pmu->cntr_evcap[i][iommu_event_group(cap)] = iommu_event_select(cap);
 			/*
 			 * Some events may only be supported by a specific counter.
@@ -773,89 +755,6 @@ static void iommu_pmu_unset_interrupt(struct intel_iommu *iommu)
 	iommu->perf_irq = 0;
 }
 
-static int iommu_pmu_cpu_online(unsigned int cpu, struct hlist_node *node)
-{
-	struct iommu_pmu *iommu_pmu = hlist_entry_safe(node, typeof(*iommu_pmu), cpuhp_node);
-
-	if (cpumask_empty(&iommu_pmu_cpu_mask))
-		cpumask_set_cpu(cpu, &iommu_pmu_cpu_mask);
-
-	if (cpumask_test_cpu(cpu, &iommu_pmu_cpu_mask))
-		iommu_pmu->cpu = cpu;
-
-	return 0;
-}
-
-static int iommu_pmu_cpu_offline(unsigned int cpu, struct hlist_node *node)
-{
-	struct iommu_pmu *iommu_pmu = hlist_entry_safe(node, typeof(*iommu_pmu), cpuhp_node);
-	int target = cpumask_first(&iommu_pmu_cpu_mask);
-
-	/*
-	 * The iommu_pmu_cpu_mask has been updated when offline the CPU
-	 * for the first iommu_pmu. Migrate the other iommu_pmu to the
-	 * new target.
-	 */
-	if (target < nr_cpu_ids && target != iommu_pmu->cpu) {
-		perf_pmu_migrate_context(&iommu_pmu->pmu, cpu, target);
-		iommu_pmu->cpu = target;
-		return 0;
-	}
-
-	if (!cpumask_test_and_clear_cpu(cpu, &iommu_pmu_cpu_mask))
-		return 0;
-
-	target = cpumask_any_but(cpu_online_mask, cpu);
-
-	if (target < nr_cpu_ids)
-		cpumask_set_cpu(target, &iommu_pmu_cpu_mask);
-	else
-		return 0;
-
-	perf_pmu_migrate_context(&iommu_pmu->pmu, cpu, target);
-	iommu_pmu->cpu = target;
-
-	return 0;
-}
-
-static int nr_iommu_pmu;
-static enum cpuhp_state iommu_cpuhp_slot;
-
-static int iommu_pmu_cpuhp_setup(struct iommu_pmu *iommu_pmu)
-{
-	int ret;
-
-	if (!nr_iommu_pmu) {
-		ret = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN,
-					      "driver/iommu/intel/perfmon:online",
-					      iommu_pmu_cpu_online,
-					      iommu_pmu_cpu_offline);
-		if (ret < 0)
-			return ret;
-		iommu_cpuhp_slot = ret;
-	}
-
-	ret = cpuhp_state_add_instance(iommu_cpuhp_slot, &iommu_pmu->cpuhp_node);
-	if (ret) {
-		if (!nr_iommu_pmu)
-			cpuhp_remove_multi_state(iommu_cpuhp_slot);
-		return ret;
-	}
-	nr_iommu_pmu++;
-
-	return 0;
-}
-
-static void iommu_pmu_cpuhp_free(struct iommu_pmu *iommu_pmu)
-{
-	cpuhp_state_remove_instance(iommu_cpuhp_slot, &iommu_pmu->cpuhp_node);
-
-	if (--nr_iommu_pmu)
-		return;
-
-	cpuhp_remove_multi_state(iommu_cpuhp_slot);
-}
-
 void iommu_pmu_register(struct intel_iommu *iommu)
 {
 	struct iommu_pmu *iommu_pmu = iommu->pmu;
@@ -866,17 +765,12 @@ void iommu_pmu_register(struct intel_iommu *iommu)
 	if (__iommu_pmu_register(iommu))
 		goto err;
 
-	if (iommu_pmu_cpuhp_setup(iommu_pmu))
-		goto unregister;
-
 	/* Set interrupt for overflow */
 	if (iommu_pmu_set_interrupt(iommu))
-		goto cpuhp_free;
+		goto unregister;
 
 	return;
 
-cpuhp_free:
-	iommu_pmu_cpuhp_free(iommu_pmu);
 unregister:
 	perf_pmu_unregister(&iommu_pmu->pmu);
 err:
@@ -892,6 +786,5 @@ void iommu_pmu_unregister(struct intel_iommu *iommu)
 		return;
 
 	iommu_pmu_unset_interrupt(iommu);
-	iommu_pmu_cpuhp_free(iommu_pmu);
 	perf_pmu_unregister(&iommu_pmu->pmu);
 }

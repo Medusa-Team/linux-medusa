@@ -295,6 +295,7 @@ struct dlm_lkb {
 		void			*lkb_astparam;	/* caller's ast arg */
 		struct dlm_user_args	*lkb_ua;
 	};
+	struct rcu_head		rcu;
 };
 
 /*
@@ -605,7 +606,6 @@ struct dlm_ls {
 
 	struct dlm_rsb		ls_local_rsb;	/* for returning errors */
 	struct dlm_lkb		ls_local_lkb;	/* for returning errors */
-	struct dlm_message	ls_local_ms;	/* for faking a reply */
 
 	struct dentry		*ls_debug_rsb_dentry; /* debugfs */
 	struct dentry		*ls_debug_waiters_dentry; /* debugfs */
@@ -660,8 +660,13 @@ struct dlm_ls {
 	const struct dlm_lockspace_ops *ls_ops;
 	void			*ls_ops_arg;
 
+	struct work_struct	ls_free_work;
+
 	int			ls_namelen;
 	char			ls_name[DLM_LOCKSPACE_LEN + 1];
+
+	/* Must be last --ends in a flexible-array member.*/
+	struct dlm_message	ls_local_ms;	/* for faking a reply */
 };
 
 /*
@@ -802,6 +807,8 @@ static inline void dlm_set_sbflags_val(struct dlm_lkb *lkb, uint32_t val)
 	dlm_set_flags_val(&lkb->lkb_sbflags, val, __DLM_SBF_MIN_BIT,
 			  __DLM_SBF_MAX_BIT);
 }
+
+extern struct workqueue_struct *dlm_wq;
 
 int dlm_plock_init(void);
 void dlm_plock_exit(void);

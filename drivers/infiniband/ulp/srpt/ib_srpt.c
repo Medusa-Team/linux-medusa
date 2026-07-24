@@ -33,6 +33,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/hex.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/err.h>
@@ -68,6 +69,8 @@ MODULE_LICENSE("Dual BSD/GPL");
 static u64 srpt_service_guid;
 static DEFINE_SPINLOCK(srpt_dev_lock);	/* Protects srpt_dev_list. */
 static LIST_HEAD(srpt_dev_list);	/* List of srpt_device structures. */
+static DEFINE_MUTEX(srpt_mc_mutex);	/* Protects srpt_memory_caches. */
+static DEFINE_XARRAY(srpt_memory_caches); /* See also srpt_memory_cache_entry */
 
 static unsigned srp_max_req_size = DEFAULT_MAX_REQ_SIZE;
 module_param(srp_max_req_size, int, 0444);
@@ -104,6 +107,63 @@ static int srpt_queue_status(struct se_cmd *cmd);
 static void srpt_recv_done(struct ib_cq *cq, struct ib_wc *wc);
 static void srpt_send_done(struct ib_cq *cq, struct ib_wc *wc);
 static void srpt_process_wait_list(struct srpt_rdma_ch *ch);
+
+/* Type of the entries in srpt_memory_caches. */
+struct srpt_memory_cache_entry {
+	refcount_t ref;
+	struct kmem_cache *c;
+};
+
+static struct kmem_cache *srpt_cache_get(unsigned int object_size)
+{
+	struct srpt_memory_cache_entry *e;
+	char name[32];
+	void *res;
+
+	guard(mutex)(&srpt_mc_mutex);
+	e = xa_load(&srpt_memory_caches, object_size);
+	if (e) {
+		refcount_inc(&e->ref);
+		return e->c;
+	}
+	snprintf(name, sizeof(name), "srpt-%u", object_size);
+	e = kmalloc_obj(*e);
+	if (!e)
+		return NULL;
+	refcount_set(&e->ref, 1);
+	e->c = kmem_cache_create(name, object_size, /*align=*/512, 0, NULL);
+	if (!e->c)
+		goto free_entry;
+	res = xa_store(&srpt_memory_caches, object_size, e, GFP_KERNEL);
+	if (xa_is_err(res))
+		goto destroy_cache;
+	return e->c;
+
+destroy_cache:
+	kmem_cache_destroy(e->c);
+
+free_entry:
+	kfree(e);
+	return NULL;
+}
+
+static void srpt_cache_put(struct kmem_cache *c)
+{
+	struct srpt_memory_cache_entry *e = NULL;
+	unsigned long object_size;
+
+	guard(mutex)(&srpt_mc_mutex);
+	xa_for_each(&srpt_memory_caches, object_size, e)
+		if (e->c == c)
+			break;
+	if (WARN_ON_ONCE(!e))
+		return;
+	if (!refcount_dec_and_test(&e->ref))
+		return;
+	WARN_ON_ONCE(xa_erase(&srpt_memory_caches, object_size) != e);
+	kmem_cache_destroy(e->c);
+	kfree(e);
+}
 
 /*
  * The only allowed channel state changes are those that change the channel
@@ -608,9 +668,9 @@ static int srpt_refresh_port(struct srpt_port *sport)
 						  srpt_mad_recv_handler,
 						  sport, 0);
 		if (IS_ERR(mad_agent)) {
-			pr_err("%s-%d: MAD agent registration failed (%ld). Note: this is expected if SR-IOV is enabled.\n",
+			pr_err("%s-%d: MAD agent registration failed (%pe). Note: this is expected if SR-IOV is enabled.\n",
 			       dev_name(&sport->sdev->device->dev), sport->port,
-			       PTR_ERR(mad_agent));
+			       mad_agent);
 			sport->mad_agent = NULL;
 			memset(&port_modify, 0, sizeof(port_modify));
 			port_modify.clr_port_cap_mask = IB_PORT_DEVICE_MGMT_SUP;
@@ -730,7 +790,7 @@ static struct srpt_ioctx **srpt_alloc_ioctx_ring(struct srpt_device *sdev,
 	WARN_ON(ioctx_size != sizeof(struct srpt_recv_ioctx) &&
 		ioctx_size != sizeof(struct srpt_send_ioctx));
 
-	ring = kvmalloc_array(ring_size, sizeof(ring[0]), GFP_KERNEL);
+	ring = kvmalloc_objs(ring[0], ring_size);
 	if (!ring)
 		goto out;
 	for (i = 0; i < ring_size; ++i) {
@@ -905,8 +965,7 @@ static int srpt_alloc_rw_ctxs(struct srpt_send_ioctx *ioctx,
 	if (nbufs == 1) {
 		ioctx->rw_ctxs = &ioctx->s_rw_ctx;
 	} else {
-		ioctx->rw_ctxs = kmalloc_array(nbufs, sizeof(*ioctx->rw_ctxs),
-			GFP_KERNEL);
+		ioctx->rw_ctxs = kmalloc_objs(*ioctx->rw_ctxs, nbufs);
 		if (!ioctx->rw_ctxs)
 			return -ENOMEM;
 	}
@@ -1121,7 +1180,7 @@ static int srpt_init_ch_qp(struct srpt_rdma_ch *ch, struct ib_qp *qp)
 
 	WARN_ON_ONCE(ch->using_rdma_cm);
 
-	attr = kzalloc(sizeof(*attr), GFP_KERNEL);
+	attr = kzalloc_obj(*attr);
 	if (!attr)
 		return -ENOMEM;
 
@@ -1797,7 +1856,7 @@ static int srpt_create_ch_ib(struct srpt_rdma_ch *ch)
 	WARN_ON(ch->rq_size < 1);
 
 	ret = -ENOMEM;
-	qp_init = kzalloc(sizeof(*qp_init), GFP_KERNEL);
+	qp_init = kzalloc_obj(*qp_init);
 	if (!qp_init)
 		goto out;
 
@@ -1806,8 +1865,8 @@ retry:
 				 IB_POLL_WORKQUEUE);
 	if (IS_ERR(ch->cq)) {
 		ret = PTR_ERR(ch->cq);
-		pr_err("failed to create CQ cqe= %d ret= %d\n",
-		       ch->rq_size + sq_size, ret);
+		pr_err("failed to create CQ cqe= %d ret= %pe\n",
+		       ch->rq_size + sq_size, ch->cq);
 		goto out;
 	}
 	ch->cq_size = ch->rq_size + sq_size;
@@ -2029,7 +2088,7 @@ static struct srpt_nexus *srpt_get_nexus(struct srpt_port *sport,
 
 		if (nexus)
 			break;
-		tmp_nexus = kzalloc(sizeof(*nexus), GFP_KERNEL);
+		tmp_nexus = kzalloc_obj(*nexus);
 		if (!tmp_nexus) {
 			nexus = ERR_PTR(-ENOMEM);
 			break;
@@ -2119,13 +2178,13 @@ static void srpt_release_channel_work(struct work_struct *w)
 			     ch->sport->sdev, ch->rq_size,
 			     ch->rsp_buf_cache, DMA_TO_DEVICE);
 
-	kmem_cache_destroy(ch->rsp_buf_cache);
+	srpt_cache_put(ch->rsp_buf_cache);
 
 	srpt_free_ioctx_ring((struct srpt_ioctx **)ch->ioctx_recv_ring,
 			     sdev, ch->rq_size,
 			     ch->req_buf_cache, DMA_FROM_DEVICE);
 
-	kmem_cache_destroy(ch->req_buf_cache);
+	srpt_cache_put(ch->req_buf_cache);
 
 	kref_put(&ch->kref, srpt_free_ch);
 }
@@ -2181,9 +2240,9 @@ static int srpt_cm_req_recv(struct srpt_device *const sdev,
 	}
 
 	ret = -ENOMEM;
-	rsp = kzalloc(sizeof(*rsp), GFP_KERNEL);
-	rej = kzalloc(sizeof(*rej), GFP_KERNEL);
-	rep_param = kzalloc(sizeof(*rep_param), GFP_KERNEL);
+	rsp = kzalloc_obj(*rsp);
+	rej = kzalloc_obj(*rej);
+	rep_param = kzalloc_obj(*rep_param);
 	if (!rsp || !rej || !rep_param)
 		goto out;
 
@@ -2213,7 +2272,7 @@ static int srpt_cm_req_recv(struct srpt_device *const sdev,
 	}
 
 	ret = -ENOMEM;
-	ch = kzalloc(sizeof(*ch), GFP_KERNEL);
+	ch = kzalloc_obj(*ch);
 	if (!ch) {
 		rej->reason = cpu_to_be32(SRP_LOGIN_REJ_INSUFFICIENT_RESOURCES);
 		pr_err("rejected SRP_LOGIN_REQ because out of memory.\n");
@@ -2245,8 +2304,7 @@ static int srpt_cm_req_recv(struct srpt_device *const sdev,
 	INIT_LIST_HEAD(&ch->cmd_wait_list);
 	ch->max_rsp_size = ch->sport->port_attrib.srp_max_rsp_size;
 
-	ch->rsp_buf_cache = kmem_cache_create("srpt-rsp-buf", ch->max_rsp_size,
-					      512, 0, NULL);
+	ch->rsp_buf_cache = srpt_cache_get(ch->max_rsp_size);
 	if (!ch->rsp_buf_cache)
 		goto free_ch;
 
@@ -2280,8 +2338,7 @@ static int srpt_cm_req_recv(struct srpt_device *const sdev,
 		alignment_offset = round_up(imm_data_offset, 512) -
 			imm_data_offset;
 		req_sz = alignment_offset + imm_data_offset + srp_max_req_size;
-		ch->req_buf_cache = kmem_cache_create("srpt-req-buf", req_sz,
-						      512, 0, NULL);
+		ch->req_buf_cache = srpt_cache_get(req_sz);
 		if (!ch->req_buf_cache)
 			goto free_rsp_ring;
 
@@ -2478,7 +2535,7 @@ free_recv_ring:
 			     ch->req_buf_cache, DMA_FROM_DEVICE);
 
 free_recv_cache:
-	kmem_cache_destroy(ch->req_buf_cache);
+	srpt_cache_put(ch->req_buf_cache);
 
 free_rsp_ring:
 	srpt_free_ioctx_ring((struct srpt_ioctx **)ch->ioctx_ring,
@@ -2486,7 +2543,7 @@ free_rsp_ring:
 			     ch->rsp_buf_cache, DMA_TO_DEVICE);
 
 free_rsp_cache:
-	kmem_cache_destroy(ch->rsp_buf_cache);
+	srpt_cache_put(ch->rsp_buf_cache);
 
 free_ch:
 	if (rdma_cm_id)
@@ -3055,7 +3112,7 @@ static void srpt_free_srq(struct srpt_device *sdev)
 	srpt_free_ioctx_ring((struct srpt_ioctx **)sdev->ioctx_ring, sdev,
 			     sdev->srq_size, sdev->req_buf_cache,
 			     DMA_FROM_DEVICE);
-	kmem_cache_destroy(sdev->req_buf_cache);
+	srpt_cache_put(sdev->req_buf_cache);
 	sdev->srq = NULL;
 }
 
@@ -3075,15 +3132,14 @@ static int srpt_alloc_srq(struct srpt_device *sdev)
 	WARN_ON_ONCE(sdev->srq);
 	srq = ib_create_srq(sdev->pd, &srq_attr);
 	if (IS_ERR(srq)) {
-		pr_debug("ib_create_srq() failed: %ld\n", PTR_ERR(srq));
+		pr_debug("ib_create_srq() failed: %pe\n", srq);
 		return PTR_ERR(srq);
 	}
 
 	pr_debug("create SRQ #wr= %d max_allow=%d dev= %s\n", sdev->srq_size,
 		 sdev->device->attrs.max_srq_wr, dev_name(&device->dev));
 
-	sdev->req_buf_cache = kmem_cache_create("srpt-srq-req-buf",
-						srp_max_req_size, 0, 0, NULL);
+	sdev->req_buf_cache = srpt_cache_get(srp_max_req_size);
 	if (!sdev->req_buf_cache)
 		goto free_srq;
 
@@ -3105,7 +3161,7 @@ static int srpt_alloc_srq(struct srpt_device *sdev)
 	return 0;
 
 free_cache:
-	kmem_cache_destroy(sdev->req_buf_cache);
+	srpt_cache_put(sdev->req_buf_cache);
 
 free_srq:
 	ib_destroy_srq(srq);
@@ -3153,8 +3209,7 @@ static int srpt_add_one(struct ib_device *device)
 
 	pr_debug("device = %p\n", device);
 
-	sdev = kzalloc(struct_size(sdev, port, device->phys_port_cnt),
-		       GFP_KERNEL);
+	sdev = kzalloc_flex(*sdev, port, device->phys_port_cnt);
 	if (!sdev)
 		return -ENOMEM;
 
@@ -3180,8 +3235,7 @@ static int srpt_add_one(struct ib_device *device)
 	if (rdma_port_get_link_layer(device, 1) == IB_LINK_LAYER_INFINIBAND)
 		sdev->cm_id = ib_create_cm_id(device, srpt_cm_handler, sdev);
 	if (IS_ERR(sdev->cm_id)) {
-		pr_info("ib_create_cm_id() failed: %ld\n",
-			PTR_ERR(sdev->cm_id));
+		pr_info("ib_create_cm_id() failed: %pe\n", sdev->cm_id);
 		ret = PTR_ERR(sdev->cm_id);
 		sdev->cm_id = NULL;
 		if (!rdma_cm_id)
@@ -3631,8 +3685,7 @@ static struct rdma_cm_id *srpt_create_rdma_id(struct sockaddr *listen_addr)
 	rdma_cm_id = rdma_create_id(&init_net, srpt_rdma_cm_handler,
 				    NULL, RDMA_PS_TCP, IB_QPT_RC);
 	if (IS_ERR(rdma_cm_id)) {
-		pr_err("RDMA/CM ID creation failed: %ld\n",
-		       PTR_ERR(rdma_cm_id));
+		pr_err("RDMA/CM ID creation failed: %pe\n", rdma_cm_id);
 		goto out;
 	}
 
@@ -3735,7 +3788,7 @@ static struct se_portal_group *srpt_make_tpg(struct se_wwn *wwn,
 	struct srpt_tpg *stpg;
 	int res = -ENOMEM;
 
-	stpg = kzalloc(sizeof(*stpg), GFP_KERNEL);
+	stpg = kzalloc_obj(*stpg);
 	if (!stpg)
 		return ERR_PTR(res);
 	stpg->sport_id = sport_id;
@@ -3792,7 +3845,7 @@ static struct se_wwn *srpt_make_tport(struct target_fabric_configfs *tf,
 		WARN_ON_ONCE(true);
 		return &(*papi.port_id)->wwn;
 	}
-	port_id = kzalloc(sizeof(*port_id), GFP_KERNEL);
+	port_id = kzalloc_obj(*port_id);
 	if (!port_id) {
 		srpt_sdev_put(sport->sdev);
 		return ERR_PTR(-ENOMEM);
@@ -3872,6 +3925,7 @@ static const struct target_core_fabric_ops srpt_template = {
 	.tfc_wwn_attrs			= srpt_wwn_attrs,
 	.tfc_tpg_attrib_attrs		= srpt_tpg_attrib_attrs,
 
+	.default_compl_type		= TARGET_QUEUE_COMPL,
 	.default_submit_type		= TARGET_DIRECT_SUBMIT,
 	.direct_submit_supp		= 1,
 };

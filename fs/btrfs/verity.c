@@ -109,7 +109,7 @@ static int drop_verity_items(struct btrfs_inode *inode, u8 key_type)
 {
 	struct btrfs_trans_handle *trans;
 	struct btrfs_root *root = inode->root;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_key key;
 	int count = 0;
 	int ret;
@@ -121,10 +121,8 @@ static int drop_verity_items(struct btrfs_inode *inode, u8 key_type)
 	while (1) {
 		/* 1 for the item being dropped */
 		trans = btrfs_start_transaction(root, 1);
-		if (IS_ERR(trans)) {
-			ret = PTR_ERR(trans);
-			goto out;
-		}
+		if (IS_ERR(trans))
+			return PTR_ERR(trans);
 
 		/*
 		 * Walk backwards through all the items until we find one that
@@ -143,7 +141,7 @@ static int drop_verity_items(struct btrfs_inode *inode, u8 key_type)
 			path->slots[0]--;
 		} else if (ret < 0) {
 			btrfs_end_transaction(trans);
-			goto out;
+			return ret;
 		}
 
 		btrfs_item_key_to_cpu(path->nodes[0], &key, path->slots[0]);
@@ -161,17 +159,14 @@ static int drop_verity_items(struct btrfs_inode *inode, u8 key_type)
 		ret = btrfs_del_items(trans, root, path, path->slots[0], 1);
 		if (ret) {
 			btrfs_end_transaction(trans);
-			goto out;
+			return ret;
 		}
 		count++;
 		btrfs_release_path(path);
 		btrfs_end_transaction(trans);
 	}
-	ret = count;
 	btrfs_end_transaction(trans);
-out:
-	btrfs_free_path(path);
-	return ret;
+	return count;
 }
 
 /*
@@ -217,7 +212,7 @@ static int write_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 			   const char *src, u64 len)
 {
 	struct btrfs_trans_handle *trans;
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_root *root = inode->root;
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
@@ -233,10 +228,8 @@ static int write_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 	while (len > 0) {
 		/* 1 for the new item being inserted */
 		trans = btrfs_start_transaction(root, 1);
-		if (IS_ERR(trans)) {
-			ret = PTR_ERR(trans);
-			break;
-		}
+		if (IS_ERR(trans))
+			return PTR_ERR(trans);
 
 		key.objectid = btrfs_ino(inode);
 		key.type = key_type;
@@ -267,7 +260,6 @@ static int write_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 		btrfs_end_transaction(trans);
 	}
 
-	btrfs_free_path(path);
 	return ret;
 }
 
@@ -284,7 +276,7 @@ static int write_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
  *              page and ignore dest, but it must still be non-NULL to avoid the
  *              counting-only behavior.
  * @len:        length in bytes to read
- * @dest_page:  copy into this page instead of the dest buffer
+ * @dest_folio: copy into this folio instead of the dest buffer
  *
  * Helper function to read items from the btree.  This returns the number of
  * bytes read or < 0 for errors.  We can return short reads if the items don't
@@ -294,9 +286,9 @@ static int write_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
  * Returns number of bytes read or a negative error code on failure.
  */
 static int read_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
-			  char *dest, u64 len, struct page *dest_page)
+			  char *dest, u64 len, struct folio *dest_folio)
 {
-	struct btrfs_path *path;
+	BTRFS_PATH_AUTO_FREE(path);
 	struct btrfs_root *root = inode->root;
 	struct extent_buffer *leaf;
 	struct btrfs_key key;
@@ -314,7 +306,7 @@ static int read_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 	if (!path)
 		return -ENOMEM;
 
-	if (dest_page)
+	if (dest_folio)
 		path->reada = READA_FORWARD;
 
 	key.objectid = btrfs_ino(inode);
@@ -371,15 +363,15 @@ static int read_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 		copy_offset = offset - key.offset;
 
 		if (dest) {
-			if (dest_page)
-				kaddr = kmap_local_page(dest_page);
+			if (dest_folio)
+				kaddr = kmap_local_folio(dest_folio, 0);
 
 			data = btrfs_item_ptr(leaf, path->slots[0], void);
 			read_extent_buffer(leaf, kaddr + dest_offset,
 					   (unsigned long)data + copy_offset,
 					   copy_bytes);
 
-			if (dest_page)
+			if (dest_folio)
 				kunmap_local(kaddr);
 		}
 
@@ -404,7 +396,6 @@ static int read_key_bytes(struct btrfs_inode *inode, u8 key_type, u64 offset,
 		}
 	}
 out:
-	btrfs_free_path(path);
 	if (!ret)
 		ret = copied;
 	return ret;
@@ -460,7 +451,7 @@ static int rollback_verity(struct btrfs_inode *inode)
 	struct btrfs_root *root = inode->root;
 	int ret;
 
-	ASSERT(inode_is_locked(&inode->vfs_inode));
+	btrfs_assert_inode_locked(inode);
 	truncate_inode_pages(inode->vfs_inode.i_mapping, inode->vfs_inode.i_size);
 	clear_bit(BTRFS_INODE_VERITY_IN_PROGRESS, &inode->runtime_flags);
 	ret = btrfs_drop_verity_items(inode);
@@ -485,14 +476,14 @@ static int rollback_verity(struct btrfs_inode *inode)
 		goto out;
 	}
 	inode->ro_flags &= ~BTRFS_INODE_RO_VERITY;
-	btrfs_sync_inode_flags_to_i_flags(&inode->vfs_inode);
+	btrfs_sync_inode_flags_to_i_flags(inode);
 	ret = btrfs_update_inode(trans, inode);
-	if (ret) {
+	if (unlikely(ret)) {
 		btrfs_abort_transaction(trans, ret);
 		goto out;
 	}
 	ret = del_orphan(trans, inode);
-	if (ret) {
+	if (unlikely(ret)) {
 		btrfs_abort_transaction(trans, ret);
 		goto out;
 	}
@@ -534,25 +525,23 @@ static int finish_verity(struct btrfs_inode *inode, const void *desc,
 	ret = write_key_bytes(inode, BTRFS_VERITY_DESC_ITEM_KEY, 0,
 			      (const char *)&item, sizeof(item));
 	if (ret)
-		goto out;
+		return ret;
 
 	/* Write out the descriptor itself */
 	ret = write_key_bytes(inode, BTRFS_VERITY_DESC_ITEM_KEY, 1,
 			      desc, desc_size);
 	if (ret)
-		goto out;
+		return ret;
 
 	/*
 	 * 1 for updating the inode flag
 	 * 1 for deleting the orphan
 	 */
 	trans = btrfs_start_transaction(root, 2);
-	if (IS_ERR(trans)) {
-		ret = PTR_ERR(trans);
-		goto out;
-	}
+	if (IS_ERR(trans))
+		return PTR_ERR(trans);
 	inode->ro_flags |= BTRFS_INODE_RO_VERITY;
-	btrfs_sync_inode_flags_to_i_flags(&inode->vfs_inode);
+	btrfs_sync_inode_flags_to_i_flags(inode);
 	ret = btrfs_update_inode(trans, inode);
 	if (ret)
 		goto end_trans;
@@ -563,7 +552,6 @@ static int finish_verity(struct btrfs_inode *inode, const void *desc,
 	btrfs_set_fs_compat_ro(root->fs_info, VERITY);
 end_trans:
 	btrfs_end_transaction(trans);
-out:
 	return ret;
 
 }
@@ -585,7 +573,10 @@ static int btrfs_begin_enable_verity(struct file *filp)
 	struct btrfs_trans_handle *trans;
 	int ret;
 
-	ASSERT(inode_is_locked(file_inode(filp)));
+	btrfs_assert_inode_locked(inode);
+
+	if (IS_ENCRYPTED(&inode->vfs_inode))
+		return -EOPNOTSUPP;
 
 	if (test_bit(BTRFS_INODE_VERITY_IN_PROGRESS, &inode->runtime_flags))
 		return -EBUSY;
@@ -633,7 +624,7 @@ static int btrfs_end_enable_verity(struct file *filp, const void *desc,
 	int ret = 0;
 	int rollback_ret;
 
-	ASSERT(inode_is_locked(file_inode(filp)));
+	btrfs_assert_inode_locked(inode);
 
 	if (desc == NULL)
 		goto rollback;
@@ -676,11 +667,11 @@ int btrfs_get_verity_descriptor(struct inode *inode, void *buf, size_t buf_size)
 	if (ret < 0)
 		return ret;
 
-	if (item.reserved[0] != 0 || item.reserved[1] != 0)
+	if (unlikely(item.reserved[0] != 0 || item.reserved[1] != 0))
 		return -EUCLEAN;
 
 	true_size = btrfs_stack_verity_descriptor_size(&item);
-	if (true_size > INT_MAX)
+	if (unlikely(true_size > INT_MAX))
 		return -EUCLEAN;
 
 	if (buf_size == 0)
@@ -703,7 +694,6 @@ int btrfs_get_verity_descriptor(struct inode *inode, void *buf, size_t buf_size)
  *
  * @inode:         inode to read a merkle tree page for
  * @index:         page index relative to the start of the merkle tree
- * @num_ra_pages:  number of pages to readahead. Optional, we ignore it
  *
  * The Merkle tree is stored in the filesystem btree, but its pages are cached
  * with a logical position past EOF in the inode's mapping.
@@ -711,8 +701,7 @@ int btrfs_get_verity_descriptor(struct inode *inode, void *buf, size_t buf_size)
  * Returns the page we read, or an ERR_PTR on error.
  */
 static struct page *btrfs_read_merkle_tree_page(struct inode *inode,
-						pgoff_t index,
-						unsigned long num_ra_pages)
+						pgoff_t index)
 {
 	struct folio *folio;
 	u64 off = (u64)index << PAGE_SHIFT;
@@ -742,7 +731,7 @@ again:
 	}
 
 	folio = filemap_alloc_folio(mapping_gfp_constraint(inode->i_mapping, ~__GFP_FS),
-				    0);
+				    0, NULL);
 	if (!folio)
 		return ERR_PTR(-ENOMEM);
 
@@ -762,7 +751,7 @@ again:
 	 * [ inode objectid, BTRFS_MERKLE_ITEM_KEY, offset in bytes ]
 	 */
 	ret = read_key_bytes(BTRFS_I(inode), BTRFS_VERITY_MERKLE_ITEM_KEY, off,
-			     folio_address(folio), PAGE_SIZE, &folio->page);
+			     folio_address(folio), PAGE_SIZE, folio);
 	if (ret < 0) {
 		folio_put(folio);
 		return ERR_PTR(ret);
@@ -780,16 +769,17 @@ out:
 /*
  * fsverity op that writes a Merkle tree block into the btree.
  *
- * @inode:	inode to write a Merkle tree block for
+ * @file:	file to write a Merkle tree block for
  * @buf:	Merkle tree block to write
  * @pos:	the position of the block in the Merkle tree (in bytes)
  * @size:	the Merkle tree block size (in bytes)
  *
  * Returns 0 on success or negative error code on failure
  */
-static int btrfs_write_merkle_tree_block(struct inode *inode, const void *buf,
+static int btrfs_write_merkle_tree_block(struct file *file, const void *buf,
 					 u64 pos, unsigned int size)
 {
+	struct inode *inode = file_inode(file);
 	loff_t merkle_pos = merkle_file_pos(inode);
 
 	if (merkle_pos < 0)

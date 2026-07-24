@@ -21,6 +21,7 @@
 			color = <LED_COLOR_ID_GREEN>;
 			default-state = "off";
 			function = LED_FUNCTION_STATUS;
+			function-enumerator = <1>;
 			gpios = <&lsio_gpio5 27 GPIO_ACTIVE_HIGH>;
 		};
 
@@ -29,6 +30,7 @@
 			color = <LED_COLOR_ID_RED>;
 			default-state = "off";
 			function = LED_FUNCTION_STATUS;
+			function-enumerator = <1>;
 			gpios = <&lsio_gpio5 29 GPIO_ACTIVE_HIGH>;
 		};
 
@@ -37,6 +39,7 @@
 			color = <LED_COLOR_ID_GREEN>;
 			default-state = "off";
 			function = LED_FUNCTION_STATUS;
+			function-enumerator = <2>;
 			gpios = <&lsio_gpio5 20 GPIO_ACTIVE_HIGH>;
 		};
 
@@ -45,6 +48,7 @@
 			color = <LED_COLOR_ID_RED>;
 			default-state = "off";
 			function = LED_FUNCTION_STATUS;
+			function-enumerator = <2>;
 			gpios = <&lsio_gpio5 21 GPIO_ACTIVE_HIGH>;
 		};
 	};
@@ -62,9 +66,9 @@
 	status = "okay";
 };
 
-/* TODO: Audio Mixer */
-
-/* TODO: Asynchronous Sample Rate Converter (ASRC) */
+&asrc0 {
+	status = "okay";
+};
 
 /* TODO: Display Controller */
 
@@ -84,8 +88,6 @@
 &flexcan2 {
 	status = "okay";
 };
-
-/* TODO: GPU */
 
 /* Apalis I2C1 */
 &i2c2 {
@@ -187,17 +189,38 @@
 	status = "okay";
 };
 
-/* TODO: Apalis PCIE1 */
+/* Apalis PCIE1 */
+&pciea {
+	status = "okay";
+};
 
-/* TODO: Apalis BKL1_PWM */
+/* Apalis BKL1_PWM */
+&pwm_lvds1 {
+	status = "okay";
+};
 
-/* TODO: Apalis DAP1 */
+/* Apalis DAP1 */
+&sai1 {
+	status = "okay";
+};
 
-/* TODO: Apalis Analogue Audio */
+&sai5 {
+	status = "okay";
+};
 
-/* TODO: Apalis SATA1 */
+&sai5_lpcg {
+	status = "okay";
+};
 
-/* TODO: Apalis SPDIF1 */
+/* Apalis SATA1 */
+&sata {
+	status = "okay";
+};
+
+/* Apalis SPDIF1 */
+&spdif0 {
+	status = "okay";
+};
 
 /* TODO: Apalis USBH2, Apalis USBH3 and on-module Wi-Fi via on-module HSIC Hub */
 
@@ -206,7 +229,10 @@
 	status = "okay";
 };
 
-/* TODO: Apalis USBH4 SuperSpeed */
+/* Apalis USBH4 SuperSpeed */
+&usbotg3_cdns3 {
+	status = "okay";
+};
 
 /* Apalis MMC1 */
 &usdhc2 {

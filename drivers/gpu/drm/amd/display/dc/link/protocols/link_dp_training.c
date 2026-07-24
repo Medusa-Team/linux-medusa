@@ -272,7 +272,7 @@ void dp_wait_for_training_aux_rd_interval(
 	struct dc_link *link,
 	uint32_t wait_in_micro_secs)
 {
-	fsleep(wait_in_micro_secs);
+	usleep_range_state(wait_in_micro_secs, wait_in_micro_secs, TASK_UNINTERRUPTIBLE);
 
 	DC_LOG_HW_LINK_TRAINING("%s:\n wait = %d\n",
 		__func__,
@@ -515,10 +515,46 @@ bool dp_is_interlane_aligned(union lane_align_status_updated align_status)
 	return align_status.bits.INTERLANE_ALIGN_DONE == 1;
 }
 
+bool dp_check_interlane_aligned(union lane_align_status_updated align_status,
+		struct dc_link *link,
+		uint8_t retries)
+{
+	/* Take into consideration corner case for DP 1.4a LL Compliance CTS as USB4
+	 * has to share encoders unlike DP and USBC
+	 */
+	return (dp_is_interlane_aligned(align_status) ||
+			(link->skip_fallback_on_link_loss && retries));
+}
+
+uint32_t dp_get_eq_aux_rd_interval(
+		const struct dc_link *link,
+		const struct link_training_settings *lt_settings,
+		uint32_t offset,
+		uint8_t retries)
+{
+	if (link->ep_type == DISPLAY_ENDPOINT_USB4_DPIA) {
+		if (offset == 0 && retries == 1 && lt_settings->lttpr_mode == LTTPR_MODE_NON_TRANSPARENT)
+			return max(lt_settings->eq_pattern_time, (uint32_t) DPIA_CLK_SYNC_DELAY);
+		else
+			return dpia_get_eq_aux_rd_interval(link, lt_settings, offset);
+	} else if (is_repeater(lt_settings, offset))
+		return dp_translate_training_aux_read_interval(
+				link->dpcd_caps.lttpr_caps.aux_rd_interval[offset - 1]);
+	else
+		return lt_settings->eq_pattern_time;
+}
+
+bool dp_check_dpcd_reqeust_status(const struct dc_link *link,
+		enum dc_status status)
+{
+	return (status != DC_OK && link->ep_type == DISPLAY_ENDPOINT_USB4_DPIA);
+}
+
 enum link_training_result dp_check_link_loss_status(
 	struct dc_link *link,
 	const struct link_training_settings *link_training_setting)
 {
+	(void)link_training_setting;
 	enum link_training_result status = LINK_TRAINING_SUCCESS;
 	union lane_status lane_status;
 	union lane_align_status_updated dpcd_lane_status_updated;
@@ -701,10 +737,12 @@ void override_training_settings(
 		lt_settings->pre_emphasis = overrides->pre_emphasis;
 	if (overrides->post_cursor2 != NULL)
 		lt_settings->post_cursor2 = overrides->post_cursor2;
+	if (link->wa_flags.force_dp_ffe_preset && !dp_is_lttpr_present(link))
+		lt_settings->ffe_preset = &link->forced_dp_ffe_preset;
 	if (overrides->ffe_preset != NULL)
 		lt_settings->ffe_preset = overrides->ffe_preset;
 	/* Override HW lane settings with BIOS forced values if present */
-	if ((link->chip_caps & EXT_DISPLAY_PATH_CAPS__DP_FIXED_VS_EN) &&
+	if ((link->chip_caps & AMD_EXT_DISPLAY_PATH_CAPS__DP_FIXED_VS_EN) &&
 			lt_settings->lttpr_mode == LTTPR_MODE_TRANSPARENT) {
 		lt_settings->voltage_swing = &link->bios_forced_drive_settings.VOLTAGE_SWING;
 		lt_settings->pre_emphasis = &link->bios_forced_drive_settings.PRE_EMPHASIS;
@@ -748,7 +786,6 @@ void override_training_settings(
 		lt_settings->lttpr_mode = LTTPR_MODE_NON_LTTPR;
 
 	dp_get_lttpr_mode_override(link, &lt_settings->lttpr_mode);
-
 }
 
 enum dc_dp_training_pattern decide_cr_training_pattern(
@@ -764,19 +801,23 @@ enum dc_dp_training_pattern decide_cr_training_pattern(
 }
 
 enum dc_dp_training_pattern decide_eq_training_pattern(struct dc_link *link,
+		const struct link_resource *link_res,
 		const struct dc_link_settings *link_settings)
 {
-	struct link_encoder *link_enc;
+	struct link_encoder *link_enc = link_res->dio_link_enc;
 	struct encoder_feature_support *enc_caps;
 	struct dpcd_caps *rx_caps = &link->dpcd_caps;
 	enum dc_dp_training_pattern pattern = DP_TRAINING_PATTERN_SEQUENCE_2;
 
-	link_enc = link_enc_cfg_get_link_enc(link);
-	ASSERT(link_enc);
-	enc_caps = &link_enc->features;
-
 	switch (link_dp_get_encoding_format(link_settings)) {
 	case DP_8b_10b_ENCODING:
+		if (!link->dc->config.unify_link_enc_assignment)
+			link_enc = link_enc_cfg_get_link_enc(link);
+
+		if (!link_enc)
+			break;
+
+		enc_caps = &link_enc->features;
 		if (enc_caps->flags.bits.IS_TPS4_CAPABLE &&
 				rx_caps->max_down_spread.bits.TPS4_SUPPORTED)
 			pattern = DP_TRAINING_PATTERN_SEQUENCE_4;
@@ -849,13 +890,14 @@ void dp_decide_lane_settings(
 
 void dp_decide_training_settings(
 		struct dc_link *link,
+		const struct link_resource *link_res,
 		const struct dc_link_settings *link_settings,
 		struct link_training_settings *lt_settings)
 {
 	if (link_dp_get_encoding_format(link_settings) == DP_8b_10b_ENCODING)
-		decide_8b_10b_training_settings(link, link_settings, lt_settings);
+		decide_8b_10b_training_settings(link, link_res, link_settings, lt_settings);
 	else if (link_dp_get_encoding_format(link_settings) == DP_128b_132b_ENCODING)
-		decide_128b_132b_training_settings(link, link_settings, lt_settings);
+		decide_128b_132b_training_settings(link, link_res, link_settings, lt_settings);
 }
 
 
@@ -973,23 +1015,34 @@ void repeater_training_done(struct dc_link *link, uint32_t offset)
 		dpcd_pattern.v1_4.TRAINING_PATTERN_SET);
 }
 
-static void dpcd_exit_training_mode(struct dc_link *link, enum dp_link_encoding encoding)
+static enum link_training_result dpcd_exit_training_mode(struct dc_link *link, enum dp_link_encoding encoding)
 {
+	enum dc_status status;
 	uint8_t sink_status = 0;
-	uint8_t i;
+	uint32_t i;
+	uint8_t lttpr_count = dp_parse_lttpr_repeater_count(link->dpcd_caps.lttpr_caps.phy_repeater_cnt);
+	uint32_t intra_hop_disable_time_ms = (lttpr_count > 0 ? lttpr_count * 300 : 10);
+
+	// Each hop could theoretically take over 256ms (max 128b/132b AUX RD INTERVAL)
+	// To be safe, allow 300ms per LTTPR and 10ms for no LTTPR case
 
 	/* clear training pattern set */
-	dpcd_set_training_pattern(link, DP_TRAINING_PATTERN_VIDEOIDLE);
+	status = dpcd_set_training_pattern(link, DP_TRAINING_PATTERN_VIDEOIDLE);
+
+	if (dp_check_dpcd_reqeust_status(link, status))
+		return LINK_TRAINING_ABORT;
 
 	if (encoding == DP_128b_132b_ENCODING) {
 		/* poll for intra-hop disable */
-		for (i = 0; i < 10; i++) {
+		for (i = 0; i < intra_hop_disable_time_ms; i++) {
 			if ((core_link_read_dpcd(link, DP_SINK_STATUS, &sink_status, 1) == DC_OK) &&
 					(sink_status & DP_INTRA_HOP_AUX_REPLY_INDICATION) == 0)
 				break;
 			fsleep(1000);
 		}
 	}
+
+	return LINK_TRAINING_SUCCESS;
 }
 
 enum dc_status dpcd_configure_channel_coding(struct dc_link *link,
@@ -1013,17 +1066,18 @@ enum dc_status dpcd_configure_channel_coding(struct dc_link *link,
 	return status;
 }
 
-void dpcd_set_training_pattern(
+enum dc_status dpcd_set_training_pattern(
 	struct dc_link *link,
 	enum dc_dp_training_pattern training_pattern)
 {
+	enum dc_status status;
 	union dpcd_training_pattern dpcd_pattern = {0};
 
 	dpcd_pattern.v1_4.TRAINING_PATTERN_SET =
 			dp_training_pattern_to_dpcd_training_pattern(
 					link, training_pattern);
 
-	core_link_write_dpcd(
+	status = core_link_write_dpcd(
 		link,
 		DP_TRAINING_PATTERN_SET,
 		&dpcd_pattern.raw,
@@ -1033,6 +1087,8 @@ void dpcd_set_training_pattern(
 		__func__,
 		DP_TRAINING_PATTERN_SET,
 		dpcd_pattern.v1_4.TRAINING_PATTERN_SET);
+
+	return status;
 }
 
 enum dc_status dpcd_set_link_settings(
@@ -1063,9 +1119,13 @@ enum dc_status dpcd_set_link_settings(
 
 	status = core_link_write_dpcd(link, DP_DOWNSPREAD_CTRL,
 		&downspread.raw, sizeof(downspread));
+	if (status != DC_OK)
+		DC_LOG_ERROR("%s:%d: core_link_write_dpcd (DP_DOWNSPREAD_CTRL) failed\n", __func__, __LINE__);
 
 	status = core_link_write_dpcd(link, DP_LANE_COUNT_SET,
 		&lane_count_set.raw, 1);
+	if (status != DC_OK)
+		DC_LOG_ERROR("%s:%d: core_link_write_dpcd (DP_LANE_COUNT_SET) failed\n", __func__, __LINE__);
 
 	if (link->dpcd_caps.dpcd_rev.raw >= DPCD_REV_13 &&
 			lt_settings->link_settings.use_link_rate_set == true) {
@@ -1081,12 +1141,19 @@ enum dc_status dpcd_set_link_settings(
 					supported_link_rates, sizeof(supported_link_rates));
 		}
 		status = core_link_write_dpcd(link, DP_LINK_BW_SET, &rate, 1);
+		if (status != DC_OK)
+			DC_LOG_ERROR("%s:%d: core_link_write_dpcd (DP_LINK_BW_SET) failed\n", __func__, __LINE__);
+
 		status = core_link_write_dpcd(link, DP_LINK_RATE_SET,
 				&lt_settings->link_settings.link_rate_set, 1);
+		if (status != DC_OK)
+			DC_LOG_ERROR("%s:%d: core_link_write_dpcd (DP_LINK_RATE_SET) failed\n", __func__, __LINE__);
 	} else {
 		rate = get_dpcd_link_rate(&lt_settings->link_settings);
 
 		status = core_link_write_dpcd(link, DP_LINK_BW_SET, &rate, 1);
+		if (status != DC_OK)
+			DC_LOG_ERROR("%s:%d: core_link_write_dpcd (DP_LINK_BW_SET) failed\n", __func__, __LINE__);
 	}
 
 	if (rate) {
@@ -1184,6 +1251,13 @@ void dpcd_set_lt_pattern_and_lane_settings(
 
 	dpcd_lt_buffer[DP_TRAINING_PATTERN_SET - DP_TRAINING_PATTERN_SET]
 		= dpcd_pattern.raw;
+
+	if (link->ep_type == DISPLAY_ENDPOINT_USB4_DPIA)
+		dpia_set_tps_notification(
+			link,
+			lt_settings,
+			dpcd_pattern.v1_4.TRAINING_PATTERN_SET,
+			offset);
 
 	if (is_repeater(lt_settings, offset)) {
 		DC_LOG_HW_LINK_TRAINING("%s\n LTTPR Repeater ID: %d\n 0x%X pattern = %x\n",
@@ -1314,6 +1388,7 @@ bool dp_set_hw_training_pattern(
 	enum dc_dp_training_pattern pattern,
 	uint32_t offset)
 {
+	(void)offset;
 	enum dp_test_pattern test_pattern = DP_TEST_PATTERN_UNSUPPORTED;
 
 	switch (pattern) {
@@ -1455,7 +1530,8 @@ static enum link_training_result dp_transition_to_video_idle(
 		 */
 		if (link->connector_signal != SIGNAL_TYPE_EDP && status == LINK_TRAINING_SUCCESS) {
 			msleep(5);
-			status = dp_check_link_loss_status(link, lt_settings);
+			if (!link->skip_fallback_on_link_loss)
+				status = dp_check_link_loss_status(link, lt_settings);
 		}
 		return status;
 	}
@@ -1491,6 +1567,7 @@ enum link_training_result dp_perform_link_training(
 	/* decide training settings */
 	dp_decide_training_settings(
 			link,
+			link_res,
 			link_settings,
 			&lt_settings);
 
@@ -1504,14 +1581,15 @@ enum link_training_result dp_perform_link_training(
 
 	/* configure link prior to entering training mode */
 	dpcd_configure_lttpr_mode(link, &lt_settings);
-	dp_set_fec_ready(link, link_res, lt_settings.should_set_fec_ready);
+	if (link_dp_get_encoding_format(link_settings) == DP_8b_10b_ENCODING)
+		dp_set_fec_ready(link, link_res, lt_settings.should_set_fec_ready);
 	dpcd_configure_channel_coding(link, &lt_settings);
 
 	/* enter training mode:
 	 * Per DP specs starting from here, DPTX device shall not issue
 	 * Non-LT AUX transactions inside training mode.
 	 */
-	if ((link->chip_caps & EXT_DISPLAY_PATH_CAPS__DP_FIXED_VS_EN) && encoding == DP_8b_10b_ENCODING)
+	if (((link->chip_caps & AMD_EXT_DISPLAY_PATH_CAPS__EXT_CHIP_MASK) == AMD_EXT_DISPLAY_PATH_CAPS__DP_FIXED_VS_EN) && encoding == DP_8b_10b_ENCODING)
 		status = dp_perform_fixed_vs_pe_training_sequence(link, link_res, &lt_settings);
 	else if (encoding == DP_8b_10b_ENCODING)
 		status = dp_perform_8b_10b_link_training(link, link_res, &lt_settings);
@@ -1521,7 +1599,9 @@ enum link_training_result dp_perform_link_training(
 		ASSERT(0);
 
 	/* exit training mode */
-	dpcd_exit_training_mode(link, encoding);
+	if ((dpcd_exit_training_mode(link, encoding) != LINK_TRAINING_SUCCESS || status == LINK_TRAINING_ABORT) &&
+			link->ep_type == DISPLAY_ENDPOINT_USB4_DPIA)
+		dpia_training_abort(link, &lt_settings, 0);
 
 	/* switch to video idle */
 	if ((status == LINK_TRAINING_SUCCESS) || !skip_video_pattern)
@@ -1599,8 +1679,7 @@ bool perform_link_training_with_retries(
 			dp_perform_link_training_skip_aux(link, &pipe_ctx->link_res, &cur_link_settings);
 			return true;
 		} else {
-			/** @todo Consolidate USB4 DP and DPx.x training. */
-			if (link->ep_type == DISPLAY_ENDPOINT_USB4_DPIA) {
+			if (!link->dc->config.consolidated_dpia_dp_lt && link->ep_type == DISPLAY_ENDPOINT_USB4_DPIA) {
 				status = dpia_perform_link_training(
 						link,
 						&pipe_ctx->link_res,
@@ -1629,8 +1708,17 @@ bool perform_link_training_with_retries(
 			dp_trace_lt_total_count_increment(link, false);
 			dp_trace_lt_result_update(link, status, false);
 			dp_trace_set_lt_end_timestamp(link, false);
-			if (status == LINK_TRAINING_SUCCESS && !is_link_bw_low)
+			if (status == LINK_TRAINING_SUCCESS && !is_link_bw_low) {
+				// Update verified link settings to current one
+				// Because DPIA LT might fallback to lower link setting.
+				if (link->ep_type == DISPLAY_ENDPOINT_USB4_DPIA &&
+						stream->signal == SIGNAL_TYPE_DISPLAY_PORT_MST) {
+					link->verified_link_cap.link_rate = link->cur_link_settings.link_rate;
+					link->verified_link_cap.lane_count = link->cur_link_settings.lane_count;
+					dm_helpers_dp_mst_update_branch_bandwidth(link->ctx, link);
+				}
 				return true;
+			}
 		}
 
 		fail_count++;
@@ -1641,6 +1729,15 @@ bool perform_link_training_with_retries(
 			 */
 			if (j == (attempts - 1) || (status == LINK_TRAINING_ABORT))
 				break;
+		}
+
+		if (link->ep_type == DISPLAY_ENDPOINT_USB4_DPIA &&
+				stream->signal == SIGNAL_TYPE_DISPLAY_PORT_MST &&
+				!link->dc->config.enable_dpia_pre_training) {
+			if (j == (attempts - 1))
+				do_fallback = true;
+			else
+				do_fallback = false;
 		}
 
 		if (j == (attempts - 1)) {
@@ -1707,13 +1804,10 @@ bool perform_link_training_with_retries(
 			is_link_bw_min = ((cur_link_settings.link_rate <= LINK_RATE_LOW) &&
 				(cur_link_settings.lane_count <= LANE_COUNT_ONE));
 
-			if (is_link_bw_low) {
+			if (is_link_bw_low)
 				DC_LOG_WARNING(
 					"%s: Link(%d) bandwidth too low after fallback req_bw(%d) > link_bw(%d)\n",
 					__func__, link->link_index, req_bw, link_bw);
-
-				return false;
-			}
 		}
 
 		msleep(delay_between_attempts);

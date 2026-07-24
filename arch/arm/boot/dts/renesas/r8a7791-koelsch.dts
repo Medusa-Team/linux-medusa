@@ -301,6 +301,16 @@
 		clock-frequency = <12000000>;
 	};
 
+	composite-in {
+		compatible = "composite-video-connector";
+
+		port {
+			composite_con_in: endpoint {
+				remote-endpoint = <&adv7180_in>;
+			};
+		};
+	};
+
 	hdmi-out {
 		compatible = "hdmi-connector";
 		type = "a";
@@ -383,13 +393,25 @@
 		};
 
 		composite-in@20 {
-			compatible = "adi,adv7180";
+			compatible = "adi,adv7180cp";
 			reg = <0x20>;
 
-			port {
-				adv7180: endpoint {
-					bus-width = <8>;
-					remote-endpoint = <&vin1ep>;
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					adv7180_in: endpoint {
+						remote-endpoint = <&composite_con_in>;
+					};
+				};
+
+				port@3 {
+					reg = <3>;
+					adv7180_out: endpoint {
+						remote-endpoint = <&vin1ep>;
+					};
 				};
 			};
 		};
@@ -397,8 +419,7 @@
 		hdmi@39 {
 			compatible = "adi,adv7511w";
 			reg = <0x39>;
-			interrupt-parent = <&gpio3>;
-			interrupts = <29 IRQ_TYPE_LEVEL_LOW>;
+			interrupts-extended = <&gpio3 29 IRQ_TYPE_LEVEL_LOW>;
 			clocks = <&cec_clock>;
 			clock-names = "cec";
 
@@ -435,8 +456,7 @@
 		hdmi-in@4c {
 			compatible = "adi,adv7612";
 			reg = <0x4c>;
-			interrupt-parent = <&gpio4>;
-			interrupts = <2 IRQ_TYPE_LEVEL_LOW>;
+			interrupts-extended = <&gpio4 2 IRQ_TYPE_LEVEL_LOW>;
 			default-input = <0>;
 
 			ports {
@@ -656,11 +676,9 @@
 	status = "okay";
 
 	phy1: ethernet-phy@1 {
-		compatible = "ethernet-phy-id0022.1537",
-			     "ethernet-phy-ieee802.3-c22";
+		compatible = "ethernet-phy-id0022.1537";
 		reg = <1>;
-		interrupt-parent = <&irqc0>;
-		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+		interrupts-extended = <&irqc0 0 IRQ_TYPE_LEVEL_LOW>;
 		micrel,led-mode = <1>;
 		reset-gpios = <&gpio5 22 GPIO_ACTIVE_LOW>;
 	};
@@ -682,6 +700,7 @@
 &scif0 {
 	pinctrl-0 = <&scif0_pins>;
 	pinctrl-names = "default";
+	bootph-all;
 
 	status = "okay";
 };
@@ -816,8 +835,7 @@
 	pmic@58 {
 		compatible = "dlg,da9063";
 		reg = <0x58>;
-		interrupt-parent = <&irqc0>;
-		interrupts = <2 IRQ_TYPE_LEVEL_LOW>;
+		interrupts-extended = <&irqc0 2 IRQ_TYPE_LEVEL_LOW>;
 		interrupt-controller;
 		#interrupt-cells = <2>;
 
@@ -833,8 +851,7 @@
 	vdd_dvfs: regulator@68 {
 		compatible = "dlg,da9210";
 		reg = <0x68>;
-		interrupt-parent = <&irqc0>;
-		interrupts = <2 IRQ_TYPE_LEVEL_LOW>;
+		interrupts-extended = <&irqc0 2 IRQ_TYPE_LEVEL_LOW>;
 
 		regulator-min-microvolt = <1000000>;
 		regulator-max-microvolt = <1000000>;
@@ -859,7 +876,7 @@
 	status = "okay";
 	pinctrl-0 = <&usb0_pins>;
 	pinctrl-names = "default";
-	renesas,enable-gpio = <&gpio5 31 GPIO_ACTIVE_HIGH>;
+	renesas,enable-gpios = <&gpio5 31 GPIO_ACTIVE_HIGH>;
 };
 
 &usbphy {
@@ -904,7 +921,7 @@
 
 	port {
 		vin1ep: endpoint {
-			remote-endpoint = <&adv7180>;
+			remote-endpoint = <&adv7180_out>;
 			bus-width = <8>;
 		};
 	};

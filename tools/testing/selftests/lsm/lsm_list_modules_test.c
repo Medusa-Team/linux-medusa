@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include "../kselftest_harness.h"
+#include "kselftest_harness.h"
 #include "common.h"
 
 TEST(size_null_lsm_list_modules)
@@ -127,6 +127,9 @@ TEST(correct_lsm_list_modules)
 			break;
 		case LSM_ID_EVM:
 			name = "evm";
+			break;
+		case LSM_ID_IPE:
+			name = "ipe";
 			break;
 		default:
 			name = "INVALID";

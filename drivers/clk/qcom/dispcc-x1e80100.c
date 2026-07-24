@@ -580,7 +580,7 @@ static struct clk_rcg2 disp_cc_mdss_mdp_clk_src = {
 		.parent_data = disp_cc_parent_data_6,
 		.num_parents = ARRAY_SIZE(disp_cc_parent_data_6),
 		.flags = CLK_SET_RATE_PARENT,
-		.ops = &clk_rcg2_shared_ops,
+		.ops = &clk_rcg2_shared_no_init_park_ops,
 	},
 };
 
@@ -1618,6 +1618,9 @@ static struct clk_regmap *disp_cc_x1e80100_clocks[] = {
 
 static const struct qcom_reset_map disp_cc_x1e80100_resets[] = {
 	[DISP_CC_MDSS_CORE_BCR] = { 0x8000 },
+	[DISP_CC_MDSS_DPTX0_USB_ROUTER_LINK_INTF_CLK_ARES] = { .reg = 0x8044, .bit = 2 },
+	[DISP_CC_MDSS_DPTX1_USB_ROUTER_LINK_INTF_CLK_ARES] = { .reg = 0x8068, .bit = 2 },
+	[DISP_CC_MDSS_DPTX2_USB_ROUTER_LINK_INTF_CLK_ARES] = { .reg = 0x8088, .bit = 2 },
 	[DISP_CC_MDSS_CORE_INT2_BCR] = { 0xa000 },
 	[DISP_CC_MDSS_RSCC_BCR] = { 0xc000 },
 };

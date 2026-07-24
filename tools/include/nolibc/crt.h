@@ -7,29 +7,55 @@
 #ifndef _NOLIBC_CRT_H
 #define _NOLIBC_CRT_H
 
+#ifndef NOLIBC_NO_RUNTIME
+
+#include "compiler.h"
+
 char **environ __attribute__((weak));
 const unsigned long *_auxv __attribute__((weak));
 
+void _start(void);
 static void __stack_chk_init(void);
 static void exit(int);
+static char *strrchr(const char *s, int c);
 
-extern void (*const __preinit_array_start[])(void) __attribute__((weak));
-extern void (*const __preinit_array_end[])(void) __attribute__((weak));
+extern void (*const __preinit_array_start[])(int, char **, char**) __attribute__((weak));
+extern void (*const __preinit_array_end[])(int, char **, char**) __attribute__((weak));
 
-extern void (*const __init_array_start[])(void) __attribute__((weak));
-extern void (*const __init_array_end[])(void) __attribute__((weak));
+extern void (*const __init_array_start[])(int, char **, char**) __attribute__((weak));
+extern void (*const __init_array_end[])(int, char **, char**) __attribute__((weak));
 
 extern void (*const __fini_array_start[])(void) __attribute__((weak));
 extern void (*const __fini_array_end[])(void) __attribute__((weak));
 
-__attribute__((weak))
+#ifndef NOLIBC_IGNORE_ERRNO
+extern char *program_invocation_name __attribute__((weak));
+extern char *program_invocation_short_name __attribute__((weak));
+
+static __inline__
+char *__nolibc_program_invocation_short_name(char *long_name)
+{
+
+	char *short_name;
+
+	short_name = strrchr(long_name, '/');
+	if (!short_name || !short_name[0])
+		return long_name;
+
+	return short_name + 1;
+}
+#endif /* NOLIBC_IGNORE_ERRNO */
+
+void _start_c(long *sp);
+__attribute__((weak,used)) __nolibc_no_sanitize_undefined
 void _start_c(long *sp)
 {
 	long argc;
 	char **argv;
 	char **envp;
 	int exitcode;
-	void (* const *func)(void);
+	void (* const *ctor_func)(int, char **, char **);
+	void (* const *dtor_func)(void);
 	const unsigned long *auxv;
 	/* silence potential warning: conflicting types for 'main' */
 	int _nolibc_main(int, char **, char **) __asm__ ("main");
@@ -66,18 +92,26 @@ void _start_c(long *sp)
 		;
 	_auxv = auxv;
 
-	for (func = __preinit_array_start; func < __preinit_array_end; func++)
-		(*func)();
-	for (func = __init_array_start; func < __init_array_end; func++)
-		(*func)();
+#ifndef NOLIBC_IGNORE_ERRNO
+	if (argc > 0 && argv[0]) {
+		program_invocation_name = argv[0];
+		program_invocation_short_name = __nolibc_program_invocation_short_name(argv[0]);
+	}
+#endif /* NOLIBC_IGNORE_ERRNO */
+
+	for (ctor_func = __preinit_array_start; ctor_func < __preinit_array_end; ctor_func++)
+		(*ctor_func)(argc, argv, envp);
+	for (ctor_func = __init_array_start; ctor_func < __init_array_end; ctor_func++)
+		(*ctor_func)(argc, argv, envp);
 
 	/* go to application */
 	exitcode = _nolibc_main(argc, argv, envp);
 
-	for (func = __fini_array_end; func > __fini_array_start;)
-		(*--func)();
+	for (dtor_func = __fini_array_end; dtor_func > __fini_array_start;)
+		(*--dtor_func)();
 
 	exit(exitcode);
 }
 
+#endif /* NOLIBC_NO_RUNTIME */
 #endif /* _NOLIBC_CRT_H */

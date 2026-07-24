@@ -33,10 +33,29 @@ Note however that any software (e.g ``WIN87EM.DLL``) expecting these features
 to be present likely predates these CPUID feature bits, and therefore
 doesn't know to check for them anyway.
 
+``KVM_SET_VCPU_EVENTS`` issue
+-----------------------------
+
+Invalid KVM_SET_VCPU_EVENTS input with respect to error codes *may* result in
+failed VM-Entry on Intel CPUs.  Pre-CET Intel CPUs require that exception
+injection through the VMCS correctly set the "error code valid" flag, e.g.
+require the flag be set when injecting a #GP, clear when injecting a #UD,
+clear when injecting a soft exception, etc.  Intel CPUs that enumerate
+IA32_VMX_BASIC[56] as '1' relax VMX's consistency checks, and AMD CPUs have no
+restrictions whatsoever.  KVM_SET_VCPU_EVENTS doesn't sanity check the vector
+versus "has_error_code", i.e. KVM's ABI follows AMD behavior.
+
 Nested virtualization features
 ------------------------------
 
-TBD
+On AMD CPUs, when GIF is cleared, #DB exceptions or traps due to a breakpoint
+register match are ignored and discarded by the CPU. The CPU relies on the VMM
+to fully virtualize this behavior, even when vGIF is enabled for the guest
+(i.e. vGIF=0 does not cause the CPU to drop #DBs when the guest is running).
+KVM does not virtualize this behavior as the complexity is unjustified given
+the rarity of the use case. One way to handle this would be for KVM to
+intercept the #DB, temporarily disable the breakpoint, single-step over the
+instruction, then re-enable the breakpoint.
 
 x2APIC
 ------

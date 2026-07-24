@@ -40,7 +40,6 @@ nvif_object_ioctl(struct nvif_object *object, void *data, u32 size, void **hack)
 			args->v0.object = nvif_handle(object);
 		else
 			args->v0.object = 0;
-		args->v0.owner = NVIF_IOCTL_V0_OWNER_ANY;
 	} else
 		return -ENOSYS;
 
@@ -58,7 +57,7 @@ int
 nvif_object_sclass_get(struct nvif_object *object, struct nvif_sclass **psclass)
 {
 	struct {
-		struct nvif_ioctl_v0 ioctl;
+		struct nvif_ioctl_v0_hdr ioctl;
 		struct nvif_ioctl_sclass_v0 sclass;
 	} *args = NULL;
 	int ret, cnt = 0, i;
@@ -82,7 +81,7 @@ nvif_object_sclass_get(struct nvif_object *object, struct nvif_sclass **psclass)
 			return ret;
 	}
 
-	*psclass = kcalloc(args->sclass.count, sizeof(**psclass), GFP_KERNEL);
+	*psclass = kzalloc_objs(**psclass, args->sclass.count);
 	if (*psclass) {
 		for (i = 0; i < args->sclass.count; i++) {
 			(*psclass)[i].oclass = args->sclass.oclass[i].oclass;
@@ -98,48 +97,11 @@ nvif_object_sclass_get(struct nvif_object *object, struct nvif_sclass **psclass)
 	return ret;
 }
 
-u32
-nvif_object_rd(struct nvif_object *object, int size, u64 addr)
-{
-	struct {
-		struct nvif_ioctl_v0 ioctl;
-		struct nvif_ioctl_rd_v0 rd;
-	} args = {
-		.ioctl.type = NVIF_IOCTL_V0_RD,
-		.rd.size = size,
-		.rd.addr = addr,
-	};
-	int ret = nvif_object_ioctl(object, &args, sizeof(args), NULL);
-	if (ret) {
-		/*XXX: warn? */
-		return 0;
-	}
-	return args.rd.data;
-}
-
-void
-nvif_object_wr(struct nvif_object *object, int size, u64 addr, u32 data)
-{
-	struct {
-		struct nvif_ioctl_v0 ioctl;
-		struct nvif_ioctl_wr_v0 wr;
-	} args = {
-		.ioctl.type = NVIF_IOCTL_V0_WR,
-		.wr.size = size,
-		.wr.addr = addr,
-		.wr.data = data,
-	};
-	int ret = nvif_object_ioctl(object, &args, sizeof(args), NULL);
-	if (ret) {
-		/*XXX: warn? */
-	}
-}
-
 int
 nvif_object_mthd(struct nvif_object *object, u32 mthd, void *data, u32 size)
 {
 	struct {
-		struct nvif_ioctl_v0 ioctl;
+		struct nvif_ioctl_v0_hdr ioctl;
 		struct nvif_ioctl_mthd_v0 mthd;
 	} *args;
 	u32 args_size;
@@ -173,7 +135,7 @@ void
 nvif_object_unmap_handle(struct nvif_object *object)
 {
 	struct {
-		struct nvif_ioctl_v0 ioctl;
+		struct nvif_ioctl_v0_hdr ioctl;
 		struct nvif_ioctl_unmap unmap;
 	} args = {
 		.ioctl.type = NVIF_IOCTL_V0_UNMAP,
@@ -187,7 +149,7 @@ nvif_object_map_handle(struct nvif_object *object, void *argv, u32 argc,
 		       u64 *handle, u64 *length)
 {
 	struct {
-		struct nvif_ioctl_v0 ioctl;
+		struct nvif_ioctl_v0_hdr ioctl;
 		struct nvif_ioctl_map_v0 map;
 	} *args;
 	u32 argn = sizeof(*args) + argc;
@@ -249,7 +211,7 @@ void
 nvif_object_dtor(struct nvif_object *object)
 {
 	struct {
-		struct nvif_ioctl_v0 ioctl;
+		struct nvif_ioctl_v0_hdr ioctl;
 		struct nvif_ioctl_del del;
 	} args = {
 		.ioctl.type = NVIF_IOCTL_V0_DEL,
@@ -268,7 +230,7 @@ nvif_object_ctor(struct nvif_object *parent, const char *name, u32 handle,
 		 s32 oclass, void *data, u32 size, struct nvif_object *object)
 {
 	struct {
-		struct nvif_ioctl_v0 ioctl;
+		struct nvif_ioctl_v0_hdr ioctl;
 		struct nvif_ioctl_new_v0 new;
 	} *args;
 	int ret = 0;
@@ -299,8 +261,6 @@ nvif_object_ctor(struct nvif_object *parent, const char *name, u32 handle,
 		args->ioctl.version = 0;
 		args->ioctl.type = NVIF_IOCTL_V0_NEW;
 		args->new.version = 0;
-		args->new.route = parent->client->route;
-		args->new.token = nvif_handle(object);
 		args->new.object = nvif_handle(object);
 		args->new.handle = handle;
 		args->new.oclass = oclass;

@@ -84,7 +84,6 @@ void radeon_driver_unload_kms(struct drm_device *dev)
 	rdev->agp = NULL;
 
 done_free:
-	kfree(rdev);
 	dev->dev_private = NULL;
 }
 
@@ -104,14 +103,8 @@ done_free:
 int radeon_driver_load_kms(struct drm_device *dev, unsigned long flags)
 {
 	struct pci_dev *pdev = to_pci_dev(dev->dev);
-	struct radeon_device *rdev;
+	struct radeon_device *rdev = dev->dev_private;
 	int r, acpi_status;
-
-	rdev = kzalloc(sizeof(struct radeon_device), GFP_KERNEL);
-	if (rdev == NULL) {
-		return -ENOMEM;
-	}
-	dev->dev_private = (void *)rdev;
 
 #ifdef __alpha__
 	rdev->hose = pdev->sysdata;
@@ -176,7 +169,6 @@ int radeon_driver_load_kms(struct drm_device *dev, unsigned long flags)
 		pm_runtime_set_autosuspend_delay(dev->dev, 5000);
 		pm_runtime_set_active(dev->dev);
 		pm_runtime_allow(dev->dev);
-		pm_runtime_mark_last_busy(dev->dev);
 		pm_runtime_put_autosuspend(dev->dev);
 	}
 
@@ -648,7 +640,7 @@ int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 	/* new gpu have virtual address space support */
 	if (rdev->family >= CHIP_CAYMAN) {
 
-		fpriv = kzalloc(sizeof(*fpriv), GFP_KERNEL);
+		fpriv = kzalloc_obj(*fpriv);
 		if (unlikely(!fpriv)) {
 			r = -ENOMEM;
 			goto err_suspend;
@@ -683,7 +675,6 @@ int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 		file_priv->driver_priv = fpriv;
 	}
 
-	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);
 	return 0;
 
@@ -693,7 +684,6 @@ err_fpriv:
 	kfree(fpriv);
 
 err_suspend:
-	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);
 	return r;
 }
@@ -743,7 +733,6 @@ void radeon_driver_postclose_kms(struct drm_device *dev,
 		kfree(fpriv);
 		file_priv->driver_priv = NULL;
 	}
-	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);
 }
 

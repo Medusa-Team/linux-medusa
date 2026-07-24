@@ -634,8 +634,6 @@ static int rzv2m_csi_probe(struct platform_device *pdev)
 	controller->use_gpio_descriptors = true;
 	controller->target_abort = rzv2m_csi_target_abort;
 
-	device_set_node(&controller->dev, dev_fwnode(dev));
-
 	ret = devm_request_irq(dev, irq, rzv2m_csi_irq_handler, 0,
 			       dev_name(dev), csi);
 	if (ret)
@@ -683,7 +681,7 @@ MODULE_DEVICE_TABLE(of, rzv2m_csi_match);
 
 static struct platform_driver rzv2m_csi_drv = {
 	.probe = rzv2m_csi_probe,
-	.remove_new = rzv2m_csi_remove,
+	.remove = rzv2m_csi_remove,
 	.driver = {
 		.name = "rzv2m_csi",
 		.of_match_table = rzv2m_csi_match,

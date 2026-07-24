@@ -48,7 +48,7 @@
 };
 
 &exp1 {
-	p15 {
+	p15-hog {
 		/* P15 - EXP_MUX2 */
 		gpio-hog;
 		gpios = <13 GPIO_ACTIVE_HIGH>;
@@ -80,6 +80,6 @@
 
 &main_cpsw_port1 {
 	status = "okay";
-	phy-mode = "rgmii-rxid";
+	phy-mode = "rgmii-id";
 	phy-handle = <&main_cpsw_phy0>;
 };

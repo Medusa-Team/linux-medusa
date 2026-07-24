@@ -42,34 +42,36 @@ static const unsigned int isp_4_1_0_int_srcid[MAX_ISP410_INT_SRC] = {
 static int isp_v4_1_0_hw_init(struct amdgpu_isp *isp)
 {
 	struct amdgpu_device *adev = isp->adev;
+	int idx, int_idx, num_res, r;
 	u64 isp_base;
-	int int_idx;
-	int r;
 
 	if (adev->rmmio_size == 0 || adev->rmmio_size < 0x5289)
 		return -EINVAL;
 
 	isp_base = adev->rmmio_base;
 
-	isp->isp_cell = kcalloc(1, sizeof(struct mfd_cell), GFP_KERNEL);
+	isp->isp_cell = kzalloc_objs(struct mfd_cell, 3);
 	if (!isp->isp_cell) {
 		r = -ENOMEM;
-		DRM_ERROR("%s: isp mfd cell alloc failed\n", __func__);
+		drm_err(&adev->ddev,
+			"%s: isp mfd cell alloc failed\n", __func__);
 		goto failure;
 	}
 
-	isp->isp_res = kcalloc(MAX_ISP410_INT_SRC + 1, sizeof(struct resource),
-			       GFP_KERNEL);
+	num_res = MAX_ISP410_MEM_RES + MAX_ISP410_INT_SRC;
+	isp->isp_res = kzalloc_objs(struct resource, num_res);
 	if (!isp->isp_res) {
 		r = -ENOMEM;
-		DRM_ERROR("%s: isp mfd res alloc failed\n", __func__);
+		drm_err(&adev->ddev,
+			"%s: isp mfd res alloc failed\n", __func__);
 		goto failure;
 	}
 
-	isp->isp_pdata = kzalloc(sizeof(*isp->isp_pdata), GFP_KERNEL);
+	isp->isp_pdata = kzalloc_obj(*isp->isp_pdata);
 	if (!isp->isp_pdata) {
 		r = -ENOMEM;
-		DRM_ERROR("%s: isp platform data alloc failed\n", __func__);
+		drm_err(&adev->ddev,
+			"%s: isp platform data alloc failed\n", __func__);
 		goto failure;
 	}
 
@@ -83,24 +85,71 @@ static int isp_v4_1_0_hw_init(struct amdgpu_isp *isp)
 	isp->isp_res[0].start = isp_base;
 	isp->isp_res[0].end = isp_base + ISP_REGS_OFFSET_END;
 
-	for (int_idx = 0; int_idx < MAX_ISP410_INT_SRC; int_idx++) {
-		isp->isp_res[int_idx + 1].name = "isp_4_1_0_irq";
-		isp->isp_res[int_idx + 1].flags = IORESOURCE_IRQ;
-		isp->isp_res[int_idx + 1].start =
+	isp->isp_res[1].name = "isp_4_1_phy0_reg";
+	isp->isp_res[1].flags = IORESOURCE_MEM;
+	isp->isp_res[1].start = isp_base + ISP410_PHY0_OFFSET;
+	isp->isp_res[1].end = isp_base + ISP410_PHY0_OFFSET + ISP410_PHY0_SIZE;
+
+	for (idx = MAX_ISP410_MEM_RES, int_idx = 0; idx < num_res; idx++, int_idx++) {
+		isp->isp_res[idx].name = "isp_4_1_0_irq";
+		isp->isp_res[idx].flags = IORESOURCE_IRQ;
+		isp->isp_res[idx].start =
 			amdgpu_irq_create_mapping(adev, isp_4_1_0_int_srcid[int_idx]);
-		isp->isp_res[int_idx + 1].end =
-			isp->isp_res[int_idx + 1].start;
+		isp->isp_res[idx].end =
+			isp->isp_res[idx].start;
 	}
 
 	isp->isp_cell[0].name = "amd_isp_capture";
-	isp->isp_cell[0].num_resources = MAX_ISP410_INT_SRC + 1;
+	isp->isp_cell[0].num_resources = num_res;
 	isp->isp_cell[0].resources = &isp->isp_res[0];
 	isp->isp_cell[0].platform_data = isp->isp_pdata;
 	isp->isp_cell[0].pdata_size = sizeof(struct isp_platform_data);
 
-	r = mfd_add_hotplug_devices(isp->parent, isp->isp_cell, 1);
+	/* initialize isp i2c platform data */
+	isp->isp_i2c_res = kzalloc_objs(struct resource, 1);
+	if (!isp->isp_i2c_res) {
+		r = -ENOMEM;
+		drm_err(&adev->ddev,
+			"%s: isp mfd res alloc failed\n", __func__);
+		goto failure;
+	}
+
+	isp->isp_i2c_res[0].name = "isp_i2c0_reg";
+	isp->isp_i2c_res[0].flags = IORESOURCE_MEM;
+	isp->isp_i2c_res[0].start = isp_base + ISP410_I2C0_OFFSET;
+	isp->isp_i2c_res[0].end = isp_base + ISP410_I2C0_OFFSET + ISP410_I2C0_SIZE;
+
+	isp->isp_cell[1].name = "amd_isp_i2c_designware";
+	isp->isp_cell[1].num_resources = 1;
+	isp->isp_cell[1].resources = &isp->isp_i2c_res[0];
+	isp->isp_cell[1].platform_data = isp->isp_pdata;
+	isp->isp_cell[1].pdata_size = sizeof(struct isp_platform_data);
+
+	/* initialize isp gpiochip platform data */
+	isp->isp_gpio_res = kzalloc_objs(struct resource, 1);
+	if (!isp->isp_gpio_res) {
+		r = -ENOMEM;
+		drm_err(&adev->ddev,
+			"%s: isp gpio res alloc failed\n", __func__);
+		goto failure;
+	}
+
+	isp->isp_gpio_res[0].name = "isp_gpio_reg";
+	isp->isp_gpio_res[0].flags = IORESOURCE_MEM;
+	isp->isp_gpio_res[0].start = isp_base + ISP410_GPIO_SENSOR_OFFSET;
+	isp->isp_gpio_res[0].end = isp_base + ISP410_GPIO_SENSOR_OFFSET +
+				   ISP410_GPIO_SENSOR_SIZE;
+
+	isp->isp_cell[2].name = "amdisp-pinctrl";
+	isp->isp_cell[2].num_resources = 1;
+	isp->isp_cell[2].resources = &isp->isp_gpio_res[0];
+	isp->isp_cell[2].platform_data = isp->isp_pdata;
+	isp->isp_cell[2].pdata_size = sizeof(struct isp_platform_data);
+
+	r = mfd_add_hotplug_devices(isp->parent, isp->isp_cell, 3);
 	if (r) {
-		DRM_ERROR("%s: add mfd hotplug device failed\n", __func__);
+		drm_err(&adev->ddev,
+			"%s: add mfd hotplug device failed\n", __func__);
 		goto failure;
 	}
 
@@ -111,6 +160,8 @@ failure:
 	kfree(isp->isp_pdata);
 	kfree(isp->isp_res);
 	kfree(isp->isp_cell);
+	kfree(isp->isp_i2c_res);
+	kfree(isp->isp_gpio_res);
 
 	return r;
 }
@@ -122,6 +173,8 @@ static int isp_v4_1_0_hw_fini(struct amdgpu_isp *isp)
 	kfree(isp->isp_res);
 	kfree(isp->isp_cell);
 	kfree(isp->isp_pdata);
+	kfree(isp->isp_i2c_res);
+	kfree(isp->isp_gpio_res);
 
 	return 0;
 }

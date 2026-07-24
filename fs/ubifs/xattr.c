@@ -48,19 +48,6 @@
 #include <linux/slab.h>
 #include <linux/xattr.h>
 
-/*
- * Extended attribute type constants.
- *
- * USER_XATTR: user extended attribute ("user.*")
- * TRUSTED_XATTR: trusted extended attribute ("trusted.*)
- * SECURITY_XATTR: security extended attribute ("security.*")
- */
-enum {
-	USER_XATTR,
-	TRUSTED_XATTR,
-	SECURITY_XATTR,
-};
-
 static const struct inode_operations empty_iops;
 static const struct file_operations empty_fops;
 
@@ -89,7 +76,7 @@ static int create_xattr(struct ubifs_info *c, struct inode *host,
 				.dirtied_ino_d = ALIGN(host_ui->data_len, 8) };
 
 	if (host_ui->xattr_cnt >= ubifs_xattr_max_cnt(c)) {
-		ubifs_err(c, "inode %lu already has too many xattrs (%d), cannot create more",
+		ubifs_err(c, "inode %llu already has too many xattrs (%d), cannot create more",
 			  host->i_ino, host_ui->xattr_cnt);
 		return -ENOSPC;
 	}
@@ -101,7 +88,7 @@ static int create_xattr(struct ubifs_info *c, struct inode *host,
 	 */
 	names_len = host_ui->xattr_names + host_ui->xattr_cnt + fname_len(nm) + 1;
 	if (names_len > XATTR_LIST_MAX) {
-		ubifs_err(c, "cannot add one more xattr name to inode %lu, total names length would become %d, max. is %d",
+		ubifs_err(c, "cannot add one more xattr name to inode %llu, total names length would become %d, max. is %d",
 			  host->i_ino, names_len, XATTR_LIST_MAX);
 		return -ENOSPC;
 	}
@@ -403,7 +390,7 @@ ssize_t ubifs_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	int err, len, written = 0;
 	struct fscrypt_name nm = {0};
 
-	dbg_gen("ino %lu ('%pd'), buffer size %zd", host->i_ino,
+	dbg_gen("ino %llu ('%pd'), buffer size %zd", host->i_ino,
 		dentry, size);
 
 	down_read(&host_ui->xattr_sem);
@@ -511,7 +498,7 @@ int ubifs_purge_xattrs(struct inode *host)
 	if (ubifs_inode(host)->xattr_cnt <= ubifs_xattr_max_cnt(c))
 		return 0;
 
-	ubifs_warn(c, "inode %lu has too many xattrs, doing a non-atomic deletion",
+	ubifs_warn(c, "inode %llu has too many xattrs, doing a non-atomic deletion",
 		   host->i_ino);
 
 	down_write(&ubifs_inode(host)->xattr_sem);
@@ -532,8 +519,6 @@ int ubifs_purge_xattrs(struct inode *host)
 			ubifs_err(c, "dead directory entry '%s', error %d",
 				  xent->name, err);
 			ubifs_ro_mode(c, err);
-			kfree(pxent);
-			kfree(xent);
 			goto out_err;
 		}
 
@@ -541,15 +526,11 @@ int ubifs_purge_xattrs(struct inode *host)
 
 		clear_nlink(xino);
 		err = remove_xattr(c, host, xino, &nm);
+		iput(xino);
 		if (err) {
-			kfree(pxent);
-			kfree(xent);
-			iput(xino);
 			ubifs_err(c, "cannot remove xattr, error %d", err);
 			goto out_err;
 		}
-
-		iput(xino);
 
 		kfree(pxent);
 		pxent = xent;
@@ -566,30 +547,10 @@ int ubifs_purge_xattrs(struct inode *host)
 	return 0;
 
 out_err:
+	kfree(pxent);
+	kfree(xent);
 	up_write(&ubifs_inode(host)->xattr_sem);
 	return err;
-}
-
-/**
- * ubifs_evict_xattr_inode - Evict an xattr inode.
- * @c: UBIFS file-system description object
- * @xattr_inum: xattr inode number
- *
- * When an inode that hosts xattrs is being removed we have to make sure
- * that cached inodes of the xattrs also get removed from the inode cache
- * otherwise we'd waste memory. This function looks up an inode from the
- * inode cache and clears the link counter such that iput() will evict
- * the inode.
- */
-void ubifs_evict_xattr_inode(struct ubifs_info *c, ino_t xattr_inum)
-{
-	struct inode *inode;
-
-	inode = ilookup(c->vfs_sb, xattr_inum);
-	if (inode) {
-		clear_nlink(inode);
-		iput(inode);
-	}
 }
 
 static int ubifs_xattr_remove(struct inode *host, const char *name)
@@ -680,7 +641,7 @@ int ubifs_init_security(struct inode *dentry, struct inode *inode,
 					   &init_xattrs, NULL);
 	if (err) {
 		struct ubifs_info *c = dentry->i_sb->s_fs_info;
-		ubifs_err(c, "cannot initialize security for inode %lu, error %d",
+		ubifs_err(c, "cannot initialize security for inode %llu, error %d",
 			  inode->i_ino, err);
 	}
 	return err;
@@ -691,7 +652,7 @@ static int xattr_get(const struct xattr_handler *handler,
 			   struct dentry *dentry, struct inode *inode,
 			   const char *name, void *buffer, size_t size)
 {
-	dbg_gen("xattr '%s', ino %lu ('%pd'), buf size %zd", name,
+	dbg_gen("xattr '%s', ino %llu ('%pd'), buf size %zd", name,
 		inode->i_ino, dentry, size);
 
 	name = xattr_full_name(handler, name);
@@ -704,7 +665,7 @@ static int xattr_set(const struct xattr_handler *handler,
 			   const char *name, const void *value,
 			   size_t size, int flags)
 {
-	dbg_gen("xattr '%s', host ino %lu ('%pd'), size %zd",
+	dbg_gen("xattr '%s', host ino %llu ('%pd'), size %zd",
 		name, inode->i_ino, dentry, size);
 
 	name = xattr_full_name(handler, name);

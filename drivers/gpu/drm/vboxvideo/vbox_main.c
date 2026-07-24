@@ -12,6 +12,7 @@
 #include <linux/vbox_err.h>
 
 #include <drm/drm_damage_helper.h>
+#include <drm/drm_print.h>
 
 #include "vbox_drv.h"
 #include "vboxvideo_guest.h"
@@ -113,6 +114,10 @@ int vbox_hw_init(struct vbox_private *vbox)
 	vbox->any_pitch = vbox_check_supported(VBE_DISPI_ID_ANYX);
 
 	DRM_INFO("VRAM %08x\n", vbox->full_vram_size);
+
+	ret = pcim_request_region(pdev, 0, "vboxvideo");
+	if (ret)
+		return ret;
 
 	/* Map guest-heap at end of vram */
 	vbox->guest_heap = pcim_iomap_range(pdev, 0,

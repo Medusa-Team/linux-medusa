@@ -119,6 +119,8 @@ struct apparmor_audit_data {
 	const char *info;
 	u32 request;
 	u32 denied;
+	u32 tags;
+
 	union {
 		/* these entries require a custom callback fn */
 		struct {
@@ -138,9 +140,12 @@ struct apparmor_audit_data {
 				};
 				struct {
 					int type, protocol;
-					struct sock *peer_sk;
 					void *addr;
 					int addrlen;
+					struct {
+						void *addr;
+						int addrlen;
+					} peer;
 				} net;
 			};
 		};
@@ -202,6 +207,6 @@ static inline int complain_error(int error)
 void aa_audit_rule_free(void *vrule);
 int aa_audit_rule_init(u32 field, u32 op, char *rulestr, void **vrule, gfp_t gfp);
 int aa_audit_rule_known(struct audit_krule *rule);
-int aa_audit_rule_match(u32 sid, u32 field, u32 op, void *vrule);
+int aa_audit_rule_match(struct lsm_prop *prop, u32 field, u32 op, void *vrule);
 
 #endif /* __AA_AUDIT_H */

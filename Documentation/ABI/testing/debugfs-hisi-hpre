@@ -50,6 +50,13 @@ Description:	Dump debug registers from the QM.
 		Available for PF and VF in host. VF in guest currently only
 		has one debug register.
 
+What:		/sys/kernel/debug/hisi_hpre/<bdf>/dev_usage
+Date:		Mar 2026
+Contact:	linux-crypto@vger.kernel.org
+Description:	Query the real-time bandwidth usage of device.
+		Returns the bandwidth usage of each channel on the device.
+		The returned number is in percentage.
+
 What:		/sys/kernel/debug/hisi_hpre/<bdf>/qm/current_q
 Date:		Sep 2019
 Contact:	linux-crypto@vger.kernel.org
@@ -184,3 +191,10 @@ Date:		Apr 2020
 Contact:	linux-crypto@vger.kernel.org
 Description:	Dump the total number of time out requests.
 		Available for both PF and VF, and take no other effect on HPRE.
+
+What:           /sys/kernel/debug/hisi_hpre/<bdf>/cap_regs
+Date:           Oct 2024
+Contact:        linux-crypto@vger.kernel.org
+Description:    Dump the values of the qm and hpre capability bit registers and
+                support the query of device specifications to facilitate fault locating.
+                Available for both PF and VF, and take no other effect on HPRE.

@@ -35,7 +35,7 @@
 #define SPX5_SE_BURST_UNIT 4096
 
 /* Dwrr */
-#define SPX5_DWRR_COST_MAX 63
+#define SPX5_DWRR_COST_MAX 31
 
 struct sparx5_shaper {
 	u32 mode;
@@ -78,5 +78,7 @@ int sparx5_tc_ets_add(struct sparx5_port *port,
 		      struct tc_ets_qopt_offload_replace_params *params);
 
 int sparx5_tc_ets_del(struct sparx5_port *port);
+
+u32 sparx5_get_hsch_max_group_rate(int grp);
 
 #endif	/* __SPARX5_QOS_H__ */

@@ -461,6 +461,7 @@ static int gsm_send_packet(struct gsm_mux *gsm, struct gsm_msg *msg);
 static struct gsm_dlci *gsm_dlci_alloc(struct gsm_mux *gsm, int addr);
 static void gsmld_write_trigger(struct gsm_mux *gsm);
 static void gsmld_write_task(struct work_struct *work);
+static int gsm_modem_send_initial_msc(struct gsm_dlci *dlci);
 
 /**
  *	gsm_fcs_add	-	update FCS
@@ -1941,7 +1942,7 @@ static void gsm_control_response(struct gsm_mux *gsm, unsigned int command,
 	/* Does the reply match our command */
 	if (ctrl != NULL && (command == ctrl->cmd || command == CMD_NSC)) {
 		/* Our command was replied to, kill the retry timer */
-		del_timer(&gsm->t2_timer);
+		timer_delete(&gsm->t2_timer);
 		gsm->pending_cmd = NULL;
 		/* Rejected by the other end */
 		if (command == CMD_NSC)
@@ -1971,7 +1972,7 @@ static void gsm_control_response(struct gsm_mux *gsm, unsigned int command,
 
 static void gsm_control_keep_alive(struct timer_list *t)
 {
-	struct gsm_mux *gsm = from_timer(gsm, t, ka_timer);
+	struct gsm_mux *gsm = timer_container_of(gsm, t, ka_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&gsm->control_lock, flags);
@@ -2028,7 +2029,7 @@ static void gsm_control_transmit(struct gsm_mux *gsm, struct gsm_control *ctrl)
 
 static void gsm_control_retransmit(struct timer_list *t)
 {
-	struct gsm_mux *gsm = from_timer(gsm, t, t2_timer);
+	struct gsm_mux *gsm = timer_container_of(gsm, t, t2_timer);
 	struct gsm_control *ctrl;
 	unsigned long flags;
 	spin_lock_irqsave(&gsm->control_lock, flags);
@@ -2064,8 +2065,7 @@ static void gsm_control_retransmit(struct timer_list *t)
 static struct gsm_control *gsm_control_send(struct gsm_mux *gsm,
 		unsigned int command, u8 *data, int clen)
 {
-	struct gsm_control *ctrl = kzalloc(sizeof(struct gsm_control),
-						GFP_ATOMIC);
+	struct gsm_control *ctrl = kzalloc_obj(struct gsm_control, GFP_ATOMIC);
 	unsigned long flags;
 	if (ctrl == NULL)
 		return NULL;
@@ -2131,7 +2131,7 @@ static int gsm_control_wait(struct gsm_mux *gsm, struct gsm_control *control)
 
 static void gsm_dlci_close(struct gsm_dlci *dlci)
 {
-	del_timer(&dlci->t1);
+	timer_delete(&dlci->t1);
 	if (debug & DBG_ERRORS)
 		pr_debug("DLCI %d goes closed.\n", dlci->addr);
 	dlci->state = DLCI_CLOSED;
@@ -2144,7 +2144,7 @@ static void gsm_dlci_close(struct gsm_dlci *dlci)
 		tty_port_set_initialized(&dlci->port, false);
 		wake_up_interruptible(&dlci->port.open_wait);
 	} else {
-		del_timer(&dlci->gsm->ka_timer);
+		timer_delete(&dlci->gsm->ka_timer);
 		dlci->gsm->dead = true;
 	}
 	/* A DLCI 0 close is a MUX termination so we need to kick that
@@ -2166,7 +2166,7 @@ static void gsm_dlci_open(struct gsm_dlci *dlci)
 
 	/* Note that SABM UA .. SABM UA first UA lost can mean that we go
 	   open -> open */
-	del_timer(&dlci->t1);
+	timer_delete(&dlci->t1);
 	/* This will let a tty open continue */
 	dlci->state = DLCI_OPEN;
 	dlci->constipated = false;
@@ -2174,7 +2174,7 @@ static void gsm_dlci_open(struct gsm_dlci *dlci)
 		pr_debug("DLCI %d goes open.\n", dlci->addr);
 	/* Send current modem state */
 	if (dlci->addr) {
-		gsm_modem_update(dlci, 0);
+		gsm_modem_send_initial_msc(dlci);
 	} else {
 		/* Start keep-alive control */
 		gsm->ka_num = 0;
@@ -2224,12 +2224,12 @@ static int gsm_dlci_negotiate(struct gsm_dlci *dlci)
  *
  *	Some control dlci can stay in ADM mode with other dlci working just
  *	fine. In that case we can just keep the control dlci open after the
- *	DLCI_OPENING retries time out.
+ *	DLCI_OPENING receives DM.
  */
 
 static void gsm_dlci_t1(struct timer_list *t)
 {
-	struct gsm_dlci *dlci = from_timer(dlci, t, t1);
+	struct gsm_dlci *dlci = timer_container_of(dlci, t, t1);
 	struct gsm_mux *gsm = dlci->gsm;
 
 	switch (dlci->state) {
@@ -2243,16 +2243,19 @@ static void gsm_dlci_t1(struct timer_list *t)
 		}
 		break;
 	case DLCI_OPENING:
-		if (dlci->retries) {
-			dlci->retries--;
-			gsm_command(dlci->gsm, dlci->addr, SABM|PF);
-			mod_timer(&dlci->t1, jiffies + gsm->t1 * HZ / 100);
-		} else if (!dlci->addr && gsm->control == (DM | PF)) {
+		if (!dlci->addr && gsm->control == (DM | PF)) {
 			if (debug & DBG_ERRORS)
-				pr_info("DLCI %d opening in ADM mode.\n",
-					dlci->addr);
+				pr_info("DLCI 0 opening in ADM mode.\n");
 			dlci->mode = DLCI_MODE_ADM;
 			gsm_dlci_open(dlci);
+		} else if (dlci->retries) {
+			if (!dlci->addr || !gsm->dlci[0] ||
+			    gsm->dlci[0]->state != DLCI_OPENING) {
+				dlci->retries--;
+				gsm_command(dlci->gsm, dlci->addr, SABM|PF);
+			}
+
+			mod_timer(&dlci->t1, jiffies + gsm->t1 * HZ / 100);
 		} else {
 			gsm->open_error++;
 			gsm_dlci_begin_close(dlci); /* prevent half open link */
@@ -2308,7 +2311,9 @@ static void gsm_dlci_begin_open(struct gsm_dlci *dlci)
 		dlci->retries = gsm->n2;
 		if (!need_pn) {
 			dlci->state = DLCI_OPENING;
-			gsm_command(gsm, dlci->addr, SABM|PF);
+			if (!dlci->addr || !gsm->dlci[0] ||
+			    gsm->dlci[0]->state != DLCI_OPENING)
+				gsm_command(gsm, dlci->addr, SABM|PF);
 		} else {
 			/* Configure DLCI before setup */
 			dlci->state = DLCI_CONFIGURE;
@@ -2484,7 +2489,7 @@ static void gsm_dlci_command(struct gsm_dlci *dlci, const u8 *data, int len)
  */
 static void gsm_kick_timer(struct timer_list *t)
 {
-	struct gsm_mux *gsm = from_timer(gsm, t, kick_timer);
+	struct gsm_mux *gsm = timer_container_of(gsm, t, kick_timer);
 	unsigned long flags;
 	int sent = 0;
 
@@ -2640,7 +2645,7 @@ static int gsm_dlci_config(struct gsm_dlci *dlci, struct gsm_dlci_config *dc, in
 
 static struct gsm_dlci *gsm_dlci_alloc(struct gsm_mux *gsm, int addr)
 {
-	struct gsm_dlci *dlci = kzalloc(sizeof(struct gsm_dlci), GFP_ATOMIC);
+	struct gsm_dlci *dlci = kzalloc_obj(struct gsm_dlci, GFP_ATOMIC);
 	if (dlci == NULL)
 		return NULL;
 	spin_lock_init(&dlci->lock);
@@ -3139,9 +3144,9 @@ static void gsm_cleanup_mux(struct gsm_mux *gsm, bool disc)
 	}
 
 	/* Finish outstanding timers, making sure they are done */
-	del_timer_sync(&gsm->kick_timer);
-	del_timer_sync(&gsm->t2_timer);
-	del_timer_sync(&gsm->ka_timer);
+	timer_delete_sync(&gsm->kick_timer);
+	timer_delete_sync(&gsm->t2_timer);
+	timer_delete_sync(&gsm->ka_timer);
 
 	/* Finish writing to ldisc */
 	flush_work(&gsm->tx_work);
@@ -3157,6 +3162,8 @@ static void gsm_cleanup_mux(struct gsm_mux *gsm, bool disc)
 	mutex_unlock(&gsm->mutex);
 	/* Now wipe the queues */
 	tty_ldisc_flush(gsm->tty);
+
+	guard(spinlock_irqsave)(&gsm->tx_lock);
 	list_for_each_entry_safe(txq, ntxq, &gsm->tx_ctrl_list, list)
 		kfree(txq);
 	INIT_LIST_HEAD(&gsm->tx_ctrl_list);
@@ -3268,7 +3275,7 @@ static inline unsigned int mux_line_to_num(unsigned int line)
 static struct gsm_mux *gsm_alloc_mux(void)
 {
 	int i;
-	struct gsm_mux *gsm = kzalloc(sizeof(struct gsm_mux), GFP_KERNEL);
+	struct gsm_mux *gsm = kzalloc_obj(struct gsm_mux);
 	if (gsm == NULL)
 		return NULL;
 	gsm->buf = kmalloc(MAX_MRU + 1, GFP_KERNEL);
@@ -4155,6 +4162,28 @@ static int gsm_modem_upd_via_msc(struct gsm_dlci *dlci, u8 brk)
 }
 
 /**
+ * gsm_modem_send_initial_msc - Send initial modem status message
+ *
+ * @dlci: channel
+ *
+ * Send an initial MSC message after DLCI open to set the initial
+ * modem status lines. This is only done for basic mode.
+ * Does not wait for a response as we cannot block the input queue
+ * processing.
+ */
+static int gsm_modem_send_initial_msc(struct gsm_dlci *dlci)
+{
+	u8 modembits[2];
+
+	if (dlci->adaption != 1 || dlci->gsm->encoding != GSM_BASIC_OPT)
+		return 0;
+
+	modembits[0] = (dlci->addr << 2) | 2 | EA; /* DLCI, Valid, EA */
+	modembits[1] = (gsm_encode_modem(dlci) << 1) | EA;
+	return gsm_control_command(dlci->gsm, CMD_MSC, (const u8 *)&modembits, 2);
+}
+
+/**
  *	gsm_modem_update	-	send modem status line state
  *	@dlci: channel
  *	@brk: break signal
@@ -4249,7 +4278,7 @@ static const struct tty_port_operations gsm_port_ops = {
 static int gsmtty_install(struct tty_driver *driver, struct tty_struct *tty)
 {
 	struct gsm_mux *gsm;
-	struct gsm_dlci *dlci;
+	struct gsm_dlci *dlci, *dlci0;
 	unsigned int line = tty->index;
 	unsigned int mux = mux_line_to_num(line);
 	bool alloc = false;
@@ -4272,10 +4301,20 @@ static int gsmtty_install(struct tty_driver *driver, struct tty_struct *tty)
 	perspective as we don't have to worry about this
 	if DLCI0 is lost */
 	mutex_lock(&gsm->mutex);
-	if (gsm->dlci[0] && gsm->dlci[0]->state != DLCI_OPEN) {
+
+	dlci0 = gsm->dlci[0];
+	if (dlci0 && dlci0->state != DLCI_OPEN) {
 		mutex_unlock(&gsm->mutex);
-		return -EL2NSYNC;
+
+		if (dlci0->state == DLCI_OPENING)
+			wait_event(gsm->event, dlci0->state != DLCI_OPENING);
+
+		if (dlci0->state != DLCI_OPEN)
+			return -EL2NSYNC;
+
+		mutex_lock(&gsm->mutex);
 	}
+
 	dlci = gsm->dlci[line];
 	if (dlci == NULL) {
 		alloc = true;

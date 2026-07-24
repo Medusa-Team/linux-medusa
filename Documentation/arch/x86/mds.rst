@@ -93,7 +93,7 @@ enters a C-state.
 
 The kernel provides a function to invoke the buffer clearing:
 
-    mds_clear_cpu_buffers()
+    x86_clear_cpu_buffers()
 
 Also macro CLEAR_CPU_BUFFERS can be used in ASM late in exit-to-user path.
 Other than CFLAGS.ZF, this macro doesn't clobber any registers.
@@ -162,7 +162,7 @@ Mitigation points
    3. It would take a large number of these precisely-timed NMIs to mount
       an actual attack.  There's presumably not enough bandwidth.
    4. The NMI in question occurs after a VERW, i.e. when user state is
-      restored and most interesting data is already scrubbed. Whats left
+      restored and most interesting data is already scrubbed. What's left
       is only the data that NMI touches, and that may or may not be of
       any interest.
 
@@ -185,9 +185,9 @@ Mitigation points
    idle clearing would be a window dressing exercise and is therefore not
    activated.
 
-   The invocation is controlled by the static key mds_idle_clear which is
-   switched depending on the chosen mitigation mode and the SMT state of
-   the system.
+   The invocation is controlled by the static key cpu_buf_idle_clear which is
+   switched depending on the chosen mitigation mode and the SMT state of the
+   system.
 
    The buffer clear is only invoked before entering the C-State to prevent
    that stale data from the idling CPU from spilling to the Hyper-Thread

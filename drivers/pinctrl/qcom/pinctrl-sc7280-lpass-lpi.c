@@ -131,6 +131,9 @@ static const struct of_device_id lpi_pinctrl_of_match[] = {
 	{
 	       .compatible = "qcom,sc7280-lpass-lpi-pinctrl",
 	       .data = &sc7280_lpi_data,
+	}, {
+	       .compatible = "qcom,sm8350-lpass-lpi-pinctrl",
+	       .data = &sc7280_lpi_data,
 	},
 	{ }
 };
@@ -142,7 +145,7 @@ static struct platform_driver lpi_pinctrl_driver = {
 		   .of_match_table = lpi_pinctrl_of_match,
 	},
 	.probe = lpi_pinctrl_probe,
-	.remove_new = lpi_pinctrl_remove,
+	.remove = lpi_pinctrl_remove,
 };
 
 module_platform_driver(lpi_pinctrl_driver);

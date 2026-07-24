@@ -666,8 +666,6 @@ static const struct vb2_ops viacam_vb2_ops = {
 	.buf_prepare		= viacam_vb2_prepare,
 	.start_streaming	= viacam_vb2_start_streaming,
 	.stop_streaming		= viacam_vb2_stop_streaming,
-	.wait_prepare		= vb2_ops_wait_prepare,
-	.wait_finish		= vb2_ops_wait_finish,
 };
 
 /* --------------------------------------------------------------------------*/
@@ -1166,7 +1164,7 @@ static int viacam_probe(struct platform_device *pdev)
 	/*
 	 * Basic structure initialization.
 	 */
-	cam = kzalloc (sizeof(struct via_camera), GFP_KERNEL);
+	cam = kzalloc_obj(struct via_camera);
 	if (cam == NULL)
 		return -ENOMEM;
 	via_cam_info = cam;
@@ -1307,7 +1305,7 @@ static struct platform_driver viacam_driver = {
 		.name = "viafb-camera",
 	},
 	.probe = viacam_probe,
-	.remove_new = viacam_remove,
+	.remove = viacam_remove,
 };
 
 module_platform_driver(viacam_driver);

@@ -142,7 +142,7 @@ static const struct snd_soc_dai_driver stm32_adfsdm_dai = {
 			       SNDRV_PCM_FMTBIT_S32_LE,
 		    .rates = SNDRV_PCM_RATE_CONTINUOUS,
 		    .rate_min = 8000,
-		    .rate_max = 48000,
+		    .rate_max = 192000,
 		    },
 	.ops = &stm32_adfsdm_dai_ops,
 };
@@ -180,7 +180,7 @@ static int stm32_afsdm_pcm_cb(const void *data, size_t size, void *private)
 		src_size >>= 1;
 	cur_size = src_size;
 
-	dev_dbg(rtd->dev, "%s: buff_add :%pK, pos = %d, size = %zu\n",
+	dev_dbg(rtd->dev, "%s: buff_add :%p, pos = %d, size = %zu\n",
 		__func__, &pcm_buff[priv->pos], priv->pos, src_size);
 
 	if ((priv->pos + src_size) > buff_size) {
@@ -309,13 +309,13 @@ static void stm32_adfsdm_cleanup(void *data)
 	iio_channel_release_all_cb(data);
 }
 
-static struct snd_soc_component_driver stm32_adfsdm_soc_platform = {
+static const struct snd_soc_component_driver stm32_adfsdm_soc_platform = {
 	.open		= stm32_adfsdm_pcm_open,
 	.close		= stm32_adfsdm_pcm_close,
 	.hw_params	= stm32_adfsdm_pcm_hw_params,
 	.trigger	= stm32_adfsdm_trigger,
 	.pointer	= stm32_adfsdm_pcm_pointer,
-	.pcm_construct	= stm32_adfsdm_pcm_new,
+	.pcm_new	= stm32_adfsdm_pcm_new,
 };
 
 static const struct of_device_id stm32_adfsdm_of_match[] = {
@@ -398,7 +398,7 @@ static struct platform_driver stm32_adfsdm_driver = {
 		   .of_match_table = stm32_adfsdm_of_match,
 		   },
 	.probe = stm32_adfsdm_probe,
-	.remove_new = stm32_adfsdm_remove,
+	.remove = stm32_adfsdm_remove,
 };
 
 module_platform_driver(stm32_adfsdm_driver);

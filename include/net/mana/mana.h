@@ -5,6 +5,7 @@
 #define _MANA_H
 
 #include <net/xdp.h>
+#include <net/net_shaper.h>
 
 #include "gdma.h"
 #include "hw_channel.h"
@@ -38,9 +39,21 @@ enum TRI_STATE {
 
 #define COMP_ENTRY_SIZE 64
 
-#define RX_BUFFERS_PER_QUEUE 512
+/* This Max value for RX buffers is derived from __alloc_page()'s max page
+ * allocation calculation. It allows maximum 2^(MAX_ORDER -1) pages. RX buffer
+ * size beyond this value gets rejected by __alloc_page() call.
+ */
+#define MAX_RX_BUFFERS_PER_QUEUE 8192
+#define DEF_RX_BUFFERS_PER_QUEUE 1024
+#define MIN_RX_BUFFERS_PER_QUEUE 128
 
-#define MAX_SEND_BUFFERS_PER_QUEUE 256
+/* This max value for TX buffers is derived as the maximum allocatable
+ * pages supported on host per guest through testing. TX buffer size beyond
+ * this value is rejected by the hardware.
+ */
+#define MAX_TX_BUFFERS_PER_QUEUE 16384
+#define DEF_TX_BUFFERS_PER_QUEUE 256
+#define MIN_TX_BUFFERS_PER_QUEUE 128
 
 #define EQ_SIZE (8 * MANA_PAGE_SIZE)
 
@@ -48,9 +61,14 @@ enum TRI_STATE {
 
 #define MAX_PORTS_IN_MANA_DEV 256
 
+/* Maximum number of packets per coalesced CQE */
+#define MANA_RXCOMP_OOB_NUM_PPI 4
+
 /* Update this count whenever the respective structures are changed */
-#define MANA_STATS_RX_COUNT 5
+#define MANA_STATS_RX_COUNT (6 + MANA_RXCOMP_OOB_NUM_PPI - 1)
 #define MANA_STATS_TX_COUNT 11
+
+#define MANA_RX_FRAG_ALIGNMENT 64
 
 struct mana_stats_rx {
 	u64 packets;
@@ -58,6 +76,8 @@ struct mana_stats_rx {
 	u64 xdp_drop;
 	u64 xdp_tx;
 	u64 xdp_redirect;
+	u64 pkt_len0_err;
+	u64 coalesced_cqe[MANA_RXCOMP_OOB_NUM_PPI - 1];
 	struct u64_stats_sync syncp;
 };
 
@@ -212,8 +232,6 @@ struct mana_rxcomp_perpkt_info {
 	u32 pkt_hash;
 }; /* HW DATA */
 
-#define MANA_RXCOMP_OOB_NUM_PPI 4
-
 /* Receive completion OOB */
 struct mana_rxcomp_oob {
 	struct mana_cqe_header cqe_hdr;
@@ -288,7 +306,7 @@ struct mana_recv_buf_oob {
 	void *buf_va;
 	bool from_pool; /* allocated from a page pool */
 
-	/* SGL of the buffer going to be sent has part of the work request. */
+	/* SGL of the buffer going to be sent as part of the work request. */
 	u32 num_sge;
 	struct gdma_sge sgl[MAX_RX_WQE_SGL_ENTRIES];
 
@@ -315,6 +333,7 @@ struct mana_rxq {
 	u32 datasize;
 	u32 alloc_size;
 	u32 headroom;
+	u32 frag_count;
 
 	mana_handle_t rxobj;
 
@@ -338,6 +357,7 @@ struct mana_rxq {
 	int xdp_rc; /* XDP redirect return code */
 
 	struct page_pool *page_pool;
+	struct dentry *mana_rx_debugfs;
 
 	/* MUST BE THE LAST MEMBER:
 	 * Each receive buffer has an associated mana_recv_buf_oob.
@@ -351,11 +371,20 @@ struct mana_tx_qp {
 	struct mana_cq tx_cq;
 
 	mana_handle_t tx_object;
+
+	struct dentry *mana_tx_debugfs;
 };
 
 struct mana_ethtool_stats {
 	u64 stop_queue;
 	u64 wake_queue;
+	u64 tx_cqe_err;
+	u64 tx_cqe_unknown_type;
+	u64 tx_linear_pkt_cnt;
+	u64 rx_cqe_unknown_type;
+};
+
+struct mana_ethtool_hc_stats {
 	u64 hc_rx_discards_no_wqe;
 	u64 hc_rx_err_vport_disabled;
 	u64 hc_rx_bytes;
@@ -383,25 +412,92 @@ struct mana_ethtool_stats {
 	u64 hc_tx_mcast_pkts;
 	u64 hc_tx_mcast_bytes;
 	u64 hc_tx_err_gdma;
-	u64 tx_cqe_err;
-	u64 tx_cqe_unknown_type;
-	u64 rx_coalesced_err;
-	u64 rx_cqe_unknown_type;
+};
+
+struct mana_ethtool_phy_stats {
+	/* Drop Counters */
+	u64 rx_pkt_drop_phy;
+	u64 tx_pkt_drop_phy;
+
+	/* Per TC traffic Counters */
+	u64 rx_pkt_tc0_phy;
+	u64 tx_pkt_tc0_phy;
+	u64 rx_pkt_tc1_phy;
+	u64 tx_pkt_tc1_phy;
+	u64 rx_pkt_tc2_phy;
+	u64 tx_pkt_tc2_phy;
+	u64 rx_pkt_tc3_phy;
+	u64 tx_pkt_tc3_phy;
+	u64 rx_pkt_tc4_phy;
+	u64 tx_pkt_tc4_phy;
+	u64 rx_pkt_tc5_phy;
+	u64 tx_pkt_tc5_phy;
+	u64 rx_pkt_tc6_phy;
+	u64 tx_pkt_tc6_phy;
+	u64 rx_pkt_tc7_phy;
+	u64 tx_pkt_tc7_phy;
+
+	u64 rx_byte_tc0_phy;
+	u64 tx_byte_tc0_phy;
+	u64 rx_byte_tc1_phy;
+	u64 tx_byte_tc1_phy;
+	u64 rx_byte_tc2_phy;
+	u64 tx_byte_tc2_phy;
+	u64 rx_byte_tc3_phy;
+	u64 tx_byte_tc3_phy;
+	u64 rx_byte_tc4_phy;
+	u64 tx_byte_tc4_phy;
+	u64 rx_byte_tc5_phy;
+	u64 tx_byte_tc5_phy;
+	u64 rx_byte_tc6_phy;
+	u64 tx_byte_tc6_phy;
+	u64 rx_byte_tc7_phy;
+	u64 tx_byte_tc7_phy;
+
+	/* Per TC pause Counters */
+	u64 rx_pause_tc0_phy;
+	u64 tx_pause_tc0_phy;
+	u64 rx_pause_tc1_phy;
+	u64 tx_pause_tc1_phy;
+	u64 rx_pause_tc2_phy;
+	u64 tx_pause_tc2_phy;
+	u64 rx_pause_tc3_phy;
+	u64 tx_pause_tc3_phy;
+	u64 rx_pause_tc4_phy;
+	u64 tx_pause_tc4_phy;
+	u64 rx_pause_tc5_phy;
+	u64 tx_pause_tc5_phy;
+	u64 rx_pause_tc6_phy;
+	u64 tx_pause_tc6_phy;
+	u64 rx_pause_tc7_phy;
+	u64 tx_pause_tc7_phy;
 };
 
 struct mana_context {
 	struct gdma_dev *gdma_dev;
 
 	u16 num_ports;
+	u8 bm_hostmode;
 
+	struct mana_ethtool_hc_stats hc_stats;
 	struct mana_eq *eqs;
+	struct dentry *mana_eqs_debugfs;
+	struct workqueue_struct *per_port_queue_reset_wq;
+	/* Workqueue for querying hardware stats */
+	struct delayed_work gf_stats_work;
+	bool hwc_timeout_occurred;
 
 	struct net_device *ports[MAX_PORTS_IN_MANA_DEV];
+
+	/* Link state change work */
+	struct work_struct link_change_work;
+	u32 link_event;
 };
 
 struct mana_port_context {
 	struct mana_context *ac;
 	struct net_device *ndev;
+	struct work_struct queue_reset_work;
 
 	u8 mac_addr[ETH_ALEN];
 
@@ -433,12 +529,16 @@ struct mana_port_context {
 	u32 rxbpre_datasize;
 	u32 rxbpre_alloc_size;
 	u32 rxbpre_headroom;
+	u32 rxbpre_frag_count;
 
 	struct bpf_prog *bpf_prog;
 
 	/* Create num_queues EQs, SQs, SQ-CQs, RQs and RQ-CQs, respectively. */
 	unsigned int max_queues;
 	unsigned int num_queues;
+
+	unsigned int rx_queue_size;
+	unsigned int tx_queue_size;
 
 	mana_handle_t port_handle;
 	mana_handle_t pf_filter_handle;
@@ -447,17 +547,33 @@ struct mana_port_context {
 	struct mutex vport_mutex;
 	int vport_use_count;
 
+	/* Net shaper handle*/
+	struct net_shaper_handle handle;
+
 	u16 port_idx;
+	/* Currently configured speed (mbps) */
+	u32 speed;
+	/* Maximum speed supported by the SKU (mbps) */
+	u32 max_speed;
 
 	bool port_is_up;
 	bool port_st_save; /* Saved port state */
 
+	u8 cqe_coalescing_enable;
+	u32 cqe_coalescing_timeout_ns;
+
 	struct mana_ethtool_stats eth_stats;
+
+	struct mana_ethtool_phy_stats phy_stats;
+
+	/* Debugfs */
+	struct dentry *mana_port_debugfs;
 };
 
 netdev_tx_t mana_start_xmit(struct sk_buff *skb, struct net_device *ndev);
 int mana_config_rss(struct mana_port_context *ac, enum TRI_STATE rx,
 		    bool update_hash, bool update_tab);
+int mana_disable_vport_rx(struct mana_port_context *apc);
 
 int mana_alloc_queues(struct net_device *ndev);
 int mana_attach(struct net_device *ndev);
@@ -465,6 +581,9 @@ int mana_detach(struct net_device *ndev, bool from_close);
 
 int mana_probe(struct gdma_dev *gd, bool resuming);
 void mana_remove(struct gdma_dev *gd, bool suspending);
+
+int mana_rdma_probe(struct gdma_dev *gd);
+void mana_rdma_remove(struct gdma_dev *gd);
 
 void mana_xdp_tx(struct sk_buff *skb, struct net_device *ndev);
 int mana_xdp_xmit(struct net_device *ndev, int n, struct xdp_frame **frames,
@@ -474,9 +593,17 @@ u32 mana_run_xdp(struct net_device *ndev, struct mana_rxq *rxq,
 struct bpf_prog *mana_xdp_get(struct mana_port_context *apc);
 void mana_chn_setxdp(struct mana_port_context *apc, struct bpf_prog *prog);
 int mana_bpf(struct net_device *ndev, struct netdev_bpf *bpf);
-void mana_query_gf_stats(struct mana_port_context *apc);
+int mana_query_gf_stats(struct mana_context *ac);
+int mana_query_link_cfg(struct mana_port_context *apc);
+int mana_set_bw_clamp(struct mana_port_context *apc, u32 speed,
+		      int enable_clamping);
+void mana_query_phy_stats(struct mana_port_context *apc);
+int mana_pre_alloc_rxbufs(struct mana_port_context *apc, int mtu, int num_queues);
+void mana_pre_dealloc_rxbufs(struct mana_port_context *apc);
+void mana_unmap_skb(struct sk_buff *skb, struct mana_port_context *apc);
 
 extern const struct ethtool_ops mana_ethtool_ops;
+extern struct dentry *mana_debugfs_root;
 
 /* A CQ can be created not associated with any EQ */
 #define GDMA_CQ_NO_EQ  0xffff
@@ -498,6 +625,9 @@ enum mana_command_code {
 	MANA_FENCE_RQ		= 0x20006,
 	MANA_CONFIG_VPORT_RX	= 0x20007,
 	MANA_QUERY_VPORT_CONFIG	= 0x20008,
+	MANA_QUERY_LINK_CONFIG	= 0x2000A,
+	MANA_SET_BW_CLAMP	= 0x2000B,
+	MANA_QUERY_PHY_STAT     = 0x2000c,
 
 	/* Privileged commands for the PF mode */
 	MANA_REGISTER_FILTER	= 0x28000,
@@ -505,6 +635,35 @@ enum mana_command_code {
 	MANA_REGISTER_HW_PORT	= 0x28003,
 	MANA_DEREGISTER_HW_PORT	= 0x28004,
 };
+
+/* Query Link Configuration*/
+struct mana_query_link_config_req {
+	struct gdma_req_hdr hdr;
+	mana_handle_t vport;
+}; /* HW DATA */
+
+struct mana_query_link_config_resp {
+	struct gdma_resp_hdr hdr;
+	u32 qos_speed_mbps;
+	u8 qos_unconfigured;
+	u8 reserved1[3];
+	u32 link_speed_mbps;
+	u8 reserved2[4];
+}; /* HW DATA */
+
+/* Set Bandwidth Clamp*/
+struct mana_set_bw_clamp_req {
+	struct gdma_req_hdr hdr;
+	mana_handle_t vport;
+	enum TRI_STATE enable_clamping;
+	u32 link_speed_mbps;
+}; /* HW DATA */
+
+struct mana_set_bw_clamp_resp {
+	struct gdma_resp_hdr hdr;
+	u8 qos_unconfigured;
+	u8 reserved[7];
+}; /* HW DATA */
 
 /* Query Device Configuration */
 struct mana_query_device_cfg_req {
@@ -532,7 +691,8 @@ struct mana_query_device_cfg_resp {
 	u64 pf_cap_flags4;
 
 	u16 max_num_vports;
-	u16 reserved;
+	u8 bm_hostmode; /* response v3: Bare Metal Host Mode */
+	u8 reserved;
 	u32 max_num_eqs;
 
 	/* response v2: */
@@ -659,6 +819,74 @@ struct mana_query_gf_stat_resp {
 	u64 tx_err_gdma;
 }; /* HW DATA */
 
+/* Query phy stats */
+struct mana_query_phy_stat_req {
+	struct gdma_req_hdr hdr;
+	u64 req_stats;
+}; /* HW DATA */
+
+struct mana_query_phy_stat_resp {
+	struct gdma_resp_hdr hdr;
+	u64 reported_stats;
+
+	/* Aggregate Drop Counters */
+	u64 rx_pkt_drop_phy;
+	u64 tx_pkt_drop_phy;
+
+	/* Per TC(Traffic class) traffic Counters */
+	u64 rx_pkt_tc0_phy;
+	u64 tx_pkt_tc0_phy;
+	u64 rx_pkt_tc1_phy;
+	u64 tx_pkt_tc1_phy;
+	u64 rx_pkt_tc2_phy;
+	u64 tx_pkt_tc2_phy;
+	u64 rx_pkt_tc3_phy;
+	u64 tx_pkt_tc3_phy;
+	u64 rx_pkt_tc4_phy;
+	u64 tx_pkt_tc4_phy;
+	u64 rx_pkt_tc5_phy;
+	u64 tx_pkt_tc5_phy;
+	u64 rx_pkt_tc6_phy;
+	u64 tx_pkt_tc6_phy;
+	u64 rx_pkt_tc7_phy;
+	u64 tx_pkt_tc7_phy;
+
+	u64 rx_byte_tc0_phy;
+	u64 tx_byte_tc0_phy;
+	u64 rx_byte_tc1_phy;
+	u64 tx_byte_tc1_phy;
+	u64 rx_byte_tc2_phy;
+	u64 tx_byte_tc2_phy;
+	u64 rx_byte_tc3_phy;
+	u64 tx_byte_tc3_phy;
+	u64 rx_byte_tc4_phy;
+	u64 tx_byte_tc4_phy;
+	u64 rx_byte_tc5_phy;
+	u64 tx_byte_tc5_phy;
+	u64 rx_byte_tc6_phy;
+	u64 tx_byte_tc6_phy;
+	u64 rx_byte_tc7_phy;
+	u64 tx_byte_tc7_phy;
+
+	/* Per TC(Traffic Class) pause Counters */
+	u64 rx_pause_tc0_phy;
+	u64 tx_pause_tc0_phy;
+	u64 rx_pause_tc1_phy;
+	u64 tx_pause_tc1_phy;
+	u64 rx_pause_tc2_phy;
+	u64 tx_pause_tc2_phy;
+	u64 rx_pause_tc3_phy;
+	u64 tx_pause_tc3_phy;
+	u64 rx_pause_tc4_phy;
+	u64 tx_pause_tc4_phy;
+	u64 rx_pause_tc5_phy;
+	u64 tx_pause_tc5_phy;
+	u64 rx_pause_tc6_phy;
+	u64 tx_pause_tc6_phy;
+	u64 rx_pause_tc7_phy;
+	u64 tx_pause_tc7_phy;
+}; /* HW DATA */
+
 /* Configure vPort Rx Steering */
 struct mana_cfg_rx_steer_req_v2 {
 	struct gdma_req_hdr hdr;
@@ -680,6 +908,10 @@ struct mana_cfg_rx_steer_req_v2 {
 
 struct mana_cfg_rx_steer_resp {
 	struct gdma_resp_hdr hdr;
+
+	/* V2 */
+	u32 cqe_coalescing_timeout_ns;
+	u32 reserved1;
 }; /* HW DATA */
 
 /* Register HW vPort */
@@ -776,6 +1008,7 @@ struct mana_deregister_filter_resp {
 #define STATISTICS_FLAGS_TX_ERRORS_GDMA_ERROR		0x0000000004000000
 
 #define MANA_MAX_NUM_QUEUES 64
+#define MANA_DEF_NUM_QUEUES 16
 
 #define MANA_SHORT_VPORT_OFFSET_MAX ((1U << 8) - 1)
 
@@ -802,5 +1035,7 @@ int mana_cfg_vport(struct mana_port_context *apc, u32 protection_dom_id,
 		   u32 doorbell_pg_id);
 void mana_uncfg_vport(struct mana_port_context *apc);
 
-struct net_device *mana_get_primary_netdev_rcu(struct mana_context *ac, u32 port_index);
+struct net_device *mana_get_primary_netdev(struct mana_context *ac,
+					   u32 port_index,
+					   netdevice_tracker *tracker);
 #endif /* _MANA_H */

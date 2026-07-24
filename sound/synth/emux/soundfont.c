@@ -38,7 +38,8 @@ static struct snd_sf_sample *sf_sample_new(struct snd_sf_list *sflist,
 static void sf_sample_delete(struct snd_sf_list *sflist,
 			     struct snd_soundfont *sf, struct snd_sf_sample *sp);
 static int load_map(struct snd_sf_list *sflist, const void __user *data, int count);
-static int load_info(struct snd_sf_list *sflist, const void __user *data, long count);
+static int load_info(struct snd_card *card, struct snd_sf_list *sflist,
+		     const void __user *data, long count);
 static int remove_info(struct snd_sf_list *sflist, struct snd_soundfont *sf,
 		       int bank, int instr);
 static void init_voice_info(struct soundfont_voice_info *avp);
@@ -60,47 +61,16 @@ static void snd_sf_init(struct snd_sf_list *sflist);
 static void snd_sf_clear(struct snd_sf_list *sflist);
 
 /*
- * lock access to sflist
- */
-static void
-lock_preset(struct snd_sf_list *sflist)
-{
-	unsigned long flags;
-	mutex_lock(&sflist->presets_mutex);
-	spin_lock_irqsave(&sflist->lock, flags);
-	sflist->presets_locked = 1;
-	spin_unlock_irqrestore(&sflist->lock, flags);
-}
-
-
-/*
- * remove lock
- */
-static void
-unlock_preset(struct snd_sf_list *sflist)
-{
-	unsigned long flags;
-	spin_lock_irqsave(&sflist->lock, flags);
-	sflist->presets_locked = 0;
-	spin_unlock_irqrestore(&sflist->lock, flags);
-	mutex_unlock(&sflist->presets_mutex);
-}
-
-
-/*
  * close the patch if the patch was opened by this client.
  */
 int
 snd_soundfont_close_check(struct snd_sf_list *sflist, int client)
 {
-	unsigned long flags;
-	spin_lock_irqsave(&sflist->lock, flags);
-	if (sflist->open_client == client)  {
-		spin_unlock_irqrestore(&sflist->lock, flags);
-		return close_patch(sflist);
+	scoped_guard(spinlock_irqsave, &sflist->lock) {
+		if (sflist->open_client != client)
+			return 0;
 	}
-	spin_unlock_irqrestore(&sflist->lock, flags);
-	return 0;
+	return close_patch(sflist);
 }
 
 
@@ -113,15 +83,15 @@ snd_soundfont_close_check(struct snd_sf_list *sflist, int client)
  * it wants to do with it.
  */
 int
-snd_soundfont_load(struct snd_sf_list *sflist, const void __user *data,
+snd_soundfont_load(struct snd_card *card,
+		   struct snd_sf_list *sflist, const void __user *data,
 		   long count, int client)
 {
 	struct soundfont_patch_info patch;
-	unsigned long flags;
 	int  rc;
 
 	if (count < (long)sizeof(patch)) {
-		snd_printk(KERN_ERR "patch record too small %ld\n", count);
+		dev_err(card->dev, "patch record too small %ld\n", count);
 		return -EINVAL;
 	}
 	if (copy_from_user(&patch, data, sizeof(patch)))
@@ -131,40 +101,36 @@ snd_soundfont_load(struct snd_sf_list *sflist, const void __user *data,
 	data += sizeof(patch);
 
 	if (patch.key != SNDRV_OSS_SOUNDFONT_PATCH) {
-		snd_printk(KERN_ERR "The wrong kind of patch %x\n", patch.key);
+		dev_err(card->dev, "The wrong kind of patch %x\n", patch.key);
 		return -EINVAL;
 	}
 	if (count < patch.len) {
-		snd_printk(KERN_ERR "Patch too short %ld, need %d\n",
-			   count, patch.len);
+		dev_err(card->dev, "Patch too short %ld, need %d\n",
+			count, patch.len);
 		return -EINVAL;
 	}
 	if (patch.len < 0) {
-		snd_printk(KERN_ERR "poor length %d\n", patch.len);
+		dev_err(card->dev, "poor length %d\n", patch.len);
 		return -EINVAL;
 	}
 
 	if (patch.type == SNDRV_SFNT_OPEN_PATCH) {
 		/* grab sflist to open */
-		lock_preset(sflist);
-		rc = open_patch(sflist, data, count, client);
-		unlock_preset(sflist);
-		return rc;
+		guard(snd_soundfont_lock_preset)(sflist);
+		return open_patch(sflist, data, count, client);
 	}
 
 	/* check if other client already opened patch */
-	spin_lock_irqsave(&sflist->lock, flags);
-	if (sflist->open_client != client) {
-		spin_unlock_irqrestore(&sflist->lock, flags);
-		return -EBUSY;
+	scoped_guard(spinlock_irqsave, &sflist->lock) {
+		if (sflist->open_client != client)
+			return -EBUSY;
 	}
-	spin_unlock_irqrestore(&sflist->lock, flags);
 
-	lock_preset(sflist);
+	guard(snd_soundfont_lock_preset)(sflist);
 	rc = -EINVAL;
 	switch (patch.type) {
 	case SNDRV_SFNT_LOAD_INFO:
-		rc = load_info(sflist, data, count);
+		rc = load_info(card, sflist, data, count);
 		break;
 	case SNDRV_SFNT_LOAD_DATA:
 		rc = load_data(sflist, data, count);
@@ -184,8 +150,8 @@ snd_soundfont_load(struct snd_sf_list *sflist, const void __user *data,
 	case SNDRV_SFNT_REMOVE_INFO:
 		/* patch must be opened */
 		if (!sflist->currsf) {
-			snd_printk(KERN_ERR "soundfont: remove_info: "
-				   "patch not opened\n");
+			dev_err(card->dev,
+				"soundfont: remove_info: patch not opened\n");
 			rc = -EINVAL;
 		} else {
 			int bank, instr;
@@ -198,7 +164,6 @@ snd_soundfont_load(struct snd_sf_list *sflist, const void __user *data,
 		}
 		break;
 	}
-	unlock_preset(sflist);
 
 	return rc;
 }
@@ -221,14 +186,11 @@ open_patch(struct snd_sf_list *sflist, const char __user *data,
 {
 	struct soundfont_open_parm parm;
 	struct snd_soundfont *sf;
-	unsigned long flags;
 
-	spin_lock_irqsave(&sflist->lock, flags);
-	if (sflist->open_client >= 0 || sflist->currsf) {
-		spin_unlock_irqrestore(&sflist->lock, flags);
-		return -EBUSY;
+	scoped_guard(spinlock_irqsave, &sflist->lock) {
+		if (sflist->open_client >= 0 || sflist->currsf)
+			return -EBUSY;
 	}
-	spin_unlock_irqrestore(&sflist->lock, flags);
 
 	if (copy_from_user(&parm, data, sizeof(parm)))
 		return -EFAULT;
@@ -242,10 +204,10 @@ open_patch(struct snd_sf_list *sflist, const char __user *data,
 		return -ENOMEM;
 	}
 
-	spin_lock_irqsave(&sflist->lock, flags);
-	sflist->open_client = client;
-	sflist->currsf = sf;
-	spin_unlock_irqrestore(&sflist->lock, flags);
+	scoped_guard(spinlock_irqsave, &sflist->lock) {
+		sflist->open_client = client;
+		sflist->currsf = sf;
+	}
 
 	return 0;
 }
@@ -268,7 +230,7 @@ newsf(struct snd_sf_list *sflist, int type, char *name)
 	}
 
 	/* not found -- create a new one */
-	sf = kzalloc(sizeof(*sf), GFP_KERNEL);
+	sf = kzalloc_obj(*sf);
 	if (sf == NULL)
 		return NULL;
 	sf->id = sflist->fonts_size;
@@ -303,12 +265,10 @@ is_identical_font(struct snd_soundfont *sf, int type, unsigned char *name)
 static int
 close_patch(struct snd_sf_list *sflist)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&sflist->lock, flags);
-	sflist->currsf = NULL;
-	sflist->open_client = -1;
-	spin_unlock_irqrestore(&sflist->lock, flags);
+	scoped_guard(spinlock_irqsave, &sflist->lock) {
+		sflist->currsf = NULL;
+		sflist->open_client = -1;
+	}
 
 	rebuild_presets(sflist);
 
@@ -349,7 +309,7 @@ sf_zone_new(struct snd_sf_list *sflist, struct snd_soundfont *sf)
 {
 	struct snd_sf_zone *zp;
 
-	zp = kzalloc(sizeof(*zp), GFP_KERNEL);
+	zp = kzalloc_obj(*zp);
 	if (!zp)
 		return NULL;
 	zp->next = sf->zones;
@@ -382,7 +342,7 @@ sf_sample_new(struct snd_sf_list *sflist, struct snd_soundfont *sf)
 {
 	struct snd_sf_sample *sp;
 
-	sp = kzalloc(sizeof(*sp), GFP_KERNEL);
+	sp = kzalloc_obj(*sp);
 	if (!sp)
 		return NULL;
 
@@ -509,7 +469,8 @@ remove_info(struct snd_sf_list *sflist, struct snd_soundfont *sf,
  * open soundfont.
  */
 static int
-load_info(struct snd_sf_list *sflist, const void __user *data, long count)
+load_info(struct snd_card *card,
+	  struct snd_sf_list *sflist, const void __user *data, long count)
 {
 	struct snd_soundfont *sf;
 	struct snd_sf_zone *zone;
@@ -525,7 +486,7 @@ load_info(struct snd_sf_list *sflist, const void __user *data, long count)
 		return -EINVAL;
 
 	if (count < (long)sizeof(hdr)) {
-		printk(KERN_ERR "Soundfont error: invalid patch zone length\n");
+		dev_err(card->dev, "Soundfont error: invalid patch zone length\n");
 		return -EINVAL;
 	}
 	if (copy_from_user((char*)&hdr, data, sizeof(hdr)))
@@ -535,15 +496,15 @@ load_info(struct snd_sf_list *sflist, const void __user *data, long count)
 	count -= sizeof(hdr);
 
 	if (hdr.nvoices <= 0 || hdr.nvoices >= 100) {
-		printk(KERN_ERR "Soundfont error: Illegal voice number %d\n",
-		       hdr.nvoices);
+		dev_err(card->dev, "Soundfont error: Illegal voice number %d\n",
+			hdr.nvoices);
 		return -EINVAL;
 	}
 
 	if (count < (long)sizeof(struct soundfont_voice_info) * hdr.nvoices) {
-		printk(KERN_ERR "Soundfont Error: "
-		       "patch length(%ld) is smaller than nvoices(%d)\n",
-		       count, hdr.nvoices);
+		dev_err(card->dev,
+			"Soundfont Error: patch length(%ld) is smaller than nvoices(%d)\n",
+			count, hdr.nvoices);
 		return -EINVAL;
 	}
 
@@ -974,7 +935,8 @@ int snd_sf_vol_table[128] = {
 
 /* load GUS patch */
 static int
-load_guspatch(struct snd_sf_list *sflist, const char __user *data, long count)
+load_guspatch(struct snd_card *card,
+	      struct snd_sf_list *sflist, const char __user *data, long count)
 {
 	struct patch_info patch;
 	struct snd_soundfont *sf;
@@ -984,7 +946,7 @@ load_guspatch(struct snd_sf_list *sflist, const char __user *data, long count)
 	int rc;
 
 	if (count < (long)sizeof(patch)) {
-		snd_printk(KERN_ERR "patch record too small %ld\n", count);
+		dev_err(card->dev, "patch record too small %ld\n", count);
 		return -EINVAL;
 	}
 	if (copy_from_user(&patch, data, sizeof(patch)))
@@ -1076,10 +1038,10 @@ load_guspatch(struct snd_sf_list *sflist, const char __user *data, long count)
 	/* panning position; -128 - 127 => 0-127 */
 	zone->v.pan = (patch.panning + 128) / 2;
 #if 0
-	snd_printk(KERN_DEBUG
-		   "gus: basefrq=%d (ofs=%d) root=%d,tune=%d, range:%d-%d\n",
-		   (int)patch.base_freq, zone->v.rate_offset,
-		   zone->v.root, zone->v.tune, zone->v.low, zone->v.high);
+	pr_debug(
+		 "gus: basefrq=%d (ofs=%d) root=%d,tune=%d, range:%d-%d\n",
+		 (int)patch.base_freq, zone->v.rate_offset,
+		 zone->v.root, zone->v.tune, zone->v.low, zone->v.high);
 #endif
 
 	/* detuning is ignored */
@@ -1111,12 +1073,12 @@ load_guspatch(struct snd_sf_list *sflist, const char __user *data, long count)
 		zone->v.parm.volrelease = 0x8000 | snd_sf_calc_parm_decay(release);
 		zone->v.attenuation = calc_gus_attenuation(patch.env_offset[0]);
 #if 0
-		snd_printk(KERN_DEBUG
-			   "gus: atkhld=%x, dcysus=%x, volrel=%x, att=%d\n",
-			   zone->v.parm.volatkhld,
-			   zone->v.parm.voldcysus,
-			   zone->v.parm.volrelease,
-			   zone->v.attenuation);
+		dev_dbg(card->dev,
+			"gus: atkhld=%x, dcysus=%x, volrel=%x, att=%d\n",
+			zone->v.parm.volatkhld,
+			zone->v.parm.voldcysus,
+			zone->v.parm.volrelease,
+			zone->v.attenuation);
 #endif
 	}
 
@@ -1160,14 +1122,12 @@ load_guspatch(struct snd_sf_list *sflist, const char __user *data, long count)
 
 /* load GUS patch */
 int
-snd_soundfont_load_guspatch(struct snd_sf_list *sflist, const char __user *data,
+snd_soundfont_load_guspatch(struct snd_card *card,
+			    struct snd_sf_list *sflist, const char __user *data,
 			    long count)
 {
-	int rc;
-	lock_preset(sflist);
-	rc = load_guspatch(sflist, data, count);
-	unlock_preset(sflist);
-	return rc;
+	guard(snd_soundfont_lock_preset)(sflist);
+	return load_guspatch(card, sflist, data, count);
 }
 
 
@@ -1273,17 +1233,14 @@ snd_soundfont_search_zone(struct snd_sf_list *sflist, int *notep, int vel,
 			  struct snd_sf_zone **table, int max_layers)
 {
 	int nvoices;
-	unsigned long flags;
 
 	/* this function is supposed to be called atomically,
 	 * so we check the lock.  if it's busy, just returns 0 to
 	 * tell the caller the busy state
 	 */
-	spin_lock_irqsave(&sflist->lock, flags);
-	if (sflist->presets_locked) {
-		spin_unlock_irqrestore(&sflist->lock, flags);
+	guard(spinlock_irqsave)(&sflist->lock);
+	if (sflist->presets_locked)
 		return 0;
-	}
 	nvoices = search_zones(sflist, notep, vel, preset, bank,
 			       table, max_layers, 0);
 	if (! nvoices) {
@@ -1292,7 +1249,6 @@ snd_soundfont_search_zone(struct snd_sf_list *sflist, int *notep, int vel,
 					       def_preset, def_bank,
 					       table, max_layers, 0);
 	}
-	spin_unlock_irqrestore(&sflist->lock, flags);
 	return nvoices;
 }
 
@@ -1435,7 +1391,7 @@ snd_sf_new(struct snd_sf_callback *callback, struct snd_util_memhdr *hdr)
 {
 	struct snd_sf_list *sflist;
 
-	sflist = kzalloc(sizeof(*sflist), GFP_KERNEL);
+	sflist = kzalloc_obj(*sflist);
 	if (!sflist)
 		return NULL;
 
@@ -1460,11 +1416,11 @@ snd_sf_free(struct snd_sf_list *sflist)
 	if (sflist == NULL)
 		return;
 	
-	lock_preset(sflist);
-	if (sflist->callback.sample_reset)
-		sflist->callback.sample_reset(sflist->callback.private_data);
-	snd_sf_clear(sflist);
-	unlock_preset(sflist);
+	scoped_guard(snd_soundfont_lock_preset, sflist) {
+		if (sflist->callback.sample_reset)
+			sflist->callback.sample_reset(sflist->callback.private_data);
+		snd_sf_clear(sflist);
+	}
 
 	kfree(sflist);
 }
@@ -1476,11 +1432,10 @@ snd_sf_free(struct snd_sf_list *sflist)
 int
 snd_soundfont_remove_samples(struct snd_sf_list *sflist)
 {
-	lock_preset(sflist);
+	guard(snd_soundfont_lock_preset)(sflist);
 	if (sflist->callback.sample_reset)
 		sflist->callback.sample_reset(sflist->callback.private_data);
 	snd_sf_clear(sflist);
-	unlock_preset(sflist);
 
 	return 0;
 }
@@ -1496,7 +1451,7 @@ snd_soundfont_remove_unlocked(struct snd_sf_list *sflist)
 	struct snd_sf_zone *zp, *nextzp;
 	struct snd_sf_sample *sp, *nextsp;
 
-	lock_preset(sflist);
+	guard(snd_soundfont_lock_preset)(sflist);
 
 	if (sflist->callback.sample_reset)
 		sflist->callback.sample_reset(sflist->callback.private_data);
@@ -1530,6 +1485,5 @@ snd_soundfont_remove_unlocked(struct snd_sf_list *sflist)
 
 	rebuild_presets(sflist);
 
-	unlock_preset(sflist);
 	return 0;
 }

@@ -165,8 +165,8 @@ void cond_policydb_destroy(struct policydb *p)
 int cond_init_bool_indexes(struct policydb *p)
 {
 	kfree(p->bool_val_to_struct);
-	p->bool_val_to_struct = kmalloc_array(
-		p->p_bools.nprim, sizeof(*p->bool_val_to_struct), GFP_KERNEL);
+	p->bool_val_to_struct = kmalloc_objs(*p->bool_val_to_struct,
+					     p->p_bools.nprim);
 	if (!p->bool_val_to_struct)
 		return -ENOMEM;
 
@@ -206,7 +206,7 @@ static int bool_isvalid(struct cond_bool_datum *b)
 	return 1;
 }
 
-int cond_read_bool(struct policydb *p, struct symtab *s, void *fp)
+int cond_read_bool(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct cond_bool_datum *booldatum;
@@ -214,7 +214,7 @@ int cond_read_bool(struct policydb *p, struct symtab *s, void *fp)
 	u32 len;
 	int rc;
 
-	booldatum = kzalloc(sizeof(*booldatum), GFP_KERNEL);
+	booldatum = kzalloc_obj(*booldatum);
 	if (!booldatum)
 		return -ENOMEM;
 
@@ -230,17 +230,11 @@ int cond_read_bool(struct policydb *p, struct symtab *s, void *fp)
 		goto err;
 
 	len = le32_to_cpu(buf[2]);
-	if (((len == 0) || (len == (u32)-1)))
-		goto err;
 
-	rc = -ENOMEM;
-	key = kmalloc(len + 1, GFP_KERNEL);
-	if (!key)
-		goto err;
-	rc = next_entry(key, fp, len);
+	rc = str_read(&key, GFP_KERNEL, fp, len);
 	if (rc)
 		goto err;
-	key[len] = '\0';
+
 	rc = symtab_insert(s, key, booldatum);
 	if (rc)
 		goto err;
@@ -323,7 +317,7 @@ static int cond_insertf(struct avtab *a, const struct avtab_key *k,
 	return 0;
 }
 
-static int cond_read_av_list(struct policydb *p, void *fp,
+static int cond_read_av_list(struct policydb *p, struct policy_file *fp,
 			     struct cond_av_list *list,
 			     struct cond_av_list *other)
 {
@@ -340,7 +334,7 @@ static int cond_read_av_list(struct policydb *p, void *fp,
 	if (len == 0)
 		return 0;
 
-	list->nodes = kcalloc(len, sizeof(*list->nodes), GFP_KERNEL);
+	list->nodes = kzalloc_objs(*list->nodes, len);
 	if (!list->nodes)
 		return -ENOMEM;
 
@@ -349,7 +343,7 @@ static int cond_read_av_list(struct policydb *p, void *fp,
 	for (i = 0; i < len; i++) {
 		data.dst = &list->nodes[i];
 		rc = avtab_read_item(&p->te_cond_avtab, fp, p, cond_insertf,
-				     &data);
+				     &data, true);
 		if (rc) {
 			kfree(list->nodes);
 			list->nodes = NULL;
@@ -375,7 +369,7 @@ static int expr_node_isvalid(struct policydb *p, struct cond_expr_node *expr)
 	return 1;
 }
 
-static int cond_read_node(struct policydb *p, struct cond_node *node, void *fp)
+static int cond_read_node(struct policydb *p, struct cond_node *node, struct policy_file *fp)
 {
 	__le32 buf[2];
 	u32 i, len;
@@ -389,7 +383,7 @@ static int cond_read_node(struct policydb *p, struct cond_node *node, void *fp)
 
 	/* expr */
 	len = le32_to_cpu(buf[1]);
-	node->expr.nodes = kcalloc(len, sizeof(*node->expr.nodes), GFP_KERNEL);
+	node->expr.nodes = kzalloc_objs(*node->expr.nodes, len);
 	if (!node->expr.nodes)
 		return -ENOMEM;
 
@@ -415,7 +409,7 @@ static int cond_read_node(struct policydb *p, struct cond_node *node, void *fp)
 	return cond_read_av_list(p, fp, &node->false_list, &node->true_list);
 }
 
-int cond_read_list(struct policydb *p, void *fp)
+int cond_read_list(struct policydb *p, struct policy_file *fp)
 {
 	__le32 buf[1];
 	u32 i, len;
@@ -427,7 +421,7 @@ int cond_read_list(struct policydb *p, void *fp)
 
 	len = le32_to_cpu(buf[0]);
 
-	p->cond_list = kcalloc(len, sizeof(*p->cond_list), GFP_KERNEL);
+	p->cond_list = kzalloc_objs(*p->cond_list, len);
 	if (!p->cond_list)
 		return -ENOMEM;
 
@@ -453,7 +447,7 @@ int cond_write_bool(void *vkey, void *datum, void *ptr)
 	char *key = vkey;
 	struct cond_bool_datum *booldatum = datum;
 	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	__le32 buf[3];
 	u32 len;
 	int rc;
@@ -536,7 +530,7 @@ static int cond_write_node(struct policydb *p, struct cond_node *node,
 	return 0;
 }
 
-int cond_write_list(struct policydb *p, void *fp)
+int cond_write_list(struct policydb *p, struct policy_file *fp)
 {
 	u32 i;
 	__le32 buf[1];
@@ -611,7 +605,7 @@ static int cond_dup_av_list(struct cond_av_list *new,
 
 	memset(new, 0, sizeof(*new));
 
-	new->nodes = kcalloc(orig->len, sizeof(*new->nodes), GFP_KERNEL);
+	new->nodes = kzalloc_objs(*new->nodes, orig->len);
 	if (!new->nodes)
 		return -ENOMEM;
 
@@ -637,8 +631,7 @@ static int duplicate_policydb_cond_list(struct policydb *newp,
 		return rc;
 
 	newp->cond_list_len = 0;
-	newp->cond_list = kcalloc(origp->cond_list_len,
-				  sizeof(*newp->cond_list), GFP_KERNEL);
+	newp->cond_list = kzalloc_objs(*newp->cond_list, origp->cond_list_len);
 	if (!newp->cond_list)
 		goto error;
 
@@ -716,9 +709,8 @@ static int duplicate_policydb_bools(struct policydb *newdb,
 	struct cond_bool_datum **cond_bool_array;
 	int rc;
 
-	cond_bool_array = kmalloc_array(orig->p_bools.nprim,
-					sizeof(*orig->bool_val_to_struct),
-					GFP_KERNEL);
+	cond_bool_array = kmalloc_objs(*orig->bool_val_to_struct,
+				       orig->p_bools.nprim);
 	if (!cond_bool_array)
 		return -ENOMEM;
 

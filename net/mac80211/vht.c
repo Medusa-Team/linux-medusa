@@ -4,7 +4,7 @@
  *
  * Portions of this file
  * Copyright(c) 2015 - 2016 Intel Deutschland GmbH
- * Copyright (C) 2018 - 2024 Intel Corporation
+ * Copyright (C) 2018 - 2026 Intel Corporation
  */
 
 #include <linux/ieee80211.h>
@@ -115,6 +115,7 @@ void ieee80211_apply_vhtcap_overrides(struct ieee80211_sub_if_data *sdata,
 void
 ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 				    struct ieee80211_supported_band *sband,
+				    const struct ieee80211_sta_vht_cap *own_vht_cap,
 				    const struct ieee80211_vht_cap *vht_cap_ie,
 				    const struct ieee80211_vht_cap *vht_cap_ie2,
 				    struct link_sta_info *link_sta)
@@ -122,7 +123,6 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 	struct ieee80211_sta_vht_cap *vht_cap = &link_sta->pub->vht_cap;
 	struct ieee80211_sta_vht_cap own_cap;
 	u32 cap_info, i;
-	bool have_80mhz;
 	u32 mpdu_len;
 
 	memset(vht_cap, 0, sizeof(*vht_cap));
@@ -130,22 +130,29 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 	if (!link_sta->pub->ht_cap.ht_supported)
 		return;
 
-	if (!vht_cap_ie || !sband->vht_cap.vht_supported)
+	if (!vht_cap_ie || !own_vht_cap->vht_supported)
 		return;
 
-	/* Allow VHT if at least one channel on the sband supports 80 MHz */
-	have_80mhz = false;
-	for (i = 0; i < sband->n_channels; i++) {
-		if (sband->channels[i].flags & (IEEE80211_CHAN_DISABLED |
-						IEEE80211_CHAN_NO_80MHZ))
-			continue;
+	/* NDI station are using the capabilities from the NMI station */
+	if (WARN_ON_ONCE(sdata->vif.type == NL80211_IFTYPE_NAN_DATA))
+		return;
 
-		have_80mhz = true;
-		break;
+	if (sband) {
+		/* Allow VHT if at least one channel on the sband supports 80 MHz */
+		bool have_80mhz = false;
+
+		for (i = 0; i < sband->n_channels; i++) {
+			if (sband->channels[i].flags & (IEEE80211_CHAN_DISABLED |
+							IEEE80211_CHAN_NO_80MHZ))
+				continue;
+
+			have_80mhz = true;
+			break;
+		}
+
+		if (!have_80mhz)
+			return;
 	}
-
-	if (!have_80mhz)
-		return;
 
 	/*
 	 * A VHT STA must support 40 MHz, but if we verify that here
@@ -156,7 +163,7 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 
 	vht_cap->vht_supported = true;
 
-	own_cap = sband->vht_cap;
+	own_cap = *own_vht_cap;
 	/*
 	 * If user has specified capability overrides, take care
 	 * of that if the station we're setting up is the AP that
@@ -280,10 +287,10 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 	/*
 	 * This is a workaround for VHT-enabled STAs which break the spec
 	 * and have the VHT-MCS Rx map filled in with value 3 for all eight
-	 * spacial streams, an example is AR9462.
+	 * spatial streams, an example is AR9462.
 	 *
 	 * As per spec, in section 22.1.1 Introduction to the VHT PHY
-	 * A VHT STA shall support at least single spactial stream VHT-MCSs
+	 * A VHT STA shall support at least single spatial stream VHT-MCSs
 	 * 0 to 7 (transmit and receive) in all supported channel widths.
 	 */
 	if (vht_cap->vht_mcs.rx_mcs_map == cpu_to_le16(0xFFFF)) {
@@ -317,7 +324,8 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 				IEEE80211_STA_RX_BW_160;
 	}
 
-	link_sta->pub->bandwidth = ieee80211_sta_cur_vht_bw(link_sta);
+	if (sdata->vif.type != NL80211_IFTYPE_NAN)
+		link_sta->pub->bandwidth = ieee80211_sta_cur_vht_bw(link_sta);
 
 	/*
 	 * Work around the Cisco 9115 FW 17.3 bug by taking the min of
@@ -350,9 +358,9 @@ ieee80211_vht_cap_ie_to_sta_vht_cap(struct ieee80211_sub_if_data *sdata,
 }
 
 /* FIXME: move this to some better location - parses HE/EHT now */
-enum ieee80211_sta_rx_bandwidth
-_ieee80211_sta_cap_rx_bw(struct link_sta_info *link_sta,
-			 struct cfg80211_chan_def *chandef)
+static enum ieee80211_sta_rx_bandwidth
+__ieee80211_sta_cap_rx_bw(struct link_sta_info *link_sta,
+			  struct cfg80211_chan_def *chandef)
 {
 	unsigned int link_id = link_sta->link_id;
 	struct ieee80211_sub_if_data *sdata = link_sta->sta->sdata;
@@ -369,6 +377,10 @@ _ieee80211_sta_cap_rx_bw(struct link_sta_info *link_sta,
 			band = chandef->chan->band;
 		} else {
 			struct ieee80211_bss_conf *link_conf;
+
+			if (WARN_ON_ONCE(sdata->vif.type == NL80211_IFTYPE_NAN_DATA ||
+					 sdata->vif.type == NL80211_IFTYPE_NAN))
+				return IEEE80211_STA_RX_BW_20;
 
 			rcu_read_lock();
 			link_conf = rcu_dereference(sdata->vif.link_conf[link_id]);
@@ -421,6 +433,28 @@ _ieee80211_sta_cap_rx_bw(struct link_sta_info *link_sta,
 		return IEEE80211_STA_RX_BW_160;
 
 	return IEEE80211_STA_RX_BW_80;
+}
+
+enum ieee80211_sta_rx_bandwidth
+_ieee80211_sta_cap_rx_bw(struct link_sta_info *link_sta,
+			 struct cfg80211_chan_def *chandef)
+{
+	/*
+	 * With RX OMI, also pretend that the STA's capability changed.
+	 * Of course this isn't really true, it didn't change, only our
+	 * RX capability was changed by notifying RX OMI to the STA.
+	 * The purpose, however, is to save power, and that requires
+	 * changing also transmissions to the AP and the chanctx. The
+	 * transmissions depend on link_sta->bandwidth which is set in
+	 * _ieee80211_sta_cur_vht_bw() below, but the chanctx depends
+	 * on the result of this function which is also called by
+	 * _ieee80211_sta_cur_vht_bw(), so we need to do that here as
+	 * well. This is sufficient for the steady state, but during
+	 * the transition we already need to change TX/RX separately,
+	 * so _ieee80211_sta_cur_vht_bw() below applies the _tx one.
+	 */
+	return min(__ieee80211_sta_cap_rx_bw(link_sta, chandef),
+		   link_sta->rx_omi_bw_rx);
 }
 
 enum nl80211_chan_width
@@ -479,28 +513,6 @@ ieee80211_sta_rx_bw_to_chan_width(struct link_sta_info *link_sta)
 	}
 }
 
-enum ieee80211_sta_rx_bandwidth
-ieee80211_chan_width_to_rx_bw(enum nl80211_chan_width width)
-{
-	switch (width) {
-	case NL80211_CHAN_WIDTH_20_NOHT:
-	case NL80211_CHAN_WIDTH_20:
-		return IEEE80211_STA_RX_BW_20;
-	case NL80211_CHAN_WIDTH_40:
-		return IEEE80211_STA_RX_BW_40;
-	case NL80211_CHAN_WIDTH_80:
-		return IEEE80211_STA_RX_BW_80;
-	case NL80211_CHAN_WIDTH_160:
-	case NL80211_CHAN_WIDTH_80P80:
-		return IEEE80211_STA_RX_BW_160;
-	case NL80211_CHAN_WIDTH_320:
-		return IEEE80211_STA_RX_BW_320;
-	default:
-		WARN_ON_ONCE(1);
-		return IEEE80211_STA_RX_BW_20;
-	}
-}
-
 /* FIXME: rename/move - this deals with everything not just VHT */
 enum ieee80211_sta_rx_bandwidth
 _ieee80211_sta_cur_vht_bw(struct link_sta_info *link_sta,
@@ -515,6 +527,11 @@ _ieee80211_sta_cur_vht_bw(struct link_sta_info *link_sta,
 	} else {
 		struct ieee80211_bss_conf *link_conf;
 
+		/* NAN operates on multiple channels so a chandef must be given */
+		if (WARN_ON_ONCE(sta->sdata->vif.type == NL80211_IFTYPE_NAN ||
+				 sta->sdata->vif.type == NL80211_IFTYPE_NAN_DATA))
+			return IEEE80211_STA_RX_BW_20;
+
 		rcu_read_lock();
 		link_conf = rcu_dereference(sta->sdata->vif.link_conf[link_sta->link_id]);
 		if (WARN_ON_ONCE(!link_conf)) {
@@ -525,8 +542,11 @@ _ieee80211_sta_cur_vht_bw(struct link_sta_info *link_sta,
 		rcu_read_unlock();
 	}
 
-	bw = _ieee80211_sta_cap_rx_bw(link_sta, chandef);
+	/* intentionally do not take rx_bw_omi_rx into account */
+	bw = __ieee80211_sta_cap_rx_bw(link_sta, chandef);
 	bw = min(bw, link_sta->cur_max_bandwidth);
+	/* but do apply rx_omi_bw_tx */
+	bw = min(bw, link_sta->rx_omi_bw_tx);
 
 	/* Don't consider AP's bandwidth for TDLS peers, section 11.23.1 of
 	 * IEEE80211-2016 specification makes higher bandwidth operation
@@ -669,8 +689,9 @@ u32 __ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
 				sta_opmode.changed |= STA_OPMODE_N_SS_CHANGED;
 			}
 		} else {
-			pr_warn_ratelimited("Ignoring NSS change in VHT Operating Mode Notification from %pM with invalid nss %d",
-					    link_sta->pub->addr, nss);
+			sdata_dbg(sdata,
+				  "Ignore NSS change to invalid %d in VHT opmode notif from %pM",
+				  nss, link_sta->pub->addr);
 		}
 	}
 
@@ -719,17 +740,17 @@ void ieee80211_process_mu_groups(struct ieee80211_sub_if_data *sdata,
 	if (!link_conf->mu_mimo_owner)
 		return;
 
-	if (!memcmp(mgmt->u.action.u.vht_group_notif.position,
+	if (!memcmp(mgmt->u.action.vht_group_notif.position,
 		    link_conf->mu_group.position, WLAN_USER_POSITION_LEN) &&
-	    !memcmp(mgmt->u.action.u.vht_group_notif.membership,
+	    !memcmp(mgmt->u.action.vht_group_notif.membership,
 		    link_conf->mu_group.membership, WLAN_MEMBERSHIP_LEN))
 		return;
 
 	memcpy(link_conf->mu_group.membership,
-	       mgmt->u.action.u.vht_group_notif.membership,
+	       mgmt->u.action.vht_group_notif.membership,
 	       WLAN_MEMBERSHIP_LEN);
 	memcpy(link_conf->mu_group.position,
-	       mgmt->u.action.u.vht_group_notif.position,
+	       mgmt->u.action.vht_group_notif.position,
 	       WLAN_USER_POSITION_LEN);
 
 	ieee80211_link_info_change_notify(sdata, link,
@@ -766,8 +787,7 @@ void ieee80211_vht_handle_opmode(struct ieee80211_sub_if_data *sdata,
 
 	if (changed > 0) {
 		ieee80211_recalc_min_chandef(sdata, link_sta->link_id);
-		rate_control_rate_update(local, sband, link_sta->sta,
-					 link_sta->link_id, changed);
+		rate_control_rate_update(local, sband, link_sta, changed);
 	}
 }
 

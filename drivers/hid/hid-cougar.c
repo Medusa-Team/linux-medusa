@@ -103,8 +103,8 @@ static void cougar_fix_g6_mapping(void)
 /*
  * Constant-friendly rdesc fixup for mouse interface
  */
-static __u8 *cougar_report_fixup(struct hid_device *hdev, __u8 *rdesc,
-				 unsigned int *rsize)
+static const __u8 *cougar_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+				       unsigned int *rsize)
 {
 	if (*rsize >= 117 && rdesc[2] == 0x09 && rdesc[3] == 0x02 &&
 	    (rdesc[115] | rdesc[116] << 8) >= HID_MAX_USAGES) {
@@ -166,7 +166,7 @@ static int cougar_bind_shared_data(struct hid_device *hdev,
 
 	shared = cougar_get_shared_data(hdev);
 	if (!shared) {
-		shared = kzalloc(sizeof(*shared), GFP_KERNEL);
+		shared = kzalloc_obj(*shared);
 		if (!shared) {
 			error = -ENOMEM;
 			goto out;

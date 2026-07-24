@@ -205,7 +205,7 @@ static struct sunxi_rsb_device *sunxi_rsb_device_create(struct sunxi_rsb *rsb,
 	int err;
 	struct sunxi_rsb_device *rdev;
 
-	rdev = kzalloc(sizeof(*rdev), GFP_KERNEL);
+	rdev = kzalloc_obj(*rdev);
 	if (!rdev)
 		return ERR_PTR(-ENOMEM);
 
@@ -373,7 +373,6 @@ static int sunxi_rsb_read(struct sunxi_rsb *rsb, u8 rtaddr, u8 addr,
 unlock:
 	mutex_unlock(&rsb->lock);
 
-	pm_runtime_mark_last_busy(rsb->dev);
 	pm_runtime_put_autosuspend(rsb->dev);
 
 	return ret;
@@ -417,7 +416,6 @@ static int sunxi_rsb_write(struct sunxi_rsb *rsb, u8 rtaddr, u8 addr,
 
 	mutex_unlock(&rsb->lock);
 
-	pm_runtime_mark_last_busy(rsb->dev);
 	pm_runtime_put_autosuspend(rsb->dev);
 
 	return ret;
@@ -479,7 +477,7 @@ static struct sunxi_rsb_ctx *regmap_sunxi_rsb_init_ctx(struct sunxi_rsb_device *
 		return ERR_PTR(-EINVAL);
 	}
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	ctx = kzalloc_obj(*ctx);
 	if (!ctx)
 		return ERR_PTR(-ENOMEM);
 
@@ -751,12 +749,10 @@ static int sunxi_rsb_probe(struct platform_device *pdev)
 	int irq, ret;
 
 	of_property_read_u32(np, "clock-frequency", &clk_freq);
-	if (clk_freq > RSB_MAX_FREQ) {
-		dev_err(dev,
-			"clock-frequency (%u Hz) is too high (max = 20MHz)\n",
-			clk_freq);
-		return -EINVAL;
-	}
+	if (clk_freq > RSB_MAX_FREQ)
+		return dev_err_probe(dev, -EINVAL,
+				     "clock-frequency (%u Hz) is too high (max = 20MHz)\n",
+				     clk_freq);
 
 	rsb = devm_kzalloc(dev, sizeof(*rsb), GFP_KERNEL);
 	if (!rsb)
@@ -774,28 +770,22 @@ static int sunxi_rsb_probe(struct platform_device *pdev)
 		return irq;
 
 	rsb->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(rsb->clk)) {
-		ret = PTR_ERR(rsb->clk);
-		dev_err(dev, "failed to retrieve clk: %d\n", ret);
-		return ret;
-	}
+	if (IS_ERR(rsb->clk))
+		return dev_err_probe(dev, PTR_ERR(rsb->clk),
+				     "failed to retrieve clk\n");
 
 	rsb->rstc = devm_reset_control_get(dev, NULL);
-	if (IS_ERR(rsb->rstc)) {
-		ret = PTR_ERR(rsb->rstc);
-		dev_err(dev, "failed to retrieve reset controller: %d\n", ret);
-		return ret;
-	}
+	if (IS_ERR(rsb->rstc))
+		return dev_err_probe(dev, PTR_ERR(rsb->rstc),
+				     "failed to retrieve reset controller\n");
 
 	init_completion(&rsb->complete);
 	mutex_init(&rsb->lock);
 
 	ret = devm_request_irq(dev, irq, sunxi_rsb_irq, 0, RSB_CTRL_NAME, rsb);
-	if (ret) {
-		dev_err(dev, "can't register interrupt handler irq %d: %d\n",
-			irq, ret);
-		return ret;
-	}
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "can't register interrupt handler irq %d\n", irq);
 
 	ret = sunxi_rsb_hw_init(rsb);
 	if (ret)
@@ -840,7 +830,7 @@ MODULE_DEVICE_TABLE(of, sunxi_rsb_of_match_table);
 
 static struct platform_driver sunxi_rsb_driver = {
 	.probe = sunxi_rsb_probe,
-	.remove_new = sunxi_rsb_remove,
+	.remove = sunxi_rsb_remove,
 	.driver	= {
 		.name = RSB_CTRL_NAME,
 		.of_match_table = sunxi_rsb_of_match_table,

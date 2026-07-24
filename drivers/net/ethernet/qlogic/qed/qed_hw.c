@@ -46,7 +46,7 @@ struct qed_ptt_pool {
 
 int qed_ptt_pool_alloc(struct qed_hwfn *p_hwfn)
 {
-	struct qed_ptt_pool *p_pool = kmalloc(sizeof(*p_pool), GFP_KERNEL);
+	struct qed_ptt_pool *p_pool = kmalloc_obj(*p_pool);
 	int i;
 
 	if (!p_pool)
@@ -67,17 +67,6 @@ int qed_ptt_pool_alloc(struct qed_hwfn *p_hwfn)
 	spin_lock_init(&p_pool->lock);
 
 	return 0;
-}
-
-void qed_ptt_invalidate(struct qed_hwfn *p_hwfn)
-{
-	struct qed_ptt *p_ptt;
-	int i;
-
-	for (i = 0; i < PXP_EXTERNAL_BAR_PF_WINDOW_NUM; i++) {
-		p_ptt = &p_hwfn->p_ptt_pool->ptts[i];
-		p_ptt->pxp.offset = QED_BAR_INVALID_OFFSET;
-	}
 }
 
 void qed_ptt_pool_free(struct qed_hwfn *p_hwfn)
@@ -596,6 +585,7 @@ static int qed_dmae_operation_wait(struct qed_hwfn *p_hwfn)
 	barrier();
 	while (*p_hwfn->dmae_info.p_completion_word != DMAE_COMPLETION_VAL) {
 		udelay(DMAE_MIN_WAIT_TIME);
+		cond_resched();
 		if (++wait_cnt > wait_cnt_limit) {
 			DP_NOTICE(p_hwfn->cdev,
 				  "Timed-out waiting for operation to complete. Completion word is 0x%08x expected 0x%08x.\n",

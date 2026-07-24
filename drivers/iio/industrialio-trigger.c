@@ -347,6 +347,7 @@ int iio_trigger_detach_poll_func(struct iio_trigger *trig,
 	iio_trigger_put_irq(trig, pf->irq);
 	free_irq(pf->irq, pf);
 	module_put(iio_dev_opaque->driver_module);
+	pf->irq = 0;
 
 	return ret;
 }
@@ -371,7 +372,7 @@ struct iio_poll_func
 	va_list vargs;
 	struct iio_poll_func *pf;
 
-	pf = kmalloc(sizeof(*pf), GFP_KERNEL);
+	pf = kmalloc_obj(*pf);
 	if (!pf)
 		return NULL;
 	va_start(vargs, fmt);
@@ -556,14 +557,10 @@ struct iio_trigger *viio_trigger_alloc(struct device *parent,
 	struct iio_trigger *trig;
 	int i;
 
-	trig = kzalloc(sizeof(*trig), GFP_KERNEL);
+	trig = kzalloc_obj(*trig);
 	if (!trig)
 		return NULL;
 
-	trig->dev.parent = parent;
-	trig->dev.type = &iio_trig_type;
-	trig->dev.bus = &iio_bus_type;
-	device_initialize(&trig->dev);
 	INIT_WORK(&trig->reenable_work, iio_reenable_work_fn);
 
 	mutex_init(&trig->pool_lock);
@@ -590,6 +587,11 @@ struct iio_trigger *viio_trigger_alloc(struct device *parent,
 		irq_modify_status(trig->subirq_base + i,
 				  IRQ_NOREQUEST | IRQ_NOAUTOEN, IRQ_NOPROBE);
 	}
+
+	trig->dev.parent = parent;
+	trig->dev.type = &iio_trig_type;
+	trig->dev.bus = &iio_bus_type;
+	device_initialize(&trig->dev);
 
 	return trig;
 
@@ -633,9 +635,9 @@ void iio_trigger_free(struct iio_trigger *trig)
 }
 EXPORT_SYMBOL(iio_trigger_free);
 
-static void devm_iio_trigger_release(struct device *dev, void *res)
+static void devm_iio_trigger_release(void *trig)
 {
-	iio_trigger_free(*(struct iio_trigger **)res);
+	iio_trigger_free(trig);
 }
 
 /**
@@ -657,24 +659,20 @@ struct iio_trigger *__devm_iio_trigger_alloc(struct device *parent,
 					     struct module *this_mod,
 					     const char *fmt, ...)
 {
-	struct iio_trigger **ptr, *trig;
+	struct iio_trigger *trig;
 	va_list vargs;
-
-	ptr = devres_alloc(devm_iio_trigger_release, sizeof(*ptr),
-			   GFP_KERNEL);
-	if (!ptr)
-		return NULL;
+	int ret;
 
 	/* use raw alloc_dr for kmalloc caller tracing */
 	va_start(vargs, fmt);
 	trig = viio_trigger_alloc(parent, this_mod, fmt, vargs);
 	va_end(vargs);
-	if (trig) {
-		*ptr = trig;
-		devres_add(parent, ptr);
-	} else {
-		devres_free(ptr);
-	}
+	if (!trig)
+		return NULL;
+
+	ret = devm_add_action_or_reset(parent, devm_iio_trigger_release, trig);
+	if (ret)
+		return NULL;
 
 	return trig;
 }
@@ -770,3 +768,29 @@ void iio_device_unregister_trigger_consumer(struct iio_dev *indio_dev)
 	if (indio_dev->trig)
 		iio_trigger_put(indio_dev->trig);
 }
+
+int iio_device_suspend_triggering(struct iio_dev *indio_dev)
+{
+	struct iio_dev_opaque *iio_dev_opaque = to_iio_dev_opaque(indio_dev);
+
+	guard(mutex)(&iio_dev_opaque->mlock);
+
+	if ((indio_dev->pollfunc) && (indio_dev->pollfunc->irq > 0))
+		disable_irq(indio_dev->pollfunc->irq);
+
+	return 0;
+}
+EXPORT_SYMBOL(iio_device_suspend_triggering);
+
+int iio_device_resume_triggering(struct iio_dev *indio_dev)
+{
+	struct iio_dev_opaque *iio_dev_opaque = to_iio_dev_opaque(indio_dev);
+
+	guard(mutex)(&iio_dev_opaque->mlock);
+
+	if ((indio_dev->pollfunc) && (indio_dev->pollfunc->irq > 0))
+		enable_irq(indio_dev->pollfunc->irq);
+
+	return 0;
+}
+EXPORT_SYMBOL(iio_device_resume_triggering);

@@ -2,8 +2,9 @@
 /*
  * linux/fs/lockd/clntxdr.c
  *
- * XDR functions to encode/decode NLM version 3 RPC arguments and results.
- * NLM version 3 is backwards compatible with NLM versions 1 and 2.
+ * XDR functions to encode/decode NLM version 1 and 3 RPC
+ * arguments and results. NLM version 2 is not specified
+ * by a standard, thus it is not implemented.
  *
  * NLM client-side only.
  *
@@ -14,7 +15,8 @@
 #include <linux/sunrpc/xdr.h>
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/stats.h>
-#include <linux/lockd/lockd.h>
+
+#include "lockd.h"
 
 #include <uapi/linux/nfs2.h>
 

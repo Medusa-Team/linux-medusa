@@ -122,7 +122,7 @@ static const struct snd_soc_ops sof_nau8825_ops = {
 static int sof_card_late_probe(struct snd_soc_card *card)
 {
 	struct sof_card_private *ctx = snd_soc_card_get_drvdata(card);
-	struct snd_soc_dapm_context *dapm = &card->dapm;
+	struct snd_soc_dapm_context *dapm = snd_soc_card_to_dapm(card);
 	int err;
 
 	if (ctx->amp_type == CODEC_MAX98373) {
@@ -339,7 +339,7 @@ MODULE_AUTHOR("David Lin <ctlin0@nuvoton.com>");
 MODULE_AUTHOR("Mac Chiang <mac.chiang@intel.com>");
 MODULE_AUTHOR("Brent Lu <brent.lu@intel.com>");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_BOARD_HELPERS);
-MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_MAXIM_COMMON);
-MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_NUVOTON_COMMON);
-MODULE_IMPORT_NS(SND_SOC_INTEL_SOF_REALTEK_COMMON);
+MODULE_IMPORT_NS("SND_SOC_INTEL_SOF_BOARD_HELPERS");
+MODULE_IMPORT_NS("SND_SOC_INTEL_SOF_MAXIM_COMMON");
+MODULE_IMPORT_NS("SND_SOC_INTEL_SOF_NUVOTON_COMMON");
+MODULE_IMPORT_NS("SND_SOC_INTEL_SOF_REALTEK_COMMON");

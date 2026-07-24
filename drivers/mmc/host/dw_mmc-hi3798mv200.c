@@ -30,13 +30,12 @@ struct dw_mci_hi3798mv200_priv {
 	struct clk *drive_clk;
 	struct regmap *crg_reg;
 	u32 sap_dll_offset;
-	struct mmc_clk_phase_map phase_map;
 };
 
 static void dw_mci_hi3798mv200_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 {
 	struct dw_mci_hi3798mv200_priv *priv = host->priv;
-	struct mmc_clk_phase phase = priv->phase_map.phase[ios->timing];
+	struct mmc_clk_phase phase = host->phase_map.phase[ios->timing];
 	u32 val;
 
 	val = mci_readl(host, ENABLE_SHIFT);
@@ -74,25 +73,24 @@ static void dw_mci_hi3798mv200_set_ios(struct dw_mci *host, struct mmc_ios *ios)
 	}
 }
 
-static inline int dw_mci_hi3798mv200_enable_tuning(struct dw_mci_slot *slot)
+static inline int dw_mci_hi3798mv200_enable_tuning(struct dw_mci *host)
 {
-	struct dw_mci_hi3798mv200_priv *priv = slot->host->priv;
+	struct dw_mci_hi3798mv200_priv *priv = host->priv;
 
 	return regmap_clear_bits(priv->crg_reg, priv->sap_dll_offset, SAP_DLL_CTRL_DLLMODE);
 }
 
-static inline int dw_mci_hi3798mv200_disable_tuning(struct dw_mci_slot *slot)
+static inline int dw_mci_hi3798mv200_disable_tuning(struct dw_mci *host)
 {
-	struct dw_mci_hi3798mv200_priv *priv = slot->host->priv;
+	struct dw_mci_hi3798mv200_priv *priv = host->priv;
 
 	return regmap_set_bits(priv->crg_reg, priv->sap_dll_offset, SAP_DLL_CTRL_DLLMODE);
 }
 
-static int dw_mci_hi3798mv200_execute_tuning_mix_mode(struct dw_mci_slot *slot,
+static int dw_mci_hi3798mv200_execute_tuning_mix_mode(struct dw_mci *host,
 					     u32 opcode)
 {
 	static const int degrees[] = { 0, 45, 90, 135, 180, 225, 270, 315 };
-	struct dw_mci *host = slot->host;
 	struct dw_mci_hi3798mv200_priv *priv = host->priv;
 	int raise_point = -1, fall_point = -1, mid;
 	int err, prev_err = -1;
@@ -101,7 +99,7 @@ static int dw_mci_hi3798mv200_execute_tuning_mix_mode(struct dw_mci_slot *slot,
 	int i;
 	int ret;
 
-	ret = dw_mci_hi3798mv200_enable_tuning(slot);
+	ret = dw_mci_hi3798mv200_enable_tuning(host);
 	if (ret < 0)
 		return ret;
 
@@ -115,7 +113,7 @@ static int dw_mci_hi3798mv200_execute_tuning_mix_mode(struct dw_mci_slot *slot,
 		 *
 		 * Treat edge(flip) found as an error too.
 		 */
-		err = mmc_send_tuning(slot->mmc, opcode, NULL);
+		err = mmc_send_tuning(host->mmc, opcode, NULL);
 		regval = mci_readl(host, TUNING_CTRL);
 		if (err || (regval & SDMMC_TUNING_FIND_EDGE))
 			err = 1;
@@ -136,7 +134,7 @@ static int dw_mci_hi3798mv200_execute_tuning_mix_mode(struct dw_mci_slot *slot,
 	}
 
 tuning_out:
-	ret = dw_mci_hi3798mv200_disable_tuning(slot);
+	ret = dw_mci_hi3798mv200_disable_tuning(host);
 	if (ret < 0)
 		return ret;
 
@@ -159,9 +157,9 @@ tuning_out:
 		 * We don't care what timing we are tuning for,
 		 * simply use the same phase for all timing needs tuning.
 		 */
-		priv->phase_map.phase[MMC_TIMING_MMC_HS200].in_deg = degrees[mid];
-		priv->phase_map.phase[MMC_TIMING_MMC_HS400].in_deg = degrees[mid];
-		priv->phase_map.phase[MMC_TIMING_UHS_SDR104].in_deg = degrees[mid];
+		host->phase_map.phase[MMC_TIMING_MMC_HS200].in_deg = degrees[mid];
+		host->phase_map.phase[MMC_TIMING_MMC_HS400].in_deg = degrees[mid];
+		host->phase_map.phase[MMC_TIMING_UHS_SDR104].in_deg = degrees[mid];
 
 		clk_set_phase(priv->sample_clk, degrees[mid]);
 		dev_dbg(host->dev, "Tuning clk_sample[%d, %d], set[%d]\n",
@@ -181,13 +179,10 @@ static int dw_mci_hi3798mv200_init(struct dw_mci *host)
 {
 	struct dw_mci_hi3798mv200_priv *priv;
 	struct device_node *np = host->dev->of_node;
-	int ret;
 
 	priv = devm_kzalloc(host->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
-
-	mmc_of_parse_clk_phase(host->dev, &priv->phase_map);
 
 	priv->sample_clk = devm_clk_get_enabled(host->dev, "ciu-sample");
 	if (IS_ERR(priv->sample_clk))
@@ -199,14 +194,11 @@ static int dw_mci_hi3798mv200_init(struct dw_mci *host)
 		return dev_err_probe(host->dev, PTR_ERR(priv->drive_clk),
 				     "failed to get enabled ciu-drive clock\n");
 
-	priv->crg_reg = syscon_regmap_lookup_by_phandle(np, "hisilicon,sap-dll-reg");
+	priv->crg_reg = syscon_regmap_lookup_by_phandle_args(np, "hisilicon,sap-dll-reg",
+							     1, &priv->sap_dll_offset);
 	if (IS_ERR(priv->crg_reg))
 		return dev_err_probe(host->dev, PTR_ERR(priv->crg_reg),
 				     "failed to get CRG reg\n");
-
-	ret = of_property_read_u32_index(np, "hisilicon,sap-dll-reg", 1, &priv->sap_dll_offset);
-	if (ret)
-		return dev_err_probe(host->dev, ret, "failed to get sample DLL register offset\n");
 
 	host->priv = priv;
 	return 0;
@@ -237,7 +229,7 @@ static void dw_mci_hi3798mv200_remove(struct platform_device *pdev)
 MODULE_DEVICE_TABLE(of, dw_mci_hi3798mv200_match);
 static struct platform_driver dw_mci_hi3798mv200_driver = {
 	.probe = dw_mci_hi3798mv200_probe,
-	.remove_new = dw_mci_hi3798mv200_remove,
+	.remove = dw_mci_hi3798mv200_remove,
 	.driver = {
 		.name = "dwmmc_hi3798mv200",
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,

@@ -23,7 +23,7 @@
 #include <linux/iio/buffer.h>
 #include <linux/iio/kfifo_buf.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 /* Commands */
 #define ADS1298_CMD_WAKEUP	0x02
@@ -294,7 +294,7 @@ static int ads1298_get_scale(struct ads1298_private *priv,
 		if (ret)
 			return ret;
 
-		/* Refererence in millivolts */
+		/* Reference in millivolts */
 		*val = regval & ADS1298_MASK_CONFIG3_VREF_4V ? 4000 : 2400;
 	}
 
@@ -319,13 +319,12 @@ static int ads1298_read_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 
 		ret = ads1298_read_one(priv, chan->scan_index);
 
-		iio_device_release_direct_mode(indio_dev);
+		iio_device_release_direct(indio_dev);
 
 		if (ret)
 			return ret;
@@ -502,8 +501,7 @@ static void ads1298_rdata_complete(void *context)
 	}
 
 	/* Demux the channel data into our bounce buffer */
-	for_each_set_bit(scan_index, indio_dev->active_scan_mask,
-			 indio_dev->masklength) {
+	iio_for_each_active_channel(indio_dev, scan_index) {
 		const struct iio_chan_spec *scan_chan =
 					&indio_dev->channels[scan_index];
 		const u8 *data = priv->rx_buffer + scan_chan->address;
@@ -614,6 +612,8 @@ static int ads1298_init(struct iio_dev *indio_dev)
 	}
 	indio_dev->name = devm_kasprintf(dev, GFP_KERNEL, "ads129%u%s",
 					 indio_dev->num_channels, suffix);
+	if (!indio_dev->name)
+		return -ENOMEM;
 
 	/* Enable internal test signal, double amplitude, double frequency */
 	ret = regmap_write(priv->regmap, ADS1298_REG_CONFIG2,

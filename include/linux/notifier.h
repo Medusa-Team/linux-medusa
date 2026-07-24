@@ -109,7 +109,7 @@ extern void srcu_init_notifier_head(struct srcu_notifier_head *nh);
 		.mutex = __MUTEX_INITIALIZER(name.mutex),	\
 		.head = NULL,					\
 		.srcuu = __SRCU_USAGE_INIT(name.srcuu),		\
-		.srcu = __SRCU_STRUCT_INIT(name.srcu, name.srcuu, pcpu), \
+		.srcu = __SRCU_STRUCT_INIT(name.srcu, name.srcuu, pcpu, 0), \
 	}
 
 #define ATOMIC_NOTIFIER_HEAD(name)				\
@@ -236,8 +236,6 @@ static inline int notifier_to_errno(int ret)
 #define KBD_UNICODE		0x0003 /* Keyboard unicode */
 #define KBD_KEYSYM		0x0004 /* Keyboard keysym */
 #define KBD_POST_KEYSYM		0x0005 /* Called after keyboard keysym interpretation */
-
-extern struct blocking_notifier_head reboot_notifier_list;
 
 #endif /* __KERNEL__ */
 #endif /* _LINUX_NOTIFIER_H */

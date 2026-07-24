@@ -18,11 +18,11 @@
 		     "google,veyron-mickey-rev0", "google,veyron-mickey",
 		     "google,veyron", "rockchip,rk3288";
 
-	vcc_5v: vcc-5v {
+	vcc_5v: regulator-vcc-5v {
 		vin-supply = <&vcc33_sys>;
 	};
 
-	vcc33_io: vcc33_io {
+	vcc33_io: regulator-vcc33-io {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc33_io";
 		regulator-always-on;
@@ -246,7 +246,6 @@
 			regulator-min-microvolt = <1000000>;
 			regulator-max-microvolt = <1000000>;
 			regulator-name = "vdd10_lcd";
-			regulator-suspend-mem-disabled;
 		};
 
 		vcc18_lcd: LDO_REG8 {
@@ -255,7 +254,6 @@
 			regulator-min-microvolt = <1800000>;
 			regulator-max-microvolt = <1800000>;
 			regulator-name = "vcc18_lcd";
-			regulator-suspend-mem-disabled;
 		};
 	};
 };

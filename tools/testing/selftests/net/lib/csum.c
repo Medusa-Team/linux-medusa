@@ -675,22 +675,20 @@ static int recv_verify_packet_ipv6(void *nh, int len)
 {
 	struct ipv6hdr *ip6h = nh;
 	uint16_t proto = cfg_encap ? IPPROTO_UDP : cfg_proto;
-	uint16_t ip_len;
+	uint16_t payload_len;
 
 	if (len < sizeof(*ip6h) || ip6h->nexthdr != proto)
 		return -1;
 
-	ip_len = ntohs(ip6h->payload_len);
-	if (ip_len > len - sizeof(*ip6h))
+	payload_len = ntohs(ip6h->payload_len);
+	if (payload_len > len - sizeof(*ip6h))
 		return -1;
 
-	len = ip_len;
 	iph_addr_p = &ip6h->saddr;
-
 	if (proto == IPPROTO_TCP)
-		return recv_verify_packet_tcp(ip6h + 1, len);
+		return recv_verify_packet_tcp(ip6h + 1, payload_len);
 	else
-		return recv_verify_packet_udp(ip6h + 1, len);
+		return recv_verify_packet_udp(ip6h + 1, payload_len);
 }
 
 /* return whether auxdata includes TP_STATUS_CSUM_VALID */
@@ -709,7 +707,7 @@ static uint32_t recv_get_packet_csum_status(struct msghdr *msg)
 			      cm->cmsg_level, cm->cmsg_type);
 
 		if (cm->cmsg_len != CMSG_LEN(sizeof(struct tpacket_auxdata)))
-			error(1, 0, "cmsg: len=%lu expected=%lu",
+			error(1, 0, "cmsg: len=%zu expected=%zu",
 			      cm->cmsg_len, CMSG_LEN(sizeof(struct tpacket_auxdata)));
 
 		aux = (void *)CMSG_DATA(cm);

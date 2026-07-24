@@ -55,6 +55,7 @@ static irqreturn_t mv88e6185_pcs_handle_irq(int irq, void *dev_id)
 }
 
 static void mv88e6185_pcs_get_state(struct phylink_pcs *pcs,
+				    unsigned int neg_mode,
 				    struct phylink_link_state *state)
 {
 	struct mv88e6185_pcs *mpcs = pcs_to_mv88e6185_pcs(pcs);
@@ -130,14 +131,13 @@ static int mv88e6185_pcs_init(struct mv88e6xxx_chip *chip, int port)
 
 	dev = chip->dev;
 
-	mpcs = kzalloc(sizeof(*mpcs), GFP_KERNEL);
+	mpcs = kzalloc_obj(*mpcs);
 	if (!mpcs)
 		return -ENOMEM;
 
 	mpcs->chip = chip;
 	mpcs->port = port;
 	mpcs->phylink_pcs.ops = &mv88e6185_phylink_pcs_ops;
-	mpcs->phylink_pcs.neg_mode = true;
 
 	irq = mv88e6xxx_serdes_irq_mapping(chip, port);
 	if (irq) {

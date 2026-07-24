@@ -76,14 +76,11 @@
 #define AUTO_UPDATE_INFO_SIZE		SZ_1M
 #define AUTO_UPDATE_BITSTREAM_BASE	(AUTO_UPDATE_DIRECTORY_SIZE + AUTO_UPDATE_INFO_SIZE)
 
-#define AUTO_UPDATE_TIMEOUT_MS		60000
-
 struct mpfs_auto_update_priv {
 	struct mpfs_sys_controller *sys_controller;
 	struct device *dev;
 	struct mtd_info *flash;
 	struct fw_upload *fw_uploader;
-	struct completion programming_complete;
 	size_t size_per_bitstream;
 	bool cancel_request;
 };
@@ -115,10 +112,6 @@ static enum fw_upload_err mpfs_auto_update_prepare(struct fw_upload *fw_uploader
 	 * driver. If those are fixed, verification of the Golden Image should
 	 * be added here.
 	 */
-
-	priv->flash = mpfs_sys_controller_get_flash(priv->sys_controller);
-	if (!priv->flash)
-		return FW_UPLOAD_ERR_HW_ERROR;
 
 	erase_size = round_up(erase_size, (u64)priv->flash->erasesize);
 
@@ -156,19 +149,6 @@ static void mpfs_auto_update_cancel(struct fw_upload *fw_uploader)
 
 static enum fw_upload_err mpfs_auto_update_poll_complete(struct fw_upload *fw_uploader)
 {
-	struct mpfs_auto_update_priv *priv = fw_uploader->dd_handle;
-	int ret;
-
-	/*
-	 * There is no meaningful way to get the status of the programming while
-	 * it is in progress, so attempting anything other than waiting for it
-	 * to complete would be misplaced.
-	 */
-	ret = wait_for_completion_timeout(&priv->programming_complete,
-					  msecs_to_jiffies(AUTO_UPDATE_TIMEOUT_MS));
-	if (!ret)
-		return FW_UPLOAD_ERR_TIMEOUT;
-
 	return FW_UPLOAD_ERR_NONE;
 }
 
@@ -178,9 +158,9 @@ static int mpfs_auto_update_verify_image(struct fw_upload *fw_uploader)
 	u32 *response_msg __free(kfree) =
 		kzalloc(AUTO_UPDATE_FEATURE_RESP_SIZE * sizeof(*response_msg), GFP_KERNEL);
 	struct mpfs_mss_response *response __free(kfree) =
-		kzalloc(sizeof(struct mpfs_mss_response), GFP_KERNEL);
+		kzalloc_obj(struct mpfs_mss_response);
 	struct mpfs_mss_msg *message __free(kfree) =
-		kzalloc(sizeof(struct mpfs_mss_msg), GFP_KERNEL);
+		kzalloc_obj(struct mpfs_mss_msg);
 	int ret;
 
 	if (!response_msg || !response || !message)
@@ -349,33 +329,23 @@ static enum fw_upload_err mpfs_auto_update_write(struct fw_upload *fw_uploader, 
 						 u32 offset, u32 size, u32 *written)
 {
 	struct mpfs_auto_update_priv *priv = fw_uploader->dd_handle;
-	enum fw_upload_err err = FW_UPLOAD_ERR_NONE;
 	int ret;
 
-	reinit_completion(&priv->programming_complete);
-
 	ret = mpfs_auto_update_write_bitstream(fw_uploader, data, offset, size, written);
-	if (ret) {
-		err = FW_UPLOAD_ERR_RW_ERROR;
-		goto out;
-	}
+	if (ret)
+		return FW_UPLOAD_ERR_RW_ERROR;
 
-	if (priv->cancel_request) {
-		err = FW_UPLOAD_ERR_CANCELED;
-		goto out;
-	}
+	if (priv->cancel_request)
+		return FW_UPLOAD_ERR_CANCELED;
 
 	if (mpfs_auto_update_is_bitstream_info(data, size))
-		goto out;
+		return FW_UPLOAD_ERR_NONE;
 
 	ret = mpfs_auto_update_verify_image(fw_uploader);
 	if (ret)
-		err = FW_UPLOAD_ERR_FW_INVALID;
+		return FW_UPLOAD_ERR_FW_INVALID;
 
-out:
-	complete(&priv->programming_complete);
-
-	return err;
+	return FW_UPLOAD_ERR_NONE;
 }
 
 static const struct fw_upload_ops mpfs_auto_update_ops = {
@@ -390,9 +360,9 @@ static int mpfs_auto_update_available(struct mpfs_auto_update_priv *priv)
 	u32 *response_msg __free(kfree) =
 		kzalloc(AUTO_UPDATE_FEATURE_RESP_SIZE * sizeof(*response_msg), GFP_KERNEL);
 	struct mpfs_mss_response *response __free(kfree) =
-		kzalloc(sizeof(struct mpfs_mss_response), GFP_KERNEL);
+		kzalloc_obj(struct mpfs_mss_response);
 	struct mpfs_mss_msg *message __free(kfree) =
-		kzalloc(sizeof(struct mpfs_mss_msg), GFP_KERNEL);
+		kzalloc_obj(struct mpfs_mss_msg);
 	int ret;
 
 	if (!response_msg || !response || !message)
@@ -428,10 +398,10 @@ static int mpfs_auto_update_available(struct mpfs_auto_update_priv *priv)
 		return -EIO;
 
 	/*
-	 * Bit 5 of byte 1 is "UL_Auto Update" & if it is set, Auto Update is
+	 * Bit 5 of byte 1 is "UL_IAP" & if it is set, Auto Update is
 	 * not possible.
 	 */
-	if (response_msg[1] & AUTO_UPDATE_FEATURE_ENABLED)
+	if ((((u8 *)response_msg)[1] & AUTO_UPDATE_FEATURE_ENABLED))
 		return -EPERM;
 
 	return 0;
@@ -453,6 +423,12 @@ static int mpfs_auto_update_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(priv->sys_controller),
 				     "Could not register as a sub device of the system controller\n");
 
+	priv->flash = mpfs_sys_controller_get_flash(priv->sys_controller);
+	if (IS_ERR_OR_NULL(priv->flash)) {
+		dev_dbg(dev, "No flash connected to the system controller, auto-update not supported\n");
+		return -ENODEV;
+	}
+
 	priv->dev = dev;
 	platform_set_drvdata(pdev, priv);
 
@@ -460,8 +436,6 @@ static int mpfs_auto_update_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "The current bitstream does not support auto-update\n");
-
-	init_completion(&priv->programming_complete);
 
 	fw_uploader = firmware_upload_register(THIS_MODULE, dev, "mpfs-auto-update",
 					       &mpfs_auto_update_ops, priv);
@@ -486,7 +460,7 @@ static struct platform_driver mpfs_auto_update_driver = {
 		.name = "mpfs-auto-update",
 	},
 	.probe = mpfs_auto_update_probe,
-	.remove_new = mpfs_auto_update_remove,
+	.remove = mpfs_auto_update_remove,
 };
 module_platform_driver(mpfs_auto_update_driver);
 

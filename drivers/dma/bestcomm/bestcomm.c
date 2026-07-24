@@ -393,7 +393,7 @@ static int mpc52xx_bcom_probe(struct platform_device *op)
 	}
 
 	/* Get a clean struct */
-	bcom_eng = kzalloc(sizeof(struct bcom_engine), GFP_KERNEL);
+	bcom_eng = kzalloc_obj(struct bcom_engine);
 	if (!bcom_eng) {
 		rv = -ENOMEM;
 		goto error_sramclean;
@@ -486,7 +486,7 @@ MODULE_DEVICE_TABLE(of, mpc52xx_bcom_of_match);
 
 static struct platform_driver mpc52xx_bcom_of_platform_driver = {
 	.probe		= mpc52xx_bcom_probe,
-	.remove_new	= mpc52xx_bcom_remove,
+	.remove		= mpc52xx_bcom_remove,
 	.driver = {
 		.name = DRIVER_NAME,
 		.of_match_table = mpc52xx_bcom_of_match,

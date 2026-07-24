@@ -1100,7 +1100,7 @@ static struct platform_driver sab_driver = {
 		.of_match_table = sab_match,
 	},
 	.probe		= sab_probe,
-	.remove_new	= sab_remove,
+	.remove		= sab_remove,
 };
 
 static int __init sunsab_init(void)
@@ -1117,9 +1117,8 @@ static int __init sunsab_init(void)
 	}
 
 	if (num_channels) {
-		sunsab_ports = kcalloc(num_channels,
-				       sizeof(struct uart_sunsab_port),
-				       GFP_KERNEL);
+		sunsab_ports = kzalloc_objs(struct uart_sunsab_port,
+					    num_channels);
 		if (!sunsab_ports)
 			return -ENOMEM;
 

@@ -68,7 +68,7 @@ int adf_cfg_dev_add(struct adf_accel_dev *accel_dev)
 {
 	struct adf_cfg_device_data *dev_cfg_data;
 
-	dev_cfg_data = kzalloc(sizeof(*dev_cfg_data), GFP_KERNEL);
+	dev_cfg_data = kzalloc_obj(*dev_cfg_data);
 	if (!dev_cfg_data)
 		return -ENOMEM;
 	INIT_LIST_HEAD(&dev_cfg_data->sec_list);
@@ -100,6 +100,8 @@ void adf_cfg_dev_dbgfs_rm(struct adf_accel_dev *accel_dev)
 }
 
 static void adf_cfg_section_del_all(struct list_head *head);
+static void adf_cfg_section_del_all_except(struct list_head *head,
+					   const char *section_name);
 
 void adf_cfg_del_all(struct adf_accel_dev *accel_dev)
 {
@@ -107,6 +109,17 @@ void adf_cfg_del_all(struct adf_accel_dev *accel_dev)
 
 	down_write(&dev_cfg_data->lock);
 	adf_cfg_section_del_all(&dev_cfg_data->sec_list);
+	up_write(&dev_cfg_data->lock);
+	clear_bit(ADF_STATUS_CONFIGURED, &accel_dev->status);
+}
+
+void adf_cfg_del_all_except(struct adf_accel_dev *accel_dev,
+			    const char *section_name)
+{
+	struct adf_cfg_device_data *dev_cfg_data = accel_dev->cfg;
+
+	down_write(&dev_cfg_data->lock);
+	adf_cfg_section_del_all_except(&dev_cfg_data->sec_list, section_name);
 	up_write(&dev_cfg_data->lock);
 	clear_bit(ADF_STATUS_CONFIGURED, &accel_dev->status);
 }
@@ -179,6 +192,22 @@ static void adf_cfg_section_del_all(struct list_head *head)
 
 	list_for_each_prev_safe(list, tmp, head) {
 		ptr = list_entry(list, struct adf_cfg_section, list);
+		adf_cfg_keyval_del_all(&ptr->param_head);
+		list_del(list);
+		kfree(ptr);
+	}
+}
+
+static void adf_cfg_section_del_all_except(struct list_head *head,
+					   const char *section_name)
+{
+	struct list_head *list, *tmp;
+	struct adf_cfg_section *ptr;
+
+	list_for_each_prev_safe(list, tmp, head) {
+		ptr = list_entry(list, struct adf_cfg_section, list);
+		if (!strcmp(ptr->name, section_name))
+			continue;
 		adf_cfg_keyval_del_all(&ptr->param_head);
 		list_del(list);
 		kfree(ptr);
@@ -260,7 +289,7 @@ int adf_cfg_add_key_value_param(struct adf_accel_dev *accel_dev,
 	if (!section)
 		return -EFAULT;
 
-	key_val = kzalloc(sizeof(*key_val), GFP_KERNEL);
+	key_val = kzalloc_obj(*key_val);
 	if (!key_val)
 		return -ENOMEM;
 
@@ -327,7 +356,7 @@ int adf_cfg_section_add(struct adf_accel_dev *accel_dev, const char *name)
 	if (sec)
 		return 0;
 
-	sec = kzalloc(sizeof(*sec), GFP_KERNEL);
+	sec = kzalloc_obj(*sec);
 	if (!sec)
 		return -ENOMEM;
 

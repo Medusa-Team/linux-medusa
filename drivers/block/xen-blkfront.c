@@ -314,7 +314,7 @@ static int fill_grant_buffer(struct blkfront_ring_info *rinfo, int num)
 	int i = 0;
 
 	while (i < num) {
-		gnt_list_entry = kzalloc(sizeof(struct grant), GFP_NOIO);
+		gnt_list_entry = kzalloc_obj(struct grant, GFP_NOIO);
 		if (!gnt_list_entry)
 			goto out_of_memory;
 
@@ -493,11 +493,11 @@ static void blkif_restart_queue_callback(void *arg)
 	schedule_work(&rinfo->work);
 }
 
-static int blkif_getgeo(struct block_device *bd, struct hd_geometry *hg)
+static int blkif_getgeo(struct gendisk *disk, struct hd_geometry *hg)
 {
 	/* We don't have real geometry info, but let's at least return
 	   values consistent with the size of the device */
-	sector_t nsect = get_capacity(bd->bd_disk);
+	sector_t nsect = get_capacity(disk);
 	sector_t cylinders = nsect;
 
 	hg->heads = 0xff;
@@ -751,7 +751,7 @@ static int blkif_queue_rw_req(struct request *req, struct blkfront_ring_info *ri
 	id = blkif_ring_get_request(rinfo, req, &final_ring_req);
 	ring_req = &rinfo->shadow[id].req;
 
-	num_sg = blk_rq_map_sg(req->q, req, rinfo->shadow[id].sg);
+	num_sg = blk_rq_map_sg(req, rinfo->shadow[id].sg);
 	num_grant = 0;
 	/* Calculate the number of grant used */
 	for_each_sg(rinfo->shadow[id].sg, sg, num_sg, i)
@@ -1131,7 +1131,6 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 	} else
 		info->tag_set.queue_depth = BLK_RING_SIZE(info);
 	info->tag_set.numa_node = NUMA_NO_NODE;
-	info->tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
 	info->tag_set.cmd_size = sizeof(struct blkif_req);
 	info->tag_set.driver_data = info;
 
@@ -1981,7 +1980,7 @@ static int blkfront_probe(struct xenbus_device *dev,
 		}
 		kfree(type);
 	}
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc_obj(*info);
 	if (!info) {
 		xenbus_dev_fatal(dev, -ENOMEM, "allocating info structure");
 		return -ENOMEM;
@@ -2208,17 +2207,13 @@ static int blkfront_setup_indirect(struct blkfront_ring_info *rinfo)
 
 	for (i = 0; i < BLK_RING_SIZE(info); i++) {
 		rinfo->shadow[i].grants_used =
-			kvcalloc(grants,
-				 sizeof(rinfo->shadow[i].grants_used[0]),
-				 GFP_KERNEL);
-		rinfo->shadow[i].sg = kvcalloc(psegs,
-					       sizeof(rinfo->shadow[i].sg[0]),
-					       GFP_KERNEL);
+			kvzalloc_objs(rinfo->shadow[i].grants_used[0], grants);
+		rinfo->shadow[i].sg = kvzalloc_objs(rinfo->shadow[i].sg[0],
+						    psegs);
 		if (info->max_indirect_segments)
 			rinfo->shadow[i].indirect_grants =
-				kvcalloc(INDIRECT_GREFS(grants),
-					 sizeof(rinfo->shadow[i].indirect_grants[0]),
-					 GFP_KERNEL);
+				kvzalloc_objs(rinfo->shadow[i].indirect_grants[0],
+					      INDIRECT_GREFS(grants));
 		if ((rinfo->shadow[i].grants_used == NULL) ||
 			(rinfo->shadow[i].sg == NULL) ||
 		     (info->max_indirect_segments &&

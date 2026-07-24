@@ -15,6 +15,7 @@
 #define CPU_PMU				(_ULCAST_(1) << 10)
 #define CPU_TIMER			(_ULCAST_(1) << 11)
 #define CPU_IPI				(_ULCAST_(1) << 12)
+#define CPU_AVEC                        (_ULCAST_(1) << 14)
 
 /* Controlled by 0x52 guest exception VIP aligned to estat bit 5~12 */
 #define CPU_IP0				(_ULCAST_(1))
@@ -37,12 +38,13 @@
 #define KVM_LOONGSON_IRQ_NUM_MASK	0xffff
 
 typedef union loongarch_instruction  larch_inst;
-typedef int (*exit_handle_fn)(struct kvm_vcpu *);
+typedef int (*exit_handle_fn)(struct kvm_vcpu *, int);
 
 int  kvm_emu_mmio_read(struct kvm_vcpu *vcpu, larch_inst inst);
 int  kvm_emu_mmio_write(struct kvm_vcpu *vcpu, larch_inst inst);
 int  kvm_complete_mmio_read(struct kvm_vcpu *vcpu, struct kvm_run *run);
 int  kvm_complete_iocsr_read(struct kvm_vcpu *vcpu, struct kvm_run *run);
+int  kvm_complete_user_service(struct kvm_vcpu *vcpu, struct kvm_run *run);
 int  kvm_emu_idle(struct kvm_vcpu *vcpu);
 int  kvm_pending_timer(struct kvm_vcpu *vcpu);
 int  kvm_handle_fault(struct kvm_vcpu *vcpu, int fault);
@@ -73,6 +75,12 @@ void kvm_restore_lasx(struct loongarch_fpu *fpu);
 static inline int kvm_own_lasx(struct kvm_vcpu *vcpu) { return -EINVAL; }
 static inline void kvm_save_lasx(struct loongarch_fpu *fpu) { }
 static inline void kvm_restore_lasx(struct loongarch_fpu *fpu) { }
+#endif
+
+#ifdef CONFIG_CPU_HAS_LBT
+int kvm_own_lbt(struct kvm_vcpu *vcpu);
+#else
+static inline int kvm_own_lbt(struct kvm_vcpu *vcpu) { return -EINVAL; }
 #endif
 
 void kvm_init_timer(struct kvm_vcpu *vcpu, unsigned long hz);
@@ -122,6 +130,11 @@ static inline void kvm_write_reg(struct kvm_vcpu *vcpu, int num, unsigned long v
 static inline bool kvm_pvtime_supported(void)
 {
 	return !!sched_info_on();
+}
+
+static inline bool kvm_guest_has_pv_feature(struct kvm_vcpu *vcpu, unsigned int feature)
+{
+	return vcpu->kvm->arch.pv_features & BIT(feature);
 }
 
 #endif /* __ASM_LOONGARCH_KVM_VCPU_H__ */

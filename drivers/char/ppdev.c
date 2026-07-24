@@ -689,7 +689,7 @@ static int pp_open(struct inode *inode, struct file *file)
 	if (minor >= PARPORT_MAX)
 		return -ENXIO;
 
-	pp = kmalloc(sizeof(struct pp_struct), GFP_KERNEL);
+	pp = kmalloc_obj(struct pp_struct);
 	if (!pp)
 		return -ENOMEM;
 
@@ -786,7 +786,6 @@ static const struct class ppdev_class = {
 
 static const struct file_operations pp_fops = {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.read		= pp_read,
 	.write		= pp_write,
 	.poll		= pp_poll,

@@ -377,7 +377,7 @@ send_update:
 		if (len > sizeof(yld->ctl_data->data))
 			len = sizeof(yld->ctl_data->data);
 
-		/* Combine up to <len> consecutive LCD bytes in a singe request
+		/* Combine up to <len> consecutive LCD bytes in a single request
 		 */
 		yld->ctl_data->cmd	= CMD_LCD;
 		yld->ctl_data->offset	= cpu_to_be16(ix);
@@ -614,7 +614,7 @@ static ssize_t show_line3(struct device *dev, struct device_attribute *attr,
 	return show_line(dev, buf, LCD_LINE3_OFFSET, LCD_LINE4_OFFSET);
 }
 
-/* Writing to /sys/../lineX will set the coresponding LCD line.
+/* Writing to /sys/../lineX will set the corresponding LCD line.
  * - Excess characters are ignored.
  * - If less characters are written than allowed, the remaining digits are
  *   unchanged.
@@ -831,7 +831,7 @@ static int usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	if (!usb_endpoint_is_int_in(endpoint))
 		return -ENODEV;
 
-	yld = kzalloc(sizeof(*yld), GFP_KERNEL);
+	yld = kzalloc_obj(*yld);
 	if (!yld)
 		return -ENOMEM;
 
@@ -854,7 +854,7 @@ static int usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	if (!yld->ctl_data)
 		return usb_cleanup(yld, -ENOMEM);
 
-	yld->ctl_req = kmalloc(sizeof(*(yld->ctl_req)), GFP_KERNEL);
+	yld->ctl_req = kmalloc_obj(*(yld->ctl_req));
 	if (yld->ctl_req == NULL)
 		return usb_cleanup(yld, -ENOMEM);
 

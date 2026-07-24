@@ -8,6 +8,7 @@
 #include <linux/ktime.h>
 #include <linux/tracepoint.h>
 #include <sound/jack.h>
+#include <sound/pcm.h>
 
 #define DAPM_DIRECT "(direct)"
 #define DAPM_ARROW(dir) (((dir) == SND_SOC_DAPM_DIR_OUT) ? "->" : "<-")
@@ -26,8 +27,8 @@ DECLARE_EVENT_CLASS(snd_soc_dapm,
 	TP_ARGS(dapm, val),
 
 	TP_STRUCT__entry(
-		__string(	card_name,	dapm->card->name)
-		__string(	comp_name,	dapm->component ? dapm->component->name : "(none)")
+		__string(	card_name,	snd_soc_dapm_to_card(dapm)->name)
+		__string(	comp_name,	snd_soc_dapm_to_component(dapm) ? snd_soc_dapm_to_component(dapm)->name : "(none)")
 		__field(	int,		val)
 	),
 
@@ -212,7 +213,7 @@ TRACE_EVENT(snd_soc_dapm_connected,
 	),
 
 	TP_printk("%s: found %d paths",
-		__entry->stream ? "capture" : "playback", __entry->paths)
+		  snd_pcm_direction_name(__entry->stream), __entry->paths)
 );
 
 TRACE_EVENT(snd_soc_jack_irq,

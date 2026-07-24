@@ -271,13 +271,14 @@ static void dce110_stream_encoder_dp_set_stream_attribute(
 	bool use_vsc_sdp_for_colorimetry,
 	uint32_t enable_sdp_splitting)
 {
+	(void)use_vsc_sdp_for_colorimetry;
+	(void)enable_sdp_splitting;
 	uint32_t h_active_start;
 	uint32_t v_active_start;
 	uint32_t misc0 = 0;
 	uint32_t misc1 = 0;
 	uint32_t h_blank;
 	uint32_t h_back_porch;
-	uint8_t synchronous_clock = 0; /* asynchronous mode */
 	uint8_t colorimetry_bpc;
 	uint8_t dynamic_range_rgb = 0; /*full range*/
 	uint8_t dynamic_range_ycbcr = 1; /*bt709*/
@@ -380,7 +381,6 @@ static void dce110_stream_encoder_dp_set_stream_attribute(
 		break;
 	}
 
-	misc0 = misc0 | synchronous_clock;
 	misc0 = colorimetry_bpc << 5;
 
 	if (REG(DP_MSA_TIMING_PARAM1)) {
@@ -420,7 +420,7 @@ static void dce110_stream_encoder_dp_set_stream_attribute(
 			dynamic_range_rgb = 1; /*limited range*/
 			break;
 		case COLOR_SPACE_2020_RGB_FULLRANGE:
-		case COLOR_SPACE_2020_YCBCR:
+		case COLOR_SPACE_2020_YCBCR_LIMITED:
 		case COLOR_SPACE_XR_RGB:
 		case COLOR_SPACE_MSREF_SCRGB:
 		case COLOR_SPACE_ADOBERGB:
@@ -432,6 +432,7 @@ static void dce110_stream_encoder_dp_set_stream_attribute(
 		case COLOR_SPACE_APPCTRL:
 		case COLOR_SPACE_CUSTOMPOINTS:
 		case COLOR_SPACE_UNKNOWN:
+		default:
 			/* do nothing */
 			break;
 		}
@@ -902,6 +903,7 @@ static void dce110_stream_encoder_dp_blank(
 	struct dc_link *link,
 	struct stream_encoder *enc)
 {
+	(void)link;
 	struct dce110_stream_encoder *enc110 = DCE110STRENC_FROM_STRENC(enc);
 	uint32_t  reg1 = 0;
 	uint32_t max_retries = DP_BLANK_MAX_RETRY * 10;
@@ -952,6 +954,7 @@ static void dce110_stream_encoder_dp_unblank(
 	struct stream_encoder *enc,
 	const struct encoder_unblank_param *param)
 {
+	(void)link;
 	struct dce110_stream_encoder *enc110 = DCE110STRENC_FROM_STRENC(enc);
 
 	if (param->link_settings.link_rate != LINK_RATE_UNKNOWN) {
@@ -1499,7 +1502,10 @@ static void dig_connect_to_otg(
 {
 	struct dce110_stream_encoder *enc110 = DCE110STRENC_FROM_STRENC(enc);
 
-	REG_UPDATE(DIG_FE_CNTL, DIG_SOURCE_SELECT, tg_inst);
+	if (enc->id == ENGINE_ID_DACA || enc->id == ENGINE_ID_DACB)
+		REG_UPDATE(DAC_SOURCE_SELECT, DAC_SOURCE_SELECT, tg_inst);
+	else
+		REG_UPDATE(DIG_FE_CNTL, DIG_SOURCE_SELECT, tg_inst);
 }
 
 static unsigned int dig_source_otg(
@@ -1508,7 +1514,10 @@ static unsigned int dig_source_otg(
 	uint32_t tg_inst = 0;
 	struct dce110_stream_encoder *enc110 = DCE110STRENC_FROM_STRENC(enc);
 
-	REG_GET(DIG_FE_CNTL, DIG_SOURCE_SELECT, &tg_inst);
+	if (enc->id == ENGINE_ID_DACA || enc->id == ENGINE_ID_DACB)
+		REG_GET(DAC_SOURCE_SELECT, DAC_SOURCE_SELECT, &tg_inst);
+	else
+		REG_GET(DIG_FE_CNTL, DIG_SOURCE_SELECT, &tg_inst);
 
 	return tg_inst;
 }
@@ -1561,6 +1570,29 @@ void dce110_stream_encoder_construct(
 	const struct dce_stream_encoder_mask *se_mask)
 {
 	enc110->base.funcs = &dce110_str_enc_funcs;
+	enc110->base.ctx = ctx;
+	enc110->base.id = eng_id;
+	enc110->base.bp = bp;
+	enc110->regs = regs;
+	enc110->se_shift = se_shift;
+	enc110->se_mask = se_mask;
+}
+
+static const struct stream_encoder_funcs dce110_an_str_enc_funcs = {
+	.dig_connect_to_otg  = dig_connect_to_otg,
+	.dig_source_otg = dig_source_otg,
+};
+
+void dce110_analog_stream_encoder_construct(
+	struct dce110_stream_encoder *enc110,
+	struct dc_context *ctx,
+	struct dc_bios *bp,
+	enum engine_id eng_id,
+	const struct dce110_stream_enc_registers *regs,
+	const struct dce_stream_encoder_shift *se_shift,
+	const struct dce_stream_encoder_mask *se_mask)
+{
+	enc110->base.funcs = &dce110_an_str_enc_funcs;
 	enc110->base.ctx = ctx;
 	enc110->base.id = eng_id;
 	enc110->base.bp = bp;

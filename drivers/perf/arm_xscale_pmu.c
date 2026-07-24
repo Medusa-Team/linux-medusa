@@ -53,6 +53,8 @@ enum xscale_counters {
 	XSCALE_COUNTER2,
 	XSCALE_COUNTER3,
 };
+#define XSCALE1_NUM_COUNTERS	3
+#define XSCALE2_NUM_COUNTERS	5
 
 static const unsigned xscale_perf_map[PERF_COUNT_HW_MAX] = {
 	PERF_MAP_ALL_UNSUPPORTED,
@@ -168,7 +170,7 @@ xscale1pmu_handle_irq(struct arm_pmu *cpu_pmu)
 
 	regs = get_irq_regs();
 
-	for (idx = 0; idx < cpu_pmu->num_events; ++idx) {
+	for_each_set_bit(idx, cpu_pmu->cntr_mask, XSCALE1_NUM_COUNTERS) {
 		struct perf_event *event = cpuc->events[idx];
 		struct hw_perf_event *hwc;
 
@@ -184,8 +186,7 @@ xscale1pmu_handle_irq(struct arm_pmu *cpu_pmu)
 		if (!armpmu_event_set_period(event))
 			continue;
 
-		if (perf_event_overflow(event, &data, regs))
-			cpu_pmu->disable(event);
+		perf_event_overflow(event, &data, regs);
 	}
 
 	irq_work_run();
@@ -364,7 +365,8 @@ static int xscale1pmu_init(struct arm_pmu *cpu_pmu)
 	cpu_pmu->start		= xscale1pmu_start;
 	cpu_pmu->stop		= xscale1pmu_stop;
 	cpu_pmu->map_event	= xscale_map_event;
-	cpu_pmu->num_events	= 3;
+
+	bitmap_set(cpu_pmu->cntr_mask, 0, XSCALE1_NUM_COUNTERS);
 
 	return 0;
 }
@@ -500,7 +502,7 @@ xscale2pmu_handle_irq(struct arm_pmu *cpu_pmu)
 
 	regs = get_irq_regs();
 
-	for (idx = 0; idx < cpu_pmu->num_events; ++idx) {
+	for_each_set_bit(idx, cpu_pmu->cntr_mask, XSCALE2_NUM_COUNTERS) {
 		struct perf_event *event = cpuc->events[idx];
 		struct hw_perf_event *hwc;
 
@@ -516,8 +518,7 @@ xscale2pmu_handle_irq(struct arm_pmu *cpu_pmu)
 		if (!armpmu_event_set_period(event))
 			continue;
 
-		if (perf_event_overflow(event, &data, regs))
-			cpu_pmu->disable(event);
+		perf_event_overflow(event, &data, regs);
 	}
 
 	irq_work_run();
@@ -719,7 +720,8 @@ static int xscale2pmu_init(struct arm_pmu *cpu_pmu)
 	cpu_pmu->start		= xscale2pmu_start;
 	cpu_pmu->stop		= xscale2pmu_stop;
 	cpu_pmu->map_event	= xscale_map_event;
-	cpu_pmu->num_events	= 5;
+
+	bitmap_set(cpu_pmu->cntr_mask, 0, XSCALE2_NUM_COUNTERS);
 
 	return 0;
 }

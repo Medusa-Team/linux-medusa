@@ -35,7 +35,7 @@ int host1x_memory_context_list_init(struct host1x *host1x)
 		return 0;
 
 	cdl->len = err / 4;
-	cdl->devs = kcalloc(cdl->len, sizeof(*cdl->devs), GFP_KERNEL);
+	cdl->devs = kzalloc_objs(*cdl->devs, cdl->len);
 	if (!cdl->devs)
 		return -ENOMEM;
 
@@ -58,6 +58,7 @@ int host1x_memory_context_list_init(struct host1x *host1x)
 		ctx->dev.parent = host1x->dev;
 		ctx->dev.release = host1x_memory_context_release;
 
+		ctx->dev.dma_parms = &ctx->dma_parms;
 		dma_set_max_seg_size(&ctx->dev, UINT_MAX);
 
 		err = device_add(&ctx->dev);

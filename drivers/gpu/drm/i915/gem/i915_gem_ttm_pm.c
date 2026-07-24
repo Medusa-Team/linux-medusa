@@ -3,6 +3,7 @@
  * Copyright © 2021 Intel Corporation
  */
 
+#include <drm/drm_print.h>
 #include <drm/ttm/ttm_placement.h>
 #include <drm/ttm/ttm_tt.h>
 
@@ -90,7 +91,7 @@ static int i915_ttm_backup(struct i915_gem_apply_to_region *apply,
 		goto out_no_lock;
 
 	backup_bo = i915_gem_to_ttm(backup);
-	err = ttm_tt_populate(backup_bo->bdev, backup_bo->ttm, &ctx);
+	err = ttm_bo_populate(backup_bo, &ctx);
 	if (err)
 		goto out_no_populate;
 
@@ -189,7 +190,7 @@ static int i915_ttm_restore(struct i915_gem_apply_to_region *apply,
 	if (!backup_bo->resource)
 		err = ttm_bo_validate(backup_bo, i915_ttm_sys_placement(), &ctx);
 	if (!err)
-		err = ttm_tt_populate(backup_bo->bdev, backup_bo->ttm, &ctx);
+		err = ttm_bo_populate(backup_bo, &ctx);
 	if (!err) {
 		err = i915_gem_obj_copy_ttm(obj, backup, pm_apply->allow_gpu,
 					    false);

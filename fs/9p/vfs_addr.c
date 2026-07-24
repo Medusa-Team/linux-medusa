@@ -36,7 +36,7 @@ static void v9fs_begin_writeback(struct netfs_io_request *wreq)
 
 	fid = v9fs_fid_find_inode(wreq->inode, true, INVALID_UID, true);
 	if (!fid) {
-		WARN_ONCE(1, "folio expected an open fid inode->i_ino=%lx\n",
+		WARN_ONCE(1, "folio expected an open fid inode->i_ino=%llx\n",
 			  wreq->inode->i_ino);
 		return;
 	}
@@ -57,7 +57,9 @@ static void v9fs_issue_write(struct netfs_io_subrequest *subreq)
 	int err, len;
 
 	len = p9_client_write(fid, subreq->start, &subreq->io_iter, &err);
-	netfs_write_subrequest_terminated(subreq, len ?: err, false);
+	if (len > 0)
+		__set_bit(NETFS_SREQ_MADE_PROGRESS, &subreq->flags);
+	netfs_write_subrequest_terminated(subreq, len ?: err);
 }
 
 /**
@@ -68,17 +70,25 @@ static void v9fs_issue_read(struct netfs_io_subrequest *subreq)
 {
 	struct netfs_io_request *rreq = subreq->rreq;
 	struct p9_fid *fid = rreq->netfs_priv;
+	unsigned long long pos = subreq->start + subreq->transferred;
 	int total, err;
 
-	total = p9_client_read(fid, subreq->start + subreq->transferred,
-			       &subreq->io_iter, &err);
+	total = p9_client_read(fid, pos, &subreq->io_iter, &err);
 
 	/* if we just extended the file size, any portion not in
 	 * cache won't be on server and is zeroes */
-	if (subreq->rreq->origin != NETFS_DIO_READ)
+	if (subreq->rreq->origin != NETFS_UNBUFFERED_READ &&
+	    subreq->rreq->origin != NETFS_DIO_READ)
 		__set_bit(NETFS_SREQ_CLEAR_TAIL, &subreq->flags);
+	if (pos + total >= i_size_read(rreq->inode))
+		__set_bit(NETFS_SREQ_HIT_EOF, &subreq->flags);
+	if (!err && total) {
+		subreq->transferred += total;
+		__set_bit(NETFS_SREQ_MADE_PROGRESS, &subreq->flags);
+	}
 
-	netfs_subreq_terminated(subreq, err ?: total, false);
+	subreq->error = err;
+	netfs_read_subreq_terminated(subreq);
 }
 
 /**
@@ -123,7 +133,7 @@ static int v9fs_init_request(struct netfs_io_request *rreq, struct file *file)
 	return 0;
 
 no_fid:
-	WARN_ONCE(1, "folio expected an open fid inode->i_ino=%lx\n",
+	WARN_ONCE(1, "folio expected an open fid inode->i_ino=%llx\n",
 		  rreq->inode->i_ino);
 	return -EINVAL;
 }
@@ -155,4 +165,5 @@ const struct address_space_operations v9fs_addr_operations = {
 	.invalidate_folio	= netfs_invalidate_folio,
 	.direct_IO		= noop_direct_IO,
 	.writepages		= netfs_writepages,
+	.migrate_folio		= filemap_migrate_folio,
 };

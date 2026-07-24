@@ -280,6 +280,7 @@ prestera_mac_select_pcs(struct phylink_config *config,
 }
 
 static void prestera_pcs_get_state(struct phylink_pcs *pcs,
+				   unsigned int neg_mode,
 				   struct phylink_link_state *state)
 {
 	struct prestera_port *port = container_of(pcs, struct prestera_port,
@@ -395,7 +396,6 @@ static int prestera_port_sfp_bind(struct prestera_port *port)
 			continue;
 
 		port->phylink_pcs.ops = &prestera_pcs_ops;
-		port->phylink_pcs.neg_mode = true;
 
 		port->phy_config.dev = &port->dev->dev;
 		port->phy_config.type = PHYLINK_NETDEV;
@@ -633,7 +633,8 @@ static int prestera_port_create(struct prestera_switch *sw, u32 id)
 	if (err)
 		goto err_dl_port_register;
 
-	dev->features |= NETIF_F_NETNS_LOCAL | NETIF_F_HW_TC;
+	dev->features |= NETIF_F_HW_TC;
+	dev->netns_immutable = true;
 	dev->netdev_ops = &prestera_netdev_ops;
 	dev->ethtool_ops = &prestera_ethtool_ops;
 	SET_NETDEV_DEV(dev, sw->dev->dev);
@@ -1013,7 +1014,7 @@ static int prestera_lag_init(struct prestera_switch *sw)
 {
 	u16 id;
 
-	sw->lags = kcalloc(sw->lag_max, sizeof(*sw->lags), GFP_KERNEL);
+	sw->lags = kzalloc_objs(*sw->lags, sw->lag_max);
 	if (!sw->lags)
 		return -ENOMEM;
 
@@ -1208,7 +1209,7 @@ prestera_mdb_entry_create(struct prestera_switch *sw,
 	struct prestera_flood_domain *flood_domain;
 	struct prestera_mdb_entry *mdb_entry;
 
-	mdb_entry = kzalloc(sizeof(*mdb_entry), GFP_KERNEL);
+	mdb_entry = kzalloc_obj(*mdb_entry);
 	if (!mdb_entry)
 		goto err_mdb_alloc;
 
@@ -1246,7 +1247,7 @@ prestera_flood_domain_create(struct prestera_switch *sw)
 {
 	struct prestera_flood_domain *domain;
 
-	domain = kzalloc(sizeof(*domain), GFP_KERNEL);
+	domain = kzalloc_obj(*domain);
 	if (!domain)
 		return NULL;
 
@@ -1278,7 +1279,7 @@ prestera_flood_domain_port_create(struct prestera_flood_domain *flood_domain,
 	bool is_first_port_in_list = false;
 	int err;
 
-	flood_domain_port = kzalloc(sizeof(*flood_domain_port), GFP_KERNEL);
+	flood_domain_port = kzalloc_obj(*flood_domain_port);
 	if (!flood_domain_port) {
 		err = -ENOMEM;
 		goto err_port_alloc;
@@ -1499,7 +1500,7 @@ EXPORT_SYMBOL(prestera_device_unregister);
 
 static int __init prestera_module_init(void)
 {
-	prestera_wq = alloc_workqueue("prestera", 0, 0);
+	prestera_wq = alloc_workqueue("prestera", WQ_PERCPU, 0);
 	if (!prestera_wq)
 		return -ENOMEM;
 

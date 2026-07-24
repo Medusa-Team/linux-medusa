@@ -106,21 +106,6 @@ int os_get_ifname(int fd, char* namebuf)
 	return 0;
 }
 
-int os_set_slip(int fd)
-{
-	int disc, sencap;
-
-	disc = N_SLIP;
-	if (ioctl(fd, TIOCSETD, &disc) < 0)
-		return -errno;
-
-	sencap = 0;
-	if (ioctl(fd, SIOCSIFENCAP, &sencap) < 0)
-		return -errno;
-
-	return 0;
-}
-
 int os_mode_fd(int fd, int mode)
 {
 	int err;
@@ -254,12 +239,6 @@ int os_dup_file(int fd)
 void os_close_file(int fd)
 {
 	close(fd);
-}
-int os_fsync_file(int fd)
-{
-	if (fsync(fd) < 0)
-	    return -errno;
-	return 0;
 }
 
 int os_seek_file(int fd, unsigned long long offset)
@@ -528,7 +507,8 @@ int os_shutdown_socket(int fd, int r, int w)
 ssize_t os_rcv_fd_msg(int fd, int *fds, unsigned int n_fds,
 		      void *data, size_t data_len)
 {
-	char buf[CMSG_SPACE(sizeof(*fds) * n_fds)];
+#define MAX_RCV_FDS	2
+	char buf[CMSG_SPACE(sizeof(*fds) * MAX_RCV_FDS)];
 	struct cmsghdr *cmsg;
 	struct iovec iov = {
 		.iov_base = data,
@@ -538,9 +518,12 @@ ssize_t os_rcv_fd_msg(int fd, int *fds, unsigned int n_fds,
 		.msg_iov = &iov,
 		.msg_iovlen = 1,
 		.msg_control = buf,
-		.msg_controllen = sizeof(buf),
+		.msg_controllen = CMSG_SPACE(sizeof(*fds) * n_fds),
 	};
 	int n;
+
+	if (n_fds > MAX_RCV_FDS)
+		return -EINVAL;
 
 	n = recvmsg(fd, &msg, 0);
 	if (n < 0)
@@ -552,7 +535,7 @@ ssize_t os_rcv_fd_msg(int fd, int *fds, unsigned int n_fds,
 	    cmsg->cmsg_type != SCM_RIGHTS)
 		return n;
 
-	memcpy(fds, CMSG_DATA(cmsg), cmsg->cmsg_len);
+	memcpy(fds, CMSG_DATA(cmsg), cmsg->cmsg_len - CMSG_LEN(0));
 	return n;
 }
 

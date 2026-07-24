@@ -52,6 +52,11 @@ int ntfs_load_attr_list(struct ntfs_inode *ni, struct ATTRIB *attr)
 
 	if (!attr->non_res) {
 		lsize = le32_to_cpu(attr->res.data_size);
+		if (!lsize) {
+			err = -EINVAL;
+			goto out;
+		}
+
 		/* attr is resident: lsize < record_size (1K or 4K) */
 		le = kvmalloc(al_aligned(lsize), GFP_KERNEL);
 		if (!le) {
@@ -66,6 +71,10 @@ int ntfs_load_attr_list(struct ntfs_inode *ni, struct ATTRIB *attr)
 		u16 run_off = le16_to_cpu(attr->nres.run_off);
 
 		lsize = le64_to_cpu(attr->nres.data_size);
+		if (!lsize) {
+			err = -EINVAL;
+			goto out;
+		}
 
 		run_init(&ni->attr_list.run);
 
@@ -336,8 +345,8 @@ int al_add_le(struct ntfs_inode *ni, enum ATTR_TYPE type, const __le16 *name,
 	le->id = id;
 	memcpy(le->name, name, sizeof(short) * name_len);
 
-	err = attr_set_size(ni, ATTR_LIST, NULL, 0, &al->run, new_size,
-			    &new_size, true, &attr);
+	err = attr_set_size_ex(ni, ATTR_LIST, NULL, 0, &al->run, new_size,
+			       &new_size, true, &attr, false);
 	if (err) {
 		/* Undo memmove above. */
 		memmove(le, Add2Ptr(le, sz), old_size - off);
@@ -382,59 +391,6 @@ bool al_remove_le(struct ntfs_inode *ni, struct ATTR_LIST_ENTRY *le)
 	return true;
 }
 
-/*
- * al_delete_le - Delete first le from the list which matches its parameters.
- */
-bool al_delete_le(struct ntfs_inode *ni, enum ATTR_TYPE type, CLST vcn,
-		  const __le16 *name, u8 name_len, const struct MFT_REF *ref)
-{
-	u16 size;
-	struct ATTR_LIST_ENTRY *le;
-	size_t off;
-	typeof(ni->attr_list) *al = &ni->attr_list;
-
-	/* Scan forward to the first le that matches the input. */
-	le = al_find_ex(ni, NULL, type, name, name_len, &vcn);
-	if (!le)
-		return false;
-
-	off = PtrOffset(al->le, le);
-
-next:
-	if (off >= al->size)
-		return false;
-	if (le->type != type)
-		return false;
-	if (le->name_len != name_len)
-		return false;
-	if (name_len && ntfs_cmp_names(le_name(le), name_len, name, name_len,
-				       ni->mi.sbi->upcase, true))
-		return false;
-	if (le64_to_cpu(le->vcn) != vcn)
-		return false;
-
-	/*
-	 * The caller specified a segment reference, so we have to
-	 * scan through the matching entries until we find that segment
-	 * reference or we run of matching entries.
-	 */
-	if (ref && memcmp(ref, &le->ref, sizeof(*ref))) {
-		off += le16_to_cpu(le->size);
-		le = Add2Ptr(al->le, off);
-		goto next;
-	}
-
-	/* Save on stack the size of 'le'. */
-	size = le16_to_cpu(le->size);
-	/* Delete the le. */
-	memmove(le, Add2Ptr(le, size), al->size - (off + size));
-
-	al->size -= size;
-	al->dirty = true;
-
-	return true;
-}
-
 int al_update(struct ntfs_inode *ni, int sync)
 {
 	int err;
@@ -448,8 +404,8 @@ int al_update(struct ntfs_inode *ni, int sync)
 	 * Attribute list increased on demand in al_add_le.
 	 * Attribute list decreased here.
 	 */
-	err = attr_set_size(ni, ATTR_LIST, NULL, 0, &al->run, al->size, NULL,
-			    false, &attr);
+	err = attr_set_size_ex(ni, ATTR_LIST, NULL, 0, &al->run, al->size, NULL,
+			       false, &attr, false);
 	if (err)
 		goto out;
 

@@ -138,7 +138,7 @@ static int pcap_ts_probe(struct platform_device *pdev)
 	struct pcap_ts *pcap_ts;
 	int err = -ENOMEM;
 
-	pcap_ts = kzalloc(sizeof(*pcap_ts), GFP_KERNEL);
+	pcap_ts = kzalloc_obj(*pcap_ts);
 	if (!pcap_ts)
 		return err;
 
@@ -238,7 +238,7 @@ static const struct dev_pm_ops pcap_ts_pm_ops = {
 
 static struct platform_driver pcap_ts_driver = {
 	.probe		= pcap_ts_probe,
-	.remove_new	= pcap_ts_remove,
+	.remove		= pcap_ts_remove,
 	.driver		= {
 		.name	= "pcap-ts",
 		.pm	= PCAP_TS_PM_OPS,

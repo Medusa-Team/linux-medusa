@@ -66,7 +66,7 @@ static const char *nsp32_release_version = "1.2";
 /****************************************************************************
  * Supported hardware
  */
-static struct pci_device_id nsp32_pci_table[] = {
+static const struct pci_device_id nsp32_pci_table[] = {
 	{
 		.vendor      = PCI_VENDOR_ID_IODATA,
 		.device      = PCI_DEVICE_ID_NINJASCSI_32BI_CBSC_II,
@@ -185,7 +185,8 @@ static void __exit exit_nsp32  (void);
 static int	   nsp32_show_info   (struct seq_file *, struct Scsi_Host *);
 
 static int	   nsp32_detect      (struct pci_dev *pdev);
-static int	   nsp32_queuecommand(struct Scsi_Host *, struct scsi_cmnd *);
+static enum scsi_qc_status nsp32_queuecommand(struct Scsi_Host *,
+					      struct scsi_cmnd *);
 static const char *nsp32_info	     (struct Scsi_Host *);
 static int	   nsp32_release     (struct Scsi_Host *);
 
@@ -905,7 +906,7 @@ static int nsp32_setup_sg_table(struct scsi_cmnd *SCpnt)
 	return TRUE;
 }
 
-static int nsp32_queuecommand_lck(struct scsi_cmnd *SCpnt)
+static enum scsi_qc_status nsp32_queuecommand_lck(struct scsi_cmnd *SCpnt)
 {
 	void (*done)(struct scsi_cmnd *) = scsi_done;
 	nsp32_hw_data *data = (nsp32_hw_data *)SCpnt->device->host->hostdata;

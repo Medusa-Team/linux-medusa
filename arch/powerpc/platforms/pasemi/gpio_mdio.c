@@ -214,7 +214,7 @@ static int gpio_mdio_probe(struct platform_device *ofdev)
 	int err;
 
 	err = -ENOMEM;
-	priv = kzalloc(sizeof(struct gpio_priv), GFP_KERNEL);
+	priv = kzalloc_obj(struct gpio_priv);
 	if (!priv)
 		goto out;
 
@@ -285,7 +285,7 @@ MODULE_DEVICE_TABLE(of, gpio_mdio_match);
 static struct platform_driver gpio_mdio_driver =
 {
 	.probe		= gpio_mdio_probe,
-	.remove_new	= gpio_mdio_remove,
+	.remove		= gpio_mdio_remove,
 	.driver = {
 		.name = "gpio-mdio-bitbang",
 		.of_match_table = gpio_mdio_match,

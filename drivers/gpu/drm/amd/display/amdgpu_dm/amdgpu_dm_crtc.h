@@ -27,6 +27,12 @@
 #ifndef __AMDGPU_DM_CRTC_H__
 #define __AMDGPU_DM_CRTC_H__
 
+void amdgpu_dm_crtc_set_panel_sr_feature(
+	struct amdgpu_display_manager *dm,
+	struct amdgpu_crtc *acrtc,
+	struct dc_stream_state *stream,
+	bool vblank_enabled, bool allow_sr_entry);
+
 void amdgpu_dm_crtc_handle_vblank(struct amdgpu_crtc *acrtc);
 
 bool amdgpu_dm_crtc_modeset_required(struct drm_crtc_state *crtc_state,
@@ -37,7 +43,7 @@ int amdgpu_dm_crtc_set_vupdate_irq(struct drm_crtc *crtc, bool enable);
 
 bool amdgpu_dm_crtc_vrr_active_irq(struct amdgpu_crtc *acrtc);
 
-bool amdgpu_dm_crtc_vrr_active(struct dm_crtc_state *dm_state);
+bool amdgpu_dm_crtc_vrr_active(const struct dm_crtc_state *dm_state);
 
 int amdgpu_dm_crtc_enable_vblank(struct drm_crtc *crtc);
 

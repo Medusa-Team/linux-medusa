@@ -60,12 +60,12 @@ int framer_pm_runtime_get_sync(struct framer *framer)
 }
 EXPORT_SYMBOL_GPL(framer_pm_runtime_get_sync);
 
-int framer_pm_runtime_put(struct framer *framer)
+void framer_pm_runtime_put(struct framer *framer)
 {
 	if (!pm_runtime_enabled(&framer->dev))
-		return -EOPNOTSUPP;
+		return;
 
-	return pm_runtime_put(&framer->dev);
+	pm_runtime_put(&framer->dev);
 }
 EXPORT_SYMBOL_GPL(framer_pm_runtime_put);
 
@@ -615,7 +615,7 @@ struct framer *framer_create(struct device *dev, struct device_node *node,
 	if (WARN_ON((ops->flags & FRAMER_FLAG_POLL_STATUS) && !ops->get_status))
 		return ERR_PTR(-EINVAL);
 
-	framer = kzalloc(sizeof(*framer), GFP_KERNEL);
+	framer = kzalloc_obj(*framer);
 	if (!framer)
 		return ERR_PTR(-ENOMEM);
 
@@ -732,8 +732,8 @@ EXPORT_SYMBOL_GPL(devm_framer_create);
 
 /**
  * framer_provider_simple_of_xlate() - returns the framer instance from framer provider
- * @dev: the framer provider device
- * @args: of_phandle_args (not used here)
+ * @dev: the framer provider device (not used here)
+ * @args: of_phandle_args
  *
  * Intended to be used by framer provider for the common case where #framer-cells is
  * 0. For other cases where #framer-cells is greater than '0', the framer provider
@@ -743,21 +743,14 @@ EXPORT_SYMBOL_GPL(devm_framer_create);
 struct framer *framer_provider_simple_of_xlate(struct device *dev,
 					       const struct of_phandle_args *args)
 {
-	struct class_dev_iter iter;
-	struct framer *framer;
+	struct device *target_dev;
 
-	class_dev_iter_init(&iter, &framer_class, NULL, NULL);
-	while ((dev = class_dev_iter_next(&iter))) {
-		framer = dev_to_framer(dev);
-		if (args->np != framer->dev.of_node)
-			continue;
+	target_dev = class_find_device_by_of_node(&framer_class, args->np);
+	if (!target_dev)
+		return ERR_PTR(-ENODEV);
 
-		class_dev_iter_exit(&iter);
-		return framer;
-	}
-
-	class_dev_iter_exit(&iter);
-	return ERR_PTR(-ENODEV);
+	put_device(target_dev);
+	return dev_to_framer(target_dev);
 }
 EXPORT_SYMBOL_GPL(framer_provider_simple_of_xlate);
 
@@ -778,7 +771,7 @@ __framer_provider_of_register(struct device *dev, struct module *owner,
 {
 	struct framer_provider *framer_provider;
 
-	framer_provider = kzalloc(sizeof(*framer_provider), GFP_KERNEL);
+	framer_provider = kzalloc_obj(*framer_provider);
 	if (!framer_provider)
 		return ERR_PTR(-ENOMEM);
 

@@ -78,7 +78,7 @@ struct clk_hw *__clk_hw_register_fixed_rate(struct device *dev,
 		fixed = devres_alloc(devm_clk_hw_register_fixed_rate_release,
 				     sizeof(*fixed), GFP_KERNEL);
 	else
-		fixed = kzalloc(sizeof(*fixed), GFP_KERNEL);
+		fixed = kzalloc_obj(*fixed);
 	if (!fixed)
 		return ERR_PTR(-ENOMEM);
 
@@ -232,7 +232,7 @@ static struct platform_driver of_fixed_clk_driver = {
 		.of_match_table = of_fixed_clk_ids,
 	},
 	.probe = of_fixed_clk_probe,
-	.remove_new = of_fixed_clk_remove,
+	.remove = of_fixed_clk_remove,
 };
 builtin_platform_driver(of_fixed_clk_driver);
 #endif

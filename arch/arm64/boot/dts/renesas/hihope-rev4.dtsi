@@ -50,7 +50,7 @@
 	pinctrl-names = "default";
 	status = "okay";
 
-	cs2000: clk_multiplier@4f {
+	cs2000: clk-multiplier@4f {
 		#clock-cells = <0>;
 		compatible = "cirrus,cs2000-cp";
 		reg = <0x4f>;
@@ -83,9 +83,6 @@
 	pinctrl-0 = <&sound_pins>, <&sound_clk_pins>;
 	pinctrl-names = "default";
 	status = "okay";
-
-	/* Single DAI */
-	#sound-dai-cells = <0>;
 
 	/* audio_clkout0/1/2/3 */
 	#clock-cells = <1>;

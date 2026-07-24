@@ -5,8 +5,10 @@
  */
 
 /dts-v1/;
+#include "rk3399-t.dtsi"
 #include "rk3399-rock-pi-4.dtsi"
-#include "rk3399-t-opp.dtsi"
+
+/delete-node/ &eeprom;
 
 / {
 	model = "Radxa ROCK 4SE";
@@ -17,11 +19,13 @@
 	};
 };
 
-&pinctrl {
-	usb2 {
-		vcc5v0_host_en: vcc5v0-host-en {
-			rockchip,pins = <4 RK_PD1 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
+&i2c0 {
+	eeprom@50 {
+		compatible = "belling,bl24c16a", "atmel,24c16";
+		reg = <0x50>;
+		pagesize = <16>;
+		read-only;
+		vcc-supply = <&vcc_3v0>;
 	};
 };
 
@@ -55,11 +59,4 @@
 		vbat-supply = <&vcc3v3_sys>;
 		vddio-supply = <&vcc_1v8>;
 	};
-};
-
-&vcc5v0_host {
-	enable-active-high;
-	gpio = <&gpio4 RK_PD1 GPIO_ACTIVE_HIGH>;
-	pinctrl-names = "default";
-	pinctrl-0 = <&vcc5v0_host_en>;
 };

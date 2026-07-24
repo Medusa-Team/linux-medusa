@@ -18,6 +18,7 @@
 	compatible = "renesas,r8a77965";
 	#address-cells = <2>;
 	#size-cells = <2>;
+	interrupt-parent = <&gic>;
 
 	/*
 	 * The external audio clocks are configured as 0 Hz fixed frequency
@@ -143,6 +144,7 @@
 		#clock-cells = <0>;
 		/* This value must be overridden by the board */
 		clock-frequency = <0>;
+		bootph-all;
 	};
 
 	extalr_clk: extalr {
@@ -150,6 +152,7 @@
 		#clock-cells = <0>;
 		/* This value must be overridden by the board */
 		clock-frequency = <0>;
+		bootph-all;
 	};
 
 	/* External PCIe clock - can be overridden by the board */
@@ -161,8 +164,8 @@
 
 	pmu_a57 {
 		compatible = "arm,cortex-a57-pmu";
-		interrupts-extended = <&gic GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>,
-				      <&gic GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <GIC_SPI 72 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 73 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-affinity = <&a57_0>,
 				     <&a57_1>;
 	};
@@ -181,7 +184,8 @@
 
 	soc {
 		compatible = "simple-bus";
-		interrupt-parent = <&gic>;
+		bootph-all;
+
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
@@ -194,6 +198,16 @@
 			clocks = <&cpg CPG_MOD 402>;
 			power-domains = <&sysc R8A77965_PD_ALWAYS_ON>;
 			resets = <&cpg 402>;
+			status = "disabled";
+		};
+
+		swdt: watchdog@e6030000 {
+			compatible = "renesas,r8a77965-wdt", "renesas,rcar-gen3-wdt";
+			reg = <0 0xe6030000 0 0x0c>;
+			interrupts = <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cpg CPG_CORE R8A77965_CLK_OSC>;
+			power-domains = <&sysc R8A77965_PD_ALWAYS_ON>;
+			resets = <&cpg 401>;
 			status = "disabled";
 		};
 
@@ -320,6 +334,7 @@
 		pfc: pinctrl@e6060000 {
 			compatible = "renesas,pfc-r8a77965";
 			reg = <0 0xe6060000 0 0x50c>;
+			bootph-all;
 		};
 
 		cmt0: timer@e60f0000 {
@@ -400,11 +415,13 @@
 			#clock-cells = <2>;
 			#power-domain-cells = <0>;
 			#reset-cells = <1>;
+			bootph-all;
 		};
 
 		rst: reset-controller@e6160000 {
 			compatible = "renesas,r8a77965-rst";
 			reg = <0 0xe6160000 0 0x0200>;
+			bootph-all;
 		};
 
 		sysc: system-controller@e6180000 {
@@ -1101,7 +1118,7 @@
 			       <&can_clk>;
 			clock-names = "fck", "canfd", "can_clk";
 			assigned-clocks = <&cpg CPG_CORE R8A77965_CLK_CANFD>;
-			assigned-clock-rates = <40000000>;
+			assigned-clock-rates = <80000000>;
 			power-domains = <&sysc R8A77965_PD_ALWAYS_ON>;
 			resets = <&cpg 914>;
 			status = "disabled";
@@ -1894,7 +1911,7 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu04: ssiu-4 {
-					dmas = <&audma0 0x3F>, <&audma1 0x40>;
+					dmas = <&audma0 0x3f>, <&audma1 0x40>;
 					dma-names = "rx", "tx";
 				};
 				ssiu05: ssiu-5 {
@@ -1902,7 +1919,7 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu06: ssiu-6 {
-					dmas = <&audma0 0x4F>, <&audma1 0x50>;
+					dmas = <&audma0 0x4f>, <&audma1 0x50>;
 					dma-names = "rx", "tx";
 				};
 				ssiu07: ssiu-7 {
@@ -1914,7 +1931,7 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu11: ssiu-9 {
-					dmas = <&audma0 0x4B>, <&audma1 0x4C>;
+					dmas = <&audma0 0x4b>, <&audma1 0x4c>;
 					dma-names = "rx", "tx";
 				};
 				ssiu12: ssiu-10 {
@@ -1922,23 +1939,23 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu13: ssiu-11 {
-					dmas = <&audma0 0x59>, <&audma1 0x5A>;
+					dmas = <&audma0 0x59>, <&audma1 0x5a>;
 					dma-names = "rx", "tx";
 				};
 				ssiu14: ssiu-12 {
-					dmas = <&audma0 0x5F>, <&audma1 0x60>;
+					dmas = <&audma0 0x5f>, <&audma1 0x60>;
 					dma-names = "rx", "tx";
 				};
 				ssiu15: ssiu-13 {
-					dmas = <&audma0 0xC3>, <&audma1 0xC4>;
+					dmas = <&audma0 0xc3>, <&audma1 0xc4>;
 					dma-names = "rx", "tx";
 				};
 				ssiu16: ssiu-14 {
-					dmas = <&audma0 0xC7>, <&audma1 0xC8>;
+					dmas = <&audma0 0xc7>, <&audma1 0xc8>;
 					dma-names = "rx", "tx";
 				};
 				ssiu17: ssiu-15 {
-					dmas = <&audma0 0xCB>, <&audma1 0xCC>;
+					dmas = <&audma0 0xcb>, <&audma1 0xcc>;
 					dma-names = "rx", "tx";
 				};
 				ssiu20: ssiu-16 {
@@ -1950,27 +1967,27 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu22: ssiu-18 {
-					dmas = <&audma0 0x6B>, <&audma1 0x6C>;
+					dmas = <&audma0 0x6b>, <&audma1 0x6c>;
 					dma-names = "rx", "tx";
 				};
 				ssiu23: ssiu-19 {
-					dmas = <&audma0 0x6D>, <&audma1 0x6E>;
+					dmas = <&audma0 0x6d>, <&audma1 0x6e>;
 					dma-names = "rx", "tx";
 				};
 				ssiu24: ssiu-20 {
-					dmas = <&audma0 0xCF>, <&audma1 0xCE>;
+					dmas = <&audma0 0xcf>, <&audma1 0xce>;
 					dma-names = "rx", "tx";
 				};
 				ssiu25: ssiu-21 {
-					dmas = <&audma0 0xEB>, <&audma1 0xEC>;
+					dmas = <&audma0 0xeb>, <&audma1 0xec>;
 					dma-names = "rx", "tx";
 				};
 				ssiu26: ssiu-22 {
-					dmas = <&audma0 0xED>, <&audma1 0xEE>;
+					dmas = <&audma0 0xed>, <&audma1 0xee>;
 					dma-names = "rx", "tx";
 				};
 				ssiu27: ssiu-23 {
-					dmas = <&audma0 0xEF>, <&audma1 0xF0>;
+					dmas = <&audma0 0xef>, <&audma1 0xf0>;
 					dma-names = "rx", "tx";
 				};
 				ssiu30: ssiu-24 {
@@ -1994,15 +2011,15 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu35: ssiu-29 {
-					dmas = <&audma0 0x29>, <&audma1 0x2A>;
+					dmas = <&audma0 0x29>, <&audma1 0x2a>;
 					dma-names = "rx", "tx";
 				};
 				ssiu36: ssiu-30 {
-					dmas = <&audma0 0x2B>, <&audma1 0x2C>;
+					dmas = <&audma0 0x2b>, <&audma1 0x2c>;
 					dma-names = "rx", "tx";
 				};
 				ssiu37: ssiu-31 {
-					dmas = <&audma0 0x2D>, <&audma1 0x2E>;
+					dmas = <&audma0 0x2d>, <&audma1 0x2e>;
 					dma-names = "rx", "tx";
 				};
 				ssiu40: ssiu-32 {
@@ -2014,19 +2031,19 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu42: ssiu-34 {
-					dmas = <&audma0 0x19>, <&audma1 0x1A>;
+					dmas = <&audma0 0x19>, <&audma1 0x1a>;
 					dma-names = "rx", "tx";
 				};
 				ssiu43: ssiu-35 {
-					dmas = <&audma0 0x1B>, <&audma1 0x1C>;
+					dmas = <&audma0 0x1b>, <&audma1 0x1c>;
 					dma-names = "rx", "tx";
 				};
 				ssiu44: ssiu-36 {
-					dmas = <&audma0 0x1D>, <&audma1 0x1E>;
+					dmas = <&audma0 0x1d>, <&audma1 0x1e>;
 					dma-names = "rx", "tx";
 				};
 				ssiu45: ssiu-37 {
-					dmas = <&audma0 0x1F>, <&audma1 0x20>;
+					dmas = <&audma0 0x1f>, <&audma1 0x20>;
 					dma-names = "rx", "tx";
 				};
 				ssiu46: ssiu-38 {
@@ -2058,7 +2075,7 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu91: ssiu-45 {
-					dmas = <&audma0 0x7F>, <&audma1 0x80>;
+					dmas = <&audma0 0x7f>, <&audma1 0x80>;
 					dma-names = "rx", "tx";
 				};
 				ssiu92: ssiu-46 {
@@ -2070,19 +2087,19 @@
 					dma-names = "rx", "tx";
 				};
 				ssiu94: ssiu-48 {
-					dmas = <&audma0 0xA3>, <&audma1 0xA4>;
+					dmas = <&audma0 0xa3>, <&audma1 0xa4>;
 					dma-names = "rx", "tx";
 				};
 				ssiu95: ssiu-49 {
-					dmas = <&audma0 0xA5>, <&audma1 0xA6>;
+					dmas = <&audma0 0xa5>, <&audma1 0xa6>;
 					dma-names = "rx", "tx";
 				};
 				ssiu96: ssiu-50 {
-					dmas = <&audma0 0xA7>, <&audma1 0xA8>;
+					dmas = <&audma0 0xa7>, <&audma1 0xa8>;
 					dma-names = "rx", "tx";
 				};
 				ssiu97: ssiu-51 {
-					dmas = <&audma0 0xA9>, <&audma1 0xAA>;
+					dmas = <&audma0 0xa9>, <&audma1 0xaa>;
 					dma-names = "rx", "tx";
 				};
 			};
@@ -2185,6 +2202,14 @@
 			resets = <&cpg 502>;
 			#dma-cells = <1>;
 			dma-channels = <16>;
+			iommus = <&ipmmu_mp 0>, <&ipmmu_mp 1>,
+				 <&ipmmu_mp 2>, <&ipmmu_mp 3>,
+				 <&ipmmu_mp 4>, <&ipmmu_mp 5>,
+				 <&ipmmu_mp 6>, <&ipmmu_mp 7>,
+				 <&ipmmu_mp 8>, <&ipmmu_mp 9>,
+				 <&ipmmu_mp 10>, <&ipmmu_mp 11>,
+				 <&ipmmu_mp 12>, <&ipmmu_mp 13>,
+				 <&ipmmu_mp 14>, <&ipmmu_mp 15>;
 		};
 
 		audma1: dma-controller@ec720000 {
@@ -2219,6 +2244,14 @@
 			resets = <&cpg 501>;
 			#dma-cells = <1>;
 			dma-channels = <16>;
+			iommus = <&ipmmu_mp 16>, <&ipmmu_mp 17>,
+				 <&ipmmu_mp 18>, <&ipmmu_mp 19>,
+				 <&ipmmu_mp 20>, <&ipmmu_mp 21>,
+				 <&ipmmu_mp 22>, <&ipmmu_mp 23>,
+				 <&ipmmu_mp 24>, <&ipmmu_mp 25>,
+				 <&ipmmu_mp 26>, <&ipmmu_mp 27>,
+				 <&ipmmu_mp 28>, <&ipmmu_mp 29>,
+				 <&ipmmu_mp 30>, <&ipmmu_mp 31>;
 		};
 
 		xhci0: usb@ee000000 {
@@ -2396,6 +2429,7 @@
 			clocks = <&cpg CPG_MOD 815>;
 			power-domains = <&sysc R8A77965_PD_ALWAYS_ON>;
 			resets = <&cpg 815>;
+			iommus = <&ipmmu_hc 2>;
 			status = "disabled";
 		};
 
@@ -2414,6 +2448,23 @@
 			clock-names = "clk";
 			power-domains = <&sysc R8A77965_PD_ALWAYS_ON>;
 			resets = <&cpg 408>;
+		};
+
+		gpu: gpu@fd000000 {
+			compatible = "renesas,r8a77965-gpu",
+				     "img,img-ge7800",
+				     "img,img-rogue";
+			reg = <0 0xfd000000 0 0x40000>;
+			interrupts = <GIC_SPI 119 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&cpg CPG_CORE R8A77965_CLK_ZG>,
+				 <&cpg CPG_CORE R8A77965_CLK_S2D1>,
+				 <&cpg CPG_MOD 112>;
+			clock-names = "core", "mem", "sys";
+			power-domains = <&sysc R8A77965_PD_3DG_A>,
+					<&sysc R8A77965_PD_3DG_B>;
+			power-domain-names = "a", "b";
+			resets = <&cpg 112>;
+			status = "disabled";
 		};
 
 		pciec0: pcie@fe000000 {
@@ -2443,6 +2494,16 @@
 			iommu-map = <0 &ipmmu_hc 0 1>;
 			iommu-map-mask = <0>;
 			status = "disabled";
+
+			/* PCIe bridge, Root Port */
+			pciec0_rp: pci@0,0 {
+				#address-cells = <3>;
+				#size-cells = <2>;
+				reg = <0x0 0x0 0x0 0x0 0x0>;
+				compatible = "pciclass,0604";
+				device_type = "pci";
+				ranges;
+			};
 		};
 
 		pciec1: pcie@ee800000 {
@@ -2472,6 +2533,16 @@
 			iommu-map = <0 &ipmmu_hc 1 1>;
 			iommu-map-mask = <0>;
 			status = "disabled";
+
+			/* PCIe bridge, Root Port */
+			pciec1_rp: pci@0,0 {
+				#address-cells = <3>;
+				#size-cells = <2>;
+				reg = <0x0 0x0 0x0 0x0 0x0>;
+				compatible = "pciclass,0604";
+				device_type = "pci";
+				ranges;
+			};
 		};
 
 		fdp1@fe940000 {
@@ -2490,6 +2561,7 @@
 			clocks = <&cpg CPG_MOD 615>;
 			power-domains = <&sysc R8A77965_PD_A3VP>;
 			resets = <&cpg 615>;
+			iommus = <&ipmmu_vp0 0>;
 		};
 
 		vspb: vsp@fe960000 {
@@ -2542,6 +2614,7 @@
 			clocks = <&cpg CPG_MOD 607>;
 			power-domains = <&sysc R8A77965_PD_A3VP>;
 			resets = <&cpg 607>;
+			iommus = <&ipmmu_vp0 5>;
 		};
 
 		fcpvd0: fcp@fea27000 {
@@ -2550,6 +2623,7 @@
 			clocks = <&cpg CPG_MOD 603>;
 			power-domains = <&sysc R8A77965_PD_ALWAYS_ON>;
 			resets = <&cpg 603>;
+			iommus = <&ipmmu_vi0 8>;
 		};
 
 		fcpvd1: fcp@fea2f000 {
@@ -2558,6 +2632,7 @@
 			clocks = <&cpg CPG_MOD 602>;
 			power-domains = <&sysc R8A77965_PD_ALWAYS_ON>;
 			resets = <&cpg 602>;
+			iommus = <&ipmmu_vi0 9>;
 		};
 
 		fcpvi0: fcp@fe9af000 {
@@ -2566,6 +2641,7 @@
 			clocks = <&cpg CPG_MOD 611>;
 			power-domains = <&sysc R8A77965_PD_A3VP>;
 			resets = <&cpg 611>;
+			iommus = <&ipmmu_vp0 8>;
 		};
 
 		cmm0: cmm@fea40000 {
@@ -2806,6 +2882,7 @@
 		prr: chipid@fff00044 {
 			compatible = "renesas,prr";
 			reg = <0 0xfff00044 0 4>;
+			bootph-all;
 		};
 	};
 
@@ -2873,10 +2950,10 @@
 
 	timer {
 		compatible = "arm,armv8-timer";
-		interrupts-extended = <&gic GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
-				      <&gic GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
-				      <&gic GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
-				      <&gic GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>;
+		interrupts = <GIC_PPI 13 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 11 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(2) | IRQ_TYPE_LEVEL_LOW)>;
 		interrupt-names = "sec-phys", "phys", "virt", "hyp-phys";
 	};
 

@@ -6,11 +6,12 @@
 #define __LINUX_UIO_H
 
 #include <linux/kernel.h>
-#include <linux/thread_info.h>
 #include <linux/mm_types.h>
+#include <linux/ucopysize.h>
 #include <uapi/linux/uio.h>
 
 struct page;
+struct folio_queue;
 
 typedef unsigned int __bitwise iov_iter_extraction_t;
 
@@ -25,6 +26,7 @@ enum iter_type {
 	ITER_IOVEC,
 	ITER_BVEC,
 	ITER_KVEC,
+	ITER_FOLIOQ,
 	ITER_XARRAY,
 	ITER_DISCARD,
 };
@@ -66,6 +68,7 @@ struct iov_iter {
 				const struct iovec *__iov;
 				const struct kvec *kvec;
 				const struct bio_vec *bvec;
+				const struct folio_queue *folioq;
 				struct xarray *xarray;
 				void __user *ubuf;
 			};
@@ -74,8 +77,18 @@ struct iov_iter {
 	};
 	union {
 		unsigned long nr_segs;
+		u8 folioq_slot;
 		loff_t xarray_start;
 	};
+};
+
+typedef __u16 uio_meta_flags_t;
+
+struct uio_meta {
+	uio_meta_flags_t	flags;
+	u16			app_tag;
+	u64			seed;
+	struct iov_iter		iter;
 };
 
 static inline const struct iovec *iter_iov(const struct iov_iter *iter)
@@ -86,7 +99,13 @@ static inline const struct iovec *iter_iov(const struct iov_iter *iter)
 }
 
 #define iter_iov_addr(iter)	(iter_iov(iter)->iov_base + (iter)->iov_offset)
-#define iter_iov_len(iter)	(iter_iov(iter)->iov_len - (iter)->iov_offset)
+
+static inline size_t iter_iov_len(const struct iov_iter *i)
+{
+	if (i->iter_type == ITER_UBUF)
+		return i->count;
+	return iter_iov(i)->iov_len - i->iov_offset;
+}
 
 static inline enum iter_type iov_iter_type(const struct iov_iter *i)
 {
@@ -126,6 +145,11 @@ static inline bool iov_iter_is_discard(const struct iov_iter *i)
 	return iov_iter_type(i) == ITER_DISCARD;
 }
 
+static inline bool iov_iter_is_folioq(const struct iov_iter *i)
+{
+	return iov_iter_type(i) == ITER_FOLIOQ;
+}
+
 static inline bool iov_iter_is_xarray(const struct iov_iter *i)
 {
 	return iov_iter_type(i) == ITER_XARRAY;
@@ -158,8 +182,6 @@ static inline size_t iov_length(const struct iovec *iov, unsigned long nr_segs)
 	return ret;
 }
 
-size_t copy_page_from_iter_atomic(struct page *page, size_t offset,
-				  size_t bytes, struct iov_iter *i);
 void iov_iter_advance(struct iov_iter *i, size_t bytes);
 void iov_iter_revert(struct iov_iter *i, size_t bytes);
 size_t fault_in_iov_iter_readable(const struct iov_iter *i, size_t bytes);
@@ -169,6 +191,8 @@ size_t copy_page_to_iter(struct page *page, size_t offset, size_t bytes,
 			 struct iov_iter *i);
 size_t copy_page_from_iter(struct page *page, size_t offset, size_t bytes,
 			 struct iov_iter *i);
+size_t copy_folio_from_iter_atomic(struct folio *folio, size_t offset,
+		size_t bytes, struct iov_iter *i);
 
 size_t _copy_to_iter(const void *addr, size_t bytes, struct iov_iter *i);
 size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *i);
@@ -180,10 +204,10 @@ static inline size_t copy_folio_to_iter(struct folio *folio, size_t offset,
 	return copy_page_to_iter(&folio->page, offset, bytes, i);
 }
 
-static inline size_t copy_folio_from_iter_atomic(struct folio *folio,
-		size_t offset, size_t bytes, struct iov_iter *i)
+static inline size_t copy_folio_from_iter(struct folio *folio, size_t offset,
+					  size_t bytes, struct iov_iter *i)
 {
-	return copy_page_from_iter_atomic(&folio->page, offset, bytes, i);
+	return copy_page_from_iter(&folio->page, offset, bytes, i);
 }
 
 size_t copy_page_to_iter_nofault(struct page *page, unsigned offset,
@@ -262,8 +286,6 @@ size_t _copy_mc_to_iter(const void *addr, size_t bytes, struct iov_iter *i);
 #endif
 
 size_t iov_iter_zero(size_t bytes, struct iov_iter *);
-bool iov_iter_is_aligned(const struct iov_iter *i, unsigned addr_mask,
-			unsigned len_mask);
 unsigned long iov_iter_alignment(const struct iov_iter *i);
 unsigned long iov_iter_gap_alignment(const struct iov_iter *i);
 void iov_iter_init(struct iov_iter *i, unsigned int direction, const struct iovec *iov,
@@ -273,6 +295,9 @@ void iov_iter_kvec(struct iov_iter *i, unsigned int direction, const struct kvec
 void iov_iter_bvec(struct iov_iter *i, unsigned int direction, const struct bio_vec *bvec,
 			unsigned long nr_segs, size_t count);
 void iov_iter_discard(struct iov_iter *i, unsigned int direction, size_t count);
+void iov_iter_folio_queue(struct iov_iter *i, unsigned int direction,
+			  const struct folio_queue *folioq,
+			  unsigned int first_slot, unsigned int offset, size_t count);
 void iov_iter_xarray(struct iov_iter *i, unsigned int direction, struct xarray *xarray,
 		     loff_t start, size_t count);
 ssize_t iov_iter_get_pages2(struct iov_iter *i, struct page **pages,
@@ -364,6 +389,9 @@ ssize_t iov_iter_extract_pages(struct iov_iter *i, struct page ***pages,
 			       size_t maxsize, unsigned int maxpages,
 			       iov_iter_extraction_t extraction_flags,
 			       size_t *offset0);
+ssize_t iov_iter_extract_bvecs(struct iov_iter *iter, struct bio_vec *bv,
+		size_t max_size, unsigned short *nr_vecs,
+		unsigned short max_vecs, iov_iter_extraction_t extraction_flags);
 
 /**
  * iov_iter_extract_will_pin - Indicate how pages from the iterator will be retained

@@ -231,6 +231,7 @@ struct tegra_dma_channel {
 	bool config_init;
 	char name[30];
 	enum dma_transfer_direction sid_dir;
+	enum dma_status status;
 	int id;
 	int irq;
 	int slave_id;
@@ -393,6 +394,8 @@ static int tegra_dma_pause(struct tegra_dma_channel *tdc)
 		tegra_dma_dump_chan_regs(tdc);
 	}
 
+	tdc->status = DMA_PAUSED;
+
 	return ret;
 }
 
@@ -419,6 +422,8 @@ static void tegra_dma_resume(struct tegra_dma_channel *tdc)
 	val = tdc_read(tdc, TEGRA_GPCDMA_CHAN_CSRE);
 	val &= ~TEGRA_GPCDMA_CHAN_CSRE_PAUSE;
 	tdc_write(tdc, TEGRA_GPCDMA_CHAN_CSRE, val);
+
+	tdc->status = DMA_IN_PROGRESS;
 }
 
 static int tegra_dma_device_resume(struct dma_chan *dc)
@@ -544,6 +549,7 @@ static void tegra_dma_xfer_complete(struct tegra_dma_channel *tdc)
 
 	tegra_dma_sid_free(tdc);
 	tdc->dma_desc = NULL;
+	tdc->status = DMA_COMPLETE;
 }
 
 static void tegra_dma_chan_decode_error(struct tegra_dma_channel *tdc,
@@ -716,6 +722,7 @@ static int tegra_dma_terminate_all(struct dma_chan *dc)
 		tdc->dma_desc = NULL;
 	}
 
+	tdc->status = DMA_COMPLETE;
 	tegra_dma_sid_free(tdc);
 	vchan_get_all_descriptors(&tdc->vc, &head);
 	spin_unlock_irqrestore(&tdc->vc.lock, flags);
@@ -768,6 +775,9 @@ static enum dma_status tegra_dma_tx_status(struct dma_chan *dc,
 	ret = dma_cookie_status(dc, cookie, txstate);
 	if (ret == DMA_COMPLETE)
 		return ret;
+
+	if (tdc->status == DMA_PAUSED)
+		ret = DMA_PAUSED;
 
 	spin_lock_irqsave(&tdc->vc.lock, flags);
 	vd = vchan_find_desc(&tdc->vc, cookie);
@@ -898,7 +908,7 @@ tegra_dma_prep_dma_memset(struct dma_chan *dc, dma_addr_t dest, int value,
 	/* Set burst size */
 	mc_seq |= TEGRA_GPCDMA_MCSEQ_BURST_16;
 
-	dma_desc = kzalloc(struct_size(dma_desc, sg_req, 1), GFP_NOWAIT);
+	dma_desc = kzalloc_flex(*dma_desc, sg_req, 1, GFP_NOWAIT);
 	if (!dma_desc)
 		return NULL;
 
@@ -967,7 +977,7 @@ tegra_dma_prep_dma_memcpy(struct dma_chan *dc, dma_addr_t dest,
 	/* Set burst size */
 	mc_seq |= TEGRA_GPCDMA_MCSEQ_BURST_16;
 
-	dma_desc = kzalloc(struct_size(dma_desc, sg_req, 1), GFP_NOWAIT);
+	dma_desc = kzalloc_flex(*dma_desc, sg_req, 1, GFP_NOWAIT);
 	if (!dma_desc)
 		return NULL;
 
@@ -1060,7 +1070,7 @@ tegra_dma_prep_slave_sg(struct dma_chan *dc, struct scatterlist *sgl,
 	else
 		mc_seq |= TEGRA_GPCDMA_MCSEQ_BURST_2;
 
-	dma_desc = kzalloc(struct_size(dma_desc, sg_req, sg_len), GFP_NOWAIT);
+	dma_desc = kzalloc_flex(*dma_desc, sg_req, sg_len, GFP_NOWAIT);
 	if (!dma_desc)
 		return NULL;
 
@@ -1195,8 +1205,7 @@ tegra_dma_prep_dma_cyclic(struct dma_chan *dc, dma_addr_t buf_addr, size_t buf_l
 		mc_seq |= TEGRA_GPCDMA_MCSEQ_BURST_2;
 
 	period_count = buf_len / period_len;
-	dma_desc = kzalloc(struct_size(dma_desc, sg_req, period_count),
-			   GFP_NOWAIT);
+	dma_desc = kzalloc_flex(*dma_desc, sg_req, period_count, GFP_NOWAIT);
 	if (!dma_desc)
 		return NULL;
 
@@ -1532,7 +1541,7 @@ static struct platform_driver tegra_dma_driver = {
 		.of_match_table = tegra_dma_of_match,
 	},
 	.probe		= tegra_dma_probe,
-	.remove_new	= tegra_dma_remove,
+	.remove		= tegra_dma_remove,
 };
 
 module_platform_driver(tegra_dma_driver);

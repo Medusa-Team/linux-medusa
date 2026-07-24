@@ -100,10 +100,26 @@ described in more detail in the footnotes.
 |                                           |                                        | ``uretprobe.s+`` [#uprobe]_      | Yes       |
 +                                           +                                        +----------------------------------+-----------+
 |                                           |                                        | ``usdt+`` [#usdt]_               |           |
++                                           +                                        +----------------------------------+-----------+
+|                                           |                                        | ``usdt.s+`` [#usdt]_             | Yes       |
 +                                           +----------------------------------------+----------------------------------+-----------+
 |                                           | ``BPF_TRACE_KPROBE_MULTI``             | ``kprobe.multi+`` [#kpmulti]_    |           |
 +                                           +                                        +----------------------------------+-----------+
 |                                           |                                        | ``kretprobe.multi+`` [#kpmulti]_ |           |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_TRACE_KPROBE_SESSION``           | ``kprobe.session+`` [#kpmulti]_  |           |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_TRACE_UPROBE_MULTI``             | ``uprobe.multi+`` [#upmul]_      |           |
++                                           +                                        +----------------------------------+-----------+
+|                                           |                                        | ``uprobe.multi.s+`` [#upmul]_    | Yes       |
++                                           +                                        +----------------------------------+-----------+
+|                                           |                                        | ``uretprobe.multi+`` [#upmul]_   |           |
++                                           +                                        +----------------------------------+-----------+
+|                                           |                                        | ``uretprobe.multi.s+`` [#upmul]_ | Yes       |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_TRACE_UPROBE_SESSION``           | ``uprobe.session+`` [#upmul]_    |           |
++                                           +                                        +----------------------------------+-----------+
+|                                           |                                        | ``uprobe.session.s+`` [#upmul]_  | Yes       |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
 | ``BPF_PROG_TYPE_LIRC_MODE2``              | ``BPF_LIRC_MODE2``                     | ``lirc_mode2``                   |           |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
@@ -121,6 +137,8 @@ described in more detail in the footnotes.
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
 | ``BPF_PROG_TYPE_LWT_XMIT``                |                                        | ``lwt_xmit``                     |           |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
+| ``BPF_PROG_TYPE_NETFILTER``               |                                        | ``netfilter``                    |           |
++-------------------------------------------+----------------------------------------+----------------------------------+-----------+
 | ``BPF_PROG_TYPE_PERF_EVENT``              |                                        | ``perf_event``                   |           |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
 | ``BPF_PROG_TYPE_RAW_TRACEPOINT_WRITABLE`` |                                        | ``raw_tp.w+`` [#rawtp]_          |           |
@@ -131,11 +149,23 @@ described in more detail in the footnotes.
 +                                           +                                        +----------------------------------+-----------+
 |                                           |                                        | ``raw_tracepoint+``              |           |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
-| ``BPF_PROG_TYPE_SCHED_ACT``               |                                        | ``action``                       |           |
+| ``BPF_PROG_TYPE_SCHED_ACT``               |                                        | ``action`` [#tc_legacy]_         |           |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
-| ``BPF_PROG_TYPE_SCHED_CLS``               |                                        | ``classifier``                   |           |
+| ``BPF_PROG_TYPE_SCHED_CLS``               |                                        | ``classifier`` [#tc_legacy]_     |           |
 +                                           +                                        +----------------------------------+-----------+
-|                                           |                                        | ``tc``                           |           |
+|                                           |                                        | ``tc`` [#tc_legacy]_             |           |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_NETKIT_PRIMARY``                 | ``netkit/primary``               |           |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_NETKIT_PEER``                    | ``netkit/peer``                  |           |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_TCX_INGRESS``                    | ``tc/ingress``                   |           |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_TCX_EGRESS``                     | ``tc/egress``                    |           |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_TCX_INGRESS``                    | ``tcx/ingress``                  |           |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_TCX_EGRESS``                     | ``tcx/egress``                   |           |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
 | ``BPF_PROG_TYPE_SK_LOOKUP``               | ``BPF_SK_LOOKUP``                      | ``sk_lookup``                    |           |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
@@ -155,7 +185,9 @@ described in more detail in the footnotes.
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
 | ``BPF_PROG_TYPE_SOCK_OPS``                | ``BPF_CGROUP_SOCK_OPS``                | ``sockops``                      |           |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
-| ``BPF_PROG_TYPE_STRUCT_OPS``              |                                        | ``struct_ops+``                  |           |
+| ``BPF_PROG_TYPE_STRUCT_OPS``              |                                        | ``struct_ops+`` [#struct_ops]_   |           |
++                                           +                                        +----------------------------------+-----------+
+|                                           |                                        | ``struct_ops.s+`` [#struct_ops]_ | Yes       |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
 | ``BPF_PROG_TYPE_SYSCALL``                 |                                        | ``syscall``                      | Yes       |
 +-------------------------------------------+----------------------------------------+----------------------------------+-----------+
@@ -174,6 +206,10 @@ described in more detail in the footnotes.
 |                                           | ``BPF_TRACE_FEXIT``                    | ``fexit+`` [#fentry]_            |           |
 +                                           +                                        +----------------------------------+-----------+
 |                                           |                                        | ``fexit.s+`` [#fentry]_          | Yes       |
++                                           +----------------------------------------+----------------------------------+-----------+
+|                                           | ``BPF_TRACE_FSESSION``                 | ``fsession+`` [#fentry]_         |           |
++                                           +                                        +----------------------------------+-----------+
+|                                           |                                        | ``fsession.s+`` [#fentry]_       | Yes       |
 +                                           +----------------------------------------+----------------------------------+-----------+
 |                                           | ``BPF_TRACE_ITER``                     | ``iter+`` [#iter]_               |           |
 +                                           +                                        +----------------------------------+-----------+
@@ -203,11 +239,19 @@ described in more detail in the footnotes.
              non-negative integer.
 .. [#ksyscall] The ``ksyscall`` attach format is ``ksyscall/<syscall>``.
 .. [#uprobe] The ``uprobe`` attach format is ``uprobe[.s]/<path>:<function>[+<offset>]``.
+.. [#upmul] The ``uprobe.multi`` attach format is ``uprobe.multi[.s]/<path>:<function-pattern>``
+            where ``function-pattern`` supports ``*`` and ``?`` wildcards.
 .. [#usdt] The ``usdt`` attach format is ``usdt/<path>:<provider>:<name>``.
 .. [#kpmulti] The ``kprobe.multi`` attach format is ``kprobe.multi/<pattern>`` where ``pattern``
               supports ``*`` and ``?`` wildcards. Valid characters for pattern are
               ``a-zA-Z0-9_.*?``.
 .. [#lsm] The ``lsm`` attachment format is ``lsm[.s]/<hook>``.
 .. [#rawtp] The ``raw_tp`` attach format is ``raw_tracepoint[.w]/<tracepoint>``.
+.. [#tc_legacy] The ``tc``, ``classifier`` and ``action`` attach types are deprecated, use
+                ``tcx/*`` instead.
+.. [#struct_ops] The ``struct_ops`` attach format supports ``struct_ops[.s]/<name>`` convention,
+                 but ``name`` is ignored and it is recommended to just use plain
+                 ``SEC("struct_ops[.s]")``. The attachments are defined in a struct initializer
+                 that is tagged with ``SEC(".struct_ops[.link]")``.
 .. [#tp] The ``tracepoint`` attach format is ``tracepoint/<category>/<name>``.
 .. [#iter] The ``iter`` attach format is ``iter[.s]/<struct-name>``.

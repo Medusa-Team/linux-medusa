@@ -97,7 +97,7 @@ struct tmigr_group {
  */
 struct tmigr_cpu {
 	raw_spinlock_t		lock;
-	bool			online;
+	bool			available;
 	bool			idle;
 	bool			remote;
 	struct tmigr_group	*tmgroup;
@@ -110,22 +110,19 @@ struct tmigr_cpu {
  * union tmigr_state - state of tmigr_group
  * @state:	Combined version of the state - only used for atomic
  *		read/cmpxchg function
- * @struct:	Split version of the state - only use the struct members to
+ * &anon struct: Split version of the state - only use the struct members to
  *		update information to stay independent of endianness
+ * @active:	Contains each mask bit of the active children
+ * @migrator:	Contains mask of the child which is migrator
+ * @seq:	Sequence counter needs to be increased when an update
+ *		to the tmigr_state is done. It prevents a race when
+ *		updates in the child groups are propagated in changed
+ *		order. Detailed information about the scenario is
+ *		given in the documentation at the begin of
+ *		timer_migration.c.
  */
 union tmigr_state {
 	u32 state;
-	/**
-	 * struct - split state of tmigr_group
-	 * @active:	Contains each mask bit of the active children
-	 * @migrator:	Contains mask of the child which is migrator
-	 * @seq:	Sequence counter needs to be increased when an update
-	 *		to the tmigr_state is done. It prevents a race when
-	 *		updates in the child groups are propagated in changed
-	 *		order. Detailed information about the scenario is
-	 *		given in the documentation at the begin of
-	 *		timer_migration.c.
-	 */
 	struct {
 		u8	active;
 		u8	migrator;

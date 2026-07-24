@@ -1021,8 +1021,7 @@ static int dcbnl_build_peer_app(struct net_device *netdev, struct sk_buff* skb,
 	 */
 	err = ops->peer_getappinfo(netdev, &info, &app_count);
 	if (!err && app_count) {
-		table = kmalloc_array(app_count, sizeof(struct dcb_app),
-				      GFP_KERNEL);
+		table = kmalloc_objs(struct dcb_app, app_count);
 		if (!table)
 			return -ENOMEM;
 
@@ -2004,7 +2003,7 @@ static int dcb_app_add(struct list_head *list, const struct dcb_app *app,
 {
 	struct dcb_app_type *entry;
 
-	entry = kmalloc(sizeof(*entry), GFP_ATOMIC);
+	entry = kmalloc_obj(*entry, GFP_ATOMIC);
 	if (!entry)
 		return -ENOMEM;
 
@@ -2408,6 +2407,11 @@ static struct notifier_block dcbnl_nb __read_mostly = {
 	.notifier_call  = dcbnl_netdevice_event,
 };
 
+static const struct rtnl_msg_handler dcbnl_rtnl_msg_handlers[] __initconst = {
+	{.msgtype = RTM_GETDCB, .doit = dcb_doit},
+	{.msgtype = RTM_SETDCB, .doit = dcb_doit},
+};
+
 static int __init dcbnl_init(void)
 {
 	int err;
@@ -2416,8 +2420,7 @@ static int __init dcbnl_init(void)
 	if (err)
 		return err;
 
-	rtnl_register(PF_UNSPEC, RTM_GETDCB, dcb_doit, NULL, 0);
-	rtnl_register(PF_UNSPEC, RTM_SETDCB, dcb_doit, NULL, 0);
+	rtnl_register_many(dcbnl_rtnl_msg_handlers);
 
 	return 0;
 }

@@ -311,7 +311,7 @@ static int au1xpsc_pcm_new(struct snd_soc_component *component,
 }
 
 /* au1xpsc audio platform */
-static struct snd_soc_component_driver au1xpsc_soc_component = {
+static const struct snd_soc_component_driver au1xpsc_soc_component = {
 	.name		= DRV_NAME,
 	.open		= au1xpsc_pcm_open,
 	.close		= au1xpsc_pcm_close,
@@ -319,7 +319,7 @@ static struct snd_soc_component_driver au1xpsc_soc_component = {
 	.prepare	= au1xpsc_pcm_prepare,
 	.trigger	= au1xpsc_pcm_trigger,
 	.pointer	= au1xpsc_pcm_pointer,
-	.pcm_construct	= au1xpsc_pcm_new,
+	.pcm_new	= au1xpsc_pcm_new,
 };
 
 static int au1xpsc_pcm_drvprobe(struct platform_device *pdev)

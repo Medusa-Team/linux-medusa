@@ -13,27 +13,28 @@
 #include <linux/notifier.h>
 
 /**
- * struct subsys_private - structure to hold the private to the driver core portions of the bus_type/class structure.
- *
- * @subsys - the struct kset that defines this subsystem
- * @devices_kset - the subsystem's 'devices' directory
- * @interfaces - list of subsystem interfaces associated
- * @mutex - protect the devices, and interfaces lists.
- *
- * @drivers_kset - the list of drivers associated
- * @klist_devices - the klist to iterate over the @devices_kset
- * @klist_drivers - the klist to iterate over the @drivers_kset
- * @bus_notifier - the bus notifier list for anything that cares about things
- *                 on this bus.
- * @bus - pointer back to the struct bus_type that this structure is associated
- *        with.
+ * struct subsys_private - structure to hold the private to the driver core
+ *			   portions of the bus_type/class structure.
+ * @subsys: the struct kset that defines this subsystem
+ * @devices_kset: the subsystem's 'devices' directory
+ * @interfaces: list of subsystem interfaces associated
+ * @mutex: protect the devices, and interfaces lists.
+ * @drivers_kset: the list of drivers associated
+ * @klist_devices: the klist to iterate over the @devices_kset
+ * @klist_drivers: the klist to iterate over the @drivers_kset
+ * @bus_notifier: the bus notifier list for anything that cares about things
+ *		  on this bus.
+ * @drivers_autoprobe: gate whether new devices are automatically attached to
+ *		       registered drivers, or new drivers automatically attach
+ *		       to existing devices.
+ * @bus: pointer back to the struct bus_type that this structure is associated
+ *	 with.
  * @dev_root: Default device to use as the parent.
- *
- * @glue_dirs - "glue" directory to put in-between the parent device to
- *              avoid namespace conflicts
- * @class - pointer back to the struct class that this structure is associated
- *          with.
- * @lock_key:	Lock class key for use by the lock validator
+ * @glue_dirs: "glue" directory to put in-between the parent device to
+ *	       avoid namespace conflicts
+ * @class: pointer back to the struct class that this structure is associated
+ *	   with.
+ * @lock_key: Lock class key for use by the lock validator
  *
  * This structure is the one that is the actual kobject allowing struct
  * bus_type/class to be statically allocated safely.  Nothing outside of the
@@ -73,6 +74,7 @@ static inline void subsys_put(struct subsys_private *sp)
 		kset_put(&sp->subsys);
 }
 
+struct subsys_private *bus_to_subsys(const struct bus_type *bus);
 struct subsys_private *class_to_subsys(const struct class *class);
 
 struct driver_private {
@@ -84,24 +86,39 @@ struct driver_private {
 };
 #define to_driver(obj) container_of(obj, struct driver_private, kobj)
 
+#ifdef CONFIG_RUST
 /**
- * struct device_private - structure to hold the private to the driver core portions of the device structure.
- *
- * @klist_children - klist containing all children of this device
- * @knode_parent - node in sibling list
- * @knode_driver - node in driver list
- * @knode_bus - node in bus list
- * @knode_class - node in class list
- * @deferred_probe - entry in deferred_probe_list which is used to retry the
- *	binding of drivers which were unable to get all the resources needed by
- *	the device; typically because it depends on another driver getting
- *	probed first.
- * @async_driver - pointer to device driver awaiting probe via async_probe
- * @device - pointer back to the struct device that this structure is
- * associated with.
- * @dead - This device is currently either in the process of or has been
- *	removed from the system. Any asynchronous events scheduled for this
- *	device should exit without taking any action.
+ * struct driver_type - Representation of a Rust driver type.
+ */
+struct driver_type {
+	/**
+	 * @id: Representation of core::any::TypeId.
+	 */
+	u8 id[16];
+} __packed;
+#endif
+
+/**
+ * struct device_private - structure to hold the private to the driver core
+ *			   portions of the device structure.
+ * @klist_children: klist containing all children of this device
+ * @knode_parent: node in sibling list
+ * @knode_driver: node in driver list
+ * @knode_bus: node in bus list
+ * @knode_class: node in class list
+ * @deferred_probe: entry in deferred_probe_list which is used to retry the
+ *		    binding of drivers which were unable to get all the
+ *		    resources needed by the device; typically because it depends
+ *		    on another driver getting probed first.
+ * @async_driver: pointer to device driver awaiting probe via async_probe
+ * @deferred_probe_reason: capture the -EPROBE_DEFER message emitted with
+ *			   dev_err_probe() for later retrieval via debugfs
+ * @device: pointer back to the struct device that this structure is
+ *	    associated with.
+ * @driver_type: The type of the bound Rust driver.
+ * @dead: This device is currently either in the process of or has been
+ *	  removed from the system. Any asynchronous events scheduled for this
+ *	  device should exit without taking any action.
  *
  * Nothing outside of the driver core should ever touch these fields.
  */
@@ -115,6 +132,9 @@ struct device_private {
 	const struct device_driver *async_driver;
 	char *deferred_probe_reason;
 	struct device *device;
+#ifdef CONFIG_RUST
+	struct driver_type driver_type;
+#endif
 	u8 dead:1;
 };
 #define to_device_private_parent(obj)	\
@@ -137,6 +157,7 @@ int hypervisor_init(void);
 static inline int hypervisor_init(void) { return 0; }
 #endif
 int platform_bus_init(void);
+int faux_bus_init(void);
 void cpu_dev_init(void);
 void container_dev_init(void);
 #ifdef CONFIG_AUXILIARY_BUS
@@ -145,7 +166,7 @@ void auxiliary_bus_init(void);
 static inline void auxiliary_bus_init(void) { }
 #endif
 
-struct kobject *virtual_device_parent(struct device *dev);
+struct kobject *virtual_device_parent(void);
 
 int bus_add_device(struct device *dev);
 void bus_probe_device(struct device *dev);
@@ -179,6 +200,44 @@ int driver_add_groups(const struct device_driver *drv, const struct attribute_gr
 void driver_remove_groups(const struct device_driver *drv, const struct attribute_group **groups);
 void device_driver_detach(struct device *dev);
 
+static inline void device_set_driver(struct device *dev, const struct device_driver *drv)
+{
+	/*
+	 * Majority (all?) read accesses to dev->driver happens either
+	 * while holding device lock or in bus/driver code that is only
+	 * invoked when the device is bound to a driver and there is no
+	 * concern of the pointer being changed while it is being read.
+	 * However when reading device's uevent file we read driver pointer
+	 * without taking device lock (so we do not block there for
+	 * arbitrary amount of time). We use WRITE_ONCE() here to prevent
+	 * tearing so that READ_ONCE() can safely be used in uevent code.
+	 */
+	// FIXME - this cast should not be needed "soon"
+	WRITE_ONCE(dev->driver, (struct device_driver *)drv);
+}
+
+struct devres_node;
+typedef void (*dr_node_release_t)(struct device *dev, struct devres_node *node);
+typedef void (*dr_node_free_t)(struct devres_node *node);
+
+struct devres_node {
+	struct list_head		entry;
+	dr_node_release_t		release;
+	dr_node_free_t			free_node;
+	const char			*name;
+	size_t				size;
+};
+
+void devres_node_init(struct devres_node *node, dr_node_release_t release,
+		      dr_node_free_t free_node);
+void devres_node_add(struct device *dev, struct devres_node *node);
+bool devres_node_remove(struct device *dev, struct devres_node *node);
+void devres_set_node_dbginfo(struct devres_node *node, const char *name,
+			     size_t size);
+void devres_for_each_res(struct device *dev, dr_release_t release,
+			 dr_match_t match, void *match_data,
+			 void (*fn)(struct device *, void *, void *),
+			 void *data);
 int devres_release_all(struct device *dev);
 void device_block_probing(void);
 void device_unblock_probing(void);
@@ -230,8 +289,17 @@ void device_links_driver_cleanup(struct device *dev);
 void device_links_no_driver(struct device *dev);
 bool device_links_busy(struct device *dev);
 void device_links_unbind_consumers(struct device *dev);
+bool device_link_flag_is_sync_state_only(u32 flags);
 void fw_devlink_drivers_done(void);
 void fw_devlink_probing_done(void);
+
+#define dev_for_each_link_to_supplier(__link, __dev)	\
+	list_for_each_entry_srcu(__link, &(__dev)->links.suppliers, c_node, \
+				 device_links_read_lock_held())
+
+#define dev_for_each_link_to_consumer(__link, __dev)	\
+	list_for_each_entry_srcu(__link, &(__dev)->links.consumers, s_node, \
+				 device_links_read_lock_held())
 
 /* device pm support */
 void device_pm_move_to_tail(struct device *dev);
@@ -244,5 +312,15 @@ static inline int devtmpfs_create_node(struct device *dev) { return 0; }
 static inline int devtmpfs_delete_node(struct device *dev) { return 0; }
 #endif
 
+void software_node_init(void);
 void software_node_notify(struct device *dev);
 void software_node_notify_remove(struct device *dev);
+
+#ifdef CONFIG_PINCTRL
+int pinctrl_bind_pins(struct device *dev);
+#else
+static inline int pinctrl_bind_pins(struct device *dev)
+{
+	return 0;
+}
+#endif /* CONFIG_PINCTRL */

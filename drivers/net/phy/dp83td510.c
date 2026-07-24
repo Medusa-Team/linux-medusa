@@ -34,10 +34,34 @@
 #define DP83TD510E_CTRL_HW_RESET		BIT(15)
 #define DP83TD510E_CTRL_SW_RESET		BIT(14)
 
+/*
+ * DP83TD510E_PKT_STAT_x registers correspond to similarly named registers
+ * in the datasheet (PKT_STAT_1 through PKT_STAT_6). These registers store
+ * 32-bit or 16-bit counters for TX and RX statistics and must be read in
+ * sequence to ensure the counters are cleared correctly.
+ *
+ * - DP83TD510E_PKT_STAT_1: Contains TX packet count bits [15:0].
+ * - DP83TD510E_PKT_STAT_2: Contains TX packet count bits [31:16].
+ * - DP83TD510E_PKT_STAT_3: Contains TX error packet count.
+ * - DP83TD510E_PKT_STAT_4: Contains RX packet count bits [15:0].
+ * - DP83TD510E_PKT_STAT_5: Contains RX packet count bits [31:16].
+ * - DP83TD510E_PKT_STAT_6: Contains RX error packet count.
+ *
+ * Keeping the register names as defined in the datasheet helps maintain
+ * clarity and alignment with the documentation.
+ */
+#define DP83TD510E_PKT_STAT_1			0x12b
+#define DP83TD510E_PKT_STAT_2			0x12c
+#define DP83TD510E_PKT_STAT_3			0x12d
+#define DP83TD510E_PKT_STAT_4			0x12e
+#define DP83TD510E_PKT_STAT_5			0x12f
+#define DP83TD510E_PKT_STAT_6			0x130
+
 #define DP83TD510E_AN_STAT_1			0x60c
 #define DP83TD510E_MASTER_SLAVE_RESOL_FAIL	BIT(15)
 
 #define DP83TD510E_MSE_DETECT			0xa85
+#define DP83TD510E_MSE_MAX			U16_MAX
 
 #define DP83TD510_SQI_MAX	7
 
@@ -56,6 +80,18 @@ static const u16 dp83td510_mse_sqi_map[] = {
 	0x01b6, /* 22dB =< SNR < 23dB */
 	0x015b, /* 23dB =< SNR < 24dB */
 	0x0000  /* 24dB =< SNR */
+};
+
+struct dp83td510_stats {
+	u64 tx_pkt_cnt;
+	u64 tx_err_pkt_cnt;
+	u64 rx_pkt_cnt;
+	u64 rx_err_pkt_cnt;
+};
+
+struct dp83td510_priv {
+	bool alcd_test_active;
+	struct dp83td510_stats stats;
 };
 
 /* Time Domain Reflectometry (TDR) Functionality of DP83TD510 PHY
@@ -168,6 +204,328 @@ static const u16 dp83td510_mse_sqi_map[] = {
  */
 #define DP83TD510E_UNKN_030E				0x30e
 #define DP83TD510E_030E_VAL				0x2520
+
+#define DP83TD510E_LEDS_CFG_1				0x460
+#define DP83TD510E_LED_FN(idx, val)		(((val) & 0xf) << ((idx) * 4))
+#define DP83TD510E_LED_FN_MASK(idx)			(0xf << ((idx) * 4))
+/* link OK */
+#define DP83TD510E_LED_MODE_LINK_OK			0x0
+/* TX/RX activity */
+#define DP83TD510E_LED_MODE_TX_RX_ACTIVITY		0x1
+/* TX activity */
+#define DP83TD510E_LED_MODE_TX_ACTIVITY			0x2
+/* RX activity */
+#define DP83TD510E_LED_MODE_RX_ACTIVITY			0x3
+/* LR */
+#define DP83TD510E_LED_MODE_LR				0x4
+/* SR */
+#define DP83TD510E_LED_MODE_SR				0x5
+/* LED SPEED: High for 10Base-T */
+#define DP83TD510E_LED_MODE_LED_SPEED			0x6
+/* Duplex mode */
+#define DP83TD510E_LED_MODE_DUPLEX			0x7
+/* link + blink on activity with stretch option */
+#define DP83TD510E_LED_MODE_LINK_BLINK			0x8
+/* blink on activity with stretch option */
+#define DP83TD510E_LED_MODE_BLINK_ACTIVITY		0x9
+/* blink on tx activity with stretch option */
+#define DP83TD510E_LED_MODE_BLINK_TX			0xa
+/* blink on rx activity with stretch option */
+#define DP83TD510E_LED_MODE_BLINK_RX			0xb
+/* link_lost */
+#define DP83TD510E_LED_MODE_LINK_LOST			0xc
+/* PRBS error: toggles on error */
+#define DP83TD510E_LED_MODE_PRBS_ERROR			0xd
+/* XMII TX/RX Error with stretch option */
+#define DP83TD510E_LED_MODE_XMII_ERR			0xe
+
+#define DP83TD510E_LED_COUNT				4
+
+#define DP83TD510E_LEDS_CFG_2				0x469
+#define DP83TD510E_LED_POLARITY(idx)			BIT((idx) * 4 + 2)
+#define DP83TD510E_LED_DRV_VAL(idx)			BIT((idx) * 4 + 1)
+#define DP83TD510E_LED_DRV_EN(idx)			BIT((idx) * 4)
+
+#define DP83TD510E_ALCD_STAT				0xa9f
+#define DP83TD510E_ALCD_COMPLETE			BIT(15)
+#define DP83TD510E_ALCD_CABLE_LENGTH			GENMASK(10, 0)
+
+static int dp83td510_get_mse_capability(struct phy_device *phydev,
+					struct phy_mse_capability *cap)
+{
+	/* DP83TD510E documents only a single (average) MSE register
+	 * (used to derive SQI); no peak or worst-peak counters are
+	 * described. Advertise only PHY_MSE_CAP_AVG.
+	 */
+	cap->supported_caps = PHY_MSE_CAP_AVG;
+	/* 10BASE-T1L is a single-pair medium, so there are no B/C/D channels.
+	 * We still advertise PHY_MSE_CAP_CHANNEL_A to indicate that the PHY
+	 * can attribute the measurement to a specific pair (the only one),
+	 * rather than exposing it only as a link-aggregate.
+	 *
+	 * Rationale:
+	 *  - Keeps the ethtool MSE_GET selection logic consistent: per-channel
+	 *    (A/B/C/D) is preferred over WORST/LINK, so userspace receives a
+	 *    CHANNEL_A nest instead of LINK.
+	 *  - Signals to tools that "per-pair" data is available (even if there's
+	 *    just one pair), avoiding the impression that only aggregate values
+	 *    are supported.
+	 *  - Remains compatible with multi-pair PHYs and uniform UI handling.
+	 *
+	 * Note: WORST and other channels are not advertised on 10BASE-T1L.
+	 */
+	cap->supported_caps |= PHY_MSE_CHANNEL_A | PHY_MSE_CAP_LINK;
+	cap->max_average_mse = DP83TD510E_MSE_MAX;
+
+	/* The datasheet does not specify the refresh rate or symbol count,
+	 * but based on similar PHYs and standards, we can assume a common
+	 * value. For 10BASE-T1L, the symbol rate is 7.5 MBd. A common
+	 * diagnostic interval is around 1ms.
+	 * 7.5e6 symbols/sec * 0.001 sec = 7500 symbols.
+	 */
+	cap->refresh_rate_ps = 1000000000; /* 1 ms */
+	cap->num_symbols = 7500;
+
+	return 0;
+}
+
+static int dp83td510_get_mse_snapshot(struct phy_device *phydev,
+				      enum phy_mse_channel channel,
+				      struct phy_mse_snapshot *snapshot)
+{
+	int ret;
+
+	if (channel != PHY_MSE_CHANNEL_LINK &&
+	    channel != PHY_MSE_CHANNEL_A)
+		return -EOPNOTSUPP;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_MSE_DETECT);
+	if (ret < 0)
+		return ret;
+
+	snapshot->average_mse = ret;
+
+	return 0;
+}
+
+static int dp83td510_led_brightness_set(struct phy_device *phydev, u8 index,
+					enum led_brightness brightness)
+{
+	u32 val;
+
+	if (index >= DP83TD510E_LED_COUNT)
+		return -EINVAL;
+
+	val = DP83TD510E_LED_DRV_EN(index);
+
+	if (brightness)
+		val |= DP83TD510E_LED_DRV_VAL(index);
+
+	return phy_modify_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_LEDS_CFG_2,
+			      DP83TD510E_LED_DRV_VAL(index) |
+			      DP83TD510E_LED_DRV_EN(index), val);
+}
+
+static int dp83td510_led_mode(u8 index, unsigned long rules)
+{
+	if (index >= DP83TD510E_LED_COUNT)
+		return -EINVAL;
+
+	switch (rules) {
+	case BIT(TRIGGER_NETDEV_LINK):
+		return DP83TD510E_LED_MODE_LINK_OK;
+	case BIT(TRIGGER_NETDEV_LINK_10):
+		return DP83TD510E_LED_MODE_LED_SPEED;
+	case BIT(TRIGGER_NETDEV_FULL_DUPLEX):
+		return DP83TD510E_LED_MODE_DUPLEX;
+	case BIT(TRIGGER_NETDEV_TX):
+		return DP83TD510E_LED_MODE_TX_ACTIVITY;
+	case BIT(TRIGGER_NETDEV_RX):
+		return DP83TD510E_LED_MODE_RX_ACTIVITY;
+	case BIT(TRIGGER_NETDEV_TX) | BIT(TRIGGER_NETDEV_RX):
+		return DP83TD510E_LED_MODE_TX_RX_ACTIVITY;
+	case BIT(TRIGGER_NETDEV_LINK) | BIT(TRIGGER_NETDEV_TX) |
+			BIT(TRIGGER_NETDEV_RX):
+		return DP83TD510E_LED_MODE_LINK_BLINK;
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int dp83td510_led_hw_is_supported(struct phy_device *phydev, u8 index,
+					 unsigned long rules)
+{
+	int ret;
+
+	ret = dp83td510_led_mode(index, rules);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
+static int dp83td510_led_hw_control_set(struct phy_device *phydev, u8 index,
+					unsigned long rules)
+{
+	int mode, ret;
+
+	mode = dp83td510_led_mode(index, rules);
+	if (mode < 0)
+		return mode;
+
+	ret = phy_modify_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_LEDS_CFG_1,
+			     DP83TD510E_LED_FN_MASK(index),
+			     DP83TD510E_LED_FN(index, mode));
+	if (ret)
+		return ret;
+
+	return phy_modify_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_LEDS_CFG_2,
+				DP83TD510E_LED_DRV_EN(index), 0);
+}
+
+static int dp83td510_led_hw_control_get(struct phy_device *phydev,
+					u8 index, unsigned long *rules)
+{
+	int val;
+
+	val = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_LEDS_CFG_1);
+	if (val < 0)
+		return val;
+
+	val &= DP83TD510E_LED_FN_MASK(index);
+	val >>= index * 4;
+
+	switch (val) {
+	case DP83TD510E_LED_MODE_LINK_OK:
+		*rules = BIT(TRIGGER_NETDEV_LINK);
+		break;
+	/* LED mode: LED SPEED (10BaseT1L indicator) */
+	case DP83TD510E_LED_MODE_LED_SPEED:
+		*rules = BIT(TRIGGER_NETDEV_LINK_10);
+		break;
+	case DP83TD510E_LED_MODE_DUPLEX:
+		*rules = BIT(TRIGGER_NETDEV_FULL_DUPLEX);
+		break;
+	case DP83TD510E_LED_MODE_TX_ACTIVITY:
+		*rules = BIT(TRIGGER_NETDEV_TX);
+		break;
+	case DP83TD510E_LED_MODE_RX_ACTIVITY:
+		*rules = BIT(TRIGGER_NETDEV_RX);
+		break;
+	case DP83TD510E_LED_MODE_TX_RX_ACTIVITY:
+		*rules = BIT(TRIGGER_NETDEV_TX) | BIT(TRIGGER_NETDEV_RX);
+		break;
+	case DP83TD510E_LED_MODE_LINK_BLINK:
+		*rules = BIT(TRIGGER_NETDEV_LINK) |
+			 BIT(TRIGGER_NETDEV_TX) |
+			 BIT(TRIGGER_NETDEV_RX);
+		break;
+	default:
+		*rules = 0;
+		break;
+	}
+
+	return 0;
+}
+
+static int dp83td510_led_polarity_set(struct phy_device *phydev, int index,
+				      unsigned long modes)
+{
+	u16 polarity = DP83TD510E_LED_POLARITY(index);
+	u32 mode;
+
+	for_each_set_bit(mode, &modes, __PHY_LED_MODES_NUM) {
+		switch (mode) {
+		case PHY_LED_ACTIVE_LOW:
+			polarity = 0;
+			break;
+		default:
+			return -EINVAL;
+		}
+	}
+
+	return phy_modify_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_LEDS_CFG_2,
+			      DP83TD510E_LED_POLARITY(index), polarity);
+}
+
+/**
+ * dp83td510_update_stats - Update the PHY statistics for the DP83TD510 PHY.
+ * @phydev: Pointer to the phy_device structure.
+ *
+ * The function reads the PHY statistics registers and updates the statistics
+ * structure.
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+static int dp83td510_update_stats(struct phy_device *phydev)
+{
+	struct dp83td510_priv *priv = phydev->priv;
+	u32 count;
+	int ret;
+
+	/* The DP83TD510E_PKT_STAT registers are divided into two groups:
+	 * - Group 1 (TX stats): DP83TD510E_PKT_STAT_1 to DP83TD510E_PKT_STAT_3
+	 * - Group 2 (RX stats): DP83TD510E_PKT_STAT_4 to DP83TD510E_PKT_STAT_6
+	 *
+	 * Registers in each group are cleared only after reading them in a
+	 * plain sequence (e.g., 1, 2, 3 for Group 1 or 4, 5, 6 for Group 2).
+	 * Any deviation from the sequence, such as reading 1, 2, 1, 2, 3, will
+	 * prevent the group from being cleared. Additionally, the counters
+	 * for a group are frozen as soon as the first register in that group
+	 * is accessed.
+	 */
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_PKT_STAT_1);
+	if (ret < 0)
+		return ret;
+	/* tx_pkt_cnt_15_0 */
+	count = ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_PKT_STAT_2);
+	if (ret < 0)
+		return ret;
+	/* tx_pkt_cnt_31_16 */
+	count |= ret << 16;
+	priv->stats.tx_pkt_cnt += count;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_PKT_STAT_3);
+	if (ret < 0)
+		return ret;
+	/* tx_err_pkt_cnt */
+	priv->stats.tx_err_pkt_cnt += ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_PKT_STAT_4);
+	if (ret < 0)
+		return ret;
+	/* rx_pkt_cnt_15_0 */
+	count = ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_PKT_STAT_5);
+	if (ret < 0)
+		return ret;
+	/* rx_pkt_cnt_31_16 */
+	count |= ret << 16;
+	priv->stats.rx_pkt_cnt += count;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_PKT_STAT_6);
+	if (ret < 0)
+		return ret;
+	/* rx_err_pkt_cnt */
+	priv->stats.rx_err_pkt_cnt += ret;
+
+	return 0;
+}
+
+static void dp83td510_get_phy_stats(struct phy_device *phydev,
+				    struct ethtool_eth_phy_stats *eth_stats,
+				    struct ethtool_phy_stats *stats)
+{
+	struct dp83td510_priv *priv = phydev->priv;
+
+	stats->tx_packets = priv->stats.tx_pkt_cnt;
+	stats->tx_errors = priv->stats.tx_err_pkt_cnt;
+	stats->rx_packets = priv->stats.rx_pkt_cnt;
+	stats->rx_errors = priv->stats.rx_err_pkt_cnt;
+}
 
 static int dp83td510_config_intr(struct phy_device *phydev)
 {
@@ -325,7 +683,22 @@ static int dp83td510_get_sqi_max(struct phy_device *phydev)
  */
 static int dp83td510_cable_test_start(struct phy_device *phydev)
 {
+	struct dp83td510_priv *priv = phydev->priv;
 	int ret;
+
+	/* If link partner is active, we won't be able to use TDR, since
+	 * we can't force link partner to be silent. The autonegotiation
+	 * pulses will be too frequent and the TDR sequence will be
+	 * too long. So, TDR will always fail. Since the link is established
+	 * we already know that the cable is working, so we can get some
+	 * extra information line the cable length using ALCD.
+	 */
+	if (phydev->link) {
+		priv->alcd_test_active = true;
+		return 0;
+	}
+
+	priv->alcd_test_active = false;
 
 	ret = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_CTRL,
 			       DP83TD510E_CTRL_HW_RESET);
@@ -402,8 +775,8 @@ static int dp83td510_cable_test_start(struct phy_device *phydev)
 }
 
 /**
- * dp83td510_cable_test_get_status - Get the status of the cable test for the
- *                                   DP83TD510 PHY.
+ * dp83td510_cable_test_get_tdr_status - Get the status of the TDR test for the
+ *                                       DP83TD510 PHY.
  * @phydev: Pointer to the phy_device structure.
  * @finished: Pointer to a boolean that indicates whether the test is finished.
  *
@@ -411,12 +784,10 @@ static int dp83td510_cable_test_start(struct phy_device *phydev)
  *
  * Returns: 0 on success or a negative error code on failure.
  */
-static int dp83td510_cable_test_get_status(struct phy_device *phydev,
-					   bool *finished)
+static int dp83td510_cable_test_get_tdr_status(struct phy_device *phydev,
+					       bool *finished)
 {
 	int ret, stat;
-
-	*finished = false;
 
 	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_TDR_CFG);
 	if (ret < 0)
@@ -459,6 +830,77 @@ static int dp83td510_cable_test_get_status(struct phy_device *phydev,
 	return phy_init_hw(phydev);
 }
 
+/**
+ * dp83td510_cable_test_get_alcd_status - Get the status of the ALCD test for the
+ *                                        DP83TD510 PHY.
+ * @phydev: Pointer to the phy_device structure.
+ * @finished: Pointer to a boolean that indicates whether the test is finished.
+ *
+ * The function sets the @finished flag to true if the test is complete.
+ * The function reads the cable length and reports it to the user.
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+static int dp83td510_cable_test_get_alcd_status(struct phy_device *phydev,
+						bool *finished)
+{
+	unsigned int location;
+	int ret, phy_sts;
+
+	phy_sts = phy_read(phydev, DP83TD510E_PHY_STS);
+
+	if (!(phy_sts & DP83TD510E_LINK_STATUS)) {
+		/* If the link is down, we can't do any thing usable now */
+		ethnl_cable_test_result_with_src(phydev, ETHTOOL_A_CABLE_PAIR_A,
+						 ETHTOOL_A_CABLE_RESULT_CODE_UNSPEC,
+						 ETHTOOL_A_CABLE_INF_SRC_ALCD);
+		*finished = true;
+		return 0;
+	}
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TD510E_ALCD_STAT);
+	if (ret < 0)
+		return ret;
+
+	if (!(ret & DP83TD510E_ALCD_COMPLETE))
+		return 0;
+
+	location = FIELD_GET(DP83TD510E_ALCD_CABLE_LENGTH, ret) * 100;
+
+	ethnl_cable_test_fault_length_with_src(phydev, ETHTOOL_A_CABLE_PAIR_A,
+					       location,
+					       ETHTOOL_A_CABLE_INF_SRC_ALCD);
+
+	ethnl_cable_test_result_with_src(phydev, ETHTOOL_A_CABLE_PAIR_A,
+					 ETHTOOL_A_CABLE_RESULT_CODE_OK,
+					 ETHTOOL_A_CABLE_INF_SRC_ALCD);
+	*finished = true;
+
+	return 0;
+}
+
+/**
+ * dp83td510_cable_test_get_status - Get the status of the cable test for the
+ *                                   DP83TD510 PHY.
+ * @phydev: Pointer to the phy_device structure.
+ * @finished: Pointer to a boolean that indicates whether the test is finished.
+ *
+ * The function sets the @finished flag to true if the test is complete.
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+static int dp83td510_cable_test_get_status(struct phy_device *phydev,
+					   bool *finished)
+{
+	struct dp83td510_priv *priv = phydev->priv;
+	*finished = false;
+
+	if (priv->alcd_test_active)
+		return dp83td510_cable_test_get_alcd_status(phydev, finished);
+
+	return dp83td510_cable_test_get_tdr_status(phydev, finished);
+}
+
 static int dp83td510_get_features(struct phy_device *phydev)
 {
 	/* This PHY can't respond on MDIO bus if no RMII clock is enabled.
@@ -477,12 +919,27 @@ static int dp83td510_get_features(struct phy_device *phydev)
 	return 0;
 }
 
+static int dp83td510_probe(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	struct dp83td510_priv *priv;
+
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	phydev->priv = priv;
+
+	return 0;
+}
+
 static struct phy_driver dp83td510_driver[] = {
 {
 	PHY_ID_MATCH_MODEL(DP83TD510E_PHY_ID),
 	.name		= "TI DP83TD510E",
 
 	.flags          = PHY_POLL_CABLE_TEST,
+	.probe		= dp83td510_probe,
 	.config_aneg	= dp83td510_config_aneg,
 	.read_status	= dp83td510_read_status,
 	.get_features	= dp83td510_get_features,
@@ -492,13 +949,24 @@ static struct phy_driver dp83td510_driver[] = {
 	.get_sqi_max	= dp83td510_get_sqi_max,
 	.cable_test_start = dp83td510_cable_test_start,
 	.cable_test_get_status = dp83td510_cable_test_get_status,
+	.get_phy_stats	= dp83td510_get_phy_stats,
+	.update_stats	= dp83td510_update_stats,
+
+	.get_mse_capability = dp83td510_get_mse_capability,
+	.get_mse_snapshot = dp83td510_get_mse_snapshot,
+
+	.led_brightness_set = dp83td510_led_brightness_set,
+	.led_hw_is_supported = dp83td510_led_hw_is_supported,
+	.led_hw_control_set = dp83td510_led_hw_control_set,
+	.led_hw_control_get = dp83td510_led_hw_control_get,
+	.led_polarity_set = dp83td510_led_polarity_set,
 
 	.suspend	= genphy_suspend,
 	.resume		= genphy_resume,
 } };
 module_phy_driver(dp83td510_driver);
 
-static struct mdio_device_id __maybe_unused dp83td510_tbl[] = {
+static const struct mdio_device_id __maybe_unused dp83td510_tbl[] = {
 	{ PHY_ID_MATCH_MODEL(DP83TD510E_PHY_ID) },
 	{ }
 };

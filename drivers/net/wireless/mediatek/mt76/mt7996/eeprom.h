@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: ISC */
+/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 /*
  * Copyright (C) 2022 MediaTek Inc.
  */
@@ -39,6 +39,8 @@ enum mt7996_eeprom_field {
 #define MT_EE_WIFI_CONF4_STREAM_NUM_BAND0	GENMASK(5, 3)
 #define MT_EE_WIFI_CONF5_STREAM_NUM_BAND1	GENMASK(2, 0)
 #define MT_EE_WIFI_CONF5_STREAM_NUM_BAND2	GENMASK(5, 3)
+
+#define MT_EE_WIFI_PA_LNA_CONFIG		GENMASK(1, 0)
 
 #define MT_EE_RATE_DELTA_MASK			GENMASK(5, 0)
 #define MT_EE_RATE_DELTA_SIGN			BIT(6)

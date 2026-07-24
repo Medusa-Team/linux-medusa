@@ -9,7 +9,7 @@
  *
  */
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
@@ -503,7 +503,7 @@ static void qt2_process_read_urb(struct urb *urb)
 
 				newport = *(ch + 3);
 
-				if (newport > serial->num_ports) {
+				if (newport >= serial->num_ports) {
 					dev_err(&port->dev,
 						"%s - port change to invalid port: %i\n",
 						__func__, newport);
@@ -626,7 +626,7 @@ static int qt2_attach(struct usb_serial *serial)
 		return status;
 	}
 
-	serial_priv = kzalloc(sizeof(*serial_priv), GFP_KERNEL);
+	serial_priv = kzalloc_obj(*serial_priv);
 	if (!serial_priv)
 		return -ENOMEM;
 
@@ -657,7 +657,7 @@ static int qt2_port_probe(struct usb_serial_port *port)
 	struct qt2_port_private *port_priv;
 	u8 bEndpointAddress;
 
-	port_priv = kzalloc(sizeof(*port_priv), GFP_KERNEL);
+	port_priv = kzalloc_obj(*port_priv);
 	if (!port_priv)
 		return -ENOMEM;
 
@@ -924,7 +924,6 @@ write_out:
 
 static struct usb_serial_driver qt2_device = {
 	.driver = {
-		.owner = THIS_MODULE,
 		.name = "quatech-serial",
 	},
 	.description	     = DRIVER_DESC,

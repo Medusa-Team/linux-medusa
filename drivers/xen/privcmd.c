@@ -12,6 +12,7 @@
 #include <linux/eventfd.h>
 #include <linux/file.h>
 #include <linux/kernel.h>
+#include <linux/kstrtox.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/poll.h>
@@ -30,7 +31,10 @@
 #include <linux/seq_file.h>
 #include <linux/miscdevice.h>
 #include <linux/moduleparam.h>
+#include <linux/notifier.h>
+#include <linux/security.h>
 #include <linux/virtio_mmio.h>
+#include <linux/wait.h>
 
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
@@ -46,6 +50,10 @@
 #include <xen/page.h>
 #include <xen/xen-ops.h>
 #include <xen/balloon.h>
+#include <xen/xenbus.h>
+#ifdef CONFIG_XEN_ACPI
+#include <xen/acpi.h>
+#endif
 
 #include "privcmd.h"
 
@@ -65,9 +73,19 @@ module_param_named(dm_op_buf_max_size, privcmd_dm_op_buf_max_size, uint,
 MODULE_PARM_DESC(dm_op_buf_max_size,
 		 "Maximum size of a dm_op hypercall buffer");
 
+static bool unrestricted;
+module_param(unrestricted, bool, 0);
+MODULE_PARM_DESC(unrestricted,
+	"Don't restrict hypercalls to target domain if running in a domU");
+
 struct privcmd_data {
 	domid_t domid;
 };
+
+/* DOMID_INVALID implies no restriction */
+static domid_t target_domain = DOMID_INVALID;
+static bool restrict_wait;
+static DECLARE_WAIT_QUEUE_HEAD(restrict_wait_wq);
 
 static int privcmd_vma_range_is_mapped(
                struct vm_area_struct *vma,
@@ -268,7 +286,7 @@ static long privcmd_ioctl_mmap(struct file *file, void __user *udata)
 	struct mmap_gfn_state state;
 
 	/* We only support privcmd_ioctl_mmap_batch for non-auto-translated. */
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return -ENOSYS;
 
 	if (copy_from_user(&mmapcmd, udata, sizeof(mmapcmd)))
@@ -350,7 +368,7 @@ static int mmap_batch_fn(void *data, int nr, void *state)
 	struct page **cur_pages = NULL;
 	int ret;
 
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		cur_pages = &pages[st->index];
 
 	BUG_ON(nr < 0);
@@ -430,7 +448,7 @@ static int alloc_empty_pages(struct vm_area_struct *vma, int numpgs)
 	int rc;
 	struct page **pages;
 
-	pages = kvcalloc(numpgs, sizeof(pages[0]), GFP_KERNEL);
+	pages = kvzalloc_objs(pages[0], numpgs);
 	if (pages == NULL)
 		return -ENOMEM;
 
@@ -532,7 +550,7 @@ static long privcmd_ioctl_mmap_batch(
 			ret = -EINVAL;
 			goto out_unlock;
 		}
-		if (xen_feature(XENFEAT_auto_translated_physmap)) {
+		if (!xen_pv_domain()) {
 			ret = alloc_empty_pages(vma, nr_pages);
 			if (ret < 0)
 				goto out_unlock;
@@ -650,7 +668,7 @@ static long privcmd_ioctl_dm_op(struct file *file, void __user *udata)
 	if (kdata.num > privcmd_dm_op_max_num)
 		return -E2BIG;
 
-	kbufs = kcalloc(kdata.num, sizeof(*kbufs), GFP_KERNEL);
+	kbufs = kzalloc_objs(*kbufs, kdata.num);
 	if (!kbufs)
 		return -ENOMEM;
 
@@ -677,13 +695,13 @@ static long privcmd_ioctl_dm_op(struct file *file, void __user *udata)
 			PAGE_SIZE);
 	}
 
-	pages = kcalloc(nr_pages, sizeof(*pages), GFP_KERNEL);
+	pages = kzalloc_objs(*pages, nr_pages);
 	if (!pages) {
 		rc = -ENOMEM;
 		goto out;
 	}
 
-	xbufs = kcalloc(kdata.num, sizeof(*xbufs), GFP_KERNEL);
+	xbufs = kzalloc_objs(*xbufs, kdata.num);
 	if (!xbufs) {
 		rc = -ENOMEM;
 		goto out;
@@ -770,14 +788,13 @@ static long privcmd_ioctl_mmap_resource(struct file *file,
 		goto out;
 	}
 
-	pfns = kcalloc(kdata.num, sizeof(*pfns), GFP_KERNEL | __GFP_NOWARN);
+	pfns = kzalloc_objs(*pfns, kdata.num, GFP_KERNEL | __GFP_NOWARN);
 	if (!pfns) {
 		rc = -ENOMEM;
 		goto out;
 	}
 
-	if (IS_ENABLED(CONFIG_XEN_AUTO_XLATE) &&
-	    xen_feature(XENFEAT_auto_translated_physmap)) {
+	if (IS_ENABLED(CONFIG_XEN_AUTO_XLATE) && !xen_pv_domain()) {
 		unsigned int nr = DIV_ROUND_UP(kdata.num, XEN_PFN_PER_PAGE);
 		struct page **pages;
 		unsigned int i;
@@ -808,8 +825,7 @@ static long privcmd_ioctl_mmap_resource(struct file *file,
 	if (rc)
 		goto out;
 
-	if (IS_ENABLED(CONFIG_XEN_AUTO_XLATE) &&
-	    xen_feature(XENFEAT_auto_translated_physmap)) {
+	if (IS_ENABLED(CONFIG_XEN_AUTO_XLATE) && !xen_pv_domain()) {
 		rc = xen_remap_vma_range(vma, kdata.addr, kdata.num << PAGE_SHIFT);
 	} else {
 		unsigned int domid =
@@ -842,6 +858,29 @@ out:
 	kfree(pfns);
 
 	return rc;
+}
+
+static long privcmd_ioctl_pcidev_get_gsi(struct file *file, void __user *udata)
+{
+#if defined(CONFIG_XEN_ACPI)
+	int rc;
+	struct privcmd_pcidev_get_gsi kdata;
+
+	if (copy_from_user(&kdata, udata, sizeof(kdata)))
+		return -EFAULT;
+
+	rc = xen_acpi_get_gsi_from_sbdf(kdata.sbdf);
+	if (rc < 0)
+		return rc;
+
+	kdata.gsi = rc;
+	if (copy_to_user(udata, &kdata, sizeof(kdata)))
+		return -EFAULT;
+
+	return 0;
+#else
+	return -EINVAL;
+#endif
 }
 
 #ifdef CONFIG_XEN_PRIVCMD_EVENTFD
@@ -939,9 +978,10 @@ static int privcmd_irqfd_assign(struct privcmd_irqfd *irqfd)
 	struct privcmd_kernel_irqfd *kirqfd, *tmp;
 	unsigned long flags;
 	__poll_t events;
-	struct fd f;
 	void *dm_op;
 	int ret, idx;
+
+	CLASS(fd, f)(irqfd->fd);
 
 	kirqfd = kzalloc(sizeof(*kirqfd) + irqfd->size, GFP_KERNEL);
 	if (!kirqfd)
@@ -958,16 +998,15 @@ static int privcmd_irqfd_assign(struct privcmd_irqfd *irqfd)
 	kirqfd->dom = irqfd->dom;
 	INIT_WORK(&kirqfd->shutdown, irqfd_shutdown);
 
-	f = fdget(irqfd->fd);
-	if (!f.file) {
+	if (fd_empty(f)) {
 		ret = -EBADF;
 		goto error_kfree;
 	}
 
-	kirqfd->eventfd = eventfd_ctx_fileget(f.file);
+	kirqfd->eventfd = eventfd_ctx_fileget(fd_file(f));
 	if (IS_ERR(kirqfd->eventfd)) {
 		ret = PTR_ERR(kirqfd->eventfd);
-		goto error_fd_put;
+		goto error_kfree;
 	}
 
 	/*
@@ -995,24 +1034,15 @@ static int privcmd_irqfd_assign(struct privcmd_irqfd *irqfd)
 	 * Check if there was an event already pending on the eventfd before we
 	 * registered, and trigger it as if we didn't miss it.
 	 */
-	events = vfs_poll(f.file, &kirqfd->pt);
+	events = vfs_poll(fd_file(f), &kirqfd->pt);
 	if (events & EPOLLIN)
 		irqfd_inject(kirqfd);
 
 	srcu_read_unlock(&irqfds_srcu, idx);
-
-	/*
-	 * Do not drop the file until the kirqfd is fully initialized, otherwise
-	 * we might race against the EPOLLHUP.
-	 */
-	fdput(f);
 	return 0;
 
 error_eventfd:
 	eventfd_ctx_put(kirqfd->eventfd);
-
-error_fd_put:
-	fdput(f);
 
 error_kfree:
 	kfree(kirqfd);
@@ -1076,7 +1106,8 @@ static long privcmd_ioctl_irqfd(struct file *file, void __user *udata)
 
 static int privcmd_irqfd_init(void)
 {
-	irqfd_cleanup_wq = alloc_workqueue("privcmd-irqfd-cleanup", 0, 0);
+	irqfd_cleanup_wq = alloc_workqueue("privcmd-irqfd-cleanup", WQ_PERCPU,
+					   0);
 	if (!irqfd_cleanup_wq)
 		return -ENOMEM;
 
@@ -1324,7 +1355,6 @@ static int privcmd_ioeventfd_assign(struct privcmd_ioeventfd *ioeventfd)
 	struct privcmd_kernel_ioeventfd *kioeventfd;
 	struct privcmd_kernel_ioreq *kioreq;
 	unsigned long flags;
-	struct fd f;
 	int ret;
 
 	/* Check for range overflow */
@@ -1340,19 +1370,11 @@ static int privcmd_ioeventfd_assign(struct privcmd_ioeventfd *ioeventfd)
 	if (!ioeventfd->vcpus || ioeventfd->vcpus > 4096)
 		return -EINVAL;
 
-	kioeventfd = kzalloc(sizeof(*kioeventfd), GFP_KERNEL);
+	kioeventfd = kzalloc_obj(*kioeventfd);
 	if (!kioeventfd)
 		return -ENOMEM;
 
-	f = fdget(ioeventfd->event_fd);
-	if (!f.file) {
-		ret = -EBADF;
-		goto error_kfree;
-	}
-
-	kioeventfd->eventfd = eventfd_ctx_fileget(f.file);
-	fdput(f);
-
+	kioeventfd->eventfd = eventfd_ctx_fdget(ioeventfd->event_fd);
 	if (IS_ERR(kioeventfd->eventfd)) {
 		ret = PTR_ERR(kioeventfd->eventfd);
 		goto error_kfree;
@@ -1543,6 +1565,10 @@ static long privcmd_ioctl(struct file *file,
 		ret = privcmd_ioctl_ioeventfd(file, udata);
 		break;
 
+	case IOCTL_PRIVCMD_PCIDEV_GET_GSI:
+		ret = privcmd_ioctl_pcidev_get_gsi(file, udata);
+		break;
+
 	default:
 		break;
 	}
@@ -1552,13 +1578,16 @@ static long privcmd_ioctl(struct file *file,
 
 static int privcmd_open(struct inode *ino, struct file *file)
 {
-	struct privcmd_data *data = kzalloc(sizeof(*data), GFP_KERNEL);
+	struct privcmd_data *data;
 
+	if (wait_event_interruptible(restrict_wait_wq, !restrict_wait) < 0)
+		return -EINTR;
+
+	data = kzalloc_obj(*data);
 	if (!data)
 		return -ENOMEM;
 
-	/* DOMID_INVALID implies no restriction */
-	data->domid = DOMID_INVALID;
+	data->domid = target_domain;
 
 	file->private_data = data;
 	return 0;
@@ -1579,7 +1608,7 @@ static void privcmd_close(struct vm_area_struct *vma)
 	int numgfns = (vma->vm_end - vma->vm_start) >> XEN_PAGE_SHIFT;
 	int rc;
 
-	if (!xen_feature(XENFEAT_auto_translated_physmap) || !numpgs || !pages)
+	if (xen_pv_domain() || !numpgs || !pages)
 		return;
 
 	rc = xen_unmap_domain_gfn_range(vma, numgfns, pages);
@@ -1589,6 +1618,12 @@ static void privcmd_close(struct vm_area_struct *vma)
 		pr_crit("unable to unmap MFN range: leaking %d pages. rc=%d\n",
 			numpgs, rc);
 	kvfree(pages);
+}
+
+static int privcmd_may_split(struct vm_area_struct *area, unsigned long addr)
+{
+	/* Forbid splitting, avoids double free via privcmd_close(). */
+	return -EINVAL;
 }
 
 static vm_fault_t privcmd_fault(struct vm_fault *vmf)
@@ -1602,6 +1637,7 @@ static vm_fault_t privcmd_fault(struct vm_fault *vmf)
 
 static const struct vm_operations_struct privcmd_vm_ops = {
 	.close = privcmd_close,
+	.may_split = privcmd_may_split,
 	.fault = privcmd_fault
 };
 
@@ -1651,12 +1687,61 @@ static struct miscdevice privcmd_dev = {
 	.fops = &xen_privcmd_fops,
 };
 
+static int init_restrict(struct notifier_block *notifier,
+			 unsigned long event,
+			 void *data)
+{
+	char *target;
+	unsigned int domid;
+
+	/* Default to an guaranteed unused domain-id. */
+	target_domain = DOMID_IDLE;
+
+	target = xenbus_read(XBT_NIL, "target", "", NULL);
+	if (IS_ERR(target) || kstrtouint(target, 10, &domid)) {
+		pr_err("No target domain found, blocking all hypercalls\n");
+		goto out;
+	}
+
+	target_domain = domid;
+
+ out:
+	if (!IS_ERR(target))
+		kfree(target);
+
+	restrict_wait = false;
+	wake_up_all(&restrict_wait_wq);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block xenstore_notifier = {
+	.notifier_call = init_restrict,
+};
+
+static void __init restrict_driver(void)
+{
+	if (unrestricted) {
+		if (security_locked_down(LOCKDOWN_XEN_USER_ACTIONS))
+			pr_warn("Kernel is locked down, parameter \"unrestricted\" ignored\n");
+		else
+			return;
+	}
+
+	restrict_wait = true;
+
+	register_xenstore_notifier(&xenstore_notifier);
+}
+
 static int __init privcmd_init(void)
 {
 	int err;
 
 	if (!xen_domain())
 		return -ENODEV;
+
+	if (!xen_initial_domain())
+		restrict_driver();
 
 	err = misc_register(&privcmd_dev);
 	if (err != 0) {
@@ -1687,6 +1772,9 @@ err_privcmdbuf:
 
 static void __exit privcmd_exit(void)
 {
+	if (!xen_initial_domain())
+		unregister_xenstore_notifier(&xenstore_notifier);
+
 	privcmd_ioeventfd_exit();
 	privcmd_irqfd_exit();
 	misc_deregister(&privcmd_dev);

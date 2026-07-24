@@ -24,12 +24,12 @@ NET COMMANDS
 ============
 
 | **bpftool** **net** { **show** | **list** } [ **dev** *NAME* ]
-| **bpftool** **net attach** *ATTACH_TYPE* *PROG* **dev** *NAME* [ **overwrite** ]
+| **bpftool** **net attach** *ATTACH_TYPE* *PROG* **dev** *NAME* [ **overwrite** | **prepend** ]
 | **bpftool** **net detach** *ATTACH_TYPE* **dev** *NAME*
 | **bpftool** **net help**
 |
 | *PROG* := { **id** *PROG_ID* | **pinned** *FILE* | **tag** *PROG_TAG* | **name** *PROG_NAME* }
-| *ATTACH_TYPE* := { **xdp** | **xdpgeneric** | **xdpdrv** | **xdpoffload** }
+| *ATTACH_TYPE* := { **xdp** | **xdpgeneric** | **xdpdrv** | **xdpoffload** | **tcx_ingress** | **tcx_egress** }
 
 DESCRIPTION
 ===========
@@ -58,23 +58,30 @@ bpftool net { show | list } [ dev *NAME* ]
     then all bpf programs attached to non clsact qdiscs, and finally all bpf
     programs attached to root and clsact qdisc.
 
-bpftool net attach *ATTACH_TYPE* *PROG* dev *NAME* [ overwrite ]
+bpftool net attach *ATTACH_TYPE* *PROG* dev *NAME* [ overwrite | prepend ]
     Attach bpf program *PROG* to network interface *NAME* with type specified
-    by *ATTACH_TYPE*. Previously attached bpf program can be replaced by the
-    command used with **overwrite** option. Currently, only XDP-related modes
-    are supported for *ATTACH_TYPE*.
+    by *ATTACH_TYPE*.
 
     *ATTACH_TYPE* can be of:
     **xdp** - try native XDP and fallback to generic XDP if NIC driver does not support it;
     **xdpgeneric** - Generic XDP. runs at generic XDP hook when packet already enters receive path as skb;
     **xdpdrv** - Native XDP. runs earliest point in driver's receive path;
     **xdpoffload** - Offload XDP. runs directly on NIC on each packet reception;
+    **tcx_ingress** - Ingress TCX. runs on ingress net traffic;
+    **tcx_egress** - Egress TCX. runs on egress net traffic;
+
+    For XDP-related attach types (**xdp**, **xdpgeneric**, **xdpdrv**,
+    **xdpoffload**), the **overwrite** option can be used to replace a
+    previously attached bpf program.
+
+    For **tcx_ingress** and **tcx_egress** attach types, the **prepend** option
+    can be used to attach the program at the beginning of the chain instead of
+    at the end.
 
 bpftool net detach *ATTACH_TYPE* dev *NAME*
     Detach bpf program attached to network interface *NAME* with type specified
     by *ATTACH_TYPE*. To detach bpf program, same *ATTACH_TYPE* previously used
-    for attach must be specified. Currently, only XDP-related modes are
-    supported for *ATTACH_TYPE*.
+    for attach must be specified.
 
 bpftool net help
     Print short help message.
@@ -178,3 +185,34 @@ EXAMPLES
 ::
 
       xdp:
+
+|
+| **# bpftool net attach tcx_ingress name tc_prog dev lo**
+| **# bpftool net**
+|
+
+::
+
+      tc:
+      lo(1) tcx/ingress tc_prog prog_id 29
+
+|
+| **# bpftool net attach tcx_ingress name tc_prog2 dev lo prepend**
+| **# bpftool net**
+|
+
+::
+
+      tc:
+      lo(1) tcx/ingress tc_prog2 prog_id 30
+      lo(1) tcx/ingress tc_prog prog_id 29
+
+|
+| **# bpftool net attach tcx_ingress name tc_prog dev lo**
+| **# bpftool net detach tcx_ingress dev lo**
+| **# bpftool net**
+|
+
+::
+
+      tc:

@@ -145,7 +145,7 @@ static int spcp8x5_port_probe(struct usb_serial_port *port)
 	const struct usb_device_id *id = usb_get_serial_data(port->serial);
 	struct spcp8x5_private *priv;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
@@ -452,7 +452,6 @@ static int spcp8x5_tiocmget(struct tty_struct *tty)
 
 static struct usb_serial_driver spcp8x5_device = {
 	.driver = {
-		.owner =	THIS_MODULE,
 		.name =		"SPCP8x5",
 	},
 	.id_table		= id_table,

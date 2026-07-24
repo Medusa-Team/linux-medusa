@@ -79,7 +79,7 @@ struct uclogic_params_pen {
 	 * Pointer to report descriptor part describing the pen inputs.
 	 * Allocated with kmalloc. NULL if the part is not specified.
 	 */
-	__u8 *desc_ptr;
+	const __u8 *desc_ptr;
 	/*
 	 * Size of the report descriptor.
 	 * Only valid, if "desc_ptr" is not NULL.
@@ -103,6 +103,11 @@ struct uclogic_params_pen {
 	 * Only valid if "id" is not zero.
 	 */
 	bool tilt_y_flipped;
+	/*
+	 * True, if reports include fragmented high resolution X coords.
+	 * This moves bytes 10-11 to the LSB of the X coordinate.
+	 */
+	bool fragmented_hires2;
 };
 
 /*
@@ -118,7 +123,7 @@ struct uclogic_params_frame {
 	 * Pointer to report descriptor part describing the frame inputs.
 	 * Allocated with kmalloc. NULL if the part is not specified.
 	 */
-	__u8 *desc_ptr;
+	const __u8 *desc_ptr;
 	/*
 	 * Size of the report descriptor.
 	 * Only valid, if "desc_ptr" is not NULL.
@@ -175,6 +180,11 @@ struct uclogic_params_frame {
 	 * counterclockwise, as opposed to the normal 1 and -1.
 	 */
 	unsigned int bitmap_dial_byte;
+	/*
+	 * Destination offset for the second bitmap dial byte, if the tablet
+	 * supports a second dial at all.
+	 */
+	unsigned int bitmap_second_dial_destination_byte;
 };
 
 /*
@@ -212,7 +222,7 @@ struct uclogic_params {
 	 * allocated with kmalloc. NULL if no common part is needed.
 	 * Only valid, if "invalid" is false.
 	 */
-	__u8 *desc_ptr;
+	const __u8 *desc_ptr;
 	/*
 	 * Size of the common part of the replacement report descriptor.
 	 * Only valid, if "desc_ptr" is valid and not NULL.
@@ -239,7 +249,7 @@ struct uclogic_drvdata {
 	/* Interface parameters */
 	struct uclogic_params params;
 	/* Pointer to the replacement report descriptor. NULL if none. */
-	__u8 *desc_ptr;
+	const __u8 *desc_ptr;
 	/*
 	 * Size of the replacement report descriptor.
 	 * Only valid if desc_ptr is not NULL
@@ -261,7 +271,7 @@ extern int uclogic_params_init(struct uclogic_params *params,
 
 /* Get a replacement report descriptor for a tablet's interface. */
 extern int uclogic_params_get_desc(const struct uclogic_params *params,
-					__u8 **pdesc,
+					const __u8 **pdesc,
 					unsigned int *psize);
 
 /* Free resources used by tablet interface's parameters */

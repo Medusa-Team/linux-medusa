@@ -7,6 +7,7 @@
  * Author: Chunfeng Yun <chunfeng.yun@mediatek.com>
  */
 
+#include <linux/string_choices.h>
 #include "mtu3.h"
 #include "mtu3_trace.h"
 
@@ -234,7 +235,7 @@ struct usb_request *mtu3_alloc_request(struct usb_ep *ep, gfp_t gfp_flags)
 	struct mtu3_ep *mep = to_mtu3_ep(ep);
 	struct mtu3_request *mreq;
 
-	mreq = kzalloc(sizeof(*mreq), gfp_flags);
+	mreq = kzalloc_obj(*mreq, gfp_flags);
 	if (!mreq)
 		return NULL;
 
@@ -490,7 +491,7 @@ static int mtu3_gadget_pullup(struct usb_gadget *gadget, int is_on)
 	unsigned long flags;
 
 	dev_dbg(mtu->dev, "%s (%s) for %sactive device\n", __func__,
-		is_on ? "on" : "off", mtu->is_active ? "" : "in");
+		str_on_off(is_on), mtu->is_active ? "" : "in");
 
 	pm_runtime_get_sync(mtu->dev);
 

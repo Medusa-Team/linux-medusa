@@ -2,19 +2,24 @@
 
 #include <linux/net.h>
 #include <linux/uio.h>
+#include <linux/io_uring_types.h>
+#include <uapi/linux/io_uring/bpf_filter.h>
 
 struct io_async_msghdr {
 #if defined(CONFIG_NET)
-	struct iovec			fast_iov;
-	/* points to an allocated iov, if NULL we use fast_iov instead */
-	struct iovec			*free_iov;
-	int				free_iov_nr;
-	int				namelen;
-	__kernel_size_t			controllen;
-	__kernel_size_t			payloadlen;
-	struct sockaddr __user		*uaddr;
-	struct msghdr			msg;
-	struct sockaddr_storage		addr;
+	struct iou_vec				vec;
+
+	struct_group(clear,
+		int				namelen;
+		struct iovec			fast_iov;
+		__kernel_size_t			controllen;
+		__kernel_size_t			payloadlen;
+		struct sockaddr __user		*uaddr;
+		struct msghdr			msg;
+		struct sockaddr_storage		addr;
+	);
+#else
+	struct_group(clear);
 #endif
 };
 
@@ -40,11 +45,11 @@ int io_accept(struct io_kiocb *req, unsigned int issue_flags);
 
 int io_socket_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
 int io_socket(struct io_kiocb *req, unsigned int issue_flags);
+void io_socket_bpf_populate(struct io_uring_bpf_ctx *bctx, struct io_kiocb *req);
 
 int io_connect_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
 int io_connect(struct io_kiocb *req, unsigned int issue_flags);
 
-int io_send_zc(struct io_kiocb *req, unsigned int issue_flags);
 int io_sendmsg_zc(struct io_kiocb *req, unsigned int issue_flags);
 int io_send_zc_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe);
 void io_send_zc_cleanup(struct io_kiocb *req);
@@ -58,6 +63,10 @@ int io_listen(struct io_kiocb *req, unsigned int issue_flags);
 void io_netmsg_cache_free(const void *entry);
 #else
 static inline void io_netmsg_cache_free(const void *entry)
+{
+}
+static inline void io_socket_bpf_populate(struct io_uring_bpf_ctx *bctx,
+					  struct io_kiocb *req)
 {
 }
 #endif

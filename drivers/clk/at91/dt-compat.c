@@ -369,7 +369,7 @@ of_at91_clk_master_get_characteristics(struct device_node *np)
 {
 	struct clk_master_characteristics *characteristics;
 
-	characteristics = kzalloc(sizeof(*characteristics), GFP_KERNEL);
+	characteristics = kzalloc_obj(*characteristics);
 	if (!characteristics)
 		return NULL;
 
@@ -563,15 +563,16 @@ of_at91_clk_pll_get_characteristics(struct device_node *np)
 	if (num_cells < 2 || num_cells > 4)
 		return NULL;
 
-	if (!of_get_property(np, "atmel,pll-clk-output-ranges", &tmp))
+	num_output = of_property_count_u32_elems(np, "atmel,pll-clk-output-ranges");
+	if (num_output <= 0)
 		return NULL;
-	num_output = tmp / (sizeof(u32) * num_cells);
+	num_output /= num_cells;
 
-	characteristics = kzalloc(sizeof(*characteristics), GFP_KERNEL);
+	characteristics = kzalloc_obj(*characteristics);
 	if (!characteristics)
 		return NULL;
 
-	output = kcalloc(num_output, sizeof(*output), GFP_KERNEL);
+	output = kzalloc_objs(*output, num_output);
 	if (!output)
 		goto out_free_characteristics;
 

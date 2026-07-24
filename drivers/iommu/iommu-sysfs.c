@@ -34,7 +34,7 @@ static void release_device(struct device *dev)
 	kfree(dev);
 }
 
-static struct class iommu_class = {
+static const struct class iommu_class = {
 	.name = "iommu",
 	.dev_release = release_device,
 	.dev_groups = dev_groups,
@@ -59,7 +59,7 @@ int iommu_device_sysfs_add(struct iommu_device *iommu,
 	va_list vargs;
 	int ret;
 
-	iommu->dev = kzalloc(sizeof(*iommu->dev), GFP_KERNEL);
+	iommu->dev = kzalloc_obj(*iommu->dev);
 	if (!iommu->dev)
 		return -ENOMEM;
 

@@ -106,7 +106,7 @@ struct oti6858_control_pkt {
 #define PIN_DTR			0x04	/* output pin */
 #define PIN_RI			0x02	/* input pin, active low */
 #define PIN_DCD			0x01	/* input pin, active low */
-	u8	rx_bytes_avail;		/* number of bytes in rx buffer */;
+	u8	rx_bytes_avail;		/* number of bytes in rx buffer */
 };
 
 #define OTI6858_CTRL_PKT_SIZE	sizeof(struct oti6858_control_pkt)
@@ -138,7 +138,6 @@ static void oti6858_port_remove(struct usb_serial_port *port);
 /* device info */
 static struct usb_serial_driver oti6858_device = {
 	.driver = {
-		.owner =	THIS_MODULE,
 		.name =		"oti6858",
 	},
 	.id_table =		id_table,
@@ -329,7 +328,7 @@ static int oti6858_port_probe(struct usb_serial_port *port)
 {
 	struct oti6858_private *priv;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 

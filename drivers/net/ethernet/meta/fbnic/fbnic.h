@@ -6,29 +6,47 @@
 
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/ptp_clock_kernel.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 
 #include "fbnic_csr.h"
 #include "fbnic_fw.h"
+#include "fbnic_fw_log.h"
+#include "fbnic_hw_stats.h"
 #include "fbnic_mac.h"
 #include "fbnic_rpc.h"
+
+struct fbnic_napi_vector;
+
+#define FBNIC_MAX_NAPI_VECTORS		128u
+#define FBNIC_MBX_CMPL_SLOTS		4
 
 struct fbnic_dev {
 	struct device *dev;
 	struct net_device *netdev;
+	struct dentry *dbg_fbd;
+	struct device *hwmon;
+	struct devlink_health_reporter *fw_reporter;
+	struct devlink_health_reporter *otp_reporter;
 
 	u32 __iomem *uc_addr0;
 	u32 __iomem *uc_addr4;
 	const struct fbnic_mac *mac;
 	unsigned int fw_msix_vector;
-	unsigned int pcs_msix_vector;
+	unsigned int mac_msix_vector;
 	unsigned short num_irqs;
+
+	struct {
+		u8 users;
+		char name[IFNAMSIZ + 9];
+	} napi_irq[FBNIC_MAX_NAPI_VECTORS];
 
 	struct delayed_work service_task;
 
 	struct fbnic_fw_mbx mbx[FBNIC_IPC_MBX_INDICES];
 	struct fbnic_fw_cap fw_cap;
+	struct fbnic_fw_completion *cmpl_data[FBNIC_MBX_CMPL_SLOTS];
 	/* Lock protecting Tx Mailbox queue to prevent possible races */
 	spinlock_t fw_tx_lock;
 
@@ -39,14 +57,51 @@ struct fbnic_dev {
 	u64 dsn;
 	u32 mps;
 	u32 readrq;
+	u8 relaxed_ord;
 
 	/* Local copy of the devices TCAM */
 	struct fbnic_act_tcam act_tcam[FBNIC_RPC_TCAM_ACT_NUM_ENTRIES];
 	struct fbnic_mac_addr mac_addr[FBNIC_RPC_TCAM_MACDA_NUM_ENTRIES];
 	u8 mac_addr_boundary;
+	u8 tce_tcam_last;
+
+	/* IP TCAM */
+	struct fbnic_ip_addr ip_src[FBNIC_RPC_TCAM_IP_ADDR_NUM_ENTRIES];
+	struct fbnic_ip_addr ip_dst[FBNIC_RPC_TCAM_IP_ADDR_NUM_ENTRIES];
+	struct fbnic_ip_addr ipo_src[FBNIC_RPC_TCAM_IP_ADDR_NUM_ENTRIES];
+	struct fbnic_ip_addr ipo_dst[FBNIC_RPC_TCAM_IP_ADDR_NUM_ENTRIES];
 
 	/* Number of TCQs/RCQs available on hardware */
 	u16 max_num_queues;
+
+	/* Lock protecting writes to @time_high, @time_offset of fbnic_netdev,
+	 * and the HW time CSR machinery.
+	 */
+	spinlock_t time_lock;
+	/* Externally accessible PTP clock, may be NULL */
+	struct ptp_clock *ptp;
+	struct ptp_clock_info ptp_info;
+	/* Last @time_high refresh time in jiffies (to catch stalls) */
+	unsigned long last_read;
+
+	/* PMD specific data */
+	unsigned long end_of_pmd_training;
+	u8 pmd_state;
+
+	/* Local copy of hardware statistics */
+	struct fbnic_hw_stats hw_stats;
+
+	/* Firmware time since boot in milliseconds */
+	u64 firmware_time;
+	u64 prev_firmware_time;
+
+	struct fbnic_fw_log fw_log;
+
+	/* MDIO bus for PHYs */
+	struct mii_bus *mdio_bus;
+
+	/* In units of ms since API supports values in ms */
+	u16 ps_timeout;
 };
 
 /* Reserve entry 0 in the MSI-X "others" array until we have filled all
@@ -117,20 +172,84 @@ extern char fbnic_driver_name[];
 
 void fbnic_devlink_free(struct fbnic_dev *fbd);
 struct fbnic_dev *fbnic_devlink_alloc(struct pci_dev *pdev);
+int fbnic_devlink_health_create(struct fbnic_dev *fbd);
+void fbnic_devlink_health_destroy(struct fbnic_dev *fbd);
 void fbnic_devlink_register(struct fbnic_dev *fbd);
 void fbnic_devlink_unregister(struct fbnic_dev *fbd);
+void __printf(2, 3)
+fbnic_devlink_fw_report(struct fbnic_dev *fbd, const char *format, ...);
+void fbnic_devlink_otp_check(struct fbnic_dev *fbd, const char *msg);
 
-int fbnic_fw_enable_mbx(struct fbnic_dev *fbd);
-void fbnic_fw_disable_mbx(struct fbnic_dev *fbd);
+int fbnic_fw_request_mbx(struct fbnic_dev *fbd);
+void fbnic_fw_free_mbx(struct fbnic_dev *fbd);
 
-int fbnic_pcs_irq_enable(struct fbnic_dev *fbd);
-void fbnic_pcs_irq_disable(struct fbnic_dev *fbd);
+void fbnic_hwmon_register(struct fbnic_dev *fbd);
+void fbnic_hwmon_unregister(struct fbnic_dev *fbd);
 
+int fbnic_mac_request_irq(struct fbnic_dev *fbd);
+void fbnic_mac_free_irq(struct fbnic_dev *fbd);
+
+void fbnic_napi_name_irqs(struct fbnic_dev *fbd);
+int fbnic_napi_request_irq(struct fbnic_dev *fbd,
+			   struct fbnic_napi_vector *nv);
+void fbnic_napi_free_irq(struct fbnic_dev *fbd,
+			 struct fbnic_napi_vector *nv);
+void fbnic_synchronize_irq(struct fbnic_dev *fbd, int nr);
 int fbnic_request_irq(struct fbnic_dev *dev, int nr, irq_handler_t handler,
 		      unsigned long flags, const char *name, void *data);
 void fbnic_free_irq(struct fbnic_dev *dev, int nr, void *data);
+
+/**
+ * enum fbnic_msix_self_test_codes - return codes from self test routines
+ *
+ * These are the codes returned from the self test routines and
+ * stored in the test result array indexed by the specific
+ * test name.
+ *
+ * @FBNIC_TEST_MSIX_SUCCESS: no errors
+ * @FBNIC_TEST_MSIX_NOMEM: allocation failure
+ * @FBNIC_TEST_MSIX_IRQ_REQ_FAIL: IRQ request failure
+ * @FBNIC_TEST_MSIX_MASK: masking failed to prevent IRQ
+ * @FBNIC_TEST_MSIX_UNMASK: unmasking failure w/ sw status set
+ * @FBNIC_TEST_MSIX_IRQ_CLEAR: interrupt when clearing mask
+ * @FBNIC_TEST_MSIX_NO_INTERRUPT: no interrupt when not masked
+ * @FBNIC_TEST_MSIX_NO_CLEAR_OR_MASK: status not cleared, or mask not set
+ * @FBNIC_TEST_MSIX_BITS_SET_AFTER_TEST: Bits are set after test
+ */
+enum fbnic_msix_self_test_codes {
+	FBNIC_TEST_MSIX_SUCCESS = 0,
+	FBNIC_TEST_MSIX_NOMEM = 5,
+	FBNIC_TEST_MSIX_IRQ_REQ_FAIL = 10,
+	FBNIC_TEST_MSIX_MASK = 20,
+	FBNIC_TEST_MSIX_UNMASK = 30,
+	FBNIC_TEST_MSIX_IRQ_CLEAR = 40,
+	FBNIC_TEST_MSIX_NO_INTERRUPT = 50,
+	FBNIC_TEST_MSIX_NO_CLEAR_OR_MASK = 60,
+	FBNIC_TEST_MSIX_BITS_SET_AFTER_TEST = 70,
+};
+
+enum fbnic_msix_self_test_codes fbnic_msix_test(struct fbnic_dev *fbd);
+
 void fbnic_free_irqs(struct fbnic_dev *fbd);
 int fbnic_alloc_irqs(struct fbnic_dev *fbd);
+
+void fbnic_get_fw_ver_commit_str(struct fbnic_dev *fbd, char *fw_version,
+				 const size_t str_sz);
+
+void fbnic_dbg_fbd_init(struct fbnic_dev *fbd);
+void fbnic_dbg_fbd_exit(struct fbnic_dev *fbd);
+void fbnic_dbg_init(void);
+void fbnic_dbg_exit(void);
+
+void fbnic_rpc_reset_valid_entries(struct fbnic_dev *fbd);
+
+int fbnic_mdiobus_create(struct fbnic_dev *fbd);
+
+void fbnic_csr_get_regs(struct fbnic_dev *fbd, u32 *data, u32 *regs_version);
+int fbnic_csr_regs_len(struct fbnic_dev *fbd);
+
+void fbnic_config_txrx_usecs(struct fbnic_napi_vector *nv, u32 arm);
+void fbnic_config_rx_frames(struct fbnic_napi_vector *nv);
 
 enum fbnic_boards {
 	fbnic_board_asic

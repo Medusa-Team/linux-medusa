@@ -7,6 +7,27 @@
  *  Based on step_wise.c with following Copyrights:
  *  Copyright (C) 2012 Intel Corp
  *  Copyright (C) 2012 Durgadoss R <durgadoss.r@intel.com>
+ *
+ * Regulation Logic: a two point regulation, deliver cooling state depending
+ * on the previous state shown in this diagram:
+ *
+ *                Fan:   OFF    ON
+ *
+ *                              |
+ *                              |
+ *          trip_temp:    +---->+
+ *                        |     |        ^
+ *                        |     |        |
+ *                        |     |   Temperature
+ * (trip_temp - hyst):    +<----+
+ *                        |
+ *                        |
+ *                        |
+ *
+ *   * If the fan is not running and temperature exceeds trip_temp, the fan
+ *     gets turned on.
+ *   * In case the fan is running, temperature must fall below
+ *     (trip_temp - hyst) so that the fan gets turned off again.
  */
 
 #include <linux/thermal.h>
@@ -30,43 +51,20 @@ static void bang_bang_set_instance_target(struct thermal_instance *instance,
 
 	dev_dbg(&instance->cdev->device, "target=%ld\n", instance->target);
 
-	mutex_lock(&instance->cdev->lock);
-	__thermal_cdev_update(instance->cdev);
-	mutex_unlock(&instance->cdev->lock);
+	thermal_cdev_update_nocheck(instance->cdev);
 }
 
 /**
- * bang_bang_control - controls devices associated with the given zone
+ * bang_bang_trip_crossed - controls devices associated with the given zone
  * @tz: thermal_zone_device
  * @trip: the trip point
- * @crossed_up: whether or not the trip has been crossed on the way up
- *
- * Regulation Logic: a two point regulation, deliver cooling state depending
- * on the previous state shown in this diagram:
- *
- *                Fan:   OFF    ON
- *
- *                              |
- *                              |
- *          trip_temp:    +---->+
- *                        |     |        ^
- *                        |     |        |
- *                        |     |   Temperature
- * (trip_temp - hyst):    +<----+
- *                        |
- *                        |
- *                        |
- *
- *   * If the fan is not running and temperature exceeds trip_temp, the fan
- *     gets turned on.
- *   * In case the fan is running, temperature must fall below
- *     (trip_temp - hyst) so that the fan gets turned off again.
- *
+ * @upward: whether or not the trip has been crossed on the way up
  */
-static void bang_bang_control(struct thermal_zone_device *tz,
-			      const struct thermal_trip *trip,
-			      bool crossed_up)
+static void bang_bang_trip_crossed(struct thermal_zone_device *tz,
+				   const struct thermal_trip *trip,
+				   bool upward)
 {
+	const struct thermal_trip_desc *td = trip_to_trip_desc(trip);
 	struct thermal_instance *instance;
 
 	lockdep_assert_held(&tz->lock);
@@ -75,10 +73,8 @@ static void bang_bang_control(struct thermal_zone_device *tz,
 		thermal_zone_trip_id(tz, trip), trip->temperature,
 		tz->temperature, trip->hysteresis);
 
-	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-		if (instance->trip == trip)
-			bang_bang_set_instance_target(instance, crossed_up);
-	}
+	list_for_each_entry(instance, &td->thermal_instances, trip_node)
+		bang_bang_set_instance_target(instance, upward);
 }
 
 static void bang_bang_manage(struct thermal_zone_device *tz)
@@ -92,23 +88,21 @@ static void bang_bang_manage(struct thermal_zone_device *tz)
 
 	for_each_trip_desc(tz, td) {
 		const struct thermal_trip *trip = &td->trip;
+		bool turn_on;
 
-		if (tz->temperature >= td->threshold ||
-		    trip->temperature == THERMAL_TEMP_INVALID ||
+		if (trip->temperature == THERMAL_TEMP_INVALID ||
 		    trip->type == THERMAL_TRIP_CRITICAL ||
 		    trip->type == THERMAL_TRIP_HOT)
 			continue;
 
 		/*
-		 * If the initial cooling device state is "on", but the zone
-		 * temperature is not above the trip point, the core will not
-		 * call bang_bang_control() until the zone temperature reaches
-		 * the trip point temperature which may be never.  In those
-		 * cases, set the initial state of the cooling device to 0.
+		 * Adjust the target states for uninitialized thermal instances
+		 * to the thermal zone temperature and the trip point threshold.
 		 */
-		list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-			if (!instance->initialized && instance->trip == trip)
-				bang_bang_set_instance_target(instance, 0);
+		turn_on = tz->temperature >= td->threshold;
+		list_for_each_entry(instance, &td->thermal_instances, trip_node) {
+			if (!instance->initialized)
+				bang_bang_set_instance_target(instance, turn_on);
 		}
 	}
 
@@ -128,7 +122,7 @@ static void bang_bang_update_tz(struct thermal_zone_device *tz,
 
 static struct thermal_governor thermal_gov_bang_bang = {
 	.name		= "bang_bang",
-	.trip_crossed	= bang_bang_control,
+	.trip_crossed	= bang_bang_trip_crossed,
 	.manage		= bang_bang_manage,
 	.update_tz	= bang_bang_update_tz,
 };

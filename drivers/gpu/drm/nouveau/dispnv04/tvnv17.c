@@ -47,7 +47,7 @@ static uint32_t nv42_tv_sample_load(struct drm_encoder *encoder)
 {
 	struct drm_device *dev = encoder->dev;
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvkm_gpio *gpio = nvxx_gpio(&drm->client.device);
+	struct nvkm_gpio *gpio = nvxx_gpio(drm);
 	uint32_t testval, regoffset = nv04_dac_output_offset(encoder);
 	uint32_t gpio0, gpio1, fp_htotal, fp_hsync_start, fp_hsync_end,
 		fp_control, test_ctrl, dacclk, ctv_14, ctv_1c, ctv_6c;
@@ -131,7 +131,7 @@ static bool
 get_tv_detect_quirks(struct drm_device *dev, uint32_t *pin_mask)
 {
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvkm_device *device = nvxx_device(&drm->client.device);
+	struct nvkm_device *device = nvxx_device(drm);
 
 	if (device->quirk && device->quirk->tv_pin_mask) {
 		*pin_mask = device->quirk->tv_pin_mask;
@@ -308,7 +308,7 @@ static int nv17_tv_get_modes(struct drm_encoder *encoder,
 }
 
 static int nv17_tv_mode_valid(struct drm_encoder *encoder,
-			      struct drm_display_mode *mode)
+			      const struct drm_display_mode *mode)
 {
 	struct nv17_tv_norm_params *tv_norm = get_tv_norm(encoder);
 
@@ -369,7 +369,7 @@ static void  nv17_tv_dpms(struct drm_encoder *encoder, int mode)
 {
 	struct drm_device *dev = encoder->dev;
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvkm_gpio *gpio = nvxx_gpio(&drm->client.device);
+	struct nvkm_gpio *gpio = nvxx_gpio(drm);
 	struct nv17_tv_state *regs = &to_tv_enc(encoder)->state;
 	struct nv17_tv_norm_params *tv_norm = get_tv_norm(encoder);
 
@@ -779,7 +779,7 @@ static const struct drm_encoder_helper_funcs nv17_tv_helper_funcs = {
 	.detect = nv17_tv_detect,
 };
 
-static const struct drm_encoder_slave_funcs nv17_tv_slave_funcs = {
+static const struct nouveau_i2c_encoder_funcs nv17_tv_encoder_i2c_funcs = {
 	.get_modes = nv17_tv_get_modes,
 	.mode_valid = nv17_tv_mode_valid,
 	.create_resources = nv17_tv_create_resources,
@@ -797,7 +797,7 @@ nv17_tv_create(struct drm_connector *connector, struct dcb_output *entry)
 	struct drm_encoder *encoder;
 	struct nv17_tv_encoder *tv_enc = NULL;
 
-	tv_enc = kzalloc(sizeof(*tv_enc), GFP_KERNEL);
+	tv_enc = kzalloc_obj(*tv_enc);
 	if (!tv_enc)
 		return -ENOMEM;
 
@@ -818,7 +818,7 @@ nv17_tv_create(struct drm_connector *connector, struct dcb_output *entry)
 	drm_encoder_init(dev, encoder, &nv17_tv_funcs, DRM_MODE_ENCODER_TVDAC,
 			 NULL);
 	drm_encoder_helper_add(encoder, &nv17_tv_helper_funcs);
-	to_encoder_slave(encoder)->slave_funcs = &nv17_tv_slave_funcs;
+	to_encoder_i2c(encoder)->encoder_i2c_funcs = &nv17_tv_encoder_i2c_funcs;
 
 	tv_enc->base.enc_save = nv17_tv_save;
 	tv_enc->base.enc_restore = nv17_tv_restore;

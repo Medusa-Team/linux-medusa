@@ -4,6 +4,7 @@
 
 #include <linux/args.h>
 #include <linux/array_size.h>
+#include <linux/cleanup.h>	/* for DEFINE_FREE() */
 #include <linux/compiler.h>	/* for inline */
 #include <linux/types.h>	/* for size_t */
 #include <linux/stddef.h>	/* for NULL */
@@ -76,12 +77,16 @@ ssize_t sized_strscpy(char *, const char *, size_t);
  * known size.
  */
 #define __strscpy0(dst, src, ...)	\
-	sized_strscpy(dst, src, sizeof(dst) + __must_be_array(dst))
-#define __strscpy1(dst, src, size)	sized_strscpy(dst, src, size)
+	sized_strscpy(dst, src, sizeof(dst) + __must_be_array(dst) +	\
+				__must_be_cstr(dst) + __must_be_cstr(src))
+#define __strscpy1(dst, src, size)	\
+	sized_strscpy(dst, src, size + __must_be_cstr(dst) + __must_be_cstr(src))
 
 #define __strscpy_pad0(dst, src, ...)	\
-	sized_strscpy_pad(dst, src, sizeof(dst) + __must_be_array(dst))
-#define __strscpy_pad1(dst, src, size)	sized_strscpy_pad(dst, src, size)
+	sized_strscpy_pad(dst, src, sizeof(dst) + __must_be_array(dst) +	\
+				    __must_be_cstr(dst) + __must_be_cstr(src))
+#define __strscpy_pad1(dst, src, size)	\
+	sized_strscpy_pad(dst, src, size + __must_be_cstr(dst) + __must_be_cstr(src))
 
 /**
  * strscpy - Copy a C-string into a sized buffer
@@ -279,6 +284,18 @@ static inline void memcpy_flushcache(void *dst, const void *src, size_t cnt)
 void *memchr_inv(const void *s, int c, size_t n);
 char *strreplace(char *str, char old, char new);
 
+/**
+ * mem_is_zero - Check if an area of memory is all 0's.
+ * @s: The memory area
+ * @n: The size of the area
+ *
+ * Return: True if the area of memory is all 0's.
+ */
+static inline bool mem_is_zero(const void *s, size_t n)
+{
+	return !memchr_inv(s, 0, n);
+}
+
 extern void kfree_const(const void *x);
 
 extern char *kstrdup(const char *s, gfp_t gfp) __malloc;
@@ -295,6 +312,8 @@ extern void *kmemdup_array(const void *src, size_t count, size_t element_size, g
 /* lib/argv_split.c */
 extern char **argv_split(gfp_t gfp, const char *str, int *argcp);
 extern void argv_free(char **argv);
+
+DEFINE_FREE(argv_free, char **, if (!IS_ERR_OR_NULL(_T)) argv_free(_T))
 
 /* lib/cmdline.c */
 extern int get_option(char **str, int *pint);
@@ -319,23 +338,12 @@ int __sysfs_match_string(const char * const *array, size_t n, const char *s);
 #ifdef CONFIG_BINARY_PRINTF
 int vbin_printf(u32 *bin_buf, size_t size, const char *fmt, va_list args);
 int bstr_printf(char *buf, size_t size, const char *fmt, const u32 *bin_buf);
-int bprintf(u32 *bin_buf, size_t size, const char *fmt, ...) __printf(3, 4);
 #endif
 
 extern ssize_t memory_read_from_buffer(void *to, size_t count, loff_t *ppos,
 				       const void *from, size_t available);
 
 int ptr_to_hashval(const void *ptr, unsigned long *hashval_out);
-
-/**
- * strstarts - does @str start with @prefix?
- * @str: string to examine
- * @prefix: prefix to look for.
- */
-static inline bool strstarts(const char *str, const char *prefix)
-{
-	return strncmp(str, prefix, strlen(prefix)) == 0;
-}
 
 size_t memweight(const void *ptr, size_t bytes);
 
@@ -363,6 +371,10 @@ static inline void memzero_explicit(void *s, size_t count)
  * kbasename - return the last part of a pathname.
  *
  * @path: path to extract the filename from.
+ *
+ * Returns:
+ * Pointer to the filename portion inside @path. If no '/' exists,
+ * returns @path unchanged.
  */
 static inline const char *kbasename(const char *path)
 {
@@ -396,8 +408,11 @@ void memcpy_and_pad(void *dest, size_t dest_len, const void *src, size_t count,
  * must be discoverable by the compiler.
  */
 #define strtomem_pad(dest, src, pad)	do {				\
-	const size_t _dest_len = __builtin_object_size(dest, 1);	\
-	const size_t _src_len = __builtin_object_size(src, 1);		\
+	const size_t _dest_len = __must_be_byte_array(dest) +		\
+				 __must_be_noncstr(dest) +		\
+				 ARRAY_SIZE(dest);			\
+	const size_t _src_len = __must_be_cstr(src) +			\
+				__builtin_object_size(src, 1);		\
 									\
 	BUILD_BUG_ON(!__builtin_constant_p(_dest_len) ||		\
 		     _dest_len == (size_t)-1);				\
@@ -419,8 +434,11 @@ void memcpy_and_pad(void *dest, size_t dest_len, const void *src, size_t count,
  * must be discoverable by the compiler.
  */
 #define strtomem(dest, src)	do {					\
-	const size_t _dest_len = __builtin_object_size(dest, 1);	\
-	const size_t _src_len = __builtin_object_size(src, 1);		\
+	const size_t _dest_len = __must_be_byte_array(dest) +		\
+				 __must_be_noncstr(dest) +		\
+				 ARRAY_SIZE(dest);			\
+	const size_t _src_len = __must_be_cstr(src) +			\
+				__builtin_object_size(src, 1);		\
 									\
 	BUILD_BUG_ON(!__builtin_constant_p(_dest_len) ||		\
 		     _dest_len == (size_t)-1);				\
@@ -438,8 +456,11 @@ void memcpy_and_pad(void *dest, size_t dest_len, const void *src, size_t count,
  * Note that sizes of @dest and @src must be known at compile-time.
  */
 #define memtostr(dest, src)	do {					\
-	const size_t _dest_len = __builtin_object_size(dest, 1);	\
-	const size_t _src_len = __builtin_object_size(src, 1);		\
+	const size_t _dest_len = __must_be_byte_array(dest) +		\
+				 __must_be_cstr(dest) +			\
+				 ARRAY_SIZE(dest);			\
+	const size_t _src_len = __must_be_noncstr(src) +		\
+				__builtin_object_size(src, 1);		\
 	const size_t _src_chars = strnlen(src, _src_len);		\
 	const size_t _copy_len = min(_dest_len - 1, _src_chars);	\
 									\
@@ -463,8 +484,11 @@ void memcpy_and_pad(void *dest, size_t dest_len, const void *src, size_t count,
  * Note that sizes of @dest and @src must be known at compile-time.
  */
 #define memtostr_pad(dest, src)		do {				\
-	const size_t _dest_len = __builtin_object_size(dest, 1);	\
-	const size_t _src_len = __builtin_object_size(src, 1);		\
+	const size_t _dest_len = __must_be_byte_array(dest) +		\
+				 __must_be_cstr(dest) +			\
+				 ARRAY_SIZE(dest);			\
+	const size_t _src_len = __must_be_noncstr(src) +		\
+				__builtin_object_size(src, 1);		\
 	const size_t _src_chars = strnlen(src, _src_len);		\
 	const size_t _copy_len = min(_dest_len - 1, _src_chars);	\
 									\
@@ -530,6 +554,38 @@ static __always_inline size_t str_has_prefix(const char *str, const char *prefix
 {
 	size_t len = strlen(prefix);
 	return strncmp(str, prefix, len) == 0 ? len : 0;
+}
+
+/**
+ * strstarts - does @str start with @prefix?
+ * @str: string to examine
+ * @prefix: prefix to look for.
+ *
+ * Returns:
+ * True if @str begins with @prefix. False in all other cases.
+ */
+static inline bool strstarts(const char *str, const char *prefix)
+{
+	return strncmp(str, prefix, strlen(prefix)) == 0;
+}
+
+/**
+ * strends - Check if a string ends with another string.
+ * @str: NULL-terminated string to check against @suffix
+ * @suffix: NULL-terminated string defining the suffix to look for in @str
+ *
+ * Returns:
+ * True if @str ends with @suffix. False in all other cases.
+ */
+static inline bool __attribute__((nonnull(1, 2)))
+strends(const char *str, const char *suffix)
+{
+	unsigned int str_len = strlen(str), suffix_len = strlen(suffix);
+
+	if (str_len < suffix_len)
+		return false;
+
+	return !(strcmp(str + str_len - suffix_len, suffix));
 }
 
 #endif /* _LINUX_STRING_H_ */

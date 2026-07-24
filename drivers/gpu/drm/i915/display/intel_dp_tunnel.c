@@ -3,11 +3,11 @@
  * Copyright © 2023 Intel Corporation
  */
 
-#include "i915_drv.h"
-
 #include <drm/display/drm_dp_tunnel.h>
+#include <drm/drm_print.h>
 
 #include "intel_atomic.h"
+#include "intel_display_core.h"
 #include "intel_display_limits.h"
 #include "intel_display_types.h"
 #include "intel_dp.h"
@@ -54,34 +54,23 @@ static int kbytes_to_mbits(int kbytes)
 	return DIV_ROUND_UP(kbytes * 8, 1000);
 }
 
-static int get_current_link_bw(struct intel_dp *intel_dp,
-			       bool *below_dprx_bw)
+static int get_current_link_bw(struct intel_dp *intel_dp)
 {
 	int rate = intel_dp_max_common_rate(intel_dp);
 	int lane_count = intel_dp_max_common_lane_count(intel_dp);
-	int bw;
 
-	bw = intel_dp_max_link_data_rate(intel_dp, rate, lane_count);
-	*below_dprx_bw = bw < drm_dp_max_dprx_data_rate(rate, lane_count);
-
-	return bw;
+	return intel_dp_max_link_data_rate(intel_dp, rate, lane_count);
 }
 
-static int update_tunnel_state(struct intel_dp *intel_dp)
+static int __update_tunnel_state(struct intel_dp *intel_dp, bool force_sink_update)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
-	bool old_bw_below_dprx;
-	bool new_bw_below_dprx;
-	int old_bw;
-	int new_bw;
 	int ret;
-
-	old_bw = get_current_link_bw(intel_dp, &old_bw_below_dprx);
 
 	ret = drm_dp_tunnel_update_state(intel_dp->tunnel);
 	if (ret < 0) {
-		drm_dbg_kms(&i915->drm,
+		drm_dbg_kms(display->drm,
 			    "[DPTUN %s][ENCODER:%d:%s] State update failed (err %pe)\n",
 			    drm_dp_tunnel_name(intel_dp->tunnel),
 			    encoder->base.base.id, encoder->base.name,
@@ -90,26 +79,56 @@ static int update_tunnel_state(struct intel_dp *intel_dp)
 		return ret;
 	}
 
-	if (ret == 0 ||
-	    !drm_dp_tunnel_bw_alloc_is_enabled(intel_dp->tunnel))
+	if (!force_sink_update &&
+	    (ret == 0 || !drm_dp_tunnel_bw_alloc_is_enabled(intel_dp->tunnel)))
 		return 0;
 
 	intel_dp_update_sink_caps(intel_dp);
 
-	new_bw = get_current_link_bw(intel_dp, &new_bw_below_dprx);
+	return 0;
+}
+
+static bool has_tunnel_bw_changed(struct intel_dp *intel_dp, int old_bw)
+{
+	struct intel_display *display = to_intel_display(intel_dp);
+	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
+	int new_bw;
+
+	new_bw = get_current_link_bw(intel_dp);
 
 	/* Suppress the notification if the mode list can't change due to bw. */
-	if (old_bw_below_dprx == new_bw_below_dprx &&
-	    !new_bw_below_dprx)
-		return 0;
+	if (old_bw == new_bw)
+		return false;
 
-	drm_dbg_kms(&i915->drm,
+	drm_dbg_kms(display->drm,
 		    "[DPTUN %s][ENCODER:%d:%s] Notify users about BW change: %d -> %d\n",
 		    drm_dp_tunnel_name(intel_dp->tunnel),
 		    encoder->base.base.id, encoder->base.name,
 		    kbytes_to_mbits(old_bw), kbytes_to_mbits(new_bw));
 
-	return 1;
+	return true;
+}
+
+/*
+ * Returns:
+ * - 0 in case of success - if there wasn't any change in the tunnel state
+ *   requiring a user notification
+ * - 1 in case of success - if there was a change in the tunnel state
+ *   requiring a user notification
+ * - Negative error code if updating the tunnel state failed
+ */
+static int update_tunnel_state(struct intel_dp *intel_dp)
+{
+	int old_bw;
+	int err;
+
+	old_bw = get_current_link_bw(intel_dp);
+
+	err = __update_tunnel_state(intel_dp, false);
+	if (err)
+		return err;
+
+	return has_tunnel_bw_changed(intel_dp, old_bw) ? 1 : 0;
 }
 
 /*
@@ -121,20 +140,20 @@ static int update_tunnel_state(struct intel_dp *intel_dp)
  */
 static int allocate_initial_tunnel_bw_for_pipes(struct intel_dp *intel_dp, u8 pipe_mask)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
 	struct intel_crtc *crtc;
 	int tunnel_bw = 0;
 	int err;
 
-	for_each_intel_crtc_in_pipe_mask(&i915->drm, crtc, pipe_mask) {
+	for_each_intel_crtc_in_pipe_mask(display->drm, crtc, pipe_mask) {
 		const struct intel_crtc_state *crtc_state =
 			to_intel_crtc_state(crtc->base.state);
 		int stream_bw = intel_dp_config_required_rate(crtc_state);
 
 		tunnel_bw += stream_bw;
 
-		drm_dbg_kms(&i915->drm,
+		drm_dbg_kms(display->drm,
 			    "[DPTUN %s][ENCODER:%d:%s][CRTC:%d:%s] Initial BW for stream %d: %d/%d Mb/s\n",
 			    drm_dp_tunnel_name(intel_dp->tunnel),
 			    encoder->base.base.id, encoder->base.name,
@@ -145,16 +164,14 @@ static int allocate_initial_tunnel_bw_for_pipes(struct intel_dp *intel_dp, u8 pi
 
 	err = drm_dp_tunnel_alloc_bw(intel_dp->tunnel, tunnel_bw);
 	if (err) {
-		drm_dbg_kms(&i915->drm,
+		drm_dbg_kms(display->drm,
 			    "[DPTUN %s][ENCODER:%d:%s] Initial BW allocation failed (err %pe)\n",
 			    drm_dp_tunnel_name(intel_dp->tunnel),
 			    encoder->base.base.id, encoder->base.name,
 			    ERR_PTR(err));
-
-		return err;
 	}
 
-	return update_tunnel_state(intel_dp);
+	return err;
 }
 
 static int allocate_initial_tunnel_bw(struct intel_dp *intel_dp,
@@ -170,14 +187,25 @@ static int allocate_initial_tunnel_bw(struct intel_dp *intel_dp,
 	return allocate_initial_tunnel_bw_for_pipes(intel_dp, pipe_mask);
 }
 
+/*
+ * Returns:
+ * - 0 in case of success - after any tunnel detected and added to @intel_dp
+ * - 1 in case of success - after a tunnel detected and added to @intel_dp,
+ *   where the link BW via the tunnel changed in a way requiring a user
+ *   notification
+ * - Negative error code if the tunnel detection failed
+ */
 static int detect_new_tunnel(struct intel_dp *intel_dp, struct drm_modeset_acquire_ctx *ctx)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
 	struct drm_dp_tunnel *tunnel;
+	int old_bw;
 	int ret;
 
-	tunnel = drm_dp_tunnel_detect(i915->display.dp_tunnel_mgr,
+	old_bw = get_current_link_bw(intel_dp);
+
+	tunnel = drm_dp_tunnel_detect(display->dp_tunnel_mgr,
 				      &intel_dp->aux);
 	if (IS_ERR(tunnel))
 		return PTR_ERR(tunnel);
@@ -189,7 +217,7 @@ static int detect_new_tunnel(struct intel_dp *intel_dp, struct drm_modeset_acqui
 		if (ret == -EOPNOTSUPP)
 			return 0;
 
-		drm_dbg_kms(&i915->drm,
+		drm_dbg_kms(display->drm,
 			    "[DPTUN %s][ENCODER:%d:%s] Failed to enable BW allocation mode (ret %pe)\n",
 			    drm_dp_tunnel_name(intel_dp->tunnel),
 			    encoder->base.base.id, encoder->base.name,
@@ -200,10 +228,17 @@ static int detect_new_tunnel(struct intel_dp *intel_dp, struct drm_modeset_acqui
 	}
 
 	ret = allocate_initial_tunnel_bw(intel_dp, ctx);
-	if (ret < 0)
+	if (ret < 0) {
 		intel_dp_tunnel_destroy(intel_dp);
 
-	return ret;
+		return ret;
+	}
+
+	ret = __update_tunnel_state(intel_dp, true);
+	if (ret)
+		return ret;
+
+	return has_tunnel_bw_changed(intel_dp, old_bw) ? 1 : 0;
 }
 
 /**
@@ -221,9 +256,12 @@ static int detect_new_tunnel(struct intel_dp *intel_dp, struct drm_modeset_acqui
  * tunnel. If the tunnel's state change requires this - for instance the
  * tunnel's group ID has changed - the tunnel will be dropped and recreated.
  *
- * Return 0 in case of success - after any tunnel detected and added to
- * @intel_dp - 1 in case the BW on an already existing tunnel has changed in a
- * way that requires notifying user space.
+ * Returns:
+ * - 0 in case of success - after any tunnel detected and added to @intel_dp
+ * - 1 in case the link BW via the new or an already existing tunnel has changed
+ *   in a way that requires notifying user space
+ * - Negative error code, if creating a new tunnel or updating the tunnel
+ *   state failed
  */
 int intel_dp_tunnel_detect(struct intel_dp *intel_dp, struct drm_modeset_acquire_ctx *ctx)
 {
@@ -266,14 +304,15 @@ bool intel_dp_tunnel_bw_alloc_is_enabled(struct intel_dp *intel_dp)
  */
 void intel_dp_tunnel_suspend(struct intel_dp *intel_dp)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_connector *connector = intel_dp->attached_connector;
 	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
 
 	if (!intel_dp_tunnel_bw_alloc_is_enabled(intel_dp))
 		return;
 
-	drm_dbg_kms(&i915->drm, "[DPTUN %s][CONNECTOR:%d:%s][ENCODER:%d:%s] Suspend\n",
+	drm_dbg_kms(display->drm,
+		    "[DPTUN %s][CONNECTOR:%d:%s][ENCODER:%d:%s] Suspend\n",
 		    drm_dp_tunnel_name(intel_dp->tunnel),
 		    connector->base.base.id, connector->base.name,
 		    encoder->base.base.id, encoder->base.name);
@@ -295,7 +334,7 @@ void intel_dp_tunnel_resume(struct intel_dp *intel_dp,
 			    const struct intel_crtc_state *crtc_state,
 			    bool dpcd_updated)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_connector *connector = intel_dp->attached_connector;
 	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
 	u8 dpcd[DP_RECEIVER_CAP_SIZE];
@@ -307,7 +346,8 @@ void intel_dp_tunnel_resume(struct intel_dp *intel_dp,
 
 	intel_dp->tunnel_suspended = false;
 
-	drm_dbg_kms(&i915->drm, "[DPTUN %s][CONNECTOR:%d:%s][ENCODER:%d:%s] Resume\n",
+	drm_dbg_kms(display->drm,
+		    "[DPTUN %s][CONNECTOR:%d:%s][ENCODER:%d:%s] Resume\n",
 		    drm_dp_tunnel_name(intel_dp->tunnel),
 		    connector->base.base.id, connector->base.name,
 		    encoder->base.base.id, encoder->base.name);
@@ -347,7 +387,7 @@ void intel_dp_tunnel_resume(struct intel_dp *intel_dp,
 	return;
 
 out_err:
-	drm_dbg_kms(&i915->drm,
+	drm_dbg_kms(display->drm,
 		    "[DPTUN %s][CONNECTOR:%d:%s][ENCODER:%d:%s] Tunnel can't be resumed, will drop and reject it (err %pe)\n",
 		    drm_dp_tunnel_name(intel_dp->tunnel),
 		    connector->base.base.id, connector->base.name,
@@ -369,18 +409,17 @@ add_inherited_tunnel(struct intel_atomic_state *state,
 		     struct drm_dp_tunnel *tunnel,
 		     struct intel_crtc *crtc)
 {
-	struct drm_i915_private *i915 = to_i915(state->base.dev);
+	struct intel_display *display = to_intel_display(state);
 	struct drm_dp_tunnel *old_tunnel;
 
 	old_tunnel = get_inherited_tunnel(state, crtc);
 	if (old_tunnel) {
-		drm_WARN_ON(&i915->drm, old_tunnel != tunnel);
+		drm_WARN_ON(display->drm, old_tunnel != tunnel);
 		return 0;
 	}
 
 	if (!state->inherited_dp_tunnels) {
-		state->inherited_dp_tunnels = kzalloc(sizeof(*state->inherited_dp_tunnels),
-						      GFP_KERNEL);
+		state->inherited_dp_tunnels = kzalloc_obj(*state->inherited_dp_tunnels);
 		if (!state->inherited_dp_tunnels)
 			return -ENOMEM;
 	}
@@ -394,7 +433,7 @@ static int check_inherited_tunnel_state(struct intel_atomic_state *state,
 					struct intel_dp *intel_dp,
 					const struct intel_digital_connector_state *old_conn_state)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(state);
 	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
 	struct intel_connector *connector =
 		to_intel_connector(old_conn_state->base.connector);
@@ -422,7 +461,7 @@ static int check_inherited_tunnel_state(struct intel_atomic_state *state,
 	    old_crtc_state->dp_tunnel_ref.tunnel == intel_dp->tunnel)
 		return 0;
 
-	drm_dbg_kms(&i915->drm,
+	drm_dbg_kms(display->drm,
 		    "[DPTUN %s][CONNECTOR:%d:%s][ENCODER:%d:%s][CRTC:%d:%s] Adding state for inherited tunnel %p\n",
 		    drm_dp_tunnel_name(intel_dp->tunnel),
 		    connector->base.base.id, connector->base.name,
@@ -441,12 +480,13 @@ static int check_inherited_tunnel_state(struct intel_atomic_state *state,
  */
 void intel_dp_tunnel_atomic_cleanup_inherited_state(struct intel_atomic_state *state)
 {
+	struct intel_display *display = to_intel_display(state);
 	enum pipe pipe;
 
 	if (!state->inherited_dp_tunnels)
 		return;
 
-	for_each_pipe(to_i915(state->base.dev), pipe)
+	for_each_pipe(display, pipe)
 		if (state->inherited_dp_tunnels->ref[pipe].tunnel)
 			drm_dp_tunnel_ref_put(&state->inherited_dp_tunnels->ref[pipe]);
 
@@ -457,7 +497,7 @@ void intel_dp_tunnel_atomic_cleanup_inherited_state(struct intel_atomic_state *s
 static int intel_dp_tunnel_atomic_add_group_state(struct intel_atomic_state *state,
 						  struct drm_dp_tunnel *tunnel)
 {
-	struct drm_i915_private *i915 = to_i915(state->base.dev);
+	struct intel_display *display = to_intel_display(state);
 	u32 pipe_mask;
 	int err;
 
@@ -466,7 +506,7 @@ static int intel_dp_tunnel_atomic_add_group_state(struct intel_atomic_state *sta
 	if (err)
 		return err;
 
-	drm_WARN_ON(&i915->drm, pipe_mask & ~((1 << I915_MAX_PIPES) - 1));
+	drm_WARN_ON(display->drm, pipe_mask & ~((1 << I915_MAX_PIPES) - 1));
 
 	return intel_modeset_pipes_in_mask_early(state, "DPTUN", pipe_mask);
 }
@@ -504,7 +544,7 @@ static int check_group_state(struct intel_atomic_state *state,
 			     struct intel_connector *connector,
 			     struct intel_crtc *crtc)
 {
-	struct drm_i915_private *i915 = to_i915(state->base.dev);
+	struct intel_display *display = to_intel_display(state);
 	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
 	const struct intel_crtc_state *crtc_state =
 		intel_atomic_get_new_crtc_state(state, crtc);
@@ -512,7 +552,7 @@ static int check_group_state(struct intel_atomic_state *state,
 	if (!crtc_state->dp_tunnel_ref.tunnel)
 		return 0;
 
-	drm_dbg_kms(&i915->drm,
+	drm_dbg_kms(display->drm,
 		    "[DPTUN %s][CONNECTOR:%d:%s][ENCODER:%d:%s][CRTC:%d:%s] Adding group state for tunnel %p\n",
 		    drm_dp_tunnel_name(intel_dp->tunnel),
 		    connector->base.base.id, connector->base.name,
@@ -583,7 +623,7 @@ int intel_dp_tunnel_atomic_compute_stream_bw(struct intel_atomic_state *state,
 					     const struct intel_connector *connector,
 					     struct intel_crtc_state *crtc_state)
 {
-	struct drm_i915_private *i915 = to_i915(state->base.dev);
+	struct intel_display *display = to_intel_display(state);
 	struct intel_encoder *encoder = &dp_to_dig_port(intel_dp)->base;
 	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
 	int required_rate = intel_dp_config_required_rate(crtc_state);
@@ -592,7 +632,7 @@ int intel_dp_tunnel_atomic_compute_stream_bw(struct intel_atomic_state *state,
 	if (!intel_dp_tunnel_bw_alloc_is_enabled(intel_dp))
 		return 0;
 
-	drm_dbg_kms(&i915->drm,
+	drm_dbg_kms(display->drm,
 		    "[DPTUN %s][CONNECTOR:%d:%s][ENCODER:%d:%s][CRTC:%d:%s] Stream %d required BW %d Mb/s\n",
 		    drm_dp_tunnel_name(intel_dp->tunnel),
 		    connector->base.base.id, connector->base.name,
@@ -619,19 +659,27 @@ int intel_dp_tunnel_atomic_compute_stream_bw(struct intel_atomic_state *state,
  *
  * Clear any DP tunnel stream BW requirement set by
  * intel_dp_tunnel_atomic_compute_stream_bw().
+ *
+ * Returns 0 in case of success, a negative error code otherwise.
  */
-void intel_dp_tunnel_atomic_clear_stream_bw(struct intel_atomic_state *state,
-					    struct intel_crtc_state *crtc_state)
+int intel_dp_tunnel_atomic_clear_stream_bw(struct intel_atomic_state *state,
+					   struct intel_crtc_state *crtc_state)
 {
 	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	int err;
 
 	if (!crtc_state->dp_tunnel_ref.tunnel)
-		return;
+		return 0;
 
-	drm_dp_tunnel_atomic_set_stream_bw(&state->base,
-					   crtc_state->dp_tunnel_ref.tunnel,
-					   crtc->pipe, 0);
+	err = drm_dp_tunnel_atomic_set_stream_bw(&state->base,
+						 crtc_state->dp_tunnel_ref.tunnel,
+						 crtc->pipe, 0);
+	if (err)
+		return err;
+
 	drm_dp_tunnel_ref_put(&crtc_state->dp_tunnel_ref);
+
+	return 0;
 }
 
 /**
@@ -645,7 +693,7 @@ void intel_dp_tunnel_atomic_clear_stream_bw(struct intel_atomic_state *state,
  * @state must be recomputed with the updated @limits.
  *
  * Returns:
- *   - 0 if the confugration is valid
+ *   - 0 if the configuration is valid
  *   - %-EAGAIN, if the configuration is invalid and @limits got updated
  *     with fallback values with which the configuration of all CRTCs in
  *     @state must be recomputed
@@ -708,7 +756,7 @@ static void queue_retry_work(struct intel_atomic_state *state,
 			     struct drm_dp_tunnel *tunnel,
 			     const struct intel_crtc_state *crtc_state)
 {
-	struct drm_i915_private *i915 = to_i915(state->base.dev);
+	struct intel_display *display = to_intel_display(state);
 	struct intel_encoder *encoder;
 
 	encoder = intel_get_crtc_new_encoder(state, crtc_state);
@@ -716,7 +764,7 @@ static void queue_retry_work(struct intel_atomic_state *state,
 	if (!intel_digital_port_connected(encoder))
 		return;
 
-	drm_dbg_kms(&i915->drm,
+	drm_dbg_kms(display->drm,
 		    "[DPTUN %s][ENCODER:%d:%s] BW allocation failed on a connected sink\n",
 		    drm_dp_tunnel_name(tunnel),
 		    encoder->base.base.id,
@@ -765,7 +813,7 @@ void intel_dp_tunnel_atomic_alloc_bw(struct intel_atomic_state *state)
 
 /**
  * intel_dp_tunnel_mgr_init - Initialize the DP tunnel manager
- * @i915: i915 device object
+ * @display: display device
  *
  * Initialize the DP tunnel manager. The tunnel manager will support the
  * detection/management of DP tunnels on all DP connectors, so the function
@@ -773,14 +821,14 @@ void intel_dp_tunnel_atomic_alloc_bw(struct intel_atomic_state *state)
  *
  * Return 0 in case of success, a negative error code otherwise.
  */
-int intel_dp_tunnel_mgr_init(struct drm_i915_private *i915)
+int intel_dp_tunnel_mgr_init(struct intel_display *display)
 {
 	struct drm_dp_tunnel_mgr *tunnel_mgr;
 	struct drm_connector_list_iter connector_list_iter;
 	struct intel_connector *connector;
 	int dp_connectors = 0;
 
-	drm_connector_list_iter_begin(&i915->drm, &connector_list_iter);
+	drm_connector_list_iter_begin(display->drm, &connector_list_iter);
 	for_each_intel_connector_iter(connector, &connector_list_iter) {
 		if (connector->base.connector_type != DRM_MODE_CONNECTOR_DisplayPort)
 			continue;
@@ -789,23 +837,23 @@ int intel_dp_tunnel_mgr_init(struct drm_i915_private *i915)
 	}
 	drm_connector_list_iter_end(&connector_list_iter);
 
-	tunnel_mgr = drm_dp_tunnel_mgr_create(&i915->drm, dp_connectors);
+	tunnel_mgr = drm_dp_tunnel_mgr_create(display->drm, dp_connectors);
 	if (IS_ERR(tunnel_mgr))
 		return PTR_ERR(tunnel_mgr);
 
-	i915->display.dp_tunnel_mgr = tunnel_mgr;
+	display->dp_tunnel_mgr = tunnel_mgr;
 
 	return 0;
 }
 
 /**
  * intel_dp_tunnel_mgr_cleanup - Clean up the DP tunnel manager state
- * @i915: i915 device object
+ * @display: display device
  *
  * Clean up the DP tunnel manager state.
  */
-void intel_dp_tunnel_mgr_cleanup(struct drm_i915_private *i915)
+void intel_dp_tunnel_mgr_cleanup(struct intel_display *display)
 {
-	drm_dp_tunnel_mgr_destroy(i915->display.dp_tunnel_mgr);
-	i915->display.dp_tunnel_mgr = NULL;
+	drm_dp_tunnel_mgr_destroy(display->dp_tunnel_mgr);
+	display->dp_tunnel_mgr = NULL;
 }

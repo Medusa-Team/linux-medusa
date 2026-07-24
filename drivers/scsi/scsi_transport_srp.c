@@ -388,7 +388,7 @@ static void srp_reconnect_work(struct work_struct *work)
 			     "reconnect attempt %d failed (%d)\n",
 			     ++rport->failed_reconnects, res);
 		delay = rport->reconnect_delay *
-			min(100, max(1, rport->failed_reconnects - 10));
+			clamp(rport->failed_reconnects - 10, 1, 100);
 		if (delay > 0)
 			queue_delayed_work(system_long_wq,
 					   &rport->reconnect_work, delay * HZ);
@@ -700,7 +700,7 @@ struct srp_rport *srp_rport_add(struct Scsi_Host *shost,
 	struct srp_internal *i = to_srp_internal(shost->transportt);
 	int id, ret;
 
-	rport = kzalloc(sizeof(*rport), GFP_KERNEL);
+	rport = kzalloc_obj(*rport);
 	if (!rport)
 		return ERR_PTR(-ENOMEM);
 
@@ -814,7 +814,7 @@ srp_attach_transport(struct srp_function_template *ft)
 	int count;
 	struct srp_internal *i;
 
-	i = kzalloc(sizeof(*i), GFP_KERNEL);
+	i = kzalloc_obj(*i);
 	if (!i)
 		return NULL;
 

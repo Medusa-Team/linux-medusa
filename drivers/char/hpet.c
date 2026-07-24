@@ -34,6 +34,7 @@
 #include <linux/io.h>
 #include <linux/acpi.h>
 #include <linux/hpet.h>
+#include <linux/platform_device.h>
 #include <asm/current.h>
 #include <asm/irq.h>
 #include <asm/div64.h>
@@ -162,6 +163,7 @@ static irqreturn_t hpet_interrupt(int irq, void *data)
 
 static void hpet_timer_set_irq(struct hpet_dev *devp)
 {
+	const unsigned int nr_irqs = irq_get_nr_irqs();
 	unsigned long v;
 	int irq, gsi;
 	struct hpet_timer __iomem *timer;
@@ -353,8 +355,9 @@ static __init int hpet_mmap_enable(char *str)
 }
 __setup("hpet_mmap=", hpet_mmap_enable);
 
-static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
+static int hpet_mmap_prepare(struct vm_area_desc *desc)
 {
+	struct file *file = desc->file;
 	struct hpet_dev *devp;
 	unsigned long addr;
 
@@ -367,11 +370,12 @@ static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
 	if (addr & (PAGE_SIZE - 1))
 		return -ENOSYS;
 
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	return vm_iomap_memory(vma, addr, PAGE_SIZE);
+	desc->page_prot = pgprot_noncached(desc->page_prot);
+	mmap_action_simple_ioremap(desc, addr, PAGE_SIZE);
+	return 0;
 }
 #else
-static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
+static int hpet_mmap_prepare(struct vm_area_desc *desc)
 {
 	return -ENOSYS;
 }
@@ -700,7 +704,6 @@ hpet_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 static const struct file_operations hpet_fops = {
 	.owner = THIS_MODULE,
-	.llseek = no_llseek,
 	.read = hpet_read,
 	.poll = hpet_poll,
 	.unlocked_ioctl = hpet_ioctl,
@@ -710,7 +713,7 @@ static const struct file_operations hpet_fops = {
 	.open = hpet_open,
 	.release = hpet_release,
 	.fasync = hpet_fasync,
-	.mmap = hpet_mmap,
+	.mmap_prepare = hpet_mmap_prepare,
 };
 
 static int hpet_is_known(struct hpet_data *hdp)
@@ -724,7 +727,7 @@ static int hpet_is_known(struct hpet_data *hdp)
 	return 0;
 }
 
-static struct ctl_table hpet_table[] = {
+static const struct ctl_table hpet_table[] = {
 	{
 	 .procname = "max-user-freq",
 	 .data = &hpet_max_freq,
@@ -808,7 +811,7 @@ int hpet_alloc(struct hpet_data *hdp)
 	struct hpets *hpetp;
 	struct hpet __iomem *hpet;
 	static struct hpets *last;
-	unsigned long period;
+	u32 period;
 	unsigned long long temp;
 	u32 remainder;
 
@@ -823,8 +826,7 @@ int hpet_alloc(struct hpet_data *hdp)
 		return 0;
 	}
 
-	hpetp = kzalloc(struct_size(hpetp, hp_dev, hdp->hd_nirqs),
-			GFP_KERNEL);
+	hpetp = kzalloc_flex(*hpetp, hp_dev, hdp->hd_nirqs);
 
 	if (!hpetp)
 		return -ENOMEM;
@@ -865,11 +867,11 @@ int hpet_alloc(struct hpet_data *hdp)
 	do_div(temp, period);
 	hpetp->hp_tick_freq = temp; /* ticks per second */
 
-	printk(KERN_INFO "hpet%d: at MMIO 0x%lx, IRQ%s",
+	printk(KERN_INFO "hpet%u: at MMIO 0x%lx, IRQ%s",
 		hpetp->hp_which, hdp->hd_phys_address,
-		hpetp->hp_ntimer > 1 ? "s" : "");
+		str_plural(hpetp->hp_ntimer));
 	for (i = 0; i < hpetp->hp_ntimer; i++)
-		printk(KERN_CONT "%s %d", i > 0 ? "," : "", hdp->hd_irq[i]);
+		printk(KERN_CONT "%s %u", i > 0 ? "," : "", hdp->hd_irq[i]);
 	printk(KERN_CONT "\n");
 
 	temp = hpetp->hp_tick_freq;
@@ -972,8 +974,9 @@ static acpi_status hpet_resources(struct acpi_resource *res, void *data)
 	return AE_OK;
 }
 
-static int hpet_acpi_add(struct acpi_device *device)
+static int hpet_acpi_probe(struct platform_device *pdev)
 {
+	struct acpi_device *device = ACPI_COMPANION(&pdev->dev);
 	acpi_status result;
 	struct hpet_data data;
 
@@ -1001,12 +1004,12 @@ static const struct acpi_device_id hpet_device_ids[] = {
 	{"", 0},
 };
 
-static struct acpi_driver hpet_acpi_driver = {
-	.name = "hpet",
-	.ids = hpet_device_ids,
-	.ops = {
-		.add = hpet_acpi_add,
-		},
+static struct platform_driver hpet_acpi_driver = {
+	.probe = hpet_acpi_probe,
+	.driver = {
+		.name = "hpet_acpi",
+		.acpi_match_table = hpet_device_ids,
+	},
 };
 
 static struct miscdevice hpet_misc = { HPET_MINOR, "hpet", &hpet_fops };
@@ -1021,10 +1024,9 @@ static int __init hpet_init(void)
 
 	sysctl_header = register_sysctl("dev/hpet", hpet_table);
 
-	result = acpi_bus_register_driver(&hpet_acpi_driver);
+	result = platform_driver_register(&hpet_acpi_driver);
 	if (result < 0) {
-		if (sysctl_header)
-			unregister_sysctl_table(sysctl_header);
+		unregister_sysctl_table(sysctl_header);
 		misc_deregister(&hpet_misc);
 		return result;
 	}

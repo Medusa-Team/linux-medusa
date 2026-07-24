@@ -52,7 +52,8 @@
  *     Usage_GD_Keyboard
  *     CollectionApplication(     ← Open the collection
  *         ReportId(3)
- *         LogicalRange_i8(0, 1)
+ *         LogicalMinimum_i8(0)
+ *         LogicalMaximum_i8(1)
  *         // other fields
  *     )                          ← End EndCollection
  *
@@ -74,26 +75,43 @@
 #define Arr		0x0
 #define Abs		0x0
 #define Rel		0x4
+#define Null		0x40
+#define Buff		0x0100
 
 /* Use like this: Input(Var|Abs) */
 #define Input(i_)			0x081, i8(i_),
 #define Output(i_)			0x091, i8(i_),
 #define Feature(i_)			0x0b1, i8(i_),
 
+#define Input_i16(i_)			0x082, LE16(i_),
+#define Output_i16(i_)			0x092, LE16(i_),
+#define Feature_i16(i_)			0x0b2, LE16(i_),
+
 #define ReportId(id_)			0x85, i8(id_),
 #define ReportSize(sz_)		        0x75, i8(sz_),
 #define ReportCount(cnt_)		0x95, i8(cnt_),
 
-#define LogicalRange_i8(min_, max_)	0x15, i8(min_), 0x25, i8(max_),
-#define LogicalRange_i16(min_, max_)	0x16, LE16(min_), 0x26, LE16(max_),
-#define LogicalRange_i32(min_, max_)	0x17, LE32(min_), 0x27, LE32(max_),
+#define LogicalMinimum_i8(min_)		0x15, i8(min_),
+#define LogicalMinimum_i16(min_)	0x16, LE16(min_),
+#define LogicalMinimum_i32(min_)	0x17, LE32(min_),
 
-#define PhysicalRange_i8(min_, max_)	0x35, i8(min_), 0x45, i8(max_),
-#define PhysicalRange_i16(min_, max_)	0x36, LE16(min_), 0x46, LE16(max_),
-#define PhysicalRange_i32(min_, max_)	0x37, LE32(min_), 0x47, LE32(max_),
+#define LogicalMaximum_i8(max_)		0x25, i8(max_),
+#define LogicalMaximum_i16(max_)	0x26, LE16(max_),
+#define LogicalMaximum_i32(max_)	0x27, LE32(max_),
 
-#define UsageRange_i8(min_, max_)	0x19, i8(min_), 0x29, i8(max_),
-#define UsageRange_i16(min_, max_)	0x1a, LE16(min_), 0x2a, LE16(max_),
+#define PhysicalMinimum_i8(min_)	0x35, i8(min_),
+#define PhysicalMinimum_i16(min_)	0x36, LE16(min_),
+#define PhysicalMinimum_i32(min_)	0x37, LE32(min_),
+
+#define PhysicalMaximum_i8(max_)	0x45, i8(max_),
+#define PhysicalMaximum_i16(max_)	0x46, LE16(max_),
+#define PhysicalMaximum_i32(max_)	0x47, LE32(max_),
+
+#define UsageMinimum_i8(min_)		0x19, i8(min_),
+#define UsageMinimum_i16(min_)		0x1a, LE16(min_),
+
+#define UsageMaximum_i8(max_)		0x29, i8(max_),
+#define UsageMaximum_i16(max_)		0x2a, LE16(max_),
 
 #define UsagePage_i8(p_)		0x05, i8(p_),
 #define UsagePage_i16(p_)		0x06, LE16(p_),
@@ -125,8 +143,11 @@
  * report with Report ID 0xac of the given size in bytes.
  * The size is inclusive of the 1 byte Report ID prefix.
  *
- * HID-BPF requires that at least one report has
- * the same size as the original report from the device.
+ * The kernel discards any HID reports that are larger
+ * than the largest report in a HID report descriptor.
+ * Thus at least one report must have (at least)
+ * the same size as the largest original report from
+ * the device.
  * The easy way to ensure that is to add this
  * macro as the last element of your CollectionApplication
  * other reports can be of any size less than this.
@@ -277,6 +298,7 @@
 #define Usage_GD_SystemSpeakerMute                     Usage_i8(0xa7)
 #define Usage_GD_SystemHibernate                       Usage_i8(0xa8)
 #define Usage_GD_SystemMicrophoneMute                  Usage_i8(0xa9)
+#define Usage_GD_SystemAccessibilityBinding            Usage_i8(0xaa)
 #define Usage_GD_SystemDisplayInvert                   Usage_i8(0xb0)
 #define Usage_GD_SystemDisplayInternal                 Usage_i8(0xb1)
 #define Usage_GD_SystemDisplayExternal                 Usage_i8(0xb2)
@@ -2651,7 +2673,7 @@
 #define Usage_BS_iDeviceName                           Usage_i8(0x88)
 #define Usage_BS_iDeviceChemistry                      Usage_i8(0x89)
 #define Usage_BS_ManufacturerData                      Usage_i8(0x8a)
-#define Usage_BS_Rechargable                           Usage_i8(0x8b)
+#define Usage_BS_Rechargeable                          Usage_i8(0x8b)
 #define Usage_BS_WarningCapacityLimit                  Usage_i8(0x8c)
 #define Usage_BS_CapacityGranularity1                  Usage_i8(0x8d)
 #define Usage_BS_CapacityGranularity2                  Usage_i8(0x8e)

@@ -6,13 +6,14 @@
 #ifndef __INTEL_VGA_H__
 #define __INTEL_VGA_H__
 
-struct drm_i915_private;
+#include <linux/types.h>
 
-void intel_vga_reset_io_mem(struct drm_i915_private *i915);
-void intel_vga_disable(struct drm_i915_private *i915);
-void intel_vga_redisable(struct drm_i915_private *i915);
-void intel_vga_redisable_power_on(struct drm_i915_private *i915);
-int intel_vga_register(struct drm_i915_private *i915);
-void intel_vga_unregister(struct drm_i915_private *i915);
+struct intel_display;
+
+u8 intel_vga_read(struct intel_display *display, u16 reg, bool mmio);
+void intel_vga_reset_io_mem(struct intel_display *display);
+void intel_vga_disable(struct intel_display *display);
+void intel_vga_register(struct intel_display *display);
+void intel_vga_unregister(struct intel_display *display);
 
 #endif /* __INTEL_VGA_H__ */

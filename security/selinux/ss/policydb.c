@@ -155,6 +155,16 @@ static const struct policydb_compat_info policydb_compat[] = {
 		.sym_num = SYM_NUM,
 		.ocon_num = OCON_NUM,
 	},
+	{
+		.version = POLICYDB_VERSION_COND_XPERMS,
+		.sym_num = SYM_NUM,
+		.ocon_num = OCON_NUM,
+	},
+	{
+		.version = POLICYDB_VERSION_NEVERAUDIT,
+		.sym_num = SYM_NUM,
+		.ocon_num = OCON_NUM,
+	},
 };
 
 static const struct policydb_compat_info *
@@ -296,9 +306,7 @@ static int sens_destroy(void *key, void *datum, void *p)
 	kfree(key);
 	if (datum) {
 		levdatum = datum;
-		if (levdatum->level)
-			ebitmap_destroy(&levdatum->level->cat);
-		kfree(levdatum->level);
+		ebitmap_destroy(&levdatum->level.cat);
 	}
 	kfree(datum);
 	return 0;
@@ -382,7 +390,7 @@ static int roles_init(struct policydb *p)
 	int rc;
 	struct role_datum *role;
 
-	role = kzalloc(sizeof(*role), GFP_KERNEL);
+	role = kzalloc_obj(*role);
 	if (!role)
 		return -ENOMEM;
 
@@ -528,6 +536,7 @@ static void policydb_init(struct policydb *p)
 	ebitmap_init(&p->filename_trans_ttypes);
 	ebitmap_init(&p->policycaps);
 	ebitmap_init(&p->permissive_map);
+	ebitmap_init(&p->neveraudit_map);
 }
 
 /*
@@ -630,11 +639,11 @@ static int sens_index(void *key, void *datum, void *datap)
 	p = datap;
 
 	if (!levdatum->isalias) {
-		if (!levdatum->level->sens ||
-		    levdatum->level->sens > p->p_levels.nprim)
+		if (!levdatum->level.sens ||
+		    levdatum->level.sens > p->p_levels.nprim)
 			return -EINVAL;
 
-		p->sym_val_to_name[SYM_LEVELS][levdatum->level->sens - 1] = key;
+		p->sym_val_to_name[SYM_LEVELS][levdatum->level.sens - 1] = key;
 	}
 
 	return 0;
@@ -729,24 +738,23 @@ static int policydb_index(struct policydb *p)
 	avtab_hash_eval(&p->te_avtab, "rules");
 	symtab_hash_eval(p->symtab);
 
-	p->class_val_to_struct = kcalloc(p->p_classes.nprim,
-					 sizeof(*p->class_val_to_struct),
-					 GFP_KERNEL);
+	p->class_val_to_struct = kzalloc_objs(*p->class_val_to_struct,
+					      p->p_classes.nprim);
 	if (!p->class_val_to_struct)
 		return -ENOMEM;
 
-	p->role_val_to_struct = kcalloc(
-		p->p_roles.nprim, sizeof(*p->role_val_to_struct), GFP_KERNEL);
+	p->role_val_to_struct = kzalloc_objs(*p->role_val_to_struct,
+					     p->p_roles.nprim);
 	if (!p->role_val_to_struct)
 		return -ENOMEM;
 
-	p->user_val_to_struct = kcalloc(
-		p->p_users.nprim, sizeof(*p->user_val_to_struct), GFP_KERNEL);
+	p->user_val_to_struct = kzalloc_objs(*p->user_val_to_struct,
+					     p->p_users.nprim);
 	if (!p->user_val_to_struct)
 		return -ENOMEM;
 
-	p->type_val_to_struct = kvcalloc(
-		p->p_types.nprim, sizeof(*p->type_val_to_struct), GFP_KERNEL);
+	p->type_val_to_struct = kvzalloc_objs(*p->type_val_to_struct,
+					      p->p_types.nprim);
 	if (!p->type_val_to_struct)
 		return -ENOMEM;
 
@@ -849,6 +857,7 @@ void policydb_destroy(struct policydb *p)
 	ebitmap_destroy(&p->filename_trans_ttypes);
 	ebitmap_destroy(&p->policycaps);
 	ebitmap_destroy(&p->permissive_map);
+	ebitmap_destroy(&p->neveraudit_map);
 }
 
 /*
@@ -992,7 +1001,7 @@ int policydb_context_isvalid(struct policydb *p, struct context *c)
  * Read a MLS range structure from a policydb binary
  * representation file.
  */
-static int mls_read_range_helper(struct mls_range *r, void *fp)
+static int mls_read_range_helper(struct mls_range *r, struct policy_file *fp)
 {
 	__le32 buf[2];
 	u32 items;
@@ -1052,7 +1061,7 @@ out:
  * from a policydb binary representation file.
  */
 static int context_read_and_validate(struct context *c, struct policydb *p,
-				     void *fp)
+				     struct policy_file *fp)
 {
 	__le32 buf[3];
 	int rc;
@@ -1090,7 +1099,7 @@ out:
  * binary representation file.
  */
 
-static int str_read(char **strp, gfp_t flags, void *fp, u32 len)
+int str_read(char **strp, gfp_t flags, struct policy_file *fp, u32 len)
 {
 	int rc;
 	char *str;
@@ -1113,7 +1122,7 @@ static int str_read(char **strp, gfp_t flags, void *fp, u32 len)
 	return 0;
 }
 
-static int perm_read(struct policydb *p, struct symtab *s, void *fp)
+static int perm_read(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct perm_datum *perdatum;
@@ -1121,7 +1130,7 @@ static int perm_read(struct policydb *p, struct symtab *s, void *fp)
 	__le32 buf[2];
 	u32 len;
 
-	perdatum = kzalloc(sizeof(*perdatum), GFP_KERNEL);
+	perdatum = kzalloc_obj(*perdatum);
 	if (!perdatum)
 		return -ENOMEM;
 
@@ -1146,7 +1155,7 @@ bad:
 	return rc;
 }
 
-static int common_read(struct policydb *p, struct symtab *s, void *fp)
+static int common_read(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct common_datum *comdatum;
@@ -1154,7 +1163,7 @@ static int common_read(struct policydb *p, struct symtab *s, void *fp)
 	u32 i, len, nel;
 	int rc;
 
-	comdatum = kzalloc(sizeof(*comdatum), GFP_KERNEL);
+	comdatum = kzalloc_obj(*comdatum);
 	if (!comdatum)
 		return -ENOMEM;
 
@@ -1198,7 +1207,7 @@ static void type_set_init(struct type_set *t)
 	ebitmap_init(&t->negset);
 }
 
-static int type_set_read(struct type_set *t, void *fp)
+static int type_set_read(struct type_set *t, struct policy_file *fp)
 {
 	__le32 buf[1];
 	int rc;
@@ -1217,7 +1226,7 @@ static int type_set_read(struct type_set *t, void *fp)
 }
 
 static int read_cons_helper(struct policydb *p, struct constraint_node **nodep,
-			    u32 ncons, int allowxtarget, void *fp)
+			    u32 ncons, int allowxtarget, struct policy_file *fp)
 {
 	struct constraint_node *c, *lc;
 	struct constraint_expr *e, *le;
@@ -1227,7 +1236,7 @@ static int read_cons_helper(struct policydb *p, struct constraint_node **nodep,
 
 	lc = NULL;
 	for (i = 0; i < ncons; i++) {
-		c = kzalloc(sizeof(*c), GFP_KERNEL);
+		c = kzalloc_obj(*c);
 		if (!c)
 			return -ENOMEM;
 
@@ -1244,7 +1253,7 @@ static int read_cons_helper(struct policydb *p, struct constraint_node **nodep,
 		le = NULL;
 		depth = -1;
 		for (j = 0; j < nexpr; j++) {
-			e = kzalloc(sizeof(*e), GFP_KERNEL);
+			e = kzalloc_obj(*e);
 			if (!e)
 				return -ENOMEM;
 
@@ -1287,9 +1296,7 @@ static int read_cons_helper(struct policydb *p, struct constraint_node **nodep,
 					return rc;
 				if (p->policyvers >=
 				    POLICYDB_VERSION_CONSTRAINT_NAMES) {
-					e->type_names =
-						kzalloc(sizeof(*e->type_names),
-							GFP_KERNEL);
+					e->type_names = kzalloc_obj(*e->type_names);
 					if (!e->type_names)
 						return -ENOMEM;
 					type_set_init(e->type_names);
@@ -1311,7 +1318,7 @@ static int read_cons_helper(struct policydb *p, struct constraint_node **nodep,
 	return 0;
 }
 
-static int class_read(struct policydb *p, struct symtab *s, void *fp)
+static int class_read(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct class_datum *cladatum;
@@ -1319,7 +1326,7 @@ static int class_read(struct policydb *p, struct symtab *s, void *fp)
 	u32 i, len, len2, ncons, nel;
 	int rc;
 
-	cladatum = kzalloc(sizeof(*cladatum), GFP_KERNEL);
+	cladatum = kzalloc_obj(*cladatum);
 	if (!cladatum)
 		return -ENOMEM;
 
@@ -1408,7 +1415,7 @@ bad:
 	return rc;
 }
 
-static int role_read(struct policydb *p, struct symtab *s, void *fp)
+static int role_read(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct role_datum *role;
@@ -1417,7 +1424,7 @@ static int role_read(struct policydb *p, struct symtab *s, void *fp)
 	__le32 buf[3];
 	u32 len;
 
-	role = kzalloc(sizeof(*role), GFP_KERNEL);
+	role = kzalloc_obj(*role);
 	if (!role)
 		return -ENOMEM;
 
@@ -1465,7 +1472,7 @@ bad:
 	return rc;
 }
 
-static int type_read(struct policydb *p, struct symtab *s, void *fp)
+static int type_read(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct type_datum *typdatum;
@@ -1474,7 +1481,7 @@ static int type_read(struct policydb *p, struct symtab *s, void *fp)
 	__le32 buf[4];
 	u32 len;
 
-	typdatum = kzalloc(sizeof(*typdatum), GFP_KERNEL);
+	typdatum = kzalloc_obj(*typdatum);
 	if (!typdatum)
 		return -ENOMEM;
 
@@ -1517,7 +1524,7 @@ bad:
  * Read a MLS level structure from a policydb binary
  * representation file.
  */
-static int mls_read_level(struct mls_level *lp, void *fp)
+static int mls_read_level(struct mls_level *lp, struct policy_file *fp)
 {
 	__le32 buf[1];
 	int rc;
@@ -1539,7 +1546,7 @@ static int mls_read_level(struct mls_level *lp, void *fp)
 	return 0;
 }
 
-static int user_read(struct policydb *p, struct symtab *s, void *fp)
+static int user_read(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct user_datum *usrdatum;
@@ -1548,7 +1555,7 @@ static int user_read(struct policydb *p, struct symtab *s, void *fp)
 	__le32 buf[3];
 	u32 len;
 
-	usrdatum = kzalloc(sizeof(*usrdatum), GFP_KERNEL);
+	usrdatum = kzalloc_obj(*usrdatum);
 	if (!usrdatum)
 		return -ENOMEM;
 
@@ -1590,7 +1597,7 @@ bad:
 	return rc;
 }
 
-static int sens_read(struct policydb *p, struct symtab *s, void *fp)
+static int sens_read(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct level_datum *levdatum;
@@ -1598,7 +1605,7 @@ static int sens_read(struct policydb *p, struct symtab *s, void *fp)
 	__le32 buf[2];
 	u32 len;
 
-	levdatum = kzalloc(sizeof(*levdatum), GFP_KERNEL);
+	levdatum = kzalloc_obj(*levdatum);
 	if (!levdatum)
 		return -ENOMEM;
 
@@ -1613,12 +1620,7 @@ static int sens_read(struct policydb *p, struct symtab *s, void *fp)
 	if (rc)
 		goto bad;
 
-	rc = -ENOMEM;
-	levdatum->level = kmalloc(sizeof(*levdatum->level), GFP_KERNEL);
-	if (!levdatum->level)
-		goto bad;
-
-	rc = mls_read_level(levdatum->level, fp);
+	rc = mls_read_level(&levdatum->level, fp);
 	if (rc)
 		goto bad;
 
@@ -1631,7 +1633,7 @@ bad:
 	return rc;
 }
 
-static int cat_read(struct policydb *p, struct symtab *s, void *fp)
+static int cat_read(struct policydb *p, struct symtab *s, struct policy_file *fp)
 {
 	char *key = NULL;
 	struct cat_datum *catdatum;
@@ -1639,7 +1641,7 @@ static int cat_read(struct policydb *p, struct symtab *s, void *fp)
 	__le32 buf[3];
 	u32 len;
 
-	catdatum = kzalloc(sizeof(*catdatum), GFP_KERNEL);
+	catdatum = kzalloc_obj(*catdatum);
 	if (!catdatum)
 		return -ENOMEM;
 
@@ -1666,7 +1668,7 @@ bad:
 
 /* clang-format off */
 static int (*const read_f[SYM_NUM])(struct policydb *p, struct symtab *s,
-				    void *fp) = {
+				    struct policy_file *fp) = {
 	common_read,
 	class_read,
 	role_read,
@@ -1836,7 +1838,7 @@ u32 string_to_av_perm(struct policydb *p, u16 tclass, const char *name)
 	return 1U << (perdatum->value - 1);
 }
 
-static int range_read(struct policydb *p, void *fp)
+static int range_read(struct policydb *p, struct policy_file *fp)
 {
 	struct range_trans *rt = NULL;
 	struct mls_range *r = NULL;
@@ -1859,7 +1861,7 @@ static int range_read(struct policydb *p, void *fp)
 
 	for (i = 0; i < nel; i++) {
 		rc = -ENOMEM;
-		rt = kzalloc(sizeof(*rt), GFP_KERNEL);
+		rt = kzalloc_obj(*rt);
 		if (!rt)
 			goto out;
 
@@ -1884,7 +1886,7 @@ static int range_read(struct policydb *p, void *fp)
 			goto out;
 
 		rc = -ENOMEM;
-		r = kzalloc(sizeof(*r), GFP_KERNEL);
+		r = kzalloc_obj(*r);
 		if (!r)
 			goto out;
 
@@ -1913,7 +1915,7 @@ out:
 	return rc;
 }
 
-static int filename_trans_read_helper_compat(struct policydb *p, void *fp)
+static int filename_trans_read_helper_compat(struct policydb *p, struct policy_file *fp)
 {
 	struct filename_trans_key key, *ft = NULL;
 	struct filename_trans_datum *last, *datum = NULL;
@@ -1960,7 +1962,7 @@ static int filename_trans_read_helper_compat(struct policydb *p, void *fp)
 	}
 	if (!datum) {
 		rc = -ENOMEM;
-		datum = kmalloc(sizeof(*datum), GFP_KERNEL);
+		datum = kmalloc_obj(*datum);
 		if (!datum)
 			goto out;
 
@@ -1998,7 +2000,7 @@ out:
 	return rc;
 }
 
-static int filename_trans_read_helper(struct policydb *p, void *fp)
+static int filename_trans_read_helper(struct policydb *p, struct policy_file *fp)
 {
 	struct filename_trans_key *ft = NULL;
 	struct filename_trans_datum **dst, *datum, *first = NULL;
@@ -2035,7 +2037,7 @@ static int filename_trans_read_helper(struct policydb *p, void *fp)
 	dst = &first;
 	for (i = 0; i < ndatum; i++) {
 		rc = -ENOMEM;
-		datum = kmalloc(sizeof(*datum), GFP_KERNEL);
+		datum = kmalloc_obj(*datum);
 		if (!datum)
 			goto out;
 
@@ -2057,7 +2059,7 @@ static int filename_trans_read_helper(struct policydb *p, void *fp)
 	}
 
 	rc = -ENOMEM;
-	ft = kmalloc(sizeof(*ft), GFP_KERNEL);
+	ft = kmalloc_obj(*ft);
 	if (!ft)
 		goto out;
 
@@ -2087,7 +2089,7 @@ out:
 	return rc;
 }
 
-static int filename_trans_read(struct policydb *p, void *fp)
+static int filename_trans_read(struct policydb *p, struct policy_file *fp)
 {
 	u32 nel, i;
 	__le32 buf[1];
@@ -2128,7 +2130,7 @@ static int filename_trans_read(struct policydb *p, void *fp)
 	return 0;
 }
 
-static int genfs_read(struct policydb *p, void *fp)
+static int genfs_read(struct policydb *p, struct policy_file *fp)
 {
 	int rc;
 	u32 i, j, nel, nel2, len, len2;
@@ -2150,7 +2152,7 @@ static int genfs_read(struct policydb *p, void *fp)
 		len = le32_to_cpu(buf[0]);
 
 		rc = -ENOMEM;
-		newgenfs = kzalloc(sizeof(*newgenfs), GFP_KERNEL);
+		newgenfs = kzalloc_obj(*newgenfs);
 		if (!newgenfs)
 			goto out;
 
@@ -2189,7 +2191,7 @@ static int genfs_read(struct policydb *p, void *fp)
 			len = le32_to_cpu(buf[0]);
 
 			rc = -ENOMEM;
-			newc = kzalloc(sizeof(*newc), GFP_KERNEL);
+			newc = kzalloc_obj(*newc);
 			if (!newc)
 				goto out;
 
@@ -2242,7 +2244,7 @@ out:
 }
 
 static int ocontext_read(struct policydb *p,
-			 const struct policydb_compat_info *info, void *fp)
+			 const struct policydb_compat_info *info, struct policy_file *fp)
 {
 	int rc;
 	unsigned int i;
@@ -2261,7 +2263,7 @@ static int ocontext_read(struct policydb *p,
 		l = NULL;
 		for (j = 0; j < nel; j++) {
 			rc = -ENOMEM;
-			c = kzalloc(sizeof(*c), GFP_KERNEL);
+			c = kzalloc_obj(*c);
 			if (!c)
 				goto out;
 			if (l)
@@ -2439,7 +2441,7 @@ out:
  * Read the configuration data from a policy database binary
  * representation file into a policy database structure.
  */
-int policydb_read(struct policydb *p, void *fp)
+int policydb_read(struct policydb *p, struct policy_file *fp)
 {
 	struct role_allow *ra, *lra;
 	struct role_trans_key *rtk = NULL;
@@ -2475,24 +2477,18 @@ int policydb_read(struct policydb *p, void *fp)
 		goto bad;
 	}
 
-	rc = -ENOMEM;
-	policydb_str = kmalloc(len + 1, GFP_KERNEL);
-	if (!policydb_str) {
-		pr_err("SELinux:  unable to allocate memory for policydb "
-		       "string of length %d\n",
-		       len);
-		goto bad;
-	}
-
-	rc = next_entry(policydb_str, fp, len);
+	rc = str_read(&policydb_str, GFP_KERNEL, fp, len);
 	if (rc) {
-		pr_err("SELinux:  truncated policydb string identifier\n");
-		kfree(policydb_str);
+		if (rc == -ENOMEM) {
+			pr_err("SELinux:  unable to allocate memory for policydb string of length %d\n",
+			       len);
+		} else {
+			pr_err("SELinux:  truncated policydb string identifier\n");
+		}
 		goto bad;
 	}
 
 	rc = -EINVAL;
-	policydb_str[len] = '\0';
 	if (strcmp(policydb_str, POLICYDB_STRING)) {
 		pr_err("SELinux:  policydb string %s does not match "
 		       "my string %s\n",
@@ -2542,6 +2538,12 @@ int policydb_read(struct policydb *p, void *fp)
 
 	if (p->policyvers >= POLICYDB_VERSION_PERMISSIVE) {
 		rc = ebitmap_read(&p->permissive_map, fp);
+		if (rc)
+			goto bad;
+	}
+
+	if (p->policyvers >= POLICYDB_VERSION_NEVERAUDIT) {
+		rc = ebitmap_read(&p->neveraudit_map, fp);
 		if (rc)
 			goto bad;
 	}
@@ -2618,12 +2620,12 @@ int policydb_read(struct policydb *p, void *fp)
 		goto bad;
 	for (i = 0; i < nel; i++) {
 		rc = -ENOMEM;
-		rtk = kmalloc(sizeof(*rtk), GFP_KERNEL);
+		rtk = kmalloc_obj(*rtk);
 		if (!rtk)
 			goto bad;
 
 		rc = -ENOMEM;
-		rtd = kmalloc(sizeof(*rtd), GFP_KERNEL);
+		rtd = kmalloc_obj(*rtd);
 		if (!rtd)
 			goto bad;
 
@@ -2666,7 +2668,7 @@ int policydb_read(struct policydb *p, void *fp)
 	lra = NULL;
 	for (i = 0; i < nel; i++) {
 		rc = -ENOMEM;
-		ra = kzalloc(sizeof(*ra), GFP_KERNEL);
+		ra = kzalloc_obj(*ra);
 		if (!ra)
 			goto bad;
 		if (lra)
@@ -2721,8 +2723,8 @@ int policydb_read(struct policydb *p, void *fp)
 		goto bad;
 
 	rc = -ENOMEM;
-	p->type_attr_map_array = kvcalloc(
-		p->p_types.nprim, sizeof(*p->type_attr_map_array), GFP_KERNEL);
+	p->type_attr_map_array = kvzalloc_objs(*p->type_attr_map_array,
+					       p->p_types.nprim);
 	if (!p->type_attr_map_array)
 		goto bad;
 
@@ -2762,7 +2764,7 @@ bad:
  * Write a MLS level structure to a policydb binary
  * representation file.
  */
-static int mls_write_level(struct mls_level *l, void *fp)
+static int mls_write_level(struct mls_level *l, struct policy_file *fp)
 {
 	__le32 buf[1];
 	int rc;
@@ -2783,7 +2785,7 @@ static int mls_write_level(struct mls_level *l, void *fp)
  * Write a MLS range structure to a policydb binary
  * representation file.
  */
-static int mls_write_range_helper(struct mls_range *r, void *fp)
+static int mls_write_range_helper(struct mls_range *r, struct policy_file *fp)
 {
 	__le32 buf[3];
 	size_t items;
@@ -2823,7 +2825,7 @@ static int sens_write(void *vkey, void *datum, void *ptr)
 	char *key = vkey;
 	struct level_datum *levdatum = datum;
 	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	__le32 buf[2];
 	size_t len;
 	int rc;
@@ -2839,7 +2841,7 @@ static int sens_write(void *vkey, void *datum, void *ptr)
 	if (rc)
 		return rc;
 
-	rc = mls_write_level(levdatum->level, fp);
+	rc = mls_write_level(&levdatum->level, fp);
 	if (rc)
 		return rc;
 
@@ -2851,7 +2853,7 @@ static int cat_write(void *vkey, void *datum, void *ptr)
 	char *key = vkey;
 	struct cat_datum *catdatum = datum;
 	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	__le32 buf[3];
 	size_t len;
 	int rc;
@@ -2876,7 +2878,7 @@ static int role_trans_write_one(void *key, void *datum, void *ptr)
 	struct role_trans_key *rtk = key;
 	struct role_trans_datum *rtd = datum;
 	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	struct policydb *p = pd->p;
 	__le32 buf[3];
 	int rc;
@@ -2896,7 +2898,7 @@ static int role_trans_write_one(void *key, void *datum, void *ptr)
 	return 0;
 }
 
-static int role_trans_write(struct policydb *p, void *fp)
+static int role_trans_write(struct policydb *p, struct policy_file *fp)
 {
 	struct policy_data pd = { .p = p, .fp = fp };
 	__le32 buf[1];
@@ -2910,7 +2912,7 @@ static int role_trans_write(struct policydb *p, void *fp)
 	return hashtab_map(&p->role_tr, role_trans_write_one, &pd);
 }
 
-static int role_allow_write(struct role_allow *r, void *fp)
+static int role_allow_write(struct role_allow *r, struct policy_file *fp)
 {
 	struct role_allow *ra;
 	__le32 buf[2];
@@ -2938,7 +2940,7 @@ static int role_allow_write(struct role_allow *r, void *fp)
  * Write a security context structure
  * to a policydb binary representation file.
  */
-static int context_write(struct policydb *p, struct context *c, void *fp)
+static int context_write(struct policydb *p, struct context *c, struct policy_file *fp)
 {
 	int rc;
 	__le32 buf[3];
@@ -2991,7 +2993,7 @@ static int common_write(void *vkey, void *datum, void *ptr)
 	char *key = vkey;
 	struct common_datum *comdatum = datum;
 	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	__le32 buf[4];
 	size_t len;
 	int rc;
@@ -3016,7 +3018,7 @@ static int common_write(void *vkey, void *datum, void *ptr)
 	return 0;
 }
 
-static int type_set_write(struct type_set *t, void *fp)
+static int type_set_write(struct type_set *t, struct policy_file *fp)
 {
 	int rc;
 	__le32 buf[1];
@@ -3035,7 +3037,7 @@ static int type_set_write(struct type_set *t, void *fp)
 }
 
 static int write_cons_helper(struct policydb *p, struct constraint_node *node,
-			     void *fp)
+			     struct policy_file *fp)
 {
 	struct constraint_node *c;
 	struct constraint_expr *e;
@@ -3086,7 +3088,7 @@ static int class_write(void *vkey, void *datum, void *ptr)
 	char *key = vkey;
 	struct class_datum *cladatum = datum;
 	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	struct policydb *p = pd->p;
 	struct constraint_node *c;
 	__le32 buf[6];
@@ -3171,7 +3173,7 @@ static int role_write(void *vkey, void *datum, void *ptr)
 	char *key = vkey;
 	struct role_datum *role = datum;
 	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	struct policydb *p = pd->p;
 	__le32 buf[3];
 	size_t items, len;
@@ -3211,7 +3213,7 @@ static int type_write(void *vkey, void *datum, void *ptr)
 	struct type_datum *typdatum = datum;
 	struct policy_data *pd = ptr;
 	struct policydb *p = pd->p;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	__le32 buf[4];
 	int rc;
 	size_t items, len;
@@ -3252,7 +3254,7 @@ static int user_write(void *vkey, void *datum, void *ptr)
 	struct user_datum *usrdatum = datum;
 	struct policy_data *pd = ptr;
 	struct policydb *p = pd->p;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	__le32 buf[3];
 	size_t items, len;
 	int rc;
@@ -3301,7 +3303,8 @@ static int (*const write_f[SYM_NUM])(void *key, void *datum, void *datap) = {
 /* clang-format on */
 
 static int ocontext_write(struct policydb *p,
-			  const struct policydb_compat_info *info, void *fp)
+			  const struct policydb_compat_info *info,
+			  struct policy_file *fp)
 {
 	unsigned int i, j;
 	int rc;
@@ -3437,7 +3440,7 @@ static int ocontext_write(struct policydb *p,
 	return 0;
 }
 
-static int genfs_write(struct policydb *p, void *fp)
+static int genfs_write(struct policydb *p, struct policy_file *fp)
 {
 	struct genfs *genfs;
 	struct ocontext *c;
@@ -3495,7 +3498,7 @@ static int range_write_helper(void *key, void *data, void *ptr)
 	struct range_trans *rt = key;
 	struct mls_range *r = data;
 	struct policy_data *pd = ptr;
-	void *fp = pd->fp;
+	struct policy_file *fp = pd->fp;
 	struct policydb *p = pd->p;
 	int rc;
 
@@ -3517,7 +3520,7 @@ static int range_write_helper(void *key, void *data, void *ptr)
 	return 0;
 }
 
-static int range_write(struct policydb *p, void *fp)
+static int range_write(struct policydb *p, struct policy_file *fp)
 {
 	__le32 buf[1];
 	int rc;
@@ -3544,7 +3547,7 @@ static int filename_write_helper_compat(void *key, void *data, void *ptr)
 	struct filename_trans_key *ft = key;
 	struct filename_trans_datum *datum = data;
 	struct ebitmap_node *node;
-	void *fp = ptr;
+	struct policy_file *fp = ptr;
 	__le32 buf[4];
 	int rc;
 	u32 bit, len = strlen(ft->name);
@@ -3581,7 +3584,7 @@ static int filename_write_helper(void *key, void *data, void *ptr)
 {
 	struct filename_trans_key *ft = key;
 	struct filename_trans_datum *datum;
-	void *fp = ptr;
+	struct policy_file *fp = ptr;
 	__le32 buf[3];
 	int rc;
 	u32 ndatum, len = strlen(ft->name);
@@ -3626,7 +3629,7 @@ static int filename_write_helper(void *key, void *data, void *ptr)
 	return 0;
 }
 
-static int filename_trans_write(struct policydb *p, void *fp)
+static int filename_trans_write(struct policydb *p, struct policy_file *fp)
 {
 	__le32 buf[1];
 	int rc;
@@ -3658,7 +3661,7 @@ static int filename_trans_write(struct policydb *p, void *fp)
  * structure to a policy database binary representation
  * file.
  */
-int policydb_write(struct policydb *p, void *fp)
+int policydb_write(struct policydb *p, struct policy_file *fp)
 {
 	unsigned int num_syms;
 	int rc;
@@ -3726,6 +3729,12 @@ int policydb_write(struct policydb *p, void *fp)
 
 	if (p->policyvers >= POLICYDB_VERSION_PERMISSIVE) {
 		rc = ebitmap_write(&p->permissive_map, fp);
+		if (rc)
+			return rc;
+	}
+
+	if (p->policyvers >= POLICYDB_VERSION_NEVERAUDIT) {
+		rc = ebitmap_write(&p->neveraudit_map, fp);
 		if (rc)
 			return rc;
 	}

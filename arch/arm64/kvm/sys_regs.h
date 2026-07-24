@@ -49,6 +49,16 @@ struct sys_reg_params {
 				  .Op2 = ((esr) >> 17) & 0x7,			\
 				  .is_write = !((esr) & 1) })
 
+/*
+ * The Feature ID space is defined as the System register space in AArch64
+ * with op0==3, op1=={0, 1, 3}, CRn==0, CRm=={0-7}, op2=={0-7}.
+ */
+static inline bool in_feat_id_space(struct sys_reg_params *p)
+{
+	return (p->Op0 == 3 && !(p->Op1 & 0b100) && p->Op1 != 2 &&
+		p->CRn == 0 && !(p->CRm & 0b1000));
+}
+
 struct sys_reg_desc {
 	/* Sysreg string for debug */
 	const char *name;
@@ -95,9 +105,8 @@ struct sys_reg_desc {
 };
 
 #define REG_HIDDEN		(1 << 0) /* hidden from userspace and guest */
-#define REG_HIDDEN_USER		(1 << 1) /* hidden from userspace only */
-#define REG_RAZ			(1 << 2) /* RAZ from userspace and guest */
-#define REG_USER_WI		(1 << 3) /* WI from userspace only */
+#define REG_RAZ			(1 << 1) /* RAZ from userspace and guest */
+#define REG_USER_WI		(1 << 2) /* WI from userspace only */
 
 static __printf(2, 3)
 inline void print_sys_reg_msg(const struct sys_reg_params *p,
@@ -109,7 +118,7 @@ inline void print_sys_reg_msg(const struct sys_reg_params *p,
 	/* Look, we even formatted it for you to paste into the table! */
 	kvm_pr_unimpl("%pV { Op0(%2u), Op1(%2u), CRn(%2u), CRm(%2u), Op2(%2u), func_%s },\n",
 		      &(struct va_format){ fmt, &va },
-		      p->Op0, p->Op1, p->CRn, p->CRm, p->Op2, p->is_write ? "write" : "read");
+		      p->Op0, p->Op1, p->CRn, p->CRm, p->Op2, str_write_read(p->is_write));
 	va_end(va);
 }
 
@@ -138,7 +147,7 @@ static inline u64 reset_unknown(struct kvm_vcpu *vcpu,
 {
 	BUG_ON(!r->reg);
 	BUG_ON(r->reg >= NR_SYS_REGS);
-	__vcpu_sys_reg(vcpu, r->reg) = 0x1de7ec7edbadc0deULL;
+	__vcpu_assign_sys_reg(vcpu, r->reg, 0x1de7ec7edbadc0deULL);
 	return __vcpu_sys_reg(vcpu, r->reg);
 }
 
@@ -146,7 +155,7 @@ static inline u64 reset_val(struct kvm_vcpu *vcpu, const struct sys_reg_desc *r)
 {
 	BUG_ON(!r->reg);
 	BUG_ON(r->reg >= NR_SYS_REGS);
-	__vcpu_sys_reg(vcpu, r->reg) = r->val;
+	__vcpu_assign_sys_reg(vcpu, r->reg, r->val);
 	return __vcpu_sys_reg(vcpu, r->reg);
 }
 
@@ -163,15 +172,6 @@ static inline bool sysreg_hidden(const struct kvm_vcpu *vcpu,
 				 const struct sys_reg_desc *r)
 {
 	return sysreg_visibility(vcpu, r) & REG_HIDDEN;
-}
-
-static inline bool sysreg_hidden_user(const struct kvm_vcpu *vcpu,
-				      const struct sys_reg_desc *r)
-{
-	if (likely(!r->visibility))
-		return false;
-
-	return r->visibility(vcpu, r) & (REG_HIDDEN | REG_HIDDEN_USER);
 }
 
 static inline bool sysreg_visible_as_raz(const struct kvm_vcpu *vcpu,
@@ -235,6 +235,8 @@ int kvm_sys_reg_set_user(struct kvm_vcpu *vcpu, const struct kvm_one_reg *reg,
 
 bool triage_sysreg_trap(struct kvm_vcpu *vcpu, int *sr_index);
 
+int kvm_finalize_sys_regs(struct kvm_vcpu *vcpu);
+
 #define AA32(_x)	.aarch32_map = AA32_##_x
 #define Op0(_x) 	.Op0 = _x
 #define Op1(_x) 	.Op1 = _x
@@ -247,5 +249,28 @@ bool triage_sysreg_trap(struct kvm_vcpu *vcpu, int *sr_index);
 	Op0(sys_reg_Op0(reg)), Op1(sys_reg_Op1(reg)),	\
 	CRn(sys_reg_CRn(reg)), CRm(sys_reg_CRm(reg)),	\
 	Op2(sys_reg_Op2(reg))
+
+#define CP15_SYS_DESC(reg)				\
+	.name = #reg,					\
+	.aarch32_map = AA32_DIRECT,			\
+	Op0(0), Op1(sys_reg_Op1(reg)),			\
+	CRn(sys_reg_CRn(reg)), CRm(sys_reg_CRm(reg)),	\
+	Op2(sys_reg_Op2(reg))
+
+#define ID_REG_LIMIT_FIELD_ENUM(val, reg, field, limit)			       \
+({									       \
+	u64 __f_val = FIELD_GET(reg##_##field##_MASK, val);		       \
+	(val) &= ~reg##_##field##_MASK;					       \
+	(val) |= FIELD_PREP(reg##_##field##_MASK,			       \
+			    min(__f_val,				       \
+				(u64)SYS_FIELD_VALUE(reg, field, limit)));     \
+	(val);								       \
+})
+
+#define TO_ARM64_SYS_REG(r)	ARM64_SYS_REG(sys_reg_Op0(SYS_ ## r),	\
+					      sys_reg_Op1(SYS_ ## r),	\
+					      sys_reg_CRn(SYS_ ## r),	\
+					      sys_reg_CRm(SYS_ ## r),	\
+					      sys_reg_Op2(SYS_ ## r))
 
 #endif /* __ARM64_KVM_SYS_REGS_LOCAL_H__ */

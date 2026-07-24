@@ -16,7 +16,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/power_supply.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "i2c-ccgx-ucsi.h"
 
@@ -216,7 +216,6 @@ exit:
 		if (status2 < 0)
 			dev_err(i2cd->dev, "i2c stop failed %d\n", status2);
 	}
-	pm_runtime_mark_last_busy(i2cd->dev);
 	pm_runtime_put_autosuspend(i2cd->dev);
 	return status;
 }

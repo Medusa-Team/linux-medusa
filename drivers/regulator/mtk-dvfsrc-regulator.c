@@ -19,7 +19,7 @@ enum dvfsrc_regulator_id {
 };
 
 struct dvfsrc_regulator_pdata {
-	struct regulator_desc *descs;
+	const struct regulator_desc *descs;
 	u32 size;
 };
 
@@ -107,7 +107,7 @@ static const unsigned int mt6873_voltages[] = {
 	725000,
 };
 
-static struct regulator_desc mt6873_regulators[] = {
+static const struct regulator_desc mt6873_regulators[] = {
 	MTK_DVFSRC_VREG("dvfsrc-vcore", VCORE, mt6873_voltages),
 	MTK_DVFSRC_VREG("dvfsrc-vscp", VSCP, mt6873_voltages),
 };
@@ -117,12 +117,30 @@ static const struct dvfsrc_regulator_pdata mt6873_data = {
 	.size = ARRAY_SIZE(mt6873_regulators),
 };
 
+static const unsigned int mt6893_voltages[] = {
+	575000,
+	600000,
+	650000,
+	725000,
+	750000,
+};
+
+static const struct regulator_desc mt6893_regulators[] = {
+	MTK_DVFSRC_VREG("dvfsrc-vcore", VCORE, mt6893_voltages),
+	MTK_DVFSRC_VREG("dvfsrc-vscp", VSCP, mt6893_voltages),
+};
+
+static const struct dvfsrc_regulator_pdata mt6893_data = {
+	.descs = mt6893_regulators,
+	.size = ARRAY_SIZE(mt6893_regulators),
+};
+
 static const unsigned int mt8183_voltages[] = {
 	725000,
 	800000,
 };
 
-static struct regulator_desc mt8183_regulators[] = {
+static const struct regulator_desc mt8183_regulators[] = {
 	MTK_DVFSRC_VREG("dvfsrc-vcore", VCORE, mt8183_voltages),
 };
 
@@ -138,7 +156,7 @@ static const unsigned int mt8195_voltages[] = {
 	750000,
 };
 
-static struct regulator_desc mt8195_regulators[] = {
+static const struct regulator_desc mt8195_regulators[] = {
 	MTK_DVFSRC_VREG("dvfsrc-vcore", VCORE, mt8195_voltages),
 	MTK_DVFSRC_VREG("dvfsrc-vscp", VSCP, mt8195_voltages),
 };
@@ -146,6 +164,24 @@ static struct regulator_desc mt8195_regulators[] = {
 static const struct dvfsrc_regulator_pdata mt8195_data = {
 	.descs = mt8195_regulators,
 	.size = ARRAY_SIZE(mt8195_regulators),
+};
+
+static const unsigned int mt8196_voltages[] = {
+	575000,
+	600000,
+	650000,
+	725000,
+	825000,
+	875000,
+};
+
+static const struct regulator_desc mt8196_regulators[] = {
+	MTK_DVFSRC_VREG("dvfsrc-vcore", VCORE, mt8196_voltages),
+};
+
+static const struct dvfsrc_regulator_pdata mt8196_data = {
+	.descs = mt8196_regulators,
+	.size = ARRAY_SIZE(mt8196_regulators),
 };
 
 static int dvfsrc_vcore_regulator_probe(struct platform_device *pdev)
@@ -159,7 +195,7 @@ static int dvfsrc_vcore_regulator_probe(struct platform_device *pdev)
 		return -EINVAL;
 
 	for (i = 0; i < pdata->size; i++) {
-		struct regulator_desc *vrdesc = &pdata->descs[i];
+		const struct regulator_desc *vrdesc = &pdata->descs[i];
 		struct regulator_dev *rdev;
 
 		rdev = devm_regulator_register(&pdev->dev, vrdesc, &config);
@@ -173,9 +209,11 @@ static int dvfsrc_vcore_regulator_probe(struct platform_device *pdev)
 
 static const struct of_device_id mtk_dvfsrc_regulator_match[] = {
 	{ .compatible = "mediatek,mt6873-dvfsrc-regulator", .data = &mt6873_data },
+	{ .compatible = "mediatek,mt6893-dvfsrc-regulator", .data = &mt6893_data },
 	{ .compatible = "mediatek,mt8183-dvfsrc-regulator", .data = &mt8183_data },
 	{ .compatible = "mediatek,mt8192-dvfsrc-regulator", .data = &mt6873_data },
 	{ .compatible = "mediatek,mt8195-dvfsrc-regulator", .data = &mt8195_data },
+	{ .compatible = "mediatek,mt8196-dvfsrc-regulator", .data = &mt8196_data },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mtk_dvfsrc_regulator_match);

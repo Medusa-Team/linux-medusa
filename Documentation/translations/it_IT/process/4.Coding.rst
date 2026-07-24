@@ -69,7 +69,7 @@ e per revisionare interi file per individuare errori nello stile di codifica,
 refusi e possibili miglioramenti.  Inoltre è utile anche per classificare gli
 ``#includes``, per allineare variabili/macro, per testi derivati ed altri
 compiti del genere.  Consultate il file
-:ref:`Documentation/translations/it_IT/process/clang-format.rst <clangformat>`
+:ref:`Documentation/translations/it_IT/dev-tools/clang-format.rst <clangformat>`
 per maggiori dettagli
 
 Se utilizzate un programma compatibile con EditorConfig, allora alcune
@@ -329,7 +329,8 @@ Sparse deve essere installato separatamente (se il vostra distribuzione non
 lo prevede, potete trovarlo su https://sparse.wiki.kernel.org/index.php/Main_Page);
 può essere attivato sul codice aggiungendo "C=1" al comando make.
 
-Lo strumento "Coccinelle" (http://coccinelle.lip6.fr/) è in grado di trovare
+Lo strumento "Coccinelle" (https://coccinelle.gitlabpages.inria.fr/website/)
+è in grado di trovare
 una vasta varietà di potenziali problemi di codifica; e può inoltre proporre
 soluzioni per risolverli.  Un buon numero di "patch semantiche" per il kernel
 sono state preparate nella cartella scripts/coccinelle; utilizzando

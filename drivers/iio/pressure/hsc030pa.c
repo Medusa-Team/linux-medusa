@@ -28,7 +28,7 @@
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "hsc030pa.h"
 
@@ -273,7 +273,7 @@ static const struct hsc_range_config hsc_range_config[HSC_VARIANTS_MAX] = {
  * @data: structure containing instantiated sensor data
  * Return: true only if both status bits are zero
  *
- * the two MSB from the first transfered byte contain a status code
+ * The two MSB from the first transferred byte contain a status code
  *   00 - normal operation, valid data
  *   01 - device in factory programming mode
  *   10 - stale data
@@ -314,8 +314,8 @@ static irqreturn_t hsc_trigger_handler(int irq, void *private)
 	memcpy(&data->scan.chan[0], &data->buffer[0], 2);
 	memcpy(&data->scan.chan[1], &data->buffer[2], 2);
 
-	iio_push_to_buffers_with_timestamp(indio_dev, &data->scan,
-					   iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_ts(indio_dev, &data->scan, sizeof(data->scan),
+				    iio_get_time_ns(indio_dev));
 
 error:
 	iio_trigger_notify_done(indio_dev->trig);
@@ -534,7 +534,7 @@ int hsc_common_probe(struct device *dev, hsc_recv_fn recv)
 
 	return devm_iio_device_register(dev, indio_dev);
 }
-EXPORT_SYMBOL_NS(hsc_common_probe, IIO_HONEYWELL_HSC030PA);
+EXPORT_SYMBOL_NS(hsc_common_probe, "IIO_HONEYWELL_HSC030PA");
 
 MODULE_AUTHOR("Petre Rodan <petre.rodan@subdimension.ro>");
 MODULE_DESCRIPTION("Honeywell HSC and SSC pressure sensor core driver");

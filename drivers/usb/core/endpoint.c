@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/usb.h>
 #include "usb.h"
 
@@ -25,21 +26,13 @@ struct ep_device {
 #define to_ep_device(_dev) \
 	container_of(_dev, struct ep_device, dev)
 
-struct ep_attribute {
-	struct attribute attr;
-	ssize_t (*show)(struct usb_device *,
-			struct usb_endpoint_descriptor *, char *);
-};
-#define to_ep_attribute(_attr) \
-	container_of(_attr, struct ep_attribute, attr)
-
 #define usb_ep_attr(field, format_string)			\
 static ssize_t field##_show(struct device *dev,			\
 			       struct device_attribute *attr,	\
 			       char *buf)			\
 {								\
 	struct ep_device *ep = to_ep_device(dev);		\
-	return sprintf(buf, format_string, ep->desc->field);	\
+	return sysfs_emit(buf, format_string, ep->desc->field);	\
 }								\
 static DEVICE_ATTR_RO(field)
 
@@ -52,7 +45,7 @@ static ssize_t wMaxPacketSize_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
 	struct ep_device *ep = to_ep_device(dev);
-	return sprintf(buf, "%04x\n", usb_endpoint_maxp(ep->desc));
+	return sysfs_emit(buf, "%04x\n", usb_endpoint_maxp(ep->desc));
 }
 static DEVICE_ATTR_RO(wMaxPacketSize);
 
@@ -76,7 +69,7 @@ static ssize_t type_show(struct device *dev, struct device_attribute *attr,
 		type = "Interrupt";
 		break;
 	}
-	return sprintf(buf, "%s\n", type);
+	return sysfs_emit(buf, "%s\n", type);
 }
 static DEVICE_ATTR_RO(type);
 
@@ -95,7 +88,7 @@ static ssize_t interval_show(struct device *dev, struct device_attribute *attr,
 		interval /= 1000;
 	}
 
-	return sprintf(buf, "%d%cs\n", interval, unit);
+	return sysfs_emit(buf, "%d%cs\n", interval, unit);
 }
 static DEVICE_ATTR_RO(interval);
 
@@ -111,7 +104,7 @@ static ssize_t direction_show(struct device *dev, struct device_attribute *attr,
 		direction = "in";
 	else
 		direction = "out";
-	return sprintf(buf, "%s\n", direction);
+	return sysfs_emit(buf, "%s\n", direction);
 }
 static DEVICE_ATTR_RO(direction);
 
@@ -153,7 +146,7 @@ int usb_create_ep_devs(struct device *parent,
 	struct ep_device *ep_dev;
 	int retval;
 
-	ep_dev = kzalloc(sizeof(*ep_dev), GFP_KERNEL);
+	ep_dev = kzalloc_obj(*ep_dev);
 	if (!ep_dev) {
 		retval = -ENOMEM;
 		goto exit;

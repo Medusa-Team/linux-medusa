@@ -53,7 +53,7 @@ static int mpls_xmit(struct sk_buff *skb)
 
 	/* Find the output device */
 	out_dev = dst->dev;
-	net = dev_net(out_dev);
+	net = dev_net_rcu(out_dev);
 
 	if (!mpls_output_possible(out_dev) ||
 	    !dst->lwtstate || skb_warn_if_lro(skb))
@@ -106,7 +106,7 @@ static int mpls_xmit(struct sk_buff *skb)
 		hh_len = 0;
 
 	/* Ensure there is enough space for the headers in the skb */
-	if (skb_cow(skb, hh_len + new_header_size))
+	if (skb_cow_head(skb, hh_len + new_header_size))
 		goto drop;
 
 	skb_set_inner_protocol(skb, skb->protocol);
@@ -128,7 +128,7 @@ static int mpls_xmit(struct sk_buff *skb)
 		bos = false;
 	}
 
-	mpls_stats_inc_outucastpkts(out_dev, skb);
+	mpls_stats_inc_outucastpkts(net, out_dev, skb);
 
 	if (rt) {
 		if (rt->rt_gw_family == AF_INET6)
@@ -153,7 +153,7 @@ static int mpls_xmit(struct sk_buff *skb)
 	return LWTUNNEL_XMIT_DONE;
 
 drop:
-	out_mdev = out_dev ? mpls_dev_get(out_dev) : NULL;
+	out_mdev = out_dev ? mpls_dev_rcu(out_dev) : NULL;
 	if (out_mdev)
 		MPLS_INC_STATS(out_mdev, tx_errors);
 	kfree_skb(skb);

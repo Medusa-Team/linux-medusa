@@ -19,17 +19,20 @@
 #include "internal.h"
 
 static void *c_start(struct seq_file *m, loff_t *pos)
+	__acquires_shared(&crypto_alg_sem)
 {
 	down_read(&crypto_alg_sem);
 	return seq_list_start(&crypto_alg_list, *pos);
 }
 
 static void *c_next(struct seq_file *m, void *p, loff_t *pos)
+	__must_hold_shared(&crypto_alg_sem)
 {
 	return seq_list_next(p, &crypto_alg_list, pos);
 }
 
 static void c_stop(struct seq_file *m, void *p)
+	__releases_shared(&crypto_alg_sem)
 {
 	up_read(&crypto_alg_sem);
 }
@@ -47,13 +50,10 @@ static int c_show(struct seq_file *m, void *p)
 		   (alg->cra_flags & CRYPTO_ALG_TESTED) ?
 		   "passed" : "unknown");
 	seq_printf(m, "internal     : %s\n",
-		   (alg->cra_flags & CRYPTO_ALG_INTERNAL) ?
-		   "yes" : "no");
-	if (fips_enabled) {
+		   str_yes_no(alg->cra_flags & CRYPTO_ALG_INTERNAL));
+	if (fips_enabled)
 		seq_printf(m, "fips         : %s\n",
-			   (alg->cra_flags & CRYPTO_ALG_FIPS_INTERNAL) ?
-			   "no" : "yes");
-	}
+			str_no_yes(alg->cra_flags & CRYPTO_ALG_FIPS_INTERNAL));
 
 	if (alg->cra_flags & CRYPTO_ALG_LARVAL) {
 		seq_printf(m, "type         : larval\n");
@@ -74,9 +74,6 @@ static int c_show(struct seq_file *m, void *p)
 					alg->cra_cipher.cia_min_keysize);
 		seq_printf(m, "max keysize  : %u\n",
 					alg->cra_cipher.cia_max_keysize);
-		break;
-	case CRYPTO_ALG_TYPE_COMPRESS:
-		seq_printf(m, "type         : compression\n");
 		break;
 	default:
 		seq_printf(m, "type         : unknown\n");

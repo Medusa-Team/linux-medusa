@@ -18,7 +18,14 @@ description: |
 
 properties:
   compatible:
-    const: qcom,fastrpc
+    oneOf:
+      - enum:
+          - qcom,kaanapali-fastrpc
+          - qcom,fastrpc
+      - items:
+          - enum:
+              - qcom,glymur-fastrpc
+          - const: qcom,kaanapali-fastrpc
 
   label:
     enum:
@@ -26,6 +33,9 @@ properties:
       - mdsp
       - sdsp
       - cdsp
+      - cdsp1
+      - gdsp0
+      - gdsp1
 
   memory-region:
     maxItems: 1
@@ -81,7 +91,7 @@ patternProperties:
 
       iommus:
         minItems: 1
-        maxItems: 3
+        maxItems: 10
 
       qcom,nsessions:
         $ref: /schemas/types.yaml#/definitions/uint32

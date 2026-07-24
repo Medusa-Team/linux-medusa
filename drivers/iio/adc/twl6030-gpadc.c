@@ -416,7 +416,7 @@ static u8 twl6032_channel_to_reg(int channel)
 {
 	/*
 	 * for any prior chosen channel, when the conversion is ready
-	 * the result is avalable in GPCH0_LSB, GPCH0_MSB.
+	 * the result is available in GPCH0_LSB, GPCH0_MSB.
 	 */
 
 	return TWL6032_GPADC_GPCH0_LSB;
@@ -871,7 +871,7 @@ static const struct of_device_id of_twl6030_match_tbl[] = {
 		.compatible = "ti,twl6032-gpadc",
 		.data = &twl6032_pdata,
 	},
-	{ /* end */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(of, of_twl6030_match_tbl);
 
@@ -1003,7 +1003,7 @@ static DEFINE_SIMPLE_DEV_PM_OPS(twl6030_gpadc_pm_ops, twl6030_gpadc_suspend,
 
 static struct platform_driver twl6030_gpadc_driver = {
 	.probe		= twl6030_gpadc_probe,
-	.remove_new	= twl6030_gpadc_remove,
+	.remove		= twl6030_gpadc_remove,
 	.driver		= {
 		.name	= DRIVER_NAME,
 		.pm	= pm_sleep_ptr(&twl6030_gpadc_pm_ops),

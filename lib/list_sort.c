@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <linux/kernel.h>
-#include <linux/bug.h>
 #include <linux/compiler.h>
 #include <linux/export.h>
-#include <linux/string.h>
 #include <linux/list_sort.h>
 #include <linux/list.h>
 
@@ -53,7 +50,6 @@ static void merge_final(void *priv, list_cmp_func_t cmp, struct list_head *head,
 			struct list_head *a, struct list_head *b)
 {
 	struct list_head *tail = head;
-	u8 count = 0;
 
 	for (;;) {
 		/* if equal, take 'a' -- important for sort stability */
@@ -79,15 +75,6 @@ static void merge_final(void *priv, list_cmp_func_t cmp, struct list_head *head,
 	/* Finish linking remainder of list b on to tail */
 	tail->next = b;
 	do {
-		/*
-		 * If the merge is highly unbalanced (e.g. the input is
-		 * already sorted), this loop may run many iterations.
-		 * Continue callbacks to the client even though no
-		 * element comparison is needed, so the client's cmp()
-		 * routine can invoke cond_resched() periodically.
-		 */
-		if (unlikely(!++count))
-			cmp(priv, b, b);
 		b->prev = tail;
 		tail = b;
 		b = b->next;
@@ -110,6 +97,13 @@ static void merge_final(void *priv, list_cmp_func_t cmp, struct list_head *head,
  * always called with the element that came first in the input in @a,
  * and list_sort is a stable sort, so it is not necessary to distinguish
  * the @a < @b and @a == @b cases.
+ *
+ * The comparison function must adhere to specific mathematical properties
+ * to ensure correct and stable sorting:
+ * - Antisymmetry: cmp(@a, @b) must return the opposite sign of
+ * cmp(@b, @a).
+ * - Transitivity: if cmp(@a, @b) <= 0 and cmp(@b, @c) <= 0, then
+ * cmp(@a, @c) <= 0.
  *
  * This is compatible with two styles of @cmp function:
  * - The traditional style which returns <0 / =0 / >0, or

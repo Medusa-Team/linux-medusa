@@ -40,7 +40,7 @@ static const struct reg_default max9768_default_regs[] = {
 static int max9768_get_gpio(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *c = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
 	struct max9768 *max9768 = snd_soc_component_get_drvdata(c);
 	int val = gpiod_get_value_cansleep(max9768->mute);
 
@@ -52,12 +52,19 @@ static int max9768_get_gpio(struct snd_kcontrol *kcontrol,
 static int max9768_set_gpio(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *c = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
 	struct max9768 *max9768 = snd_soc_component_get_drvdata(c);
+	bool val = !ucontrol->value.integer.value[0];
+	int ret;
 
-	gpiod_set_value_cansleep(max9768->mute, !ucontrol->value.integer.value[0]);
+	if (val != gpiod_get_value_cansleep(max9768->mute))
+		ret = 1;
+	else
+		ret = 0;
 
-	return 0;
+	gpiod_set_value_cansleep(max9768->mute, val);
+
+	return ret;
 }
 
 static const DECLARE_TLV_DB_RANGE(volume_tlv,

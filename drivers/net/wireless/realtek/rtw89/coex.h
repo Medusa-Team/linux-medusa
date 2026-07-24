@@ -193,6 +193,8 @@ enum btc_wa_type {
 	BTC_WA_5G_HI_CH_RX = BIT(0),
 	BTC_WA_NULL_AP = BIT(1),
 	BTC_WA_HFP_ZB = BIT(2),  /* HFP PTA req bit4 define issue */
+	BTC_WA_HFP_LAG = BIT(3),  /* 52BT WL break BT Rx lag issue */
+	BTC_WA_INIT_SCAN = BIT(4)  /* 52A/C/D init scan move to wl slot WA */
 };
 
 enum btc_3cx_type {
@@ -220,6 +222,13 @@ enum btc_wl_mode {
 	BTC_WL_MODE_VHT = 4,
 	BTC_WL_MODE_HE = 5,
 	BTC_WL_MODE_NUM,
+};
+
+enum btc_mlo_rf_combin {
+	BTC_MLO_RF_2_PLUS_0 = 0,
+	BTC_MLO_RF_0_PLUS_2 = 1,
+	BTC_MLO_RF_1_PLUS_1 = 2,
+	BTC_MLO_RF_2_PLUS_2 = 3,
 };
 
 enum btc_wl_gpio_debug {
@@ -265,12 +274,14 @@ void rtw89_btc_ntfy_scan_finish(struct rtw89_dev *rtwdev, u8 phy_idx);
 void rtw89_btc_ntfy_switch_band(struct rtw89_dev *rtwdev, u8 phy_idx, u8 band);
 void rtw89_btc_ntfy_specific_packet(struct rtw89_dev *rtwdev,
 				    enum btc_pkt_type pkt_type);
-void rtw89_btc_ntfy_eapol_packet_work(struct work_struct *work);
-void rtw89_btc_ntfy_arp_packet_work(struct work_struct *work);
-void rtw89_btc_ntfy_dhcp_packet_work(struct work_struct *work);
-void rtw89_btc_ntfy_icmp_packet_work(struct work_struct *work);
-void rtw89_btc_ntfy_role_info(struct rtw89_dev *rtwdev, struct rtw89_vif *rtwvif,
-			      struct rtw89_sta *rtwsta, enum btc_role_state state);
+void rtw89_btc_ntfy_eapol_packet_work(struct wiphy *wiphy, struct wiphy_work *work);
+void rtw89_btc_ntfy_arp_packet_work(struct wiphy *wiphy, struct wiphy_work *work);
+void rtw89_btc_ntfy_dhcp_packet_work(struct wiphy *wiphy, struct wiphy_work *work);
+void rtw89_btc_ntfy_icmp_packet_work(struct wiphy *wiphy, struct wiphy_work *work);
+void rtw89_btc_ntfy_role_info(struct rtw89_dev *rtwdev,
+			      struct rtw89_vif_link *rtwvif_link,
+			      struct rtw89_sta_link *rtwsta_link,
+			      enum btc_role_state state);
 void rtw89_btc_ntfy_radio_state(struct rtw89_dev *rtwdev, enum btc_rfctrl rf_state);
 void rtw89_btc_ntfy_wl_rfk(struct rtw89_dev *rtwdev, u8 phy_map,
 			   enum btc_wl_rfk_type type,
@@ -278,20 +289,23 @@ void rtw89_btc_ntfy_wl_rfk(struct rtw89_dev *rtwdev, u8 phy_map,
 void rtw89_btc_ntfy_wl_sta(struct rtw89_dev *rtwdev);
 void rtw89_btc_c2h_handle(struct rtw89_dev *rtwdev, struct sk_buff *skb,
 			  u32 len, u8 class, u8 func);
-void rtw89_btc_dump_info(struct rtw89_dev *rtwdev, struct seq_file *m);
-void rtw89_coex_act1_work(struct work_struct *work);
-void rtw89_coex_bt_devinfo_work(struct work_struct *work);
-void rtw89_coex_rfk_chk_work(struct work_struct *work);
+ssize_t rtw89_btc_dump_info(struct rtw89_dev *rtwdev, char *buf, size_t bufsz);
+void rtw89_coex_act1_work(struct wiphy *wiphy, struct wiphy_work *work);
+void rtw89_coex_bt_devinfo_work(struct wiphy *wiphy, struct wiphy_work *work);
+void rtw89_coex_rfk_chk_work(struct wiphy *wiphy, struct wiphy_work *work);
 void rtw89_coex_power_on(struct rtw89_dev *rtwdev);
 void rtw89_btc_set_policy(struct rtw89_dev *rtwdev, u16 policy_type);
 void rtw89_btc_set_policy_v1(struct rtw89_dev *rtwdev, u16 policy_type);
 void rtw89_coex_recognize_ver(struct rtw89_dev *rtwdev);
+void rtw89_btc_ntfy_preserve_bt_time(struct rtw89_dev *rtwdev, u32 ms);
+void rtw89_btc_ntfy_conn_rfk(struct rtw89_dev *rtwdev, bool state);
 
 static inline u8 rtw89_btc_phymap(struct rtw89_dev *rtwdev,
 				  enum rtw89_phy_idx phy_idx,
-				  enum rtw89_rf_path_bit paths)
+				  enum rtw89_rf_path_bit paths,
+				  enum rtw89_chanctx_idx chanctx_idx)
 {
-	const struct rtw89_chan *chan = rtw89_chan_get(rtwdev, RTW89_SUB_ENTITY_0);
+	const struct rtw89_chan *chan = rtw89_chan_get(rtwdev, chanctx_idx);
 	u8 phy_map;
 
 	phy_map = FIELD_PREP(BTC_RFK_PATH_MAP, paths) |
@@ -303,9 +317,10 @@ static inline u8 rtw89_btc_phymap(struct rtw89_dev *rtwdev,
 
 static inline u8 rtw89_btc_path_phymap(struct rtw89_dev *rtwdev,
 				       enum rtw89_phy_idx phy_idx,
-				       enum rtw89_rf_path path)
+				       enum rtw89_rf_path path,
+				       enum rtw89_chanctx_idx chanctx_idx)
 {
-	return rtw89_btc_phymap(rtwdev, phy_idx, BIT(path));
+	return rtw89_btc_phymap(rtwdev, phy_idx, BIT(path), chanctx_idx);
 }
 
 /* return bt req len in TU */

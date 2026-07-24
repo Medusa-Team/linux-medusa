@@ -223,7 +223,7 @@ static struct dentry *ubifs_lookup(struct inode *dir, struct dentry *dentry,
 	struct ubifs_info *c = dir->i_sb->s_fs_info;
 	struct fscrypt_name nm;
 
-	dbg_gen("'%pd' in dir ino %lu", dentry, dir->i_ino);
+	dbg_gen("'%pd' in dir ino %llu", dentry, dir->i_ino);
 
 	err = fscrypt_prepare_lookup(dir, dentry, &nm);
 	if (err == -ENOENT)
@@ -281,7 +281,7 @@ static struct dentry *ubifs_lookup(struct inode *dir, struct dentry *dentry,
 	if (IS_ENCRYPTED(dir) &&
 	    (S_ISDIR(inode->i_mode) || S_ISLNK(inode->i_mode)) &&
 	    !fscrypt_has_permitted_context(dir, inode)) {
-		ubifs_warn(c, "Inconsistent encryption contexts: %lu/%lu",
+		ubifs_warn(c, "Inconsistent encryption contexts: %llu/%llu",
 			   dir->i_ino, inode->i_ino);
 		iput(inode);
 		inode = ERR_PTR(-EPERM);
@@ -318,7 +318,7 @@ static int ubifs_create(struct mnt_idmap *idmap, struct inode *dir,
 	 * parent directory inode.
 	 */
 
-	dbg_gen("dent '%pd', mode %#hx in dir ino %lu",
+	dbg_gen("dent '%pd', mode %#hx in dir ino %llu",
 		dentry, mode, dir->i_ino);
 
 	err = ubifs_budget_space(c, &req);
@@ -386,7 +386,7 @@ static struct inode *create_whiteout(struct inode *dir, struct dentry *dentry)
 	 * atomically.
 	 */
 
-	dbg_gen("dent '%pd', mode %#hx in dir ino %lu",
+	dbg_gen("dent '%pd', mode %#hx in dir ino %llu",
 		dentry, mode, dir->i_ino);
 
 	inode = ubifs_new_inode(c, dir, mode, false);
@@ -460,7 +460,7 @@ static int ubifs_tmpfile(struct mnt_idmap *idmap, struct inode *dir,
 	 * be released via writeback.
 	 */
 
-	dbg_gen("dent '%pd', mode %#hx in dir ino %lu",
+	dbg_gen("dent '%pd', mode %#hx in dir ino %llu",
 		dentry, mode, dir->i_ino);
 
 	err = fscrypt_setup_filename(dir, &dentry->d_name, 0, &nm);
@@ -555,6 +555,11 @@ static unsigned int vfs_dent_type(uint8_t type)
 	return 0;
 }
 
+struct ubifs_dir_data {
+	struct ubifs_dent_node *dent;
+	u64 cookie;
+};
+
 /*
  * The classical Unix view for directory is that it is a linear array of
  * (name, inode number) entries. Linux/VFS assumes this model as well.
@@ -582,8 +587,9 @@ static int ubifs_readdir(struct file *file, struct dir_context *ctx)
 	struct inode *dir = file_inode(file);
 	struct ubifs_info *c = dir->i_sb->s_fs_info;
 	bool encrypted = IS_ENCRYPTED(dir);
+	struct ubifs_dir_data *data = file->private_data;
 
-	dbg_gen("dir ino %lu, f_pos %#llx", dir->i_ino, ctx->pos);
+	dbg_gen("dir ino %llu, f_pos %#llx", dir->i_ino, ctx->pos);
 
 	if (ctx->pos > UBIFS_S_KEY_HASH_MASK || ctx->pos == 2)
 		/*
@@ -604,27 +610,27 @@ static int ubifs_readdir(struct file *file, struct dir_context *ctx)
 		fstr_real_len = fstr.len;
 	}
 
-	if (file->f_version == 0) {
+	if (data->cookie == 0) {
 		/*
-		 * The file was seek'ed, which means that @file->private_data
+		 * The file was seek'ed, which means that @data->dent
 		 * is now invalid. This may also be just the first
 		 * 'ubifs_readdir()' invocation, in which case
-		 * @file->private_data is NULL, and the below code is
+		 * @data->dent is NULL, and the below code is
 		 * basically a no-op.
 		 */
-		kfree(file->private_data);
-		file->private_data = NULL;
+		kfree(data->dent);
+		data->dent = NULL;
 	}
 
 	/*
-	 * 'generic_file_llseek()' unconditionally sets @file->f_version to
-	 * zero, and we use this for detecting whether the file was seek'ed.
+	 * 'ubifs_dir_llseek()' sets @data->cookie to zero, and we use this
+	 * for detecting whether the file was seek'ed.
 	 */
-	file->f_version = 1;
+	data->cookie = 1;
 
 	/* File positions 0 and 1 correspond to "." and ".." */
 	if (ctx->pos < 2) {
-		ubifs_assert(c, !file->private_data);
+		ubifs_assert(c, !data->dent);
 		if (!dir_emit_dots(file, ctx)) {
 			if (encrypted)
 				fscrypt_fname_free_buffer(&fstr);
@@ -641,10 +647,10 @@ static int ubifs_readdir(struct file *file, struct dir_context *ctx)
 		}
 
 		ctx->pos = key_hash_flash(c, &dent->key);
-		file->private_data = dent;
+		data->dent = dent;
 	}
 
-	dent = file->private_data;
+	dent = data->dent;
 	if (!dent) {
 		/*
 		 * The directory was seek'ed to and is now readdir'ed.
@@ -658,7 +664,7 @@ static int ubifs_readdir(struct file *file, struct dir_context *ctx)
 			goto out;
 		}
 		ctx->pos = key_hash_flash(c, &dent->key);
-		file->private_data = dent;
+		data->dent = dent;
 	}
 
 	while (1) {
@@ -701,15 +707,15 @@ static int ubifs_readdir(struct file *file, struct dir_context *ctx)
 			goto out;
 		}
 
-		kfree(file->private_data);
+		kfree(data->dent);
 		ctx->pos = key_hash_flash(c, &dent->key);
-		file->private_data = dent;
+		data->dent = dent;
 		cond_resched();
 	}
 
 out:
-	kfree(file->private_data);
-	file->private_data = NULL;
+	kfree(data->dent);
+	data->dent = NULL;
 
 	if (encrypted)
 		fscrypt_fname_free_buffer(&fstr);
@@ -733,7 +739,10 @@ out:
 /* Free saved readdir() state when the directory is closed */
 static int ubifs_dir_release(struct inode *dir, struct file *file)
 {
-	kfree(file->private_data);
+	struct ubifs_dir_data *data = file->private_data;
+
+	kfree(data->dent);
+	kfree(data);
 	file->private_data = NULL;
 	return 0;
 }
@@ -755,7 +764,7 @@ static int ubifs_link(struct dentry *old_dentry, struct inode *dir,
 	 * changing the parent inode.
 	 */
 
-	dbg_gen("dent '%pd' to ino %lu (nlink %d) in dir ino %lu",
+	dbg_gen("dent '%pd' to ino %llu (nlink %d) in dir ino %llu",
 		dentry, inode->i_ino,
 		inode->i_nlink, dir->i_ino);
 	ubifs_assert(c, inode_is_locked(dir));
@@ -827,7 +836,7 @@ static int ubifs_unlink(struct inode *dir, struct dentry *dentry)
 	 * deletions.
 	 */
 
-	dbg_gen("dent '%pd' from ino %lu (nlink %d) in dir ino %lu",
+	dbg_gen("dent '%pd' from ino %llu (nlink %d) in dir ino %llu",
 		dentry, inode->i_ino,
 		inode->i_nlink, dir->i_ino);
 
@@ -932,7 +941,7 @@ static int ubifs_rmdir(struct inode *dir, struct dentry *dentry)
 	 * because we have extra space reserved for deletions.
 	 */
 
-	dbg_gen("directory '%pd', ino %lu in dir ino %lu", dentry,
+	dbg_gen("directory '%pd', ino %llu in dir ino %llu", dentry,
 		inode->i_ino, dir->i_ino);
 	ubifs_assert(c, inode_is_locked(dir));
 	ubifs_assert(c, inode_is_locked(inode));
@@ -993,8 +1002,8 @@ out_fname:
 	return err;
 }
 
-static int ubifs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
-		       struct dentry *dentry, umode_t mode)
+static struct dentry *ubifs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
+				  struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode;
 	struct ubifs_inode *dir_ui = ubifs_inode(dir);
@@ -1009,12 +1018,12 @@ static int ubifs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 	 * directory inode.
 	 */
 
-	dbg_gen("dent '%pd', mode %#hx in dir ino %lu",
+	dbg_gen("dent '%pd', mode %#hx in dir ino %llu",
 		dentry, mode, dir->i_ino);
 
 	err = ubifs_budget_space(c, &req);
 	if (err)
-		return err;
+		return ERR_PTR(err);
 
 	err = ubifs_prepare_create(dir, dentry, &nm);
 	if (err)
@@ -1051,7 +1060,7 @@ static int ubifs_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 	ubifs_release_budget(c, &req);
 	d_instantiate(dentry, inode);
 	fscrypt_free_filename(&nm);
-	return 0;
+	return NULL;
 
 out_cancel:
 	dir->i_size -= sz_change;
@@ -1065,7 +1074,7 @@ out_fname:
 	fscrypt_free_filename(&nm);
 out_budg:
 	ubifs_release_budget(c, &req);
-	return err;
+	return ERR_PTR(err);
 }
 
 static int ubifs_mknod(struct mnt_idmap *idmap, struct inode *dir,
@@ -1087,10 +1096,10 @@ static int ubifs_mknod(struct mnt_idmap *idmap, struct inode *dir,
 	 * directory inode.
 	 */
 
-	dbg_gen("dent '%pd' in dir ino %lu", dentry, dir->i_ino);
+	dbg_gen("dent '%pd' in dir ino %llu", dentry, dir->i_ino);
 
 	if (S_ISBLK(mode) || S_ISCHR(mode)) {
-		dev = kmalloc(sizeof(union ubifs_dev_desc), GFP_NOFS);
+		dev = kmalloc_obj(union ubifs_dev_desc, GFP_NOFS);
 		if (!dev)
 			return -ENOMEM;
 		devlen = ubifs_encode_dev(dev, rdev);
@@ -1174,7 +1183,7 @@ static int ubifs_symlink(struct mnt_idmap *idmap, struct inode *dir,
 					.dirtied_ino = 1 };
 	struct fscrypt_name nm;
 
-	dbg_gen("dent '%pd', target '%s' in dir ino %lu", dentry,
+	dbg_gen("dent '%pd', target '%s' in dir ino %llu", dentry,
 		symname, dir->i_ino);
 
 	err = fscrypt_prepare_symlink(dir, symname, len, UBIFS_MAX_INO_DATA,
@@ -1340,7 +1349,7 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
 	 *   ino_req: marks the target inode as dirty and does not write it.
 	 */
 
-	dbg_gen("dent '%pd' ino %lu in dir ino %lu to dent '%pd' in dir ino %lu flags 0x%x",
+	dbg_gen("dent '%pd' ino %llu in dir ino %llu to dent '%pd' in dir ino %llu flags 0x%x",
 		old_dentry, old_inode->i_ino, old_dir->i_ino,
 		new_dentry, new_dir->i_ino, flags);
 
@@ -1390,7 +1399,7 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
 	if (flags & RENAME_WHITEOUT) {
 		union ubifs_dev_desc *dev = NULL;
 
-		dev = kmalloc(sizeof(union ubifs_dev_desc), GFP_NOFS);
+		dev = kmalloc_obj(union ubifs_dev_desc, GFP_NOFS);
 		if (!dev) {
 			err = -ENOMEM;
 			goto out_release;
@@ -1588,7 +1597,7 @@ static int ubifs_xrename(struct inode *old_dir, struct dentry *old_dentry,
 	 * parent directory inodes.
 	 */
 
-	dbg_gen("dent '%pd' ino %lu in dir ino %lu exchange dent '%pd' ino %lu in dir ino %lu",
+	dbg_gen("dent '%pd' ino %llu in dir ino %llu exchange dent '%pd' ino %llu in dir ino %llu",
 		old_dentry, fst_inode->i_ino, old_dir->i_ino,
 		new_dentry, snd_inode->i_ino, new_dir->i_ino);
 
@@ -1712,6 +1721,24 @@ int ubifs_getattr(struct mnt_idmap *idmap, const struct path *path,
 	return 0;
 }
 
+static int ubifs_dir_open(struct inode *inode, struct file *file)
+{
+	struct ubifs_dir_data *data;
+
+	data = kzalloc_obj(struct ubifs_dir_data);
+	if (!data)
+		return -ENOMEM;
+	file->private_data = data;
+	return 0;
+}
+
+static loff_t ubifs_dir_llseek(struct file *file, loff_t offset, int whence)
+{
+	struct ubifs_dir_data *data = file->private_data;
+
+	return generic_llseek_cookie(file, offset, whence, &data->cookie);
+}
+
 const struct inode_operations ubifs_dir_inode_operations = {
 	.lookup      = ubifs_lookup,
 	.create      = ubifs_create,
@@ -1732,7 +1759,8 @@ const struct inode_operations ubifs_dir_inode_operations = {
 };
 
 const struct file_operations ubifs_dir_operations = {
-	.llseek         = generic_file_llseek,
+	.open		= ubifs_dir_open,
+	.llseek         = ubifs_dir_llseek,
 	.release        = ubifs_dir_release,
 	.read           = generic_read_dir,
 	.iterate_shared = ubifs_readdir,

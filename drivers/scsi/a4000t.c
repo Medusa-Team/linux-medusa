@@ -47,8 +47,7 @@ static int __init amiga_a4000t_scsi_probe(struct platform_device *pdev)
 				"A4000T builtin SCSI"))
 		return -EBUSY;
 
-	hostdata = kzalloc(sizeof(struct NCR_700_Host_Parameters),
-			   GFP_KERNEL);
+	hostdata = kzalloc_obj(struct NCR_700_Host_Parameters);
 	if (!hostdata) {
 		dev_err(&pdev->dev, "Failed to allocate host data\n");
 		goto out_release;
@@ -115,9 +114,9 @@ static void __exit amiga_a4000t_scsi_remove(struct platform_device *pdev)
  * triggering a section mismatch warning.
  */
 static struct platform_driver amiga_a4000t_scsi_driver __refdata = {
-	.remove_new = __exit_p(amiga_a4000t_scsi_remove),
-	.driver   = {
-		.name	= "amiga-a4000t-scsi",
+	.remove = __exit_p(amiga_a4000t_scsi_remove),
+	.driver = {
+		.name = "amiga-a4000t-scsi",
 	},
 };
 

@@ -27,7 +27,6 @@ static bool is_ignored_symbol(const char *name, char type)
 		 * stable symbol list.
 		 */
 		"kallsyms_offsets",
-		"kallsyms_relative_base",
 		"kallsyms_num_syms",
 		"kallsyms_names",
 		"kallsyms_markers",
@@ -131,7 +130,7 @@ static int test__vmlinux_matches_kallsyms_cb1(struct map *map, void *data)
 					(dso__kernel(dso) ? dso__short_name(dso) : dso__name(dso)));
 
 	if (pair) {
-		map__set_priv(pair, 1);
+		map__set_priv(pair);
 		map__put(pair);
 	} else {
 		if (!args->header_printed) {
@@ -166,7 +165,7 @@ static int test__vmlinux_matches_kallsyms_cb2(struct map *map, void *data)
 			pr_info(":\nWARN: *%" PRIx64 "-%" PRIx64 " %" PRIx64,
 				map__start(pair), map__end(pair), map__pgoff(pair));
 		pr_info(" %s\n", dso__name(dso));
-		map__set_priv(pair, 1);
+		map__set_priv(pair);
 	}
 	map__put(pair);
 	return 0;

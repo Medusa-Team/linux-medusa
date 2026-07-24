@@ -313,7 +313,6 @@ static int mtk_disp_rdma_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct mtk_disp_rdma *priv;
-	struct resource *res;
 	int irq;
 	int ret;
 
@@ -330,8 +329,7 @@ static int mtk_disp_rdma_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(priv->clk),
 				     "failed to get rdma clk\n");
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->regs = devm_ioremap_resource(dev, res);
+	priv->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->regs))
 		return dev_err_probe(dev, PTR_ERR(priv->regs),
 				     "failed to ioremap rdma\n");
@@ -341,14 +339,11 @@ static int mtk_disp_rdma_probe(struct platform_device *pdev)
 		dev_dbg(dev, "get mediatek,gce-client-reg fail!\n");
 #endif
 
-	if (of_find_property(dev->of_node, "mediatek,rdma-fifo-size", &ret)) {
-		ret = of_property_read_u32(dev->of_node,
-					   "mediatek,rdma-fifo-size",
-					   &priv->fifo_size);
-		if (ret)
-			return dev_err_probe(dev, ret,
-					     "Failed to get rdma fifo size\n");
-	}
+	ret = of_property_read_u32(dev->of_node,
+				   "mediatek,rdma-fifo-size",
+				   &priv->fifo_size);
+	if (ret && (ret != -EINVAL))
+		return dev_err_probe(dev, ret, "Failed to get rdma fifo size\n");
 
 	/* Disable and clear pending interrupts */
 	writel(0x0, priv->regs + DISP_REG_RDMA_INT_ENABLE);
@@ -420,7 +415,7 @@ MODULE_DEVICE_TABLE(of, mtk_disp_rdma_driver_dt_match);
 
 struct platform_driver mtk_disp_rdma_driver = {
 	.probe		= mtk_disp_rdma_probe,
-	.remove_new	= mtk_disp_rdma_remove,
+	.remove		= mtk_disp_rdma_remove,
 	.driver		= {
 		.name	= "mediatek-disp-rdma",
 		.of_match_table = mtk_disp_rdma_driver_dt_match,

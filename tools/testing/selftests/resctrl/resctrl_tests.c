@@ -23,15 +23,23 @@ static struct resctrl_test *resctrl_tests[] = {
 	&l2_noncont_cat_test,
 };
 
-static int detect_vendor(void)
+static unsigned int detect_vendor(void)
 {
-	FILE *inf = fopen("/proc/cpuinfo", "r");
-	int vendor_id = 0;
+	static unsigned int vendor_id;
+	static bool initialized;
 	char *s = NULL;
+	FILE *inf;
 	char *res;
 
-	if (!inf)
+	if (initialized)
 		return vendor_id;
+
+	inf = fopen("/proc/cpuinfo", "r");
+	if (!inf) {
+		vendor_id = 0;
+		initialized = true;
+		return vendor_id;
+	}
 
 	res = fgrep(inf, "vendor_id");
 
@@ -42,18 +50,22 @@ static int detect_vendor(void)
 		vendor_id = ARCH_INTEL;
 	else if (s && !strcmp(s, ": AuthenticAMD\n"))
 		vendor_id = ARCH_AMD;
+	else if (s && !strcmp(s, ": HygonGenuine\n"))
+		vendor_id = ARCH_HYGON;
 
 	fclose(inf);
 	free(res);
+
+	initialized = true;
 	return vendor_id;
 }
 
-int get_vendor(void)
+unsigned int get_vendor(void)
 {
-	static int vendor = -1;
+	unsigned int vendor;
 
-	if (vendor == -1)
-		vendor = detect_vendor();
+	vendor = detect_vendor();
+
 	if (vendor == 0)
 		ksft_print_msg("Can not get vendor info...\n");
 
@@ -118,7 +130,7 @@ static bool test_vendor_specific_check(const struct resctrl_test *test)
 
 static void run_single_test(const struct resctrl_test *test, const struct user_params *uparams)
 {
-	int ret;
+	int ret, snc_mode;
 
 	if (test->disabled)
 		return;
@@ -128,7 +140,14 @@ static void run_single_test(const struct resctrl_test *test, const struct user_p
 		return;
 	}
 
+	snc_mode = snc_nodes_per_l3_cache();
+
 	ksft_print_msg("Starting %s test ...\n", test->name);
+
+	if (snc_mode == 1 && snc_unreliable && get_vendor() == ARCH_INTEL) {
+		ksft_test_result_skip("SNC detection unreliable due to offline CPUs. Test results may not be accurate if SNC enabled.\n");
+		return;
+	}
 
 	if (test_prepare(test)) {
 		ksft_exit_fail_msg("Abnormal failure when preparing for the test\n");
@@ -148,6 +167,78 @@ cleanup:
 	test_cleanup(test);
 }
 
+/*
+ * Allocate and initialize a struct fill_buf_param with user provided
+ * (via "-b fill_buf <fill_buf parameters>") parameters.
+ *
+ * Use defaults (that may not be appropriate for all tests) for any
+ * fill_buf parameters omitted by the user.
+ *
+ * Historically it may have been possible for user space to provide
+ * additional parameters, "operation" ("read" vs "write") in
+ * benchmark_cmd[3] and "once" (run "once" or until terminated) in
+ * benchmark_cmd[4]. Changing these parameters have never been
+ * supported with the default of "read" operation and running until
+ * terminated built into the tests. Any unsupported values for
+ * (original) "fill_buf" parameters are treated as failure.
+ *
+ * Return: On failure, forcibly exits the test on any parsing failure,
+ *         returns NULL if no parsing needed (user did not actually provide
+ *         "-b fill_buf").
+ *         On success, returns pointer to newly allocated and fully
+ *         initialized struct fill_buf_param that caller must free.
+ */
+static struct fill_buf_param *alloc_fill_buf_param(struct user_params *uparams)
+{
+	struct fill_buf_param *fill_param = NULL;
+	char *endptr = NULL;
+
+	if (!uparams->benchmark_cmd[0] || strcmp(uparams->benchmark_cmd[0], "fill_buf"))
+		return NULL;
+
+	fill_param = malloc(sizeof(*fill_param));
+	if (!fill_param)
+		ksft_exit_skip("Unable to allocate memory for fill_buf parameters.\n");
+
+	if (uparams->benchmark_cmd[1] && *uparams->benchmark_cmd[1] != '\0') {
+		errno = 0;
+		fill_param->buf_size = strtoul(uparams->benchmark_cmd[1], &endptr, 10);
+		if (errno || *endptr != '\0') {
+			free(fill_param);
+			ksft_exit_skip("Unable to parse benchmark buffer size.\n");
+		}
+	} else {
+		fill_param->buf_size = MINIMUM_SPAN;
+	}
+
+	if (uparams->benchmark_cmd[2] && *uparams->benchmark_cmd[2] != '\0') {
+		errno = 0;
+		fill_param->memflush = strtol(uparams->benchmark_cmd[2], &endptr, 10) != 0;
+		if (errno || *endptr != '\0') {
+			free(fill_param);
+			ksft_exit_skip("Unable to parse benchmark memflush parameter.\n");
+		}
+	} else {
+		fill_param->memflush = true;
+	}
+
+	if (uparams->benchmark_cmd[3] && *uparams->benchmark_cmd[3] != '\0') {
+		if (strcmp(uparams->benchmark_cmd[3], "0")) {
+			free(fill_param);
+			ksft_exit_skip("Only read operations supported.\n");
+		}
+	}
+
+	if (uparams->benchmark_cmd[4] && *uparams->benchmark_cmd[4] != '\0') {
+		if (strcmp(uparams->benchmark_cmd[4], "false")) {
+			free(fill_param);
+			ksft_exit_skip("fill_buf is required to run until termination.\n");
+		}
+	}
+
+	return fill_param;
+}
+
 static void init_user_params(struct user_params *uparams)
 {
 	memset(uparams, 0, sizeof(*uparams));
@@ -158,11 +249,11 @@ static void init_user_params(struct user_params *uparams)
 
 int main(int argc, char **argv)
 {
+	struct fill_buf_param *fill_param = NULL;
 	int tests = ARRAY_SIZE(resctrl_tests);
 	bool test_param_seen = false;
 	struct user_params uparams;
-	char *span_str = NULL;
-	int ret, c, i;
+	int c, i;
 
 	init_user_params(&uparams);
 
@@ -239,6 +330,10 @@ int main(int argc, char **argv)
 	}
 last_arg:
 
+	fill_param = alloc_fill_buf_param(&uparams);
+	if (fill_param)
+		uparams.fill_buf = fill_param;
+
 	ksft_print_header();
 
 	/*
@@ -257,24 +352,11 @@ last_arg:
 
 	filter_dmesg();
 
-	if (!uparams.benchmark_cmd[0]) {
-		/* If no benchmark is given by "-b" argument, use fill_buf. */
-		uparams.benchmark_cmd[0] = "fill_buf";
-		ret = asprintf(&span_str, "%u", DEFAULT_SPAN);
-		if (ret < 0)
-			ksft_exit_fail_msg("Out of memory!\n");
-		uparams.benchmark_cmd[1] = span_str;
-		uparams.benchmark_cmd[2] = "1";
-		uparams.benchmark_cmd[3] = "0";
-		uparams.benchmark_cmd[4] = "false";
-		uparams.benchmark_cmd[5] = NULL;
-	}
-
 	ksft_set_plan(tests);
 
 	for (i = 0; i < ARRAY_SIZE(resctrl_tests); i++)
 		run_single_test(resctrl_tests[i], &uparams);
 
-	free(span_str);
+	free(fill_param);
 	ksft_finished();
 }

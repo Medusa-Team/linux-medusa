@@ -53,7 +53,7 @@ struct da9121_range {
 	int reg_max;
 };
 
-static struct da9121_range da9121_10A_2phase_current = {
+static const struct da9121_range da9121_10A_2phase_current = {
 	.val_min =  7000000,
 	.val_max = 20000000,
 	.val_stp =  1000000,
@@ -61,7 +61,7 @@ static struct da9121_range da9121_10A_2phase_current = {
 	.reg_max = 14,
 };
 
-static struct da9121_range da9121_6A_2phase_current = {
+static const struct da9121_range da9121_6A_2phase_current = {
 	.val_min =  7000000,
 	.val_max = 12000000,
 	.val_stp =  1000000,
@@ -69,7 +69,7 @@ static struct da9121_range da9121_6A_2phase_current = {
 	.reg_max = 6,
 };
 
-static struct da9121_range da9121_5A_1phase_current = {
+static const struct da9121_range da9121_5A_1phase_current = {
 	.val_min =  3500000,
 	.val_max = 10000000,
 	.val_stp =   500000,
@@ -77,7 +77,7 @@ static struct da9121_range da9121_5A_1phase_current = {
 	.reg_max = 14,
 };
 
-static struct da9121_range da9121_3A_1phase_current = {
+static const struct da9121_range da9121_3A_1phase_current = {
 	.val_min = 3500000,
 	.val_max = 6000000,
 	.val_stp =  500000,
@@ -85,7 +85,7 @@ static struct da9121_range da9121_3A_1phase_current = {
 	.reg_max = 6,
 };
 
-static struct da9121_range da914x_40A_4phase_current = {
+static const struct da9121_range da914x_40A_4phase_current = {
 	.val_min = 26000000,
 	.val_max = 78000000,
 	.val_stp =  4000000,
@@ -93,7 +93,7 @@ static struct da9121_range da914x_40A_4phase_current = {
 	.reg_max = 14,
 };
 
-static struct da9121_range da914x_20A_2phase_current = {
+static const struct da9121_range da914x_20A_2phase_current = {
 	.val_min = 13000000,
 	.val_max = 39000000,
 	.val_stp =  2000000,
@@ -104,7 +104,7 @@ static struct da9121_range da914x_20A_2phase_current = {
 struct da9121_variant_info {
 	int num_bucks;
 	int num_phases;
-	struct da9121_range *current_range;
+	const struct da9121_range *current_range;
 };
 
 static const struct da9121_variant_info variant_parameters[] = {
@@ -188,7 +188,7 @@ static int da9121_get_current_limit(struct regulator_dev *rdev)
 {
 	struct da9121 *chip = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
-	struct da9121_range *range =
+	const struct da9121_range *range =
 		variant_parameters[chip->variant_id].current_range;
 	unsigned int val = 0;
 	int ret = 0;
@@ -219,7 +219,7 @@ static int da9121_ceiling_selector(struct regulator_dev *rdev,
 		unsigned int *selector)
 {
 	struct da9121 *chip = rdev_get_drvdata(rdev);
-	struct da9121_range *range =
+	const struct da9121_range *range =
 		variant_parameters[chip->variant_id].current_range;
 	unsigned int level;
 	unsigned int i = 0;
@@ -259,7 +259,7 @@ static int da9121_set_current_limit(struct regulator_dev *rdev,
 {
 	struct da9121 *chip = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
-	struct da9121_range *range =
+	const struct da9121_range *range =
 		variant_parameters[chip->variant_id].current_range;
 	unsigned int sel = 0;
 	int ret = 0;
@@ -400,8 +400,14 @@ static int da9121_of_parse_cb(struct device_node *np,
 						GPIOD_OUT_HIGH |
 						GPIOD_FLAGS_BIT_NONEXCLUSIVE,
 						"da9121-enable");
-	if (!IS_ERR(ena_gpiod))
+	if (!IS_ERR(ena_gpiod)) {
+		if (of_property_read_bool(chip->dev->of_node, "dlg,no-gpio-control")) {
+			gpiod_put(ena_gpiod);
+			dev_err(chip->dev, "dlg,no-gpio-control conflicts with enable-gpios\n");
+			return -EINVAL;
+		}
 		config->ena_gpiod = ena_gpiod;
+	}
 
 	if (variant_parameters[chip->variant_id].num_bucks == 2) {
 		uint32_t ripple_cancel;
@@ -864,6 +870,21 @@ static const struct regmap_access_table da9121_volatile_table = {
 	.n_yes_ranges = ARRAY_SIZE(da9121_volatile_ranges),
 };
 
+/*
+ * When GPIO functions DVC/RELOAD/EN are not used, the registers in the range
+ * DA9121_REG_BUCK_BUCK1_0 to DA9121_REG_BUCK_BUCK1_6 need not be volatile
+ * because register writes to these registers can only be performed via I2C.
+ */
+static const struct regmap_range da9121_volatile_ranges_no_gpio_ctrl[] = {
+	regmap_reg_range(DA9121_REG_SYS_STATUS_0, DA9121_REG_SYS_EVENT_2),
+	regmap_reg_range(DA9121_REG_SYS_GPIO0_0, DA9121_REG_SYS_GPIO2_1),
+};
+
+static const struct regmap_access_table da9121_volatile_table_no_gpio_ctrl = {
+	.yes_ranges = da9121_volatile_ranges_no_gpio_ctrl,
+	.n_yes_ranges = ARRAY_SIZE(da9121_volatile_ranges_no_gpio_ctrl),
+};
+
 /* DA9121 regmap config for 1 channel variants */
 static const struct regmap_config da9121_1ch_regmap_config = {
 	.reg_bits = 8,
@@ -994,9 +1015,17 @@ static int da9121_assign_chip_model(struct i2c_client *i2c,
 			struct da9121 *chip)
 {
 	const struct regmap_config *regmap;
+	struct regmap_config regmap_config_1ch = da9121_1ch_regmap_config;
+	struct regmap_config regmap_config_2ch = da9121_2ch_regmap_config;
+
 	int ret = 0;
 
 	chip->dev = &i2c->dev;
+
+	if (of_property_read_bool(i2c->dev.of_node, "dlg,no-gpio-control")) {
+		regmap_config_1ch.volatile_table = &da9121_volatile_table_no_gpio_ctrl;
+		regmap_config_2ch.volatile_table = &da9121_volatile_table_no_gpio_ctrl;
+	}
 
 	/* Use configured subtype to select the regulator descriptor index and
 	 * register map, common to both consumer and automotive grade variants
@@ -1005,29 +1034,29 @@ static int da9121_assign_chip_model(struct i2c_client *i2c,
 	case DA9121_SUBTYPE_DA9121:
 	case DA9121_SUBTYPE_DA9130:
 		chip->variant_id = DA9121_TYPE_DA9121_DA9130;
-		regmap = &da9121_1ch_regmap_config;
+		regmap = &regmap_config_1ch;
 		break;
 	case DA9121_SUBTYPE_DA9217:
 		chip->variant_id = DA9121_TYPE_DA9217;
-		regmap = &da9121_1ch_regmap_config;
+		regmap = &regmap_config_1ch;
 		break;
 	case DA9121_SUBTYPE_DA9122:
 	case DA9121_SUBTYPE_DA9131:
 		chip->variant_id = DA9121_TYPE_DA9122_DA9131;
-		regmap = &da9121_2ch_regmap_config;
+		regmap = &regmap_config_2ch;
 		break;
 	case DA9121_SUBTYPE_DA9220:
 	case DA9121_SUBTYPE_DA9132:
 		chip->variant_id = DA9121_TYPE_DA9220_DA9132;
-		regmap = &da9121_2ch_regmap_config;
+		regmap = &regmap_config_2ch;
 		break;
 	case DA9121_SUBTYPE_DA9141:
 		chip->variant_id = DA9121_TYPE_DA9141;
-		regmap = &da9121_1ch_regmap_config;
+		regmap = &regmap_config_1ch;
 		break;
 	case DA9121_SUBTYPE_DA9142:
 		chip->variant_id = DA9121_TYPE_DA9142;
-		regmap = &da9121_2ch_regmap_config;
+		regmap = &regmap_config_2ch;
 		break;
 	default:
 		return -EINVAL;
@@ -1129,7 +1158,7 @@ static int da9121_i2c_probe(struct i2c_client *i2c)
 	}
 
 	chip->pdata = i2c->dev.platform_data;
-	chip->subvariant_id = (enum da9121_subvariant)i2c_get_match_data(i2c);
+	chip->subvariant_id = (kernel_ulong_t)i2c_get_match_data(i2c);
 
 	ret = da9121_assign_chip_model(i2c, chip);
 	if (ret < 0)

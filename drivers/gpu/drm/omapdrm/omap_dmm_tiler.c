@@ -26,6 +26,8 @@
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
 
+#include <drm/drm_print.h>
+
 #include "omap_dmm_tiler.h"
 #include "omap_dmm_priv.h"
 
@@ -119,7 +121,7 @@ static u32 dmm_read_wa(struct dmm *dmm, u32 reg)
 	 * earlier than the DMA finished writing the value to memory.
 	 */
 	rmb();
-	return readl(dmm->wa_dma_data);
+	return readl((__iomem void *)dmm->wa_dma_data);
 }
 
 static void dmm_write_wa(struct dmm *dmm, u32 val, u32 reg)
@@ -127,7 +129,7 @@ static void dmm_write_wa(struct dmm *dmm, u32 val, u32 reg)
 	dma_addr_t src, dst;
 	int r;
 
-	writel(val, dmm->wa_dma_data);
+	writel(val, (__iomem void *)dmm->wa_dma_data);
 	/*
 	 * As per i878 workaround, the DMA is used to access the DMM registers.
 	 * Make sure that the writel is not moved by the compiler or the CPU, so
@@ -411,7 +413,7 @@ static int dmm_txn_commit(struct dmm_txn *txn, bool wait)
 	 */
 
 	/* read back to ensure the data is in RAM */
-	readl(&txn->last_pat->next_pa);
+	readl((__iomem void *)&txn->last_pat->next_pa);
 
 	/* write to PAT_DESCR to clear out any pending transaction */
 	dmm_write(dmm, 0x0, reg[PAT_DESCR][engine->id]);
@@ -534,7 +536,7 @@ struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, u16 w,
 	unsigned long flags;
 	u32 slot_bytes;
 
-	block = kzalloc(sizeof(*block), GFP_KERNEL);
+	block = kzalloc_obj(*block);
 	if (!block)
 		return ERR_PTR(-ENOMEM);
 
@@ -569,7 +571,7 @@ struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, u16 w,
 
 struct tiler_block *tiler_reserve_1d(size_t size)
 {
-	struct tiler_block *block = kzalloc(sizeof(*block), GFP_KERNEL);
+	struct tiler_block *block = kzalloc_obj(*block);
 	int num_pages = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	unsigned long flags;
 
@@ -772,7 +774,7 @@ static int omap_dmm_probe(struct platform_device *dev)
 	u32 hwinfo, pat_geom;
 	struct resource *mem;
 
-	omap_dmm = kzalloc(sizeof(*omap_dmm), GFP_KERNEL);
+	omap_dmm = kzalloc_obj(*omap_dmm);
 	if (!omap_dmm)
 		goto fail;
 
@@ -883,8 +885,8 @@ static int omap_dmm_probe(struct platform_device *dev)
 	}
 
 	/* alloc engines */
-	omap_dmm->engines = kcalloc(omap_dmm->num_engines,
-				    sizeof(*omap_dmm->engines), GFP_KERNEL);
+	omap_dmm->engines = kzalloc_objs(*omap_dmm->engines,
+					 omap_dmm->num_engines);
 	if (!omap_dmm->engines) {
 		ret = -ENOMEM;
 		goto fail;
@@ -902,8 +904,7 @@ static int omap_dmm_probe(struct platform_device *dev)
 		list_add(&omap_dmm->engines[i].idle_node, &omap_dmm->idle_head);
 	}
 
-	omap_dmm->tcm = kcalloc(omap_dmm->num_lut, sizeof(*omap_dmm->tcm),
-				GFP_KERNEL);
+	omap_dmm->tcm = kzalloc_objs(*omap_dmm->tcm, omap_dmm->num_lut);
 	if (!omap_dmm->tcm) {
 		ret = -ENOMEM;
 		goto fail;
@@ -1210,7 +1211,7 @@ static const struct of_device_id dmm_of_match[] = {
 
 struct platform_driver omap_dmm_driver = {
 	.probe = omap_dmm_probe,
-	.remove_new = omap_dmm_remove,
+	.remove = omap_dmm_remove,
 	.driver = {
 		.name = DMM_DRIVER_NAME,
 		.of_match_table = of_match_ptr(dmm_of_match),

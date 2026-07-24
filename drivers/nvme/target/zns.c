@@ -69,20 +69,16 @@ bool nvmet_bdev_zns_enable(struct nvmet_ns *ns)
 void nvmet_execute_identify_ctrl_zns(struct nvmet_req *req)
 {
 	u8 zasl = req->sq->ctrl->subsys->zasl;
-	struct nvmet_ctrl *ctrl = req->sq->ctrl;
 	struct nvme_id_ctrl_zns *id;
 	u16 status;
 
-	id = kzalloc(sizeof(*id), GFP_KERNEL);
+	id = kzalloc_obj(*id);
 	if (!id) {
 		status = NVME_SC_INTERNAL;
 		goto out;
 	}
 
-	if (ctrl->ops->get_mdts)
-		id->zasl = min_t(u8, ctrl->ops->get_mdts(ctrl), zasl);
-	else
-		id->zasl = zasl;
+	id->zasl = min_not_zero(nvmet_ctrl_mdts(req), zasl);
 
 	status = nvmet_copy_to_sgl(req, 0, id, sizeof(*id));
 
@@ -104,7 +100,7 @@ void nvmet_execute_identify_ns_zns(struct nvmet_req *req)
 		goto out;
 	}
 
-	id_zns = kzalloc(sizeof(*id_zns), GFP_KERNEL);
+	id_zns = kzalloc_obj(*id_zns);
 	if (!id_zns) {
 		status = NVME_SC_INTERNAL;
 		goto out;
@@ -537,12 +533,20 @@ void nvmet_bdev_execute_zone_append(struct nvmet_req *req)
 	u16 status = NVME_SC_SUCCESS;
 	unsigned int total_len = 0;
 	struct scatterlist *sg;
+	u32 data_len = nvmet_rw_data_len(req);
 	struct bio *bio;
 	int sg_cnt;
 
-	/* Request is completed on len mismatch in nvmet_check_transter_len() */
+	/* Request is completed on len mismatch in nvmet_check_transfer_len() */
 	if (!nvmet_check_transfer_len(req, nvmet_rw_data_len(req)))
 		return;
+
+	if (data_len >
+	    bdev_max_zone_append_sectors(req->ns->bdev) << SECTOR_SHIFT) {
+		req->error_loc = offsetof(struct nvme_rw_command, length);
+		status = NVME_SC_INVALID_FIELD | NVME_STATUS_DNR;
+		goto out;
+	}
 
 	if (!req->sg_cnt) {
 		nvmet_req_complete(req, 0);
@@ -576,20 +580,16 @@ void nvmet_bdev_execute_zone_append(struct nvmet_req *req)
 		bio->bi_opf |= REQ_FUA;
 
 	for_each_sg(req->sg, sg, req->sg_cnt, sg_cnt) {
-		struct page *p = sg_page(sg);
-		unsigned int l = sg->length;
-		unsigned int o = sg->offset;
-		unsigned int ret;
+		unsigned int len = sg->length;
 
-		ret = bio_add_zone_append_page(bio, p, l, o);
-		if (ret != sg->length) {
+		if (bio_add_page(bio, sg_page(sg), len, sg->offset) != len) {
 			status = NVME_SC_INTERNAL;
 			goto out_put_bio;
 		}
-		total_len += sg->length;
+		total_len += len;
 	}
 
-	if (total_len != nvmet_rw_data_len(req)) {
+	if (total_len != data_len) {
 		status = NVME_SC_INTERNAL | NVME_STATUS_DNR;
 		goto out_put_bio;
 	}

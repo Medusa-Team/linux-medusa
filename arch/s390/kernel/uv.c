@@ -2,11 +2,11 @@
 /*
  * Common Ultravisor functions and initialization
  *
- * Copyright IBM Corp. 2019, 2020
+ * Copyright IBM Corp. 2019, 2024
  */
-#define KMSG_COMPONENT "prot_virt"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "prot_virt: " fmt
 
+#include <linux/export.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/sizes.h>
@@ -14,22 +14,11 @@
 #include <linux/memblock.h>
 #include <linux/pagemap.h>
 #include <linux/swap.h>
+#include <linux/pagewalk.h>
+#include <linux/backing-dev.h>
 #include <asm/facility.h>
 #include <asm/sections.h>
 #include <asm/uv.h>
-
-#if !IS_ENABLED(CONFIG_KVM)
-unsigned long __gmap_translate(struct gmap *gmap, unsigned long gaddr)
-{
-	return 0;
-}
-
-int gmap_fault(struct gmap *gmap, unsigned long gaddr,
-	       unsigned int fault_flags)
-{
-	return 0;
-}
-#endif
 
 /* the bootdata_preserved fields come from ones in arch/s390/boot/uv.c */
 int __bootdata_preserved(prot_virt_guest);
@@ -145,19 +134,21 @@ static int uv_destroy(unsigned long paddr)
  */
 int uv_destroy_folio(struct folio *folio)
 {
+	unsigned long i;
 	int rc;
 
-	/* See gmap_make_secure(): large folios cannot be secure */
-	if (unlikely(folio_test_large(folio)))
-		return 0;
-
 	folio_get(folio);
-	rc = uv_destroy(folio_to_phys(folio));
+	for (i = 0; i < (1 << folio_order(folio)); i++) {
+		rc = uv_destroy(folio_to_phys(folio) + i * PAGE_SIZE);
+		if (rc)
+			break;
+	}
 	if (!rc)
-		clear_bit(PG_arch_1, &folio->flags);
+		clear_bit(PG_arch_1, &folio->flags.f);
 	folio_put(folio);
 	return rc;
 }
+EXPORT_SYMBOL(uv_destroy_folio);
 
 /*
  * The present PTE still indirectly holds a folio reference through the mapping.
@@ -174,7 +165,7 @@ int uv_destroy_pte(pte_t pte)
  *
  * @paddr: Absolute host address of page to be exported
  */
-static int uv_convert_from_secure(unsigned long paddr)
+int uv_convert_from_secure(unsigned long paddr)
 {
 	struct uv_cb_cfs uvcb = {
 		.header.cmd = UVC_CMD_CONV_FROM_SEC_STOR,
@@ -186,25 +177,28 @@ static int uv_convert_from_secure(unsigned long paddr)
 		return -EINVAL;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(uv_convert_from_secure);
 
 /*
  * The caller must already hold a reference to the folio.
  */
-static int uv_convert_from_secure_folio(struct folio *folio)
+int uv_convert_from_secure_folio(struct folio *folio)
 {
+	unsigned long i;
 	int rc;
 
-	/* See gmap_make_secure(): large folios cannot be secure */
-	if (unlikely(folio_test_large(folio)))
-		return 0;
-
 	folio_get(folio);
-	rc = uv_convert_from_secure(folio_to_phys(folio));
+	for (i = 0; i < (1 << folio_order(folio)); i++) {
+		rc = uv_convert_from_secure(folio_to_phys(folio) + i * PAGE_SIZE);
+		if (rc)
+			break;
+	}
 	if (!rc)
-		clear_bit(PG_arch_1, &folio->flags);
+		clear_bit(PG_arch_1, &folio->flags.f);
 	folio_put(folio);
 	return rc;
 }
+EXPORT_SYMBOL_GPL(uv_convert_from_secure_folio);
 
 /*
  * The present PTE still indirectly holds a folio reference through the mapping.
@@ -236,16 +230,34 @@ static int expected_folio_refs(struct folio *folio)
 	return res;
 }
 
-static int make_folio_secure(struct folio *folio, struct uv_cb_header *uvcb)
+/**
+ * __make_folio_secure() - make a folio secure
+ * @folio: the folio to make secure
+ * @uvcb: the uvcb that describes the UVC to be used
+ *
+ * The folio @folio will be made secure if possible, @uvcb will be passed
+ * as-is to the UVC.
+ *
+ * Return: 0 on success;
+ *         -EBUSY if the folio is in writeback or has too many references;
+ *         -EAGAIN if the UVC needs to be attempted again;
+ *         -ENXIO if the address is not mapped;
+ *         -EINVAL if the UVC failed for other reasons.
+ *
+ * Context: The caller must hold exactly one extra reference on the folio
+ *          (it's the same logic as split_folio()), and the folio must be
+ *          locked.
+ */
+int __make_folio_secure(struct folio *folio, struct uv_cb_header *uvcb)
 {
 	int expected, cc = 0;
 
 	if (folio_test_writeback(folio))
-		return -EAGAIN;
-	expected = expected_folio_refs(folio);
+		return -EBUSY;
+	expected = expected_folio_refs(folio) + 1;
 	if (!folio_ref_freeze(folio, expected))
 		return -EBUSY;
-	set_bit(PG_arch_1, &folio->flags);
+	set_bit(PG_arch_1, &folio->flags.f);
 	/*
 	 * If the UVC does not succeed or fail immediately, we don't want to
 	 * loop for long, or we might get stall notifications.
@@ -266,281 +278,126 @@ static int make_folio_secure(struct folio *folio, struct uv_cb_header *uvcb)
 		return -EAGAIN;
 	return uvcb->rc == 0x10a ? -ENXIO : -EINVAL;
 }
+EXPORT_SYMBOL(__make_folio_secure);
 
 /**
- * should_export_before_import - Determine whether an export is needed
- * before an import-like operation
- * @uvcb: the Ultravisor control block of the UVC to be performed
- * @mm: the mm of the process
+ * s390_wiggle_split_folio() - try to drain extra references to a folio and
+ *			       split the folio if it is large.
+ * @mm:    the mm containing the folio to work on
+ * @folio: the folio
  *
- * Returns whether an export is needed before every import-like operation.
- * This is needed for shared pages, which don't trigger a secure storage
- * exception when accessed from a different guest.
- *
- * Although considered as one, the Unpin Page UVC is not an actual import,
- * so it is not affected.
- *
- * No export is needed also when there is only one protected VM, because the
- * page cannot belong to the wrong VM in that case (there is no "other VM"
- * it can belong to).
- *
- * Return: true if an export is needed before every import, otherwise false.
+ * Context: Must be called while holding an extra reference to the folio;
+ *          the mm lock should not be held.
+ * Return: 0 if the operation was successful;
+ *	   -EAGAIN if splitting the large folio was not successful,
+ *		   but another attempt can be made;
+ *	   -EINVAL in case of other folio splitting errors. See split_folio().
  */
-static bool should_export_before_import(struct uv_cb_header *uvcb, struct mm_struct *mm)
+int s390_wiggle_split_folio(struct mm_struct *mm, struct folio *folio)
 {
-	/*
-	 * The misc feature indicates, among other things, that importing a
-	 * shared page from a different protected VM will automatically also
-	 * transfer its ownership.
-	 */
-	if (uv_has_feature(BIT_UV_FEAT_MISC))
-		return false;
-	if (uvcb->cmd == UVC_CMD_UNPIN_PAGE_SHARED)
-		return false;
-	return atomic_read(&mm->context.protected_count) > 1;
-}
+	int rc, tried_splits;
 
-/*
- * Drain LRU caches: the local one on first invocation and the ones of all
- * CPUs on successive invocations. Returns "true" on the first invocation.
- */
-static bool drain_lru(bool *drain_lru_called)
-{
-	/*
-	 * If we have tried a local drain and the folio refcount
-	 * still does not match our expected safe value, try with a
-	 * system wide drain. This is needed if the pagevecs holding
-	 * the page are on a different CPU.
-	 */
-	if (*drain_lru_called) {
-		lru_add_drain_all();
-		/* We give up here, don't retry immediately. */
-		return false;
-	}
-	/*
-	 * We are here if the folio refcount does not match the
-	 * expected safe value. The main culprits are usually
-	 * pagevecs. With lru_add_drain() we drain the pagevecs
-	 * on the local CPU so that hopefully the refcount will
-	 * reach the expected safe value.
-	 */
-	lru_add_drain();
-	*drain_lru_called = true;
-	/* The caller should try again immediately */
-	return true;
-}
+	lockdep_assert_not_held(&mm->mmap_lock);
+	folio_wait_writeback(folio);
+	lru_add_drain_all();
 
-/*
- * Requests the Ultravisor to make a page accessible to a guest.
- * If it's brought in the first time, it will be cleared. If
- * it has been exported before, it will be decrypted and integrity
- * checked.
- */
-int gmap_make_secure(struct gmap *gmap, unsigned long gaddr, void *uvcb)
-{
-	struct vm_area_struct *vma;
-	bool drain_lru_called = false;
-	spinlock_t *ptelock;
-	unsigned long uaddr;
-	struct folio *folio;
-	pte_t *ptep;
-	int rc;
+	if (!folio_test_large(folio))
+		return 0;
 
-again:
-	rc = -EFAULT;
-	mmap_read_lock(gmap->mm);
+	for (tried_splits = 0; tried_splits < 2; tried_splits++) {
+		struct address_space *mapping;
+		loff_t lstart, lend;
+		struct inode *inode;
 
-	uaddr = __gmap_translate(gmap, gaddr);
-	if (IS_ERR_VALUE(uaddr))
-		goto out;
-	vma = vma_lookup(gmap->mm, uaddr);
-	if (!vma)
-		goto out;
-	/*
-	 * Secure pages cannot be huge and userspace should not combine both.
-	 * In case userspace does it anyway this will result in an -EFAULT for
-	 * the unpack. The guest is thus never reaching secure mode. If
-	 * userspace is playing dirty tricky with mapping huge pages later
-	 * on this will result in a segmentation fault.
-	 */
-	if (is_vm_hugetlb_page(vma))
-		goto out;
-
-	rc = -ENXIO;
-	ptep = get_locked_pte(gmap->mm, uaddr, &ptelock);
-	if (!ptep)
-		goto out;
-	if (pte_present(*ptep) && !(pte_val(*ptep) & _PAGE_INVALID) && pte_write(*ptep)) {
-		folio = page_folio(pte_page(*ptep));
-		rc = -EAGAIN;
-		if (folio_test_large(folio)) {
-			rc = -E2BIG;
-		} else if (folio_trylock(folio)) {
-			if (should_export_before_import(uvcb, gmap->mm))
-				uv_convert_from_secure(PFN_PHYS(folio_pfn(folio)));
-			rc = make_folio_secure(folio, uvcb);
-			folio_unlock(folio);
-		}
-
-		/*
-		 * Once we drop the PTL, the folio may get unmapped and
-		 * freed immediately. We need a temporary reference.
-		 */
-		if (rc == -EAGAIN || rc == -E2BIG)
-			folio_get(folio);
-	}
-	pte_unmap_unlock(ptep, ptelock);
-out:
-	mmap_read_unlock(gmap->mm);
-
-	switch (rc) {
-	case -E2BIG:
 		folio_lock(folio);
 		rc = split_folio(folio);
-		folio_unlock(folio);
-		folio_put(folio);
-
-		switch (rc) {
-		case 0:
-			/* Splitting succeeded, try again immediately. */
-			goto again;
-		case -EAGAIN:
-			/* Additional folio references. */
-			if (drain_lru(&drain_lru_called))
-				goto again;
-			return -EAGAIN;
-		case -EBUSY:
-			/* Unexpected race. */
-			return -EAGAIN;
+		if (rc != -EBUSY) {
+			folio_unlock(folio);
+			return rc;
 		}
-		WARN_ON_ONCE(1);
-		return -ENXIO;
-	case -EAGAIN:
+
 		/*
-		 * If we are here because the UVC returned busy or partial
-		 * completion, this is just a useless check, but it is safe.
+		 * Splitting with -EBUSY can fail for various reasons, but we
+		 * have to handle one case explicitly for now: some mappings
+		 * don't allow for splitting dirty folios; writeback will
+		 * mark them clean again, including marking all page table
+		 * entries mapping the folio read-only, to catch future write
+		 * attempts.
+		 *
+		 * While the system should be writing back dirty folios in the
+		 * background, we obtained this folio by looking up a writable
+		 * page table entry. On these problematic mappings, writable
+		 * page table entries imply dirty folios, preventing the
+		 * split in the first place.
+		 *
+		 * To prevent a livelock when trigger writeback manually and
+		 * letting the caller look up the folio again in the page
+		 * table (turning it dirty), immediately try to split again.
+		 *
+		 * This is only a problem for some mappings (e.g., XFS);
+		 * mappings that do not support writeback (e.g., shmem) do not
+		 * apply.
 		 */
-		folio_wait_writeback(folio);
-		folio_put(folio);
-		return -EAGAIN;
-	case -EBUSY:
-		/* Additional folio references. */
-		if (drain_lru(&drain_lru_called))
-			goto again;
-		return -EAGAIN;
-	case -ENXIO:
-		if (gmap_fault(gmap, gaddr, FAULT_FLAG_WRITE))
-			return -EFAULT;
-		return -EAGAIN;
+		if (!folio_test_dirty(folio) || folio_test_anon(folio) ||
+		    !folio->mapping || !mapping_can_writeback(folio->mapping)) {
+			folio_unlock(folio);
+			break;
+		}
+
+		/*
+		 * Ideally, we'd only trigger writeback on this exact folio. But
+		 * there is no easy way to do that, so we'll stabilize the
+		 * mapping while we still hold the folio lock, so we can drop
+		 * the folio lock to trigger writeback on the range currently
+		 * covered by the folio instead.
+		 */
+		mapping = folio->mapping;
+		lstart = folio_pos(folio);
+		lend = lstart + folio_size(folio) - 1;
+		inode = igrab(mapping->host);
+		folio_unlock(folio);
+
+		if (unlikely(!inode))
+			break;
+
+		filemap_write_and_wait_range(mapping, lstart, lend);
+		iput(mapping->host);
 	}
-	return rc;
+	return -EAGAIN;
 }
-EXPORT_SYMBOL_GPL(gmap_make_secure);
-
-int gmap_convert_to_secure(struct gmap *gmap, unsigned long gaddr)
-{
-	struct uv_cb_cts uvcb = {
-		.header.cmd = UVC_CMD_CONV_TO_SEC_STOR,
-		.header.len = sizeof(uvcb),
-		.guest_handle = gmap->guest_handle,
-		.gaddr = gaddr,
-	};
-
-	return gmap_make_secure(gmap, gaddr, &uvcb);
-}
-EXPORT_SYMBOL_GPL(gmap_convert_to_secure);
-
-/**
- * gmap_destroy_page - Destroy a guest page.
- * @gmap: the gmap of the guest
- * @gaddr: the guest address to destroy
- *
- * An attempt will be made to destroy the given guest page. If the attempt
- * fails, an attempt is made to export the page. If both attempts fail, an
- * appropriate error is returned.
- */
-int gmap_destroy_page(struct gmap *gmap, unsigned long gaddr)
-{
-	struct vm_area_struct *vma;
-	unsigned long uaddr;
-	struct folio *folio;
-	struct page *page;
-	int rc;
-
-	rc = -EFAULT;
-	mmap_read_lock(gmap->mm);
-
-	uaddr = __gmap_translate(gmap, gaddr);
-	if (IS_ERR_VALUE(uaddr))
-		goto out;
-	vma = vma_lookup(gmap->mm, uaddr);
-	if (!vma)
-		goto out;
-	/*
-	 * Huge pages should not be able to become secure
-	 */
-	if (is_vm_hugetlb_page(vma))
-		goto out;
-
-	rc = 0;
-	/* we take an extra reference here */
-	page = follow_page(vma, uaddr, FOLL_WRITE | FOLL_GET);
-	if (IS_ERR_OR_NULL(page))
-		goto out;
-	folio = page_folio(page);
-	rc = uv_destroy_folio(folio);
-	/*
-	 * Fault handlers can race; it is possible that two CPUs will fault
-	 * on the same secure page. One CPU can destroy the page, reboot,
-	 * re-enter secure mode and import it, while the second CPU was
-	 * stuck at the beginning of the handler. At some point the second
-	 * CPU will be able to progress, and it will not be able to destroy
-	 * the page. In that case we do not want to terminate the process,
-	 * we instead try to export the page.
-	 */
-	if (rc)
-		rc = uv_convert_from_secure_folio(folio);
-	folio_put(folio);
-out:
-	mmap_read_unlock(gmap->mm);
-	return rc;
-}
-EXPORT_SYMBOL_GPL(gmap_destroy_page);
+EXPORT_SYMBOL_GPL(s390_wiggle_split_folio);
 
 /*
  * To be called with the folio locked or with an extra reference! This will
- * prevent gmap_make_secure from touching the folio concurrently. Having 2
- * parallel arch_make_folio_accessible is fine, as the UV calls will become a
- * no-op if the folio is already exported.
+ * prevent kvm_s390_pv_make_secure() from touching the folio concurrently.
+ * Having 2 parallel arch_make_folio_accessible is fine, as the UV calls will
+ * become a no-op if the folio is already exported.
  */
 int arch_make_folio_accessible(struct folio *folio)
 {
 	int rc = 0;
 
-	/* See gmap_make_secure(): large folios cannot be secure */
-	if (unlikely(folio_test_large(folio)))
+	/*
+	 * PG_arch_1 is used as an indication that this small folio might be
+	 * secure. This can overindicate, e.g. we set the bit before calling
+	 * convert_to_secure.
+	 */
+	if (!test_bit(PG_arch_1, &folio->flags.f))
 		return 0;
 
-	/*
-	 * PG_arch_1 is used in 2 places:
-	 * 1. for storage keys of hugetlb folios and KVM
-	 * 2. As an indication that this small folio might be secure. This can
-	 *    overindicate, e.g. we set the bit before calling
-	 *    convert_to_secure.
-	 * As secure pages are never large folios, both variants can co-exists.
-	 */
-	if (!test_bit(PG_arch_1, &folio->flags))
-		return 0;
+	/* Large folios cannot be secure. */
+	if (WARN_ON_ONCE(folio_test_large(folio)))
+		return -EFAULT;
 
 	rc = uv_pin_shared(folio_to_phys(folio));
 	if (!rc) {
-		clear_bit(PG_arch_1, &folio->flags);
+		clear_bit(PG_arch_1, &folio->flags.f);
 		return 0;
 	}
 
 	rc = uv_convert_from_secure(folio_to_phys(folio));
 	if (!rc) {
-		clear_bit(PG_arch_1, &folio->flags);
+		clear_bit(PG_arch_1, &folio->flags.f);
 		return 0;
 	}
 
@@ -548,11 +405,6 @@ int arch_make_folio_accessible(struct folio *folio)
 }
 EXPORT_SYMBOL_GPL(arch_make_folio_accessible);
 
-int arch_make_page_accessible(struct page *page)
-{
-	return arch_make_folio_accessible(page_folio(page));
-}
-EXPORT_SYMBOL_GPL(arch_make_page_accessible);
 static ssize_t uv_query_facilities(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
 {
@@ -695,11 +547,31 @@ static struct kobj_attribute uv_query_supp_secret_types_attr =
 static ssize_t uv_query_max_secrets(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%d\n", uv_info.max_secrets);
+	return sysfs_emit(buf, "%d\n",
+			  uv_info.max_assoc_secrets + uv_info.max_retr_secrets);
 }
 
 static struct kobj_attribute uv_query_max_secrets_attr =
 	__ATTR(max_secrets, 0444, uv_query_max_secrets, NULL);
+
+static ssize_t uv_query_max_retr_secrets(struct kobject *kobj,
+					 struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", uv_info.max_retr_secrets);
+}
+
+static struct kobj_attribute uv_query_max_retr_secrets_attr =
+	__ATTR(max_retr_secrets, 0444, uv_query_max_retr_secrets, NULL);
+
+static ssize_t uv_query_max_assoc_secrets(struct kobject *kobj,
+					  struct kobj_attribute *attr,
+					  char *buf)
+{
+	return sysfs_emit(buf, "%d\n", uv_info.max_assoc_secrets);
+}
+
+static struct kobj_attribute uv_query_max_assoc_secrets_attr =
+	__ATTR(max_assoc_secrets, 0444, uv_query_max_assoc_secrets, NULL);
 
 static struct attribute *uv_query_attrs[] = {
 	&uv_query_facilities_attr.attr,
@@ -718,11 +590,79 @@ static struct attribute *uv_query_attrs[] = {
 	&uv_query_supp_add_secret_pcf_attr.attr,
 	&uv_query_supp_secret_types_attr.attr,
 	&uv_query_max_secrets_attr.attr,
+	&uv_query_max_assoc_secrets_attr.attr,
+	&uv_query_max_retr_secrets_attr.attr,
 	NULL,
 };
 
+static inline struct uv_cb_query_keys uv_query_keys(void)
+{
+	struct uv_cb_query_keys uvcb = {
+		.header.cmd = UVC_CMD_QUERY_KEYS,
+		.header.len = sizeof(uvcb)
+	};
+
+	uv_call(0, (uint64_t)&uvcb);
+	return uvcb;
+}
+
+static inline ssize_t emit_hash(struct uv_key_hash *hash, char *buf, int at)
+{
+	return sysfs_emit_at(buf, at, "%016llx%016llx%016llx%016llx\n",
+			    hash->dword[0], hash->dword[1], hash->dword[2], hash->dword[3]);
+}
+
+static ssize_t uv_keys_host_key(struct kobject *kobj,
+				struct kobj_attribute *attr, char *buf)
+{
+	struct uv_cb_query_keys uvcb = uv_query_keys();
+
+	return emit_hash(&uvcb.key_hashes[UVC_QUERY_KEYS_IDX_HK], buf, 0);
+}
+
+static struct kobj_attribute uv_keys_host_key_attr =
+	__ATTR(host_key, 0444, uv_keys_host_key, NULL);
+
+static ssize_t uv_keys_backup_host_key(struct kobject *kobj,
+				       struct kobj_attribute *attr, char *buf)
+{
+	struct uv_cb_query_keys uvcb = uv_query_keys();
+
+	return emit_hash(&uvcb.key_hashes[UVC_QUERY_KEYS_IDX_BACK_HK], buf, 0);
+}
+
+static struct kobj_attribute uv_keys_backup_host_key_attr =
+	__ATTR(backup_host_key, 0444, uv_keys_backup_host_key, NULL);
+
+static ssize_t uv_keys_all(struct kobject *kobj,
+			   struct kobj_attribute *attr, char *buf)
+{
+	struct uv_cb_query_keys uvcb = uv_query_keys();
+	ssize_t len = 0;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(uvcb.key_hashes); i++)
+		len += emit_hash(uvcb.key_hashes + i, buf, len);
+
+	return len;
+}
+
+static struct kobj_attribute uv_keys_all_attr =
+	__ATTR(all, 0444, uv_keys_all, NULL);
+
 static struct attribute_group uv_query_attr_group = {
 	.attrs = uv_query_attrs,
+};
+
+static struct attribute *uv_keys_attrs[] = {
+	&uv_keys_host_key_attr.attr,
+	&uv_keys_backup_host_key_attr.attr,
+	&uv_keys_all_attr.attr,
+	NULL,
+};
+
+static struct attribute_group uv_keys_attr_group = {
+	.attrs = uv_keys_attrs,
 };
 
 static ssize_t uv_is_prot_virt_guest(struct kobject *kobj,
@@ -750,9 +690,27 @@ static const struct attribute *uv_prot_virt_attrs[] = {
 };
 
 static struct kset *uv_query_kset;
+static struct kset *uv_keys_kset;
 static struct kobject *uv_kobj;
 
-static int __init uv_info_init(void)
+static int __init uv_sysfs_dir_init(const struct attribute_group *grp,
+				    struct kset **uv_dir_kset, const char *name)
+{
+	struct kset *kset;
+	int rc;
+
+	kset = kset_create_and_add(name, NULL, uv_kobj);
+	if (!kset)
+		return -ENOMEM;
+	*uv_dir_kset = kset;
+
+	rc = sysfs_create_group(&kset->kobj, grp);
+	if (rc)
+		kset_unregister(kset);
+	return rc;
+}
+
+static int __init uv_sysfs_init(void)
 {
 	int rc = -ENOMEM;
 
@@ -767,17 +725,16 @@ static int __init uv_info_init(void)
 	if (rc)
 		goto out_kobj;
 
-	uv_query_kset = kset_create_and_add("query", NULL, uv_kobj);
-	if (!uv_query_kset) {
-		rc = -ENOMEM;
+	rc = uv_sysfs_dir_init(&uv_query_attr_group, &uv_query_kset, "query");
+	if (rc)
 		goto out_ind_files;
-	}
 
-	rc = sysfs_create_group(&uv_query_kset->kobj, &uv_query_attr_group);
-	if (!rc)
-		return 0;
+	/* Get installed key hashes if available, ignore any errors */
+	if (test_bit_inv(BIT_UVC_CMD_QUERY_KEYS, uv_info.inst_calls_list))
+		uv_sysfs_dir_init(&uv_keys_attr_group, &uv_keys_kset, "keys");
 
-	kset_unregister(uv_query_kset);
+	return 0;
+
 out_ind_files:
 	sysfs_remove_files(uv_kobj, uv_prot_virt_attrs);
 out_kobj:
@@ -785,4 +742,110 @@ out_kobj:
 	kobject_put(uv_kobj);
 	return rc;
 }
-device_initcall(uv_info_init);
+device_initcall(uv_sysfs_init);
+
+/*
+ * Locate a secret in the list by its id.
+ * @secret_id: search pattern.
+ * @list: ephemeral buffer space
+ * @secret: output data, containing the secret's metadata.
+ *
+ * Search for a secret with the given secret_id in the Ultravisor secret store.
+ *
+ * Context: might sleep.
+ */
+static int find_secret_in_page(const u8 secret_id[UV_SECRET_ID_LEN],
+			       const struct uv_secret_list *list,
+			       struct uv_secret_list_item_hdr *secret)
+{
+	u16 i;
+
+	for (i = 0; i < list->total_num_secrets; i++) {
+		if (memcmp(secret_id, list->secrets[i].id, UV_SECRET_ID_LEN) == 0) {
+			*secret = list->secrets[i].hdr;
+			return 0;
+		}
+	}
+	return -ENOENT;
+}
+
+/**
+ * uv_find_secret() - search secret metadata for a given secret id.
+ * @secret_id: search pattern.
+ * @list: ephemeral buffer space
+ * @secret: output data, containing the secret's metadata.
+ *
+ * Context: might sleep.
+ */
+int uv_find_secret(const u8 secret_id[UV_SECRET_ID_LEN],
+		   struct uv_secret_list *list,
+		   struct uv_secret_list_item_hdr *secret)
+{
+	u16 start_idx = 0;
+	u16 list_rc;
+	int ret;
+
+	do {
+		uv_list_secrets(list, start_idx, &list_rc, NULL);
+		if (list_rc != UVC_RC_EXECUTED && list_rc != UVC_RC_MORE_DATA) {
+			if (list_rc == UVC_RC_INV_CMD)
+				return -ENODEV;
+			else
+				return -EIO;
+		}
+		ret = find_secret_in_page(secret_id, list, secret);
+		if (ret == 0)
+			return ret;
+		start_idx = list->next_secret_idx;
+	} while (list_rc == UVC_RC_MORE_DATA && start_idx < list->next_secret_idx);
+
+	return -ENOENT;
+}
+EXPORT_SYMBOL_GPL(uv_find_secret);
+
+/**
+ * uv_retrieve_secret() - get the secret value for the secret index.
+ * @secret_idx: Secret index for which the secret should be retrieved.
+ * @buf: Buffer to store retrieved secret.
+ * @buf_size: Size of the buffer. The correct buffer size is reported as part of
+ * the result from `uv_get_secret_metadata`.
+ *
+ * Calls the Retrieve Secret UVC and translates the UV return code into an errno.
+ *
+ * Context: might sleep.
+ *
+ * Return:
+ * * %0		- Entry found; buffer contains a valid secret.
+ * * %ENOENT:	- No entry found or secret at the index is non-retrievable.
+ * * %ENODEV:	- Not supported: UV not available or command not available.
+ * * %EINVAL:	- Buffer too small for content.
+ * * %EIO:	- Other unexpected UV error.
+ */
+int uv_retrieve_secret(u16 secret_idx, u8 *buf, size_t buf_size)
+{
+	struct uv_cb_retr_secr uvcb = {
+		.header.len = sizeof(uvcb),
+		.header.cmd = UVC_CMD_RETR_SECRET,
+		.secret_idx = secret_idx,
+		.buf_addr = (u64)buf,
+		.buf_size = buf_size,
+	};
+
+	uv_call_sched(0, (u64)&uvcb);
+
+	switch (uvcb.header.rc) {
+	case UVC_RC_EXECUTED:
+		return 0;
+	case UVC_RC_INV_CMD:
+		return -ENODEV;
+	case UVC_RC_RETR_SECR_STORE_EMPTY:
+	case UVC_RC_RETR_SECR_INV_SECRET:
+	case UVC_RC_RETR_SECR_INV_IDX:
+		return -ENOENT;
+	case UVC_RC_RETR_SECR_BUF_SMALL:
+		return -EINVAL;
+	default:
+		return -EIO;
+	}
+}
+EXPORT_SYMBOL_GPL(uv_retrieve_secret);

@@ -189,7 +189,7 @@ void imx_register_uart_clocks(void)
 		if (!of_stdout)
 			return;
 
-		imx_uart_clocks = kcalloc(num, sizeof(struct clk *), GFP_KERNEL);
+		imx_uart_clocks = kzalloc_objs(struct clk *, num);
 		if (!imx_uart_clocks)
 			return;
 
@@ -226,4 +226,5 @@ static int __init imx_clk_disable_uart(void)
 late_initcall_sync(imx_clk_disable_uart);
 #endif
 
+MODULE_DESCRIPTION("Common clock support for NXP i.MX SoC family");
 MODULE_LICENSE("GPL v2");

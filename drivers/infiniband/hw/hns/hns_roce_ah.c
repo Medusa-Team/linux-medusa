@@ -30,10 +30,8 @@
  * SOFTWARE.
  */
 
-#include <linux/pci.h>
 #include <rdma/ib_addr.h>
 #include <rdma/ib_cache.h>
-#include "hnae3.h"
 #include "hns_roce_device.h"
 #include "hns_roce_hw_v2.h"
 
@@ -62,10 +60,12 @@ int hns_roce_create_ah(struct ib_ah *ibah, struct rdma_ah_init_attr *init_attr,
 	u8 tclass = get_tclass(grh);
 	u8 priority = 0;
 	u8 tc_mode = 0;
-	int ret;
+	int ret = 0;
 
-	if (hr_dev->pci_dev->revision == PCI_REVISION_ID_HIP08 && udata)
-		return -EOPNOTSUPP;
+	if (hr_dev->pci_dev->revision == PCI_REVISION_ID_HIP08 && udata) {
+		ret = -EOPNOTSUPP;
+		goto err_out;
+	}
 
 	ah->av.port = rdma_ah_get_port_num(ah_attr);
 	ah->av.gid_index = grh->sgid_index;
@@ -77,22 +77,23 @@ int hns_roce_create_ah(struct ib_ah *ibah, struct rdma_ah_init_attr *init_attr,
 	ah->av.flowlabel = grh->flow_label;
 	ah->av.udp_sport = get_ah_udp_sport(ah_attr);
 	ah->av.tclass = tclass;
+	ah->av.sl = rdma_ah_get_sl(ah_attr);
 
-	ret = hr_dev->hw->get_dscp(hr_dev, tclass, &tc_mode, &priority);
-	if (ret == -EOPNOTSUPP)
-		ret = 0;
+	if (grh->sgid_attr->gid_type == IB_GID_TYPE_ROCE_UDP_ENCAP) {
+		ret = hr_dev->hw->get_dscp(hr_dev, tclass, &tc_mode, &priority);
+		if (ret == -EOPNOTSUPP)
+			ret = 0;
+		else if (ret)
+			goto err_out;
 
-	if (ret && grh->sgid_attr->gid_type == IB_GID_TYPE_ROCE_UDP_ENCAP)
-		return ret;
+		if (tc_mode == HNAE3_TC_MAP_MODE_DSCP)
+			ah->av.sl = priority;
+	}
 
-	if (tc_mode == HNAE3_TC_MAP_MODE_DSCP &&
-	    grh->sgid_attr->gid_type == IB_GID_TYPE_ROCE_UDP_ENCAP)
-		ah->av.sl = priority;
-	else
-		ah->av.sl = rdma_ah_get_sl(ah_attr);
-
-	if (!check_sl_valid(hr_dev, ah->av.sl))
-		return -EINVAL;
+	if (!check_sl_valid(hr_dev, ah->av.sl)) {
+		ret = -EINVAL;
+		goto err_out;
+	}
 
 	memcpy(ah->av.dgid, grh->dgid.raw, HNS_ROCE_GID_SIZE);
 	memcpy(ah->av.mac, ah_attr->roce.dmac, ETH_ALEN);

@@ -342,7 +342,7 @@ static const struct backlight_ops acx565akm_bl_ops = {
 static int acx565akm_backlight_init(struct acx565akm_panel *lcd)
 {
 	struct backlight_properties props = {
-		.power = FB_BLANK_UNBLANK,
+		.power = BACKLIGHT_POWER_ON,
 		.type = BACKLIGHT_RAW,
 	};
 	int ret;
@@ -562,8 +562,7 @@ static int acx565akm_detect(struct acx565akm_panel *lcd)
 		lcd->enabled ? "enabled" : "disabled ", status);
 
 	acx565akm_read(lcd, MIPI_DCS_GET_DISPLAY_ID, lcd->display_id, 3);
-	dev_dbg(&lcd->spi->dev, "MIPI display ID: %02x%02x%02x\n",
-		lcd->display_id[0], lcd->display_id[1], lcd->display_id[2]);
+	dev_dbg(&lcd->spi->dev, "MIPI display ID: %3phN\n", lcd->display_id);
 
 	switch (lcd->display_id[0]) {
 	case 0x10:
@@ -608,9 +607,10 @@ static int acx565akm_probe(struct spi_device *spi)
 	struct acx565akm_panel *lcd;
 	int ret;
 
-	lcd = devm_kzalloc(&spi->dev, sizeof(*lcd), GFP_KERNEL);
-	if (!lcd)
-		return -ENOMEM;
+	lcd = devm_drm_panel_alloc(&spi->dev, struct acx565akm_panel, panel,
+				   &acx565akm_funcs, DRM_MODE_CONNECTOR_DPI);
+	if (IS_ERR(lcd))
+		return PTR_ERR(lcd);
 
 	spi_set_drvdata(spi, lcd);
 	spi->mode = SPI_MODE_3;
@@ -635,9 +635,6 @@ static int acx565akm_probe(struct spi_device *spi)
 		if (ret < 0)
 			return ret;
 	}
-
-	drm_panel_init(&lcd->panel, &lcd->spi->dev, &acx565akm_funcs,
-		       DRM_MODE_CONNECTOR_DPI);
 
 	drm_panel_add(&lcd->panel);
 

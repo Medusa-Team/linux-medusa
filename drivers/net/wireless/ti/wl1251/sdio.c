@@ -204,7 +204,7 @@ static int wl1251_sdio_probe(struct sdio_func *func,
 
 	wl = hw->priv;
 
-	wl_sdio = kzalloc(sizeof(*wl_sdio), GFP_KERNEL);
+	wl_sdio = kzalloc_obj(*wl_sdio);
 	if (wl_sdio == NULL) {
 		ret = -ENOMEM;
 		goto out_free_hw;
@@ -233,8 +233,8 @@ static int wl1251_sdio_probe(struct sdio_func *func,
 	}
 
 	if (wl->irq) {
-		irq_set_status_flags(wl->irq, IRQ_NOAUTOEN);
-		ret = request_irq(wl->irq, wl1251_line_irq, 0, "wl1251", wl);
+		ret = request_irq(wl->irq, wl1251_line_irq, IRQF_NO_AUTOEN,
+				  "wl1251", wl);
 		if (ret < 0) {
 			wl1251_error("request_irq() failed: %d", ret);
 			goto disable;

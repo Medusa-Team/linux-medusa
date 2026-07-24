@@ -38,7 +38,7 @@ struct intel_dvo_device {
 	enum port port;
 	/* GPIO register used for i2c bus to control this device */
 	u32 gpio;
-	int slave_addr;
+	int target_addr;
 
 	const struct intel_dvo_dev_ops *dev_ops;
 	void *dev_priv;
@@ -57,7 +57,7 @@ struct intel_dvo_dev_ops {
 	 * Turn on/off output.
 	 *
 	 * Because none of our dvo drivers support an intermediate power levels,
-	 * we don't expose this in the interfac.
+	 * we don't expose this in the interface.
 	 */
 	void (*dpms)(struct intel_dvo_device *dvo, bool enable);
 
@@ -71,7 +71,7 @@ struct intel_dvo_dev_ops {
 	 * \return MODE_OK if the mode is valid, or another MODE_* otherwise.
 	 */
 	enum drm_mode_status (*mode_valid)(struct intel_dvo_device *dvo,
-					   struct drm_display_mode *mode);
+					   const struct drm_display_mode *mode);
 
 	/*
 	 * Callback for setting up a video mode after fixups have been made.

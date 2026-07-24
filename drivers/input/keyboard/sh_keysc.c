@@ -184,7 +184,7 @@ static int sh_keysc_probe(struct platform_device *pdev)
 	if (irq < 0)
 		goto err0;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (priv == NULL) {
 		dev_err(&pdev->dev, "failed to allocate driver data\n");
 		error = -ENOMEM;
@@ -319,7 +319,7 @@ static DEFINE_SIMPLE_DEV_PM_OPS(sh_keysc_dev_pm_ops,
 
 static struct platform_driver sh_keysc_device_driver = {
 	.probe		= sh_keysc_probe,
-	.remove_new	= sh_keysc_remove,
+	.remove		= sh_keysc_remove,
 	.driver		= {
 		.name	= "sh_keysc",
 		.pm	= pm_sleep_ptr(&sh_keysc_dev_pm_ops),

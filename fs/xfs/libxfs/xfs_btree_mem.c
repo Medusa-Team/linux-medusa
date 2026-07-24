@@ -3,7 +3,7 @@
  * Copyright (c) 2021-2024 Oracle.  All Rights Reserved.
  * Author: Darrick J. Wong <djwong@kernel.org>
  */
-#include "xfs.h"
+#include "xfs_platform.h"
 #include "xfs_fs.h"
 #include "xfs_shared.h"
 #include "xfs_format.h"
@@ -18,6 +18,7 @@
 #include "xfs_ag.h"
 #include "xfs_buf_item.h"
 #include "xfs_trace.h"
+#include "xfs_rtgroup.h"
 
 /* Set the root of an in-memory btree. */
 void
@@ -57,10 +58,8 @@ xfbtree_dup_cursor(
 	ncur->bc_flags = cur->bc_flags;
 	ncur->bc_nlevels = cur->bc_nlevels;
 	ncur->bc_mem.xfbtree = cur->bc_mem.xfbtree;
-
-	if (cur->bc_mem.pag)
-		ncur->bc_mem.pag = xfs_perag_hold(cur->bc_mem.pag);
-
+	if (cur->bc_group)
+		ncur->bc_group = xfs_group_hold(cur->bc_group);
 	return ncur;
 }
 

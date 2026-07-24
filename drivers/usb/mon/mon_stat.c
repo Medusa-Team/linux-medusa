@@ -29,7 +29,7 @@ static int mon_stat_open(struct inode *inode, struct file *file)
 	struct mon_bus *mbus;
 	struct snap *sp;
 
-	sp = kmalloc(sizeof(struct snap), GFP_KERNEL);
+	sp = kmalloc_obj(struct snap);
 	if (sp == NULL)
 		return -ENOMEM;
 
@@ -62,7 +62,6 @@ static int mon_stat_release(struct inode *inode, struct file *file)
 const struct file_operations mon_fops_stat = {
 	.owner =	THIS_MODULE,
 	.open =		mon_stat_open,
-	.llseek =	no_llseek,
 	.read =		mon_stat_read,
 	/* .write =	mon_stat_write, */
 	/* .poll =		mon_stat_poll, */

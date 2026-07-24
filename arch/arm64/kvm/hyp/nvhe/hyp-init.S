@@ -24,28 +24,25 @@
 	.align	11
 
 SYM_CODE_START(__kvm_hyp_init)
-	ventry	__invalid		// Synchronous EL2t
-	ventry	__invalid		// IRQ EL2t
-	ventry	__invalid		// FIQ EL2t
-	ventry	__invalid		// Error EL2t
+	ventry	.			// Synchronous EL2t
+	ventry	.			// IRQ EL2t
+	ventry	.			// FIQ EL2t
+	ventry	.			// Error EL2t
 
-	ventry	__invalid		// Synchronous EL2h
-	ventry	__invalid		// IRQ EL2h
-	ventry	__invalid		// FIQ EL2h
-	ventry	__invalid		// Error EL2h
+	ventry	.			// Synchronous EL2h
+	ventry	.			// IRQ EL2h
+	ventry	.			// FIQ EL2h
+	ventry	.			// Error EL2h
 
 	ventry	__do_hyp_init		// Synchronous 64-bit EL1
-	ventry	__invalid		// IRQ 64-bit EL1
-	ventry	__invalid		// FIQ 64-bit EL1
-	ventry	__invalid		// Error 64-bit EL1
+	ventry	.			// IRQ 64-bit EL1
+	ventry	.			// FIQ 64-bit EL1
+	ventry	.			// Error 64-bit EL1
 
-	ventry	__invalid		// Synchronous 32-bit EL1
-	ventry	__invalid		// IRQ 32-bit EL1
-	ventry	__invalid		// FIQ 32-bit EL1
-	ventry	__invalid		// Error 32-bit EL1
-
-__invalid:
-	b	.
+	ventry	.			// Synchronous 32-bit EL1
+	ventry	.			// IRQ 32-bit EL1
+	ventry	.			// FIQ 32-bit EL1
+	ventry	.			// Error 32-bit EL1
 
 	/*
 	 * Only uses x0..x3 so as to not clobber callee-saved SMCCC registers.
@@ -77,6 +74,17 @@ __do_hyp_init:
 SYM_CODE_END(__kvm_hyp_init)
 
 /*
+ * Initialize EL2 CPU state to sane values.
+ *
+ * HCR_EL2.E2H must have been initialized already.
+ */
+SYM_CODE_START_LOCAL(__kvm_init_el2_state)
+	init_el2_state				// Clobbers x0..x2
+	finalise_el2_state
+	ret
+SYM_CODE_END(__kvm_init_el2_state)
+
+/*
  * Initialize the hypervisor in EL2.
  *
  * Only uses x0..x2 so as to not clobber callee-saved SMCCC registers
@@ -92,7 +100,7 @@ SYM_CODE_START_LOCAL(___kvm_hyp_init)
 	msr	mair_el2, x1
 
 	ldr	x1, [x0, #NVHE_INIT_HCR_EL2]
-	msr	hcr_el2, x1
+	msr_hcr_el2 x1
 
 	mov	x2, #HCR_E2H
 	and	x2, x1, x2
@@ -102,9 +110,12 @@ SYM_CODE_START_LOCAL(___kvm_hyp_init)
 	// TPIDR_EL2 is used to preserve x0 across the macro maze...
 	isb
 	msr	tpidr_el2, x0
-	init_el2_state
-	finalise_el2_state
+	str	lr, [x0, #NVHE_INIT_TMP]
+
+	bl	__kvm_init_el2_state
+
 	mrs	x0, tpidr_el2
+	ldr	lr, [x0, #NVHE_INIT_TMP]
 
 1:
 	ldr	x1, [x0, #NVHE_INIT_TPIDR_EL2]
@@ -119,7 +130,7 @@ SYM_CODE_START_LOCAL(___kvm_hyp_init)
 	ldr	x1, [x0, #NVHE_INIT_PGD_PA]
 	phys_to_ttbr x2, x1
 alternative_if ARM64_HAS_CNP
-	orr	x2, x2, #TTBR_CNP_BIT
+	orr	x2, x2, #TTBRx_EL1_CnP
 alternative_else_nop_endif
 	msr	ttbr0_el2, x2
 
@@ -130,7 +141,7 @@ alternative_else_nop_endif
 
 	/* Invalidate the stale TLBs from Bootloader */
 	tlbi	alle2
-	tlbi	vmalls12e1
+	tlbi	alle1
 	dsb	sy
 
 	mov_q	x0, INIT_SCTLR_EL2_MMU_ON
@@ -162,9 +173,8 @@ SYM_CODE_END(___kvm_hyp_init)
  * x0: struct kvm_nvhe_init_params PA
  */
 SYM_CODE_START(kvm_hyp_cpu_entry)
-	mov	x1, #1				// is_cpu_on = true
+	ldr	x29, =__kvm_host_psci_cpu_on_entry
 	b	__kvm_hyp_init_cpu
-SYM_CODE_END(kvm_hyp_cpu_entry)
 
 /*
  * PSCI CPU_SUSPEND / SYSTEM_SUSPEND entry point
@@ -172,47 +182,36 @@ SYM_CODE_END(kvm_hyp_cpu_entry)
  * x0: struct kvm_nvhe_init_params PA
  */
 SYM_CODE_START(kvm_hyp_cpu_resume)
-	mov	x1, #0				// is_cpu_on = false
-	b	__kvm_hyp_init_cpu
-SYM_CODE_END(kvm_hyp_cpu_resume)
+	ldr	x29, =__kvm_host_psci_cpu_resume_entry
 
-/*
- * Common code for CPU entry points. Initializes EL2 state and
- * installs the hypervisor before handing over to a C handler.
- *
- * x0: struct kvm_nvhe_init_params PA
- * x1: bool is_cpu_on
- */
-SYM_CODE_START_LOCAL(__kvm_hyp_init_cpu)
+SYM_INNER_LABEL(__kvm_hyp_init_cpu, SYM_L_LOCAL)
 	mov	x28, x0				// Stash arguments
-	mov	x29, x1
 
 	/* Check that the core was booted in EL2. */
 	mrs	x0, CurrentEL
 	cmp	x0, #CurrentEL_EL2
-	b.eq	2f
+	b.ne	1f
 
-	/* The core booted in EL1. KVM cannot be initialized on it. */
-1:	wfe
-	wfi
-	b	1b
+	msr	SPsel, #1			// We want to use SP_EL2
 
-2:	msr	SPsel, #1			// We want to use SP_EL{1,2}
+	init_el2_hcr	0
 
-	/* Initialize EL2 CPU state to sane values. */
-	init_el2_state				// Clobbers x0..x2
-	finalise_el2_state
-	__init_el2_nvhe_prepare_eret
+	bl	__kvm_init_el2_state
 
 	/* Enable MMU, set vectors and stack. */
 	mov	x0, x28
 	bl	___kvm_hyp_init			// Clobbers x0..x2
 
-	/* Leave idmap. */
-	mov	x0, x29
-	ldr	x1, =kvm_host_psci_cpu_entry
-	br	x1
-SYM_CODE_END(__kvm_hyp_init_cpu)
+	/* Leave idmap -- using BLR is OK, LR is restored from host context */
+	blr	x29
+
+	// The core booted in EL1, or the C code unexpectedly returned.
+	// Either way, KVM cannot be initialized on it.
+1:	wfe
+	wfi
+	b	1b
+SYM_CODE_END(kvm_hyp_cpu_resume)
+SYM_CODE_END(kvm_hyp_cpu_entry)
 
 SYM_CODE_START(__kvm_handle_stub_hvc)
 	/*
@@ -250,11 +249,6 @@ reset:
 	msr	sctlr_el2, x5
 	isb
 
-alternative_if ARM64_KVM_PROTECTED_MODE
-	mov_q	x5, HCR_HOST_NVHE_FLAGS
-	msr	hcr_el2, x5
-alternative_else_nop_endif
-
 	/* Install stub vectors */
 	adr_l	x5, __hyp_stub_vectors
 	msr	vbar_el2, x5
@@ -286,7 +280,7 @@ SYM_TYPED_FUNC_START(__pkvm_init_switch_pgd)
 	/* Install the new pgtables */
 	phys_to_ttbr x5, x0
 alternative_if ARM64_HAS_CNP
-	orr	x5, x5, #TTBR_CNP_BIT
+	orr	x5, x5, #TTBRx_EL1_CnP
 alternative_else_nop_endif
 	msr	ttbr0_el2, x5
 

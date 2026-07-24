@@ -49,24 +49,24 @@ additionalProperties: false
 examples:
   - |
     #include <dt-bindings/interrupt-controller/irq.h>
-    i2c2 {
+    i2c {
         #address-cells = <1>;
         #size-cells = <0>;
 
         typec-mux@48 {
-          compatible = "ite,it5205";
-          reg = <0x48>;
+            compatible = "ite,it5205";
+            reg = <0x48>;
 
-          mode-switch;
-          orientation-switch;
+            mode-switch;
+            orientation-switch;
 
-          vcc-supply = <&mt6359_vibr_ldo_reg>;
+            vcc-supply = <&mt6359_vibr_ldo_reg>;
 
-          port {
-            it5205_usbss_sbu: endpoint {
-              remote-endpoint = <&typec_controller>;
+            port {
+                it5205_usbss_sbu: endpoint {
+                    remote-endpoint = <&typec_controller>;
+                };
             };
-          };
         };
     };
 ...

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 /* Copyright (C) 2023 MediaTek Inc. */
 
 #include "mt7925.h"
@@ -101,12 +101,15 @@ int mt7925e_mac_reset(struct mt792x_dev *dev)
 
 	mt792x_wpdma_reset(dev, true);
 
-	local_bh_disable();
 	mt76_for_each_q_rx(&dev->mt76, i) {
 		napi_enable(&dev->mt76.napi[i]);
-		napi_schedule(&dev->mt76.napi[i]);
 	}
 	napi_enable(&dev->mt76.tx_napi);
+
+	local_bh_disable();
+	mt76_for_each_q_rx(&dev->mt76, i) {
+		napi_schedule(&dev->mt76.napi[i]);
+	}
 	napi_schedule(&dev->mt76.tx_napi);
 	local_bh_enable();
 

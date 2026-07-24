@@ -152,7 +152,7 @@ static int counter_set_event_node(struct counter_device *const counter,
 	/* If event is not already in the list */
 	if (&event_node->l == &counter->next_events_list) {
 		/* Allocate new event node */
-		event_node = kmalloc(sizeof(*event_node), GFP_KERNEL);
+		event_node = kmalloc_obj(*event_node);
 		if (!event_node)
 			return -ENOMEM;
 
@@ -172,7 +172,7 @@ static int counter_set_event_node(struct counter_device *const counter,
 		}
 
 	/* Allocate component node */
-	comp_node = kmalloc(sizeof(*comp_node), GFP_KERNEL);
+	comp_node = kmalloc_obj(*comp_node);
 	if (!comp_node) {
 		err = -ENOMEM;
 		goto exit_free_event_node;
@@ -454,7 +454,6 @@ out_unlock:
 
 static const struct file_operations counter_fops = {
 	.owner = THIS_MODULE,
-	.llseek = no_llseek,
 	.read = counter_chrdev_read,
 	.poll = counter_chrdev_poll,
 	.unlocked_ioctl = counter_chrdev_ioctl,
@@ -673,4 +672,4 @@ exit_early:
 	if (copied)
 		wake_up_poll(&counter->events_wait, EPOLLIN);
 }
-EXPORT_SYMBOL_NS_GPL(counter_push_event, COUNTER);
+EXPORT_SYMBOL_NS_GPL(counter_push_event, "COUNTER");

@@ -25,6 +25,12 @@ struct truly_nt35521 {
 	struct gpio_desc *blen_gpio;
 };
 
+#define NT35521_DCS_SWITCH_PAGE	0xf0
+
+#define nt35521_switch_page(dsi_ctx, page) \
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, NT35521_DCS_SWITCH_PAGE, \
+				     0x55, 0xaa, 0x52, 0x08, (page))
+
 static inline
 struct truly_nt35521 *to_truly_nt35521(struct drm_panel *panel)
 {
@@ -48,7 +54,7 @@ static int truly_nt35521_on(struct truly_nt35521 *ctx)
 
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x00);
+	nt35521_switch_page(&dsi_ctx, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xff, 0xaa, 0x55, 0xa5, 0x80);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x6f, 0x11, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf7, 0x20, 0x00);
@@ -59,7 +65,8 @@ static int truly_nt35521_on(struct truly_nt35521 *ctx)
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xbb, 0x11, 0x11);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xbc, 0x00, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb6, 0x02);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x01);
+
+	nt35521_switch_page(&dsi_ctx, 0x01);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb0, 0x09, 0x09);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb1, 0x09, 0x09);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xbc, 0x8c, 0x00);
@@ -71,7 +78,8 @@ static int truly_nt35521_on(struct truly_nt35521 *ctx)
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb4, 0x25, 0x25);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb9, 0x43, 0x43);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xba, 0x24, 0x24);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x02);
+
+	nt35521_switch_page(&dsi_ctx, 0x02);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xee, 0x03);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb0,
 					 0x00, 0xb2, 0x00, 0xb3, 0x00, 0xb6, 0x00, 0xc3,
@@ -103,7 +111,8 @@ static int truly_nt35521_on(struct truly_nt35521 *ctx)
 					 0x02, 0x93, 0x02, 0xcd, 0x02, 0xf6, 0x03, 0x31,
 					 0x03, 0x6c, 0x03, 0xe9, 0x03, 0xef, 0x03, 0xf4);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xbb, 0x03, 0xf6, 0x03, 0xf7);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x03);
+
+	nt35521_switch_page(&dsi_ctx, 0x03);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb0, 0x22, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb1, 0x22, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb2, 0x05, 0x00, 0x60, 0x00, 0x00);
@@ -122,7 +131,8 @@ static int truly_nt35521_on(struct truly_nt35521 *ctx)
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xc5, 0xc0);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xc6, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xc7, 0x00);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x05);
+
+	nt35521_switch_page(&dsi_ctx, 0x05);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb0, 0x17, 0x06);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb1, 0x17, 0x06);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb2, 0x17, 0x06);
@@ -178,7 +188,8 @@ static int truly_nt35521_on(struct truly_nt35521 *ctx)
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xeb, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xec, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xed, 0x30);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x06);
+
+	nt35521_switch_page(&dsi_ctx, 0x06);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb0, 0x31, 0x31);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb1, 0x31, 0x31);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb2, 0x2d, 0x2e);
@@ -235,10 +246,12 @@ static int truly_nt35521_on(struct truly_nt35521 *ctx)
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x6f, 0x11);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf3, 0x01);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x35, 0x00);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x00);
+
+	nt35521_switch_page(&dsi_ctx, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xd9, 0x02, 0x03, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x00, 0x00);
-	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x00);
+
+	nt35521_switch_page(&dsi_ctx, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xb1, 0x6c, 0x21);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x00, 0x00);
 	mipi_dsi_generic_write_seq_multi(&dsi_ctx, 0x35, 0x00);
@@ -420,9 +433,11 @@ static int truly_nt35521_probe(struct mipi_dsi_device *dsi)
 	struct truly_nt35521 *ctx;
 	int ret;
 
-	ctx = devm_kzalloc(dev, sizeof(*ctx), GFP_KERNEL);
-	if (!ctx)
-		return -ENOMEM;
+	ctx = devm_drm_panel_alloc(dev, struct truly_nt35521, panel,
+				   &truly_nt35521_panel_funcs,
+				   DRM_MODE_CONNECTOR_DSI);
+	if (IS_ERR(ctx))
+		return PTR_ERR(ctx);
 
 	ctx->supplies[0].supply = "positive5";
 	ctx->supplies[1].supply = "negative5";
@@ -451,9 +466,6 @@ static int truly_nt35521_probe(struct mipi_dsi_device *dsi)
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
 			  MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_NO_EOT_PACKET |
 			  MIPI_DSI_CLOCK_NON_CONTINUOUS;
-
-	drm_panel_init(&ctx->panel, dev, &truly_nt35521_panel_funcs,
-		       DRM_MODE_CONNECTOR_DSI);
 
 	ctx->panel.backlight = truly_nt35521_create_backlight(dsi);
 	if (IS_ERR(ctx->panel.backlight))

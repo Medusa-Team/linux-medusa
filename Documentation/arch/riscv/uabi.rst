@@ -7,7 +7,9 @@ ISA string ordering in /proc/cpuinfo
 ------------------------------------
 
 The canonical order of ISA extension names in the ISA string is defined in
-chapter 27 of the unprivileged specification.
+Chapter 27 of the RISC-V Instruction Set Manual Volume I Unprivileged ISA
+(Document Version 20191213).
+
 The specification uses vague wording, such as should, when it comes to ordering,
 so for our purposes the following rules apply:
 
@@ -68,3 +70,19 @@ Misaligned accesses
 Misaligned scalar accesses are supported in userspace, but they may perform
 poorly.  Misaligned vector accesses are only supported if the Zicclsm extension
 is supported.
+
+Pointer masking
+---------------
+
+Support for pointer masking in userspace (the Supm extension) is provided via
+the ``PR_SET_TAGGED_ADDR_CTRL`` and ``PR_GET_TAGGED_ADDR_CTRL`` ``prctl()``
+operations. Pointer masking is disabled by default. To enable it, userspace
+must call ``PR_SET_TAGGED_ADDR_CTRL`` with the ``PR_PMLEN`` field set to the
+number of mask/tag bits needed by the application. ``PR_PMLEN`` is interpreted
+as a lower bound; if the kernel is unable to satisfy the request, the
+``PR_SET_TAGGED_ADDR_CTRL`` operation will fail. The actual number of tag bits
+is returned in ``PR_PMLEN`` by the ``PR_GET_TAGGED_ADDR_CTRL`` operation.
+
+Additionally, when pointer masking is enabled (``PR_PMLEN`` is greater than 0),
+a tagged address ABI is supported, with the same interface and behavior as
+documented for AArch64 (Documentation/arch/arm64/tagged-address-abi.rst).

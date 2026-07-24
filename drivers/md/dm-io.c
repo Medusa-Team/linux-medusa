@@ -52,7 +52,7 @@ struct dm_io_client *dm_io_client_create(void)
 	unsigned int min_ios = dm_get_reserved_bio_based_ios();
 	int ret;
 
-	client = kzalloc(sizeof(*client), GFP_KERNEL);
+	client = kzalloc_obj(*client);
 	if (!client)
 		return ERR_PTR(-ENOMEM);
 
@@ -379,6 +379,7 @@ static void do_region(const blk_opf_t opf, unsigned int region,
 
 		atomic_inc(&io->count);
 		submit_bio(bio);
+		WARN_ON_ONCE(opf & REQ_ATOMIC && remaining);
 	} while (remaining);
 }
 

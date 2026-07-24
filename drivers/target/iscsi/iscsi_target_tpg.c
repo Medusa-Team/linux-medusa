@@ -26,7 +26,7 @@ struct iscsi_portal_group *iscsit_alloc_portal_group(struct iscsi_tiqn *tiqn, u1
 {
 	struct iscsi_portal_group *tpg;
 
-	tpg = kzalloc(sizeof(struct iscsi_portal_group), GFP_KERNEL);
+	tpg = kzalloc_obj(struct iscsi_portal_group);
 	if (!tpg) {
 		pr_err("Unable to allocate struct iscsi_portal_group\n");
 		return NULL;
@@ -198,11 +198,6 @@ static void iscsit_clear_tpg_np_login_threads(
 		spin_lock(&tpg->tpg_np_lock);
 	}
 	spin_unlock(&tpg->tpg_np_lock);
-}
-
-void iscsit_tpg_dump_params(struct iscsi_portal_group *tpg)
-{
-	iscsi_print_params(tpg->param_list);
 }
 
 static void iscsit_set_default_tpg_attribs(struct iscsi_portal_group *tpg)
@@ -469,7 +464,7 @@ struct iscsi_tpg_np *iscsit_tpg_add_network_portal(
 		}
 	}
 
-	tpg_np = kzalloc(sizeof(struct iscsi_tpg_np), GFP_KERNEL);
+	tpg_np = kzalloc_obj(struct iscsi_tpg_np);
 	if (!tpg_np) {
 		pr_err("Unable to allocate memory for"
 				" struct iscsi_tpg_np.\n");

@@ -7,6 +7,7 @@
 #include <linux/sched/mm.h>
 #include <linux/sched/task_stack.h>
 #include <linux/sched/task.h>
+#include <linux/smp-internal.h>
 
 #include <asm/tlbflush.h>
 
@@ -22,25 +23,21 @@ static int __init start_kernel_proc(void *unused)
 {
 	block_signals_trace();
 
-	cpu_tasks[0].task = current;
-
 	start_kernel();
 	return 0;
 }
 
-extern int userspace_pid[];
-
-extern char cpu0_irqstack[];
+char cpu_irqstacks[NR_CPUS][THREAD_SIZE] __aligned(THREAD_SIZE);
 
 int __init start_uml(void)
 {
-	stack_protections((unsigned long) &cpu0_irqstack);
-	set_sigstack(cpu0_irqstack, THREAD_SIZE);
+	stack_protections((unsigned long) &cpu_irqstacks[0]);
+	set_sigstack(cpu_irqstacks[0], THREAD_SIZE);
 
 	init_new_thread_signals();
 
-	init_task.thread.request.u.thread.proc = start_kernel_proc;
-	init_task.thread.request.u.thread.arg = NULL;
+	init_task.thread.request.thread.proc = start_kernel_proc;
+	init_task.thread.request.thread.arg = NULL;
 	return start_idle_thread(task_stack_page(&init_task),
 				 &init_task.thread.switch_buf);
 }
@@ -67,4 +64,16 @@ void current_mm_sync(void)
 		return;
 
 	um_tlb_sync(current->mm);
+}
+
+static DEFINE_SPINLOCK(initial_jmpbuf_spinlock);
+
+void initial_jmpbuf_lock(void)
+{
+	spin_lock_irq(&initial_jmpbuf_spinlock);
+}
+
+void initial_jmpbuf_unlock(void)
+{
+	spin_unlock_irq(&initial_jmpbuf_spinlock);
 }

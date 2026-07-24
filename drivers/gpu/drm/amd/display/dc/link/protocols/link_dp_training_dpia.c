@@ -43,9 +43,6 @@
 #define DC_LOGGER \
 	link->ctx->logger
 
-/* The approximate time (us) it takes to transmit 9 USB4 DP clock sync packets. */
-#define DPIA_CLK_SYNC_DELAY 16000
-
 /* Extend interval between training status checks for manual testing. */
 #define DPIA_DEBUG_EXTENDED_AUX_RD_INTERVAL_US 60000000
 
@@ -113,6 +110,7 @@ static enum link_training_result dpia_configure_link(
 
 	dp_decide_training_settings(
 		link,
+		link_res,
 		link_setting,
 		lt_settings);
 
@@ -132,11 +130,14 @@ static enum link_training_result dpia_configure_link(
 	if (status != DC_OK && link->is_hpd_pending)
 		return LINK_TRAINING_ABORT;
 
-	if (link->preferred_training_settings.fec_enable != NULL)
-		fec_enable = *link->preferred_training_settings.fec_enable;
-	else
-		fec_enable = true;
-	status = dp_set_fec_ready(link, link_res, fec_enable);
+	if (link_dp_get_encoding_format(link_setting) == DP_8b_10b_ENCODING) {
+		if (link->preferred_training_settings.fec_enable != NULL)
+			fec_enable = *link->preferred_training_settings.fec_enable;
+		else
+			fec_enable = true;
+		status = dp_set_fec_ready(link, link_res, fec_enable);
+	}
+
 	if (status != DC_OK && link->is_hpd_pending)
 		return LINK_TRAINING_ABORT;
 
@@ -171,6 +172,7 @@ static uint8_t dpia_build_set_config_data(
 		struct dc_link *link,
 		struct link_training_settings *lt_settings)
 {
+	(void)link;
 	union dpia_set_config_data data;
 
 	data.raw = 0;
@@ -289,6 +291,7 @@ static enum link_training_result dpia_training_cr_non_transparent(
 		struct link_training_settings *lt_settings,
 		uint32_t hop)
 {
+	(void)link_res;
 	enum link_training_result result = LINK_TRAINING_CR_FAIL_LANE0;
 	uint8_t repeater_cnt = 0; /* Number of hops/repeaters in display path. */
 	enum dc_status status = DC_ERROR_UNEXPECTED;
@@ -456,6 +459,7 @@ static enum link_training_result dpia_training_cr_transparent(
 		const struct link_resource *link_res,
 		struct link_training_settings *lt_settings)
 {
+	(void)link_res;
 	enum link_training_result result = LINK_TRAINING_CR_FAIL_LANE0;
 	enum dc_status status;
 	uint32_t retries_cr = 0; /* Number of consecutive attempts with same VS or PE. */
@@ -566,28 +570,6 @@ static enum link_training_result dpia_training_cr_phase(
 	return result;
 }
 
-/* Return status read interval during equalization phase. */
-static uint32_t dpia_get_eq_aux_rd_interval(
-		const struct dc_link *link,
-		const struct link_training_settings *lt_settings,
-		uint32_t hop)
-{
-	uint32_t wait_time_microsec;
-
-	if (hop == DPRX)
-		wait_time_microsec = lt_settings->eq_pattern_time;
-	else
-		wait_time_microsec =
-				dp_translate_training_aux_read_interval(
-					link->dpcd_caps.lttpr_caps.aux_rd_interval[hop - 1]);
-
-	/* Check debug option for extending aux read interval. */
-	if (link->dc->debug.dpia_debug.bits.extend_aux_rd_interval)
-		wait_time_microsec = DPIA_DEBUG_EXTENDED_AUX_RD_INTERVAL_US;
-
-	return wait_time_microsec;
-}
-
 /* Execute equalization phase of link training for specified hop in display
  * path in non-transparent mode:
  * - driver issues both DPCD and SET_CONFIG transactions.
@@ -606,6 +588,7 @@ static enum link_training_result dpia_training_eq_non_transparent(
 		struct link_training_settings *lt_settings,
 		uint32_t hop)
 {
+	(void)link_res;
 	enum link_training_result result = LINK_TRAINING_EQ_FAIL_EQ;
 	uint8_t repeater_cnt = 0; /* Number of hops/repeaters in display path. */
 	uint32_t retries_eq = 0;
@@ -751,6 +734,7 @@ static enum link_training_result dpia_training_eq_transparent(
 		const struct link_resource *link_res,
 		struct link_training_settings *lt_settings)
 {
+	(void)link_res;
 	enum link_training_result result = LINK_TRAINING_EQ_FAIL_EQ;
 	uint32_t retries_eq = 0;
 	enum dc_status status;
@@ -936,6 +920,22 @@ static enum link_training_result dpia_training_end(
 	return result;
 }
 
+/* Return status read interval during equalization phase. */
+uint32_t dpia_get_eq_aux_rd_interval(
+		const struct dc_link *link,
+		const struct link_training_settings *lt_settings,
+		uint32_t hop)
+{
+	/* Check debug option for extending aux read interval. */
+	if (link->dc->debug.dpia_debug.bits.extend_aux_rd_interval)
+		return DPIA_DEBUG_EXTENDED_AUX_RD_INTERVAL_US;
+	else if (hop == DPRX)
+		return lt_settings->eq_pattern_time;
+	else
+		return dp_translate_training_aux_read_interval(
+					link->dpcd_caps.lttpr_caps.aux_rd_interval[hop - 1]);
+}
+
 /* When aborting training of specified hop in display path, clean up by:
  * - Attempting to clear DPCD TRAINING_PATTERN_SET, LINK_BW_SET and LANE_COUNT_SET.
  * - Sending SET_CONFIG(SET_LINK) with lane count and link rate set to 0.
@@ -943,7 +943,7 @@ static enum link_training_result dpia_training_end(
  * @param link DPIA link being trained.
  * @param hop Hop in display path. DPRX = 0.
  */
-static void dpia_training_abort(
+void dpia_training_abort(
 		struct dc_link *link,
 		struct link_training_settings *lt_settings,
 		uint32_t hop)
@@ -968,7 +968,26 @@ static void dpia_training_abort(
 	core_link_write_dpcd(link, dpcd_tps_offset, &data, 1);
 	core_link_write_dpcd(link, DP_LINK_BW_SET, &data, 1);
 	core_link_write_dpcd(link, DP_LANE_COUNT_SET, &data, 1);
-	core_link_send_set_config(link, DPIA_SET_CFG_SET_LINK, data);
+
+	if (!link->dc->config.consolidated_dpia_dp_lt)
+		core_link_send_set_config(link, DPIA_SET_CFG_SET_LINK, data);
+}
+
+void dpia_set_tps_notification(
+		struct dc_link *link,
+		const struct link_training_settings *lt_settings,
+		uint8_t pattern,
+		uint32_t hop)
+{
+	uint8_t repeater_cnt = 0; /* Number of hops/repeaters in display path. */
+
+	if (lt_settings->lttpr_mode != LTTPR_MODE_NON_TRANSPARENT || pattern == DPCD_TRAINING_PATTERN_VIDEOIDLE)
+		return;
+
+	repeater_cnt = dp_parse_lttpr_repeater_count(link->dpcd_caps.lttpr_caps.phy_repeater_cnt);
+
+	if (hop != repeater_cnt)
+		dc_process_dmub_dpia_set_tps_notification(link->ctx->dc, link->link_index, pattern);
 }
 
 enum link_training_result dpia_perform_link_training(
@@ -977,6 +996,7 @@ enum link_training_result dpia_perform_link_training(
 	const struct dc_link_settings *link_setting,
 	bool skip_video_pattern)
 {
+	(void)skip_video_pattern;
 	enum link_training_result result;
 	struct link_training_settings lt_settings = {0};
 	uint8_t repeater_cnt = 0; /* Number of hops/repeaters in display path. */

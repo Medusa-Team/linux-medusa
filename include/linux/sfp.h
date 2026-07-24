@@ -522,6 +522,28 @@ struct ethtool_modinfo;
 struct sfp_bus;
 
 /**
+ * struct sfp_module_caps - sfp module capabilities
+ * @interfaces: bitmap of interfaces that the module may support
+ * @link_modes: bitmap of ethtool link modes that the module may support
+ */
+struct sfp_module_caps {
+	DECLARE_PHY_INTERFACE_MASK(interfaces);
+	__ETHTOOL_DECLARE_LINK_MODE_MASK(link_modes);
+	/**
+	 * @may_have_phy: indicate whether the module may have an ethernet PHY
+	 * There is no way to be sure that a module has a PHY as the EEPROM
+	 * doesn't contain this information. When set, this does not mean that
+	 * the module definitely has a PHY.
+	 */
+	bool may_have_phy;
+	/**
+	 * @port: one of ethtool %PORT_* definitions, parsed from the module
+	 * EEPROM, or %PORT_OTHER if the port type is not known.
+	 */
+	u8 port;
+};
+
+/**
  * struct sfp_upstream_ops - upstream operations structure
  * @attach: called when the sfp socket driver is bound to the upstream
  *   (mandatory).
@@ -550,15 +572,11 @@ struct sfp_upstream_ops {
 	void (*link_down)(void *priv);
 	void (*link_up)(void *priv);
 	int (*connect_phy)(void *priv, struct phy_device *);
-	void (*disconnect_phy)(void *priv);
+	void (*disconnect_phy)(void *priv, struct phy_device *);
 };
 
 #if IS_ENABLED(CONFIG_SFP)
-int sfp_parse_port(struct sfp_bus *bus, const struct sfp_eeprom_id *id,
-		   unsigned long *support);
-bool sfp_may_have_phy(struct sfp_bus *bus, const struct sfp_eeprom_id *id);
-void sfp_parse_support(struct sfp_bus *bus, const struct sfp_eeprom_id *id,
-		       unsigned long *support, unsigned long *interfaces);
+const struct sfp_module_caps *sfp_get_module_caps(struct sfp_bus *bus);
 phy_interface_t sfp_select_interface(struct sfp_bus *bus,
 				     const unsigned long *link_modes);
 
@@ -576,25 +594,12 @@ struct sfp_bus *sfp_bus_find_fwnode(const struct fwnode_handle *fwnode);
 int sfp_bus_add_upstream(struct sfp_bus *bus, void *upstream,
 			 const struct sfp_upstream_ops *ops);
 void sfp_bus_del_upstream(struct sfp_bus *bus);
+const char *sfp_get_name(struct sfp_bus *bus);
 #else
-static inline int sfp_parse_port(struct sfp_bus *bus,
-				 const struct sfp_eeprom_id *id,
-				 unsigned long *support)
+static inline const struct sfp_module_caps *
+sfp_get_module_caps(struct sfp_bus *bus)
 {
-	return PORT_OTHER;
-}
-
-static inline bool sfp_may_have_phy(struct sfp_bus *bus,
-				    const struct sfp_eeprom_id *id)
-{
-	return false;
-}
-
-static inline void sfp_parse_support(struct sfp_bus *bus,
-				     const struct sfp_eeprom_id *id,
-				     unsigned long *support,
-				     unsigned long *interfaces)
-{
+	return NULL;
 }
 
 static inline phy_interface_t sfp_select_interface(struct sfp_bus *bus,
@@ -653,6 +658,11 @@ static inline int sfp_bus_add_upstream(struct sfp_bus *bus, void *upstream,
 
 static inline void sfp_bus_del_upstream(struct sfp_bus *bus)
 {
+}
+
+static inline const char *sfp_get_name(struct sfp_bus *bus)
+{
+	return NULL;
 }
 #endif
 

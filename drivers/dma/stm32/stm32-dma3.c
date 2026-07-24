@@ -221,6 +221,8 @@ enum stm32_dma3_port_data_width {
 #define STM32_DMA3_DT_BREQ		BIT(8) /* CTR2_BREQ */
 #define STM32_DMA3_DT_PFREQ		BIT(9) /* CTR2_PFREQ */
 #define STM32_DMA3_DT_TCEM		GENMASK(13, 12) /* CTR2_TCEM */
+#define STM32_DMA3_DT_NOPACK		BIT(16) /* CTR1_PAM */
+#define STM32_DMA3_DT_NOREFACT		BIT(17)
 
 /* struct stm32_dma3_chan .config_set bitfield */
 #define STM32_DMA3_CFG_SET_DT		BIT(0)
@@ -228,6 +230,8 @@ enum stm32_dma3_port_data_width {
 #define STM32_DMA3_CFG_SET_BOTH		(STM32_DMA3_CFG_SET_DT | STM32_DMA3_CFG_SET_DMA)
 
 #define STM32_DMA3_MAX_BLOCK_SIZE	ALIGN_DOWN(CBR1_BNDT, 64)
+#define STM32_DMA3_MAX_BURST_LEN	(1 + min_t(u32, FIELD_MAX(CTR1_SBL_1), \
+							FIELD_MAX(CTR1_DBL_1)))
 #define port_is_ahb(maxdw)		({ typeof(maxdw) (_maxdw) = (maxdw); \
 					   ((_maxdw) != DW_INVALID) && ((_maxdw) == DW_32); })
 #define port_is_axi(maxdw)		({ typeof(maxdw) (_maxdw) = (maxdw); \
@@ -284,6 +288,7 @@ struct stm32_dma3_chan {
 	u32 fifo_size;
 	u32 max_burst;
 	bool semaphore_mode;
+	bool semaphore_taken;
 	struct stm32_dma3_dt_conf dt_config;
 	struct dma_slave_config dma_config;
 	u8 config_set;
@@ -291,6 +296,10 @@ struct stm32_dma3_chan {
 	struct stm32_dma3_swdesc *swdesc;
 	enum ctr2_tcem tcem;
 	u32 dma_status;
+};
+
+struct stm32_dma3_pdata {
+	u32 axi_max_burst_len;
 };
 
 struct stm32_dma3_ddata {
@@ -301,6 +310,7 @@ struct stm32_dma3_ddata {
 	u32 dma_channels;
 	u32 dma_requests;
 	enum stm32_dma3_port_data_width ports_max_dw[2];
+	u32 axi_max_burst_len;
 };
 
 static inline struct stm32_dma3_ddata *to_stm32_dma3_ddata(struct stm32_dma3_chan *chan)
@@ -321,6 +331,11 @@ static inline struct stm32_dma3_swdesc *to_stm32_dma3_swdesc(struct virt_dma_des
 static struct device *chan2dev(struct stm32_dma3_chan *chan)
 {
 	return &chan->vchan.chan.dev->device;
+}
+
+static struct device *ddata2dev(struct stm32_dma3_ddata *ddata)
+{
+	return ddata->dma_dev.dev;
 }
 
 static void stm32_dma3_chan_dump_reg(struct stm32_dma3_chan *chan)
@@ -400,7 +415,7 @@ static struct stm32_dma3_swdesc *stm32_dma3_chan_desc_alloc(struct stm32_dma3_ch
 		return NULL;
 	}
 
-	swdesc = kzalloc(struct_size(swdesc, lli, count), GFP_NOWAIT);
+	swdesc = kzalloc_flex(*swdesc, lli, count, GFP_NOWAIT);
 	if (!swdesc)
 		return NULL;
 	swdesc->lli_size = count;
@@ -533,7 +548,8 @@ static enum dma_slave_buswidth stm32_dma3_get_max_dw(u32 chan_max_burst,
 	return 1 << __ffs(len | addr | max_dw);
 }
 
-static u32 stm32_dma3_get_max_burst(u32 len, enum dma_slave_buswidth dw, u32 chan_max_burst)
+static u32 stm32_dma3_get_max_burst(u32 len, enum dma_slave_buswidth dw,
+				    u32 chan_max_burst, u32 bus_max_burst)
 {
 	u32 max_burst = chan_max_burst ? chan_max_burst / dw : 1;
 
@@ -544,8 +560,9 @@ static u32 stm32_dma3_get_max_burst(u32 len, enum dma_slave_buswidth dw, u32 cha
 	/*
 	 * HW doesn't modify the burst if burst size <= half of the fifo size.
 	 * If len is not a multiple of burst size, last burst is shortened by HW.
+	 * Take care of maximum burst supported on interconnect bus.
 	 */
-	return max_burst;
+	return min_t(u32, max_burst, bus_max_burst);
 }
 
 static int stm32_dma3_chan_prep_hw(struct stm32_dma3_chan *chan, enum dma_transfer_direction dir,
@@ -554,6 +571,7 @@ static int stm32_dma3_chan_prep_hw(struct stm32_dma3_chan *chan, enum dma_transf
 {
 	struct stm32_dma3_ddata *ddata = to_stm32_dma3_ddata(chan);
 	struct dma_device dma_device = ddata->dma_dev;
+	u32 src_max_burst = STM32_DMA3_MAX_BURST_LEN, dst_max_burst = STM32_DMA3_MAX_BURST_LEN;
 	u32 sdw, ddw, sbl_max, dbl_max, tcem, init_dw, init_bl_max;
 	u32 _ctr1 = 0, _ctr2 = 0;
 	u32 ch_conf = chan->dt_config.ch_conf;
@@ -594,10 +612,14 @@ static int stm32_dma3_chan_prep_hw(struct stm32_dma3_chan *chan, enum dma_transf
 		_ctr1 |= CTR1_SINC;
 	if (sap)
 		_ctr1 |= CTR1_SAP;
+	if (port_is_axi(sap_max_dw)) /* AXI - apply axi maximum burst limitation */
+		src_max_burst = ddata->axi_max_burst_len;
 	if (FIELD_GET(STM32_DMA3_DT_DINC, tr_conf))
 		_ctr1 |= CTR1_DINC;
 	if (dap)
 		_ctr1 |= CTR1_DAP;
+	if (port_is_axi(dap_max_dw)) /* AXI - apply axi maximum burst limitation */
+		dst_max_burst = ddata->axi_max_burst_len;
 
 	_ctr2 |= FIELD_PREP(CTR2_REQSEL, chan->dt_config.req_line) & ~CTR2_SWREQ;
 	if (FIELD_GET(STM32_DMA3_DT_BREQ, tr_conf))
@@ -617,11 +639,16 @@ static int stm32_dma3_chan_prep_hw(struct stm32_dma3_chan *chan, enum dma_transf
 		/* Set destination (device) data width and burst */
 		ddw = min_t(u32, ddw, stm32_dma3_get_max_dw(chan->max_burst, dap_max_dw,
 							    len, dst_addr));
-		dbl_max = min_t(u32, dbl_max, stm32_dma3_get_max_burst(len, ddw, chan->max_burst));
+		dbl_max = min_t(u32, dbl_max, stm32_dma3_get_max_burst(len, ddw, chan->max_burst,
+								       dst_max_burst));
 
 		/* Set source (memory) data width and burst */
 		sdw = stm32_dma3_get_max_dw(chan->max_burst, sap_max_dw, len, src_addr);
-		sbl_max = stm32_dma3_get_max_burst(len, sdw, chan->max_burst);
+		sbl_max = stm32_dma3_get_max_burst(len, sdw, chan->max_burst, src_max_burst);
+		if (!!FIELD_GET(STM32_DMA3_DT_NOPACK, tr_conf)) {
+			sdw = ddw;
+			sbl_max = dbl_max;
+		}
 
 		_ctr1 |= FIELD_PREP(CTR1_SDW_LOG2, ilog2(sdw));
 		_ctr1 |= FIELD_PREP(CTR1_SBL_1, sbl_max - 1);
@@ -647,11 +674,17 @@ static int stm32_dma3_chan_prep_hw(struct stm32_dma3_chan *chan, enum dma_transf
 		/* Set source (device) data width and burst */
 		sdw = min_t(u32, sdw, stm32_dma3_get_max_dw(chan->max_burst, sap_max_dw,
 							    len, src_addr));
-		sbl_max = min_t(u32, sbl_max, stm32_dma3_get_max_burst(len, sdw, chan->max_burst));
+		sbl_max = min_t(u32, sbl_max, stm32_dma3_get_max_burst(len, sdw, chan->max_burst,
+								       src_max_burst));
 
 		/* Set destination (memory) data width and burst */
 		ddw = stm32_dma3_get_max_dw(chan->max_burst, dap_max_dw, len, dst_addr);
-		dbl_max = stm32_dma3_get_max_burst(len, ddw, chan->max_burst);
+		dbl_max = stm32_dma3_get_max_burst(len, ddw, chan->max_burst, dst_max_burst);
+		if (!!FIELD_GET(STM32_DMA3_DT_NOPACK, tr_conf) ||
+		    ((_ctr2 & CTR2_PFREQ) && ddw > sdw)) { /* Packing to wider ddw not supported */
+			ddw = sdw;
+			dbl_max = sbl_max;
+		}
 
 		_ctr1 |= FIELD_PREP(CTR1_SDW_LOG2, ilog2(sdw));
 		_ctr1 |= FIELD_PREP(CTR1_SBL_1, sbl_max - 1);
@@ -678,22 +711,24 @@ static int stm32_dma3_chan_prep_hw(struct stm32_dma3_chan *chan, enum dma_transf
 		init_dw = sdw;
 		init_bl_max = sbl_max;
 		sdw = stm32_dma3_get_max_dw(chan->max_burst, sap_max_dw, len, src_addr);
-		sbl_max = stm32_dma3_get_max_burst(len, sdw, chan->max_burst);
+		sbl_max = stm32_dma3_get_max_burst(len, sdw, chan->max_burst, src_max_burst);
 		if (chan->config_set & STM32_DMA3_CFG_SET_DMA) {
 			sdw = min_t(u32, init_dw, sdw);
-			sbl_max = min_t(u32, init_bl_max,
-					stm32_dma3_get_max_burst(len, sdw, chan->max_burst));
+			sbl_max = min_t(u32, init_bl_max, stm32_dma3_get_max_burst(len, sdw,
+										   chan->max_burst,
+										   src_max_burst));
 		}
 
 		/* Set destination (memory) data width and burst */
 		init_dw = ddw;
 		init_bl_max = dbl_max;
 		ddw = stm32_dma3_get_max_dw(chan->max_burst, dap_max_dw, len, dst_addr);
-		dbl_max = stm32_dma3_get_max_burst(len, ddw, chan->max_burst);
+		dbl_max = stm32_dma3_get_max_burst(len, ddw, chan->max_burst, dst_max_burst);
 		if (chan->config_set & STM32_DMA3_CFG_SET_DMA) {
 			ddw = min_t(u32, init_dw, ddw);
-			dbl_max = min_t(u32, init_bl_max,
-					stm32_dma3_get_max_burst(len, ddw, chan->max_burst));
+			dbl_max = min_t(u32, init_bl_max, stm32_dma3_get_max_burst(len, ddw,
+										   chan->max_burst,
+										   dst_max_burst));
 		}
 
 		_ctr1 |= FIELD_PREP(CTR1_SDW_LOG2, ilog2(sdw));
@@ -772,7 +807,7 @@ static void stm32_dma3_chan_start(struct stm32_dma3_chan *chan)
 
 	chan->dma_status = DMA_IN_PROGRESS;
 
-	dev_dbg(chan2dev(chan), "vchan %pK: started\n", &chan->vchan);
+	dev_dbg(chan2dev(chan), "vchan %p: started\n", &chan->vchan);
 }
 
 static int stm32_dma3_chan_suspend(struct stm32_dma3_chan *chan, bool susp)
@@ -1034,14 +1069,53 @@ static irqreturn_t stm32_dma3_chan_irq(int irq, void *devid)
 	return IRQ_HANDLED;
 }
 
+static int stm32_dma3_get_chan_sem(struct stm32_dma3_chan *chan)
+{
+	struct stm32_dma3_ddata *ddata = to_stm32_dma3_ddata(chan);
+	u32 csemcr, ccid;
+
+	csemcr = readl_relaxed(ddata->base + STM32_DMA3_CSEMCR(chan->id));
+	/* Make an attempt to take the channel semaphore if not already taken */
+	if (!(csemcr & CSEMCR_SEM_MUTEX)) {
+		writel_relaxed(CSEMCR_SEM_MUTEX, ddata->base + STM32_DMA3_CSEMCR(chan->id));
+		csemcr = readl_relaxed(ddata->base + STM32_DMA3_CSEMCR(chan->id));
+	}
+
+	/* Check if channel is under CID1 control */
+	ccid = FIELD_GET(CSEMCR_SEM_CCID, csemcr);
+	if (!(csemcr & CSEMCR_SEM_MUTEX) || ccid != CCIDCFGR_CID1)
+		goto bad_cid;
+
+	chan->semaphore_taken = true;
+	dev_dbg(chan2dev(chan), "under CID1 control (semcr=0x%08x)\n", csemcr);
+
+	return 0;
+
+bad_cid:
+	chan->semaphore_taken = false;
+	dev_err(chan2dev(chan), "not under CID1 control (in-use by CID%d)\n", ccid);
+
+	return -EACCES;
+}
+
+static void stm32_dma3_put_chan_sem(struct stm32_dma3_chan *chan)
+{
+	struct stm32_dma3_ddata *ddata = to_stm32_dma3_ddata(chan);
+
+	if (chan->semaphore_taken) {
+		writel_relaxed(0, ddata->base + STM32_DMA3_CSEMCR(chan->id));
+		chan->semaphore_taken = false;
+		dev_dbg(chan2dev(chan), "no more under CID1 control\n");
+	}
+}
+
 static int stm32_dma3_alloc_chan_resources(struct dma_chan *c)
 {
 	struct stm32_dma3_chan *chan = to_stm32_dma3_chan(c);
 	struct stm32_dma3_ddata *ddata = to_stm32_dma3_ddata(chan);
-	u32 id = chan->id, csemcr, ccid;
 	int ret;
 
-	ret = pm_runtime_resume_and_get(ddata->dma_dev.dev);
+	ret = pm_runtime_resume_and_get(ddata2dev(ddata));
 	if (ret < 0)
 		return ret;
 
@@ -1063,16 +1137,9 @@ static int stm32_dma3_alloc_chan_resources(struct dma_chan *c)
 
 	/* Take the channel semaphore */
 	if (chan->semaphore_mode) {
-		writel_relaxed(CSEMCR_SEM_MUTEX, ddata->base + STM32_DMA3_CSEMCR(id));
-		csemcr = readl_relaxed(ddata->base + STM32_DMA3_CSEMCR(id));
-		ccid = FIELD_GET(CSEMCR_SEM_CCID, csemcr);
-		/* Check that the channel is well taken */
-		if (ccid != CCIDCFGR_CID1) {
-			dev_err(chan2dev(chan), "Not under CID1 control (in-use by CID%d)\n", ccid);
-			ret = -EPERM;
+		ret = stm32_dma3_get_chan_sem(chan);
+		if (ret)
 			goto err_pool_destroy;
-		}
-		dev_dbg(chan2dev(chan), "Under CID1 control (semcr=0x%08x)\n", csemcr);
 	}
 
 	return 0;
@@ -1082,7 +1149,7 @@ err_pool_destroy:
 	chan->lli_pool = NULL;
 
 err_put_sync:
-	pm_runtime_put_sync(ddata->dma_dev.dev);
+	pm_runtime_put_sync(ddata2dev(ddata));
 
 	return ret;
 }
@@ -1106,14 +1173,36 @@ static void stm32_dma3_free_chan_resources(struct dma_chan *c)
 
 	/* Release the channel semaphore */
 	if (chan->semaphore_mode)
-		writel_relaxed(0, ddata->base + STM32_DMA3_CSEMCR(chan->id));
+		stm32_dma3_put_chan_sem(chan);
 
-	pm_runtime_put_sync(ddata->dma_dev.dev);
+	pm_runtime_put_sync(ddata2dev(ddata));
 
 	/* Reset configuration */
 	memset(&chan->dt_config, 0, sizeof(chan->dt_config));
 	memset(&chan->dma_config, 0, sizeof(chan->dma_config));
 	chan->config_set = 0;
+}
+
+static u32 stm32_dma3_get_ll_count(struct stm32_dma3_chan *chan, size_t len, bool prevent_refactor)
+{
+	u32 count;
+
+	if (prevent_refactor)
+		return DIV_ROUND_UP(len, STM32_DMA3_MAX_BLOCK_SIZE);
+
+	count = len / STM32_DMA3_MAX_BLOCK_SIZE;
+	len -= (len / STM32_DMA3_MAX_BLOCK_SIZE) * STM32_DMA3_MAX_BLOCK_SIZE;
+
+	if (len >= chan->max_burst) {
+		count += 1; /* len < STM32_DMA3_MAX_BLOCK_SIZE here, so it fits in one item */
+		len -= (len / chan->max_burst) * chan->max_burst;
+	}
+
+	/* Unaligned remainder fits in one extra item */
+	if (len > 0)
+		count += 1;
+
+	return count;
 }
 
 static void stm32_dma3_init_chan_config_for_memcpy(struct stm32_dma3_chan *chan,
@@ -1150,8 +1239,14 @@ static struct dma_async_tx_descriptor *stm32_dma3_prep_dma_memcpy(struct dma_cha
 	struct stm32_dma3_swdesc *swdesc;
 	size_t next_size, offset;
 	u32 count, i, ctr1, ctr2;
+	bool prevent_refactor = !!FIELD_GET(STM32_DMA3_DT_NOPACK, chan->dt_config.tr_conf) ||
+				!!FIELD_GET(STM32_DMA3_DT_NOREFACT, chan->dt_config.tr_conf);
 
-	count = DIV_ROUND_UP(len, STM32_DMA3_MAX_BLOCK_SIZE);
+	/* Semaphore could be lost during suspend/resume */
+	if (chan->semaphore_mode && !chan->semaphore_taken)
+		return NULL;
+
+	count = stm32_dma3_get_ll_count(chan, len, prevent_refactor);
 
 	swdesc = stm32_dma3_chan_desc_alloc(chan, count);
 	if (!swdesc)
@@ -1166,6 +1261,10 @@ static struct dma_async_tx_descriptor *stm32_dma3_prep_dma_memcpy(struct dma_cha
 
 		remaining = len - offset;
 		next_size = min_t(size_t, remaining, STM32_DMA3_MAX_BLOCK_SIZE);
+
+		if (!prevent_refactor &&
+		    (next_size < STM32_DMA3_MAX_BLOCK_SIZE && next_size >= chan->max_burst))
+			next_size = chan->max_burst * (remaining / chan->max_burst);
 
 		ret = stm32_dma3_chan_prep_hw(chan, DMA_MEM_TO_MEM, &swdesc->ccr, &ctr1, &ctr2,
 					      src + offset, dst + offset, next_size);
@@ -1203,14 +1302,17 @@ static struct dma_async_tx_descriptor *stm32_dma3_prep_slave_sg(struct dma_chan 
 	size_t len;
 	dma_addr_t sg_addr, dev_addr, src, dst;
 	u32 i, j, count, ctr1, ctr2;
+	bool prevent_refactor = !!FIELD_GET(STM32_DMA3_DT_NOPACK, chan->dt_config.tr_conf) ||
+				!!FIELD_GET(STM32_DMA3_DT_NOREFACT, chan->dt_config.tr_conf);
 	int ret;
 
-	count = sg_len;
-	for_each_sg(sgl, sg, sg_len, i) {
-		len = sg_dma_len(sg);
-		if (len > STM32_DMA3_MAX_BLOCK_SIZE)
-			count += DIV_ROUND_UP(len, STM32_DMA3_MAX_BLOCK_SIZE) - 1;
-	}
+	/* Semaphore could be lost during suspend/resume */
+	if (chan->semaphore_mode && !chan->semaphore_taken)
+		return NULL;
+
+	count = 0;
+	for_each_sg(sgl, sg, sg_len, i)
+		count += stm32_dma3_get_ll_count(chan, sg_dma_len(sg), prevent_refactor);
 
 	swdesc = stm32_dma3_chan_desc_alloc(chan, count);
 	if (!swdesc)
@@ -1226,6 +1328,10 @@ static struct dma_async_tx_descriptor *stm32_dma3_prep_slave_sg(struct dma_chan 
 
 		do {
 			size_t chunk = min_t(size_t, len, STM32_DMA3_MAX_BLOCK_SIZE);
+
+			if (!prevent_refactor &&
+			    (chunk < STM32_DMA3_MAX_BLOCK_SIZE && chunk >= chan->max_burst))
+				chunk = chan->max_burst * (len / chan->max_burst);
 
 			if (dir == DMA_MEM_TO_DEV) {
 				src = sg_addr;
@@ -1259,6 +1365,10 @@ static struct dma_async_tx_descriptor *stm32_dma3_prep_slave_sg(struct dma_chan 
 		} while (len);
 	}
 
+	if (count != sg_len && chan->tcem != CTR2_TCEM_CHANNEL)
+		dev_warn(chan2dev(chan), "Linked-list refactored, %d items instead of %d\n",
+			 count, sg_len);
+
 	/* Enable Error interrupts */
 	swdesc->ccr |= CCR_USEIE | CCR_ULEIE | CCR_DTEIE;
 	/* Enable Transfer state interrupts */
@@ -1285,6 +1395,10 @@ static struct dma_async_tx_descriptor *stm32_dma3_prep_dma_cyclic(struct dma_cha
 	dma_addr_t src, dst;
 	u32 count, i, ctr1, ctr2;
 	int ret;
+
+	/* Semaphore could be lost during suspend/resume */
+	if (chan->semaphore_mode && !chan->semaphore_taken)
+		return NULL;
 
 	if (!buf_len || !period_len || period_len > STM32_DMA3_MAX_BLOCK_SIZE) {
 		dev_err(chan2dev(chan), "Invalid buffer/period length\n");
@@ -1388,7 +1502,7 @@ static int stm32_dma3_pause(struct dma_chan *c)
 
 	chan->dma_status = DMA_PAUSED;
 
-	dev_dbg(chan2dev(chan), "vchan %pK: paused\n", &chan->vchan);
+	dev_dbg(chan2dev(chan), "vchan %p: paused\n", &chan->vchan);
 
 	return 0;
 }
@@ -1401,7 +1515,7 @@ static int stm32_dma3_resume(struct dma_chan *c)
 
 	chan->dma_status = DMA_IN_PROGRESS;
 
-	dev_dbg(chan2dev(chan), "vchan %pK: resumed\n", &chan->vchan);
+	dev_dbg(chan2dev(chan), "vchan %p: resumed\n", &chan->vchan);
 
 	return 0;
 }
@@ -1426,7 +1540,7 @@ static int stm32_dma3_terminate_all(struct dma_chan *c)
 	spin_unlock_irqrestore(&chan->vchan.lock, flags);
 	vchan_dma_desc_free_list(&chan->vchan, &head);
 
-	dev_dbg(chan2dev(chan), "vchan %pK: terminated\n", &chan->vchan);
+	dev_dbg(chan2dev(chan), "vchan %p: terminated\n", &chan->vchan);
 
 	return 0;
 }
@@ -1479,7 +1593,7 @@ static void stm32_dma3_issue_pending(struct dma_chan *c)
 	spin_lock_irqsave(&chan->vchan.lock, flags);
 
 	if (vchan_issue_pending(&chan->vchan) && !chan->swdesc) {
-		dev_dbg(chan2dev(chan), "vchan %pK: issued\n", &chan->vchan);
+		dev_dbg(chan2dev(chan), "vchan %p: issued\n", &chan->vchan);
 		stm32_dma3_chan_start(chan);
 	}
 
@@ -1501,11 +1615,11 @@ static bool stm32_dma3_filter_fn(struct dma_chan *c, void *fn_param)
 		if (!(mask & BIT(chan->id)))
 			return false;
 
-	ret = pm_runtime_resume_and_get(ddata->dma_dev.dev);
+	ret = pm_runtime_resume_and_get(ddata2dev(ddata));
 	if (ret < 0)
 		return false;
 	semcr = readl_relaxed(ddata->base + STM32_DMA3_CSEMCR(chan->id));
-	pm_runtime_put_sync(ddata->dma_dev.dev);
+	pm_runtime_put_sync(ddata2dev(ddata));
 
 	/* Check if chan is free */
 	if (semcr & CSEMCR_SEM_MUTEX)
@@ -1527,7 +1641,7 @@ static struct dma_chan *stm32_dma3_of_xlate(struct of_phandle_args *dma_spec, st
 	struct dma_chan *c;
 
 	if (dma_spec->args_count < 3) {
-		dev_err(ddata->dma_dev.dev, "Invalid args count\n");
+		dev_err(ddata2dev(ddata), "Invalid args count\n");
 		return NULL;
 	}
 
@@ -1536,14 +1650,14 @@ static struct dma_chan *stm32_dma3_of_xlate(struct of_phandle_args *dma_spec, st
 	conf.tr_conf = dma_spec->args[2];
 
 	if (conf.req_line >= ddata->dma_requests) {
-		dev_err(ddata->dma_dev.dev, "Invalid request line\n");
+		dev_err(ddata2dev(ddata), "Invalid request line\n");
 		return NULL;
 	}
 
 	/* Request dma channel among the generic dma controller list */
 	c = dma_request_channel(mask, stm32_dma3_filter_fn, &conf);
 	if (!c) {
-		dev_err(ddata->dma_dev.dev, "No suitable channel found\n");
+		dev_err(ddata2dev(ddata), "No suitable channel found\n");
 		return NULL;
 	}
 
@@ -1556,6 +1670,7 @@ static struct dma_chan *stm32_dma3_of_xlate(struct of_phandle_args *dma_spec, st
 
 static u32 stm32_dma3_check_rif(struct stm32_dma3_ddata *ddata)
 {
+	struct device *dev = ddata2dev(ddata);
 	u32 chan_reserved, mask = 0, i, ccidcfgr, invalid_cid = 0;
 
 	/* Reserve Secure channels */
@@ -1567,7 +1682,7 @@ static u32 stm32_dma3_check_rif(struct stm32_dma3_ddata *ddata)
 	 * In case CID filtering is not configured, dma-channel-mask property can be used to
 	 * specify available DMA channels to the kernel.
 	 */
-	of_property_read_u32(ddata->dma_dev.dev->of_node, "dma-channel-mask", &mask);
+	of_property_read_u32(dev->of_node, "dma-channel-mask", &mask);
 
 	/* Reserve !CID-filtered not in dma-channel-mask, static CID != CID1, CID1 not allowed */
 	for (i = 0; i < ddata->dma_channels; i++) {
@@ -1587,7 +1702,7 @@ static u32 stm32_dma3_check_rif(struct stm32_dma3_ddata *ddata)
 				ddata->chans[i].semaphore_mode = true;
 			}
 		}
-		dev_dbg(ddata->dma_dev.dev, "chan%d: %s mode, %s\n", i,
+		dev_dbg(dev, "chan%d: %s mode, %s\n", i,
 			!(ccidcfgr & CCIDCFGR_CFEN) ? "!CID-filtered" :
 			ddata->chans[i].semaphore_mode ? "Semaphore" : "Static CID",
 			(chan_reserved & BIT(i)) ? "denied" :
@@ -1595,14 +1710,18 @@ static u32 stm32_dma3_check_rif(struct stm32_dma3_ddata *ddata)
 	}
 
 	if (invalid_cid)
-		dev_warn(ddata->dma_dev.dev, "chan%*pbl have invalid CID configuration\n",
+		dev_warn(dev, "chan%*pbl have invalid CID configuration\n",
 			 ddata->dma_channels, &invalid_cid);
 
 	return chan_reserved;
 }
 
+static struct stm32_dma3_pdata stm32mp25_pdata = {
+	.axi_max_burst_len = 16,
+};
+
 static const struct of_device_id stm32_dma3_of_match[] = {
-	{ .compatible = "st,stm32mp25-dma3", },
+	{ .compatible = "st,stm32mp25-dma3", .data = &stm32mp25_pdata, },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, stm32_dma3_of_match);
@@ -1610,6 +1729,7 @@ MODULE_DEVICE_TABLE(of, stm32_dma3_of_match);
 static int stm32_dma3_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
+	const struct stm32_dma3_pdata *pdata;
 	struct stm32_dma3_ddata *ddata;
 	struct reset_control *reset;
 	struct stm32_dma3_chan *chan;
@@ -1703,6 +1823,16 @@ static int stm32_dma3_probe(struct platform_device *pdev)
 		ddata->ports_max_dw[1] = DW_INVALID;
 	else /* Dual master ports */
 		ddata->ports_max_dw[1] = FIELD_GET(G_M1_DATA_WIDTH_ENC, hwcfgr);
+
+	/* axi_max_burst_len is optional, if not defined, use STM32_DMA3_MAX_BURST_LEN  */
+	ddata->axi_max_burst_len = STM32_DMA3_MAX_BURST_LEN;
+	pdata = device_get_match_data(&pdev->dev);
+	if (pdata && pdata->axi_max_burst_len) {
+		ddata->axi_max_burst_len = min_t(u32, pdata->axi_max_burst_len,
+						 STM32_DMA3_MAX_BURST_LEN);
+		dev_dbg(&pdev->dev, "Burst is limited to %u beats through AXI port\n",
+			ddata->axi_max_burst_len);
+	}
 
 	ddata->chans = devm_kcalloc(&pdev->dev, ddata->dma_channels, sizeof(*ddata->chans),
 				    GFP_KERNEL);
@@ -1820,14 +1950,75 @@ static int stm32_dma3_runtime_resume(struct device *dev)
 	return ret;
 }
 
+static int stm32_dma3_pm_suspend(struct device *dev)
+{
+	struct stm32_dma3_ddata *ddata = dev_get_drvdata(dev);
+	struct dma_device *dma_dev = &ddata->dma_dev;
+	struct dma_chan *c;
+	int ccr, ret;
+
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret < 0)
+		return ret;
+
+	list_for_each_entry(c, &dma_dev->channels, device_node) {
+		struct stm32_dma3_chan *chan = to_stm32_dma3_chan(c);
+
+		ccr = readl_relaxed(ddata->base + STM32_DMA3_CCR(chan->id));
+		if (ccr & CCR_EN) {
+			dev_warn(dev, "Suspend is prevented: %s still in use by %s\n",
+				 dma_chan_name(c), dev_name(c->slave));
+			pm_runtime_put_sync(dev);
+			return -EBUSY;
+		}
+	}
+
+	pm_runtime_put_sync(dev);
+
+	pm_runtime_force_suspend(dev);
+
+	return 0;
+}
+
+static int stm32_dma3_pm_resume(struct device *dev)
+{
+	struct stm32_dma3_ddata *ddata = dev_get_drvdata(dev);
+	struct dma_device *dma_dev = &ddata->dma_dev;
+	struct dma_chan *c;
+	int ret;
+
+	ret = pm_runtime_force_resume(dev);
+	if (ret < 0)
+		return ret;
+
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * Channel semaphores need to be restored in case of registers reset during low power.
+	 * stm32_dma3_get_chan_sem() will prior check the semaphore status.
+	 */
+	list_for_each_entry(c, &dma_dev->channels, device_node) {
+		struct stm32_dma3_chan *chan = to_stm32_dma3_chan(c);
+
+		if (chan->semaphore_mode && chan->semaphore_taken)
+			stm32_dma3_get_chan_sem(chan);
+	}
+
+	pm_runtime_put_sync(dev);
+
+	return 0;
+}
+
 static const struct dev_pm_ops stm32_dma3_pm_ops = {
-	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
+	SYSTEM_SLEEP_PM_OPS(stm32_dma3_pm_suspend, stm32_dma3_pm_resume)
 	RUNTIME_PM_OPS(stm32_dma3_runtime_suspend, stm32_dma3_runtime_resume, NULL)
 };
 
 static struct platform_driver stm32_dma3_driver = {
 	.probe = stm32_dma3_probe,
-	.remove_new = stm32_dma3_remove,
+	.remove = stm32_dma3_remove,
 	.driver = {
 		.name = "stm32-dma3",
 		.of_match_table = stm32_dma3_of_match,
@@ -1835,12 +2026,7 @@ static struct platform_driver stm32_dma3_driver = {
 	},
 };
 
-static int __init stm32_dma3_init(void)
-{
-	return platform_driver_register(&stm32_dma3_driver);
-}
-
-subsys_initcall(stm32_dma3_init);
+module_platform_driver(stm32_dma3_driver);
 
 MODULE_DESCRIPTION("STM32 DMA3 controller driver");
 MODULE_AUTHOR("Amelie Delaunay <amelie.delaunay@foss.st.com>");

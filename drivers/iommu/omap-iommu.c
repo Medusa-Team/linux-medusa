@@ -311,7 +311,7 @@ static struct cr_regs *iotlb_alloc_cr(struct omap_iommu *obj,
 		return ERR_PTR(-EINVAL);
 	}
 
-	cr = kmalloc(sizeof(*cr), GFP_KERNEL);
+	cr = kmalloc_obj(*cr);
 	if (!cr)
 		return ERR_PTR(-ENOMEM);
 
@@ -1123,29 +1123,15 @@ static int omap_iommu_dra7_get_dsp_system_cfg(struct platform_device *pdev,
 					      struct omap_iommu *obj)
 {
 	struct device_node *np = pdev->dev.of_node;
-	int ret;
 
 	if (!of_device_is_compatible(np, "ti,dra7-dsp-iommu"))
 		return 0;
 
-	if (!of_property_read_bool(np, "ti,syscon-mmuconfig")) {
-		dev_err(&pdev->dev, "ti,syscon-mmuconfig property is missing\n");
-		return -EINVAL;
-	}
-
-	obj->syscfg =
-		syscon_regmap_lookup_by_phandle(np, "ti,syscon-mmuconfig");
-	if (IS_ERR(obj->syscfg)) {
-		/* can fail with -EPROBE_DEFER */
-		ret = PTR_ERR(obj->syscfg);
-		return ret;
-	}
-
-	if (of_property_read_u32_index(np, "ti,syscon-mmuconfig", 1,
-				       &obj->id)) {
-		dev_err(&pdev->dev, "couldn't get the IOMMU instance id within subsystem\n");
-		return -EINVAL;
-	}
+	obj->syscfg = syscon_regmap_lookup_by_phandle_args(np, "ti,syscon-mmuconfig",
+							   1, &obj->id);
+	if (IS_ERR(obj->syscfg))
+		return dev_err_probe(&pdev->dev, PTR_ERR(obj->syscfg),
+				     "ti,syscon-mmuconfig property is missing\n");
 
 	if (obj->id != 0 && obj->id != 1) {
 		dev_err(&pdev->dev, "invalid IOMMU instance id\n");
@@ -1230,11 +1216,12 @@ static int omap_iommu_probe(struct platform_device *pdev)
 		if (err)
 			return err;
 
-		err = iommu_device_register(&obj->iommu, &omap_iommu_ops, &pdev->dev);
-		if (err)
-			goto out_sysfs;
 		obj->has_iommu_driver = true;
 	}
+
+	err = iommu_device_register(&obj->iommu, &omap_iommu_ops, &pdev->dev);
+	if (err)
+		goto out_sysfs;
 
 	pm_runtime_enable(obj->dev);
 
@@ -1242,13 +1229,11 @@ static int omap_iommu_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "%s registered\n", obj->name);
 
-	/* Re-probe bus to probe device attached to this IOMMU */
-	bus_iommu_probe(&platform_bus_type);
-
 	return 0;
 
 out_sysfs:
-	iommu_device_sysfs_remove(&obj->iommu);
+	if (obj->has_iommu_driver)
+		iommu_device_sysfs_remove(&obj->iommu);
 	return err;
 }
 
@@ -1256,10 +1241,10 @@ static void omap_iommu_remove(struct platform_device *pdev)
 {
 	struct omap_iommu *obj = platform_get_drvdata(pdev);
 
-	if (obj->has_iommu_driver) {
+	if (obj->has_iommu_driver)
 		iommu_device_sysfs_remove(&obj->iommu);
-		iommu_device_unregister(&obj->iommu);
-	}
+
+	iommu_device_unregister(&obj->iommu);
 
 	omap_iommu_debugfs_remove(obj);
 
@@ -1286,7 +1271,7 @@ static const struct of_device_id omap_iommu_of_match[] = {
 
 static struct platform_driver omap_iommu_driver = {
 	.probe	= omap_iommu_probe,
-	.remove_new = omap_iommu_remove,
+	.remove = omap_iommu_remove,
 	.driver	= {
 		.name	= "omap-iommu",
 		.pm	= &omap_iommu_pm_ops,
@@ -1318,8 +1303,8 @@ static int omap_iommu_map(struct iommu_domain *domain, unsigned long da,
 	struct omap_iommu_device *iommu;
 	struct omap_iommu *oiommu;
 	struct iotlb_entry e;
+	int ret = -EINVAL;
 	int omap_pgsz;
-	u32 ret = -EINVAL;
 	int i;
 
 	omap_pgsz = bytes_to_iopgsz(bytes);
@@ -1410,8 +1395,7 @@ static int omap_iommu_attach_init(struct device *dev,
 	if (!odomain->num_iommus)
 		return -ENODEV;
 
-	odomain->iommus = kcalloc(odomain->num_iommus, sizeof(*iommu),
-				  GFP_ATOMIC);
+	odomain->iommus = kzalloc_objs(*iommu, odomain->num_iommus, GFP_ATOMIC);
 	if (!odomain->iommus)
 		return -ENOMEM;
 
@@ -1446,8 +1430,8 @@ static void omap_iommu_detach_fini(struct omap_iommu_domain *odomain)
 	odomain->iommus = NULL;
 }
 
-static int
-omap_iommu_attach_dev(struct iommu_domain *domain, struct device *dev)
+static int omap_iommu_attach_dev(struct iommu_domain *domain,
+				 struct device *dev, struct iommu_domain *old)
 {
 	struct omap_iommu_arch_data *arch_data = dev_iommu_priv_get(dev);
 	struct omap_iommu_domain *omap_domain = to_omap_domain(domain);
@@ -1551,15 +1535,15 @@ static void _omap_iommu_detach_dev(struct omap_iommu_domain *omap_domain,
 }
 
 static int omap_iommu_identity_attach(struct iommu_domain *identity_domain,
-				      struct device *dev)
+				      struct device *dev,
+				      struct iommu_domain *old)
 {
-	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
 	struct omap_iommu_domain *omap_domain;
 
-	if (domain == identity_domain || !domain)
+	if (old == identity_domain || !old)
 		return 0;
 
-	omap_domain = to_omap_domain(domain);
+	omap_domain = to_omap_domain(old);
 	spin_lock(&omap_domain->lock);
 	_omap_iommu_detach_dev(omap_domain, dev);
 	spin_unlock(&omap_domain->lock);
@@ -1579,11 +1563,13 @@ static struct iommu_domain *omap_iommu_domain_alloc_paging(struct device *dev)
 {
 	struct omap_iommu_domain *omap_domain;
 
-	omap_domain = kzalloc(sizeof(*omap_domain), GFP_KERNEL);
+	omap_domain = kzalloc_obj(*omap_domain);
 	if (!omap_domain)
 		return NULL;
 
 	spin_lock_init(&omap_domain->lock);
+
+	omap_domain->domain.pgsize_bitmap = OMAP_IOMMU_PGSIZES;
 
 	omap_domain->domain.geometry.aperture_start = 0;
 	omap_domain->domain.geometry.aperture_end   = (1ULL << 32) - 1;
@@ -1669,7 +1655,7 @@ static struct iommu_device *omap_iommu_probe_device(struct device *dev)
 	if (num_iommus < 0)
 		return ERR_PTR(-ENODEV);
 
-	arch_data = kcalloc(num_iommus + 1, sizeof(*arch_data), GFP_KERNEL);
+	arch_data = kzalloc_objs(*arch_data, num_iommus + 1);
 	if (!arch_data)
 		return ERR_PTR(-ENOMEM);
 
@@ -1681,23 +1667,20 @@ static struct iommu_device *omap_iommu_probe_device(struct device *dev)
 		}
 
 		pdev = of_find_device_by_node(np);
+		of_node_put(np);
 		if (!pdev) {
-			of_node_put(np);
 			kfree(arch_data);
 			return ERR_PTR(-ENODEV);
 		}
 
 		oiommu = platform_get_drvdata(pdev);
+		put_device(&pdev->dev);
 		if (!oiommu) {
-			of_node_put(np);
 			kfree(arch_data);
 			return ERR_PTR(-EINVAL);
 		}
 
 		tmp->iommu_dev = oiommu;
-		tmp->dev = &pdev->dev;
-
-		of_node_put(np);
 	}
 
 	dev_iommu_priv_set(dev, arch_data);
@@ -1723,13 +1706,19 @@ static void omap_iommu_release_device(struct device *dev)
 
 }
 
+static int omap_iommu_of_xlate(struct device *dev, const struct of_phandle_args *args)
+{
+	/* TODO: collect args->np to save re-parsing in probe above */
+	return 0;
+}
+
 static const struct iommu_ops omap_iommu_ops = {
 	.identity_domain = &omap_iommu_identity_domain,
 	.domain_alloc_paging = omap_iommu_domain_alloc_paging,
 	.probe_device	= omap_iommu_probe_device,
 	.release_device	= omap_iommu_release_device,
 	.device_group	= generic_single_device_group,
-	.pgsize_bitmap	= OMAP_IOMMU_PGSIZES,
+	.of_xlate	= omap_iommu_of_xlate,
 	.default_domain_ops = &(const struct iommu_domain_ops) {
 		.attach_dev	= omap_iommu_attach_dev,
 		.map_pages	= omap_iommu_map,

@@ -23,6 +23,7 @@
 #include <linux/freezer.h>
 #include <linux/page_owner.h>
 #include <linux/psi.h>
+#include <linux/cpuset.h>
 #include "internal.h"
 
 #ifdef CONFIG_COMPACTION
@@ -82,36 +83,10 @@ static inline bool is_via_compact_memory(int order) { return false; }
 static struct page *mark_allocated_noprof(struct page *page, unsigned int order, gfp_t gfp_flags)
 {
 	post_alloc_hook(page, order, __GFP_MOVABLE);
+	set_page_refcounted(page);
 	return page;
 }
 #define mark_allocated(...)	alloc_hooks(mark_allocated_noprof(__VA_ARGS__))
-
-static void split_map_pages(struct list_head *freepages)
-{
-	unsigned int i, order;
-	struct page *page, *next;
-	LIST_HEAD(tmp_list);
-
-	for (order = 0; order < NR_PAGE_ORDERS; order++) {
-		list_for_each_entry_safe(page, next, &freepages[order], lru) {
-			unsigned int nr_pages;
-
-			list_del(&page->lru);
-
-			nr_pages = 1 << order;
-
-			mark_allocated(page, order, __GFP_MOVABLE);
-			if (order)
-				split_page(page, order);
-
-			for (i = 0; i < nr_pages; i++) {
-				list_add(&page->lru, &tmp_list);
-				page++;
-			}
-		}
-		list_splice_init(&tmp_list, &freepages[0]);
-	}
-}
 
 static unsigned long release_free_list(struct list_head *freepages)
 {
@@ -139,39 +114,6 @@ static unsigned long release_free_list(struct list_head *freepages)
 }
 
 #ifdef CONFIG_COMPACTION
-bool PageMovable(struct page *page)
-{
-	const struct movable_operations *mops;
-
-	VM_BUG_ON_PAGE(!PageLocked(page), page);
-	if (!__PageMovable(page))
-		return false;
-
-	mops = page_movable_ops(page);
-	if (mops)
-		return true;
-
-	return false;
-}
-
-void __SetPageMovable(struct page *page, const struct movable_operations *mops)
-{
-	VM_BUG_ON_PAGE(!PageLocked(page), page);
-	VM_BUG_ON_PAGE((unsigned long)mops & PAGE_MAPPING_MOVABLE, page);
-	page->mapping = (void *)((unsigned long)mops | PAGE_MAPPING_MOVABLE);
-}
-EXPORT_SYMBOL(__SetPageMovable);
-
-void __ClearPageMovable(struct page *page)
-{
-	VM_BUG_ON_PAGE(!PageMovable(page), page);
-	/*
-	 * This page still has the type of a movable page, but it's
-	 * actually not movable any more.
-	 */
-	page->mapping = (void *)PAGE_MAPPING_MOVABLE;
-}
-EXPORT_SYMBOL(__ClearPageMovable);
 
 /* Do not skip compaction more than 64 times */
 #define COMPACT_MAX_DEFER_SHIFT 6
@@ -576,6 +518,24 @@ static bool compact_lock_irqsave(spinlock_t *lock, unsigned long *flags,
 	return true;
 }
 
+static struct lruvec *
+compact_folio_lruvec_lock_irqsave(struct folio *folio, unsigned long *flags,
+				  struct compact_control *cc)
+{
+	struct lruvec *lruvec;
+
+	rcu_read_lock();
+retry:
+	lruvec = folio_lruvec(folio);
+	compact_lock_irqsave(&lruvec->lru_lock, flags, cc);
+	if (unlikely(lruvec_memcg(lruvec) != folio_memcg(folio))) {
+		spin_unlock_irqrestore(&lruvec->lru_lock, *flags);
+		goto retry;
+	}
+
+	return lruvec;
+}
+
 /*
  * Compaction requires the taking of some coarse locks that are potentially
  * very heavily contended. The lock should be periodically unlocked to avoid
@@ -656,7 +616,8 @@ static unsigned long isolate_freepages_block(struct compact_control *cc,
 		if (PageCompound(page)) {
 			const unsigned int order = compound_order(page);
 
-			if (blockpfn + (1UL << order) <= end_pfn) {
+			if ((order <= MAX_PAGE_ORDER) &&
+			    (blockpfn + (1UL << order) <= end_pfn)) {
 				blockpfn += (1UL << order) - 1;
 				page += (1UL << order) - 1;
 				nr_scanned += (1UL << order) - 1;
@@ -742,11 +703,11 @@ isolate_fail:
  *
  * Non-free pages, invalid PFNs, or zone boundaries within the
  * [start_pfn, end_pfn) range are considered errors, cause function to
- * undo its actions and return zero.
+ * undo its actions and return zero. cc->freepages[] are empty.
  *
  * Otherwise, function returns one-past-the-last PFN of isolated page
  * (which may be greater then end_pfn if end fell in a middle of
- * a free page).
+ * a free page). cc->freepages[] contain free pages isolated.
  */
 unsigned long
 isolate_freepages_range(struct compact_control *cc,
@@ -754,10 +715,9 @@ isolate_freepages_range(struct compact_control *cc,
 {
 	unsigned long isolated, pfn, block_start_pfn, block_end_pfn;
 	int order;
-	struct list_head tmp_freepages[NR_PAGE_ORDERS];
 
 	for (order = 0; order < NR_PAGE_ORDERS; order++)
-		INIT_LIST_HEAD(&tmp_freepages[order]);
+		INIT_LIST_HEAD(&cc->freepages[order]);
 
 	pfn = start_pfn;
 	block_start_pfn = pageblock_start_pfn(pfn);
@@ -788,7 +748,7 @@ isolate_freepages_range(struct compact_control *cc,
 			break;
 
 		isolated = isolate_freepages_block(cc, &isolate_start_pfn,
-					block_end_pfn, tmp_freepages, 0, true);
+					block_end_pfn, cc->freepages, 0, true);
 
 		/*
 		 * In strict mode, isolate_freepages_block() returns 0 if
@@ -807,12 +767,9 @@ isolate_freepages_range(struct compact_control *cc,
 
 	if (pfn < end_pfn) {
 		/* Loop terminated early, cleanup. */
-		release_free_list(tmp_freepages);
+		release_free_list(cc->freepages);
 		return 0;
 	}
-
-	/* __isolate_free_page() does not map the pages */
-	split_map_pages(tmp_freepages);
 
 	/* We don't use freelists for anything. */
 	return pfn;
@@ -900,7 +857,7 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 {
 	pg_data_t *pgdat = cc->zone->zone_pgdat;
 	unsigned long nr_scanned = 0, nr_isolated = 0;
-	struct lruvec *lruvec;
+	struct lruvec *lruvec = NULL;
 	unsigned long flags = 0;
 	struct lruvec *locked = NULL;
 	struct folio *folio = NULL;
@@ -974,7 +931,7 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 */
 		if (!(low_pfn % COMPACT_CLUSTER_MAX)) {
 			if (locked) {
-				unlock_page_lruvec_irqrestore(locked, flags);
+				lruvec_unlock_irqrestore(locked, flags);
 				locked = NULL;
 			}
 
@@ -1009,13 +966,13 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		}
 
 		if (PageHuge(page)) {
+			const unsigned int order = compound_order(page);
 			/*
 			 * skip hugetlbfs if we are not compacting for pages
 			 * bigger than its order. THPs and other compound pages
 			 * are handled below.
 			 */
 			if (!cc->alloc_contig) {
-				const unsigned int order = compound_order(page);
 
 				if (order <= MAX_PAGE_ORDER) {
 					low_pfn += (1UL << order) - 1;
@@ -1025,32 +982,32 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			}
 			/* for alloc_contig case */
 			if (locked) {
-				unlock_page_lruvec_irqrestore(locked, flags);
+				lruvec_unlock_irqrestore(locked, flags);
 				locked = NULL;
 			}
 
-			ret = isolate_or_dissolve_huge_page(page, &cc->migratepages);
+			folio = page_folio(page);
+			ret = isolate_or_dissolve_huge_folio(folio, &cc->migratepages);
 
 			/*
-			 * Fail isolation in case isolate_or_dissolve_huge_page()
+			 * Fail isolation in case isolate_or_dissolve_huge_folio()
 			 * reports an error. In case of -ENOMEM, abort right away.
 			 */
 			if (ret < 0) {
 				 /* Do not report -EBUSY down the chain */
 				if (ret == -EBUSY)
 					ret = 0;
-				low_pfn += compound_nr(page) - 1;
-				nr_scanned += compound_nr(page) - 1;
+				low_pfn += (1UL << order) - 1;
+				nr_scanned += (1UL << order) - 1;
 				goto isolate_fail;
 			}
 
-			if (PageHuge(page)) {
+			if (folio_test_hugetlb(folio)) {
 				/*
 				 * Hugepage was successfully isolated and placed
 				 * on the cc->migratepages list.
 				 */
-				folio = page_folio(page);
-				low_pfn += folio_nr_pages(folio) - 1;
+				low_pfn += folio_nr_pages(folio) - folio_page_idx(folio, page) - 1;
 				goto isolate_success_no_list;
 			}
 
@@ -1110,18 +1067,15 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * Skip any other type of page
 		 */
 		if (!PageLRU(page)) {
-			/*
-			 * __PageMovable can return false positive so we need
-			 * to verify it under page_lock.
-			 */
-			if (unlikely(__PageMovable(page)) &&
-					!PageIsolated(page)) {
+			/* Isolation code will deal with any races. */
+			if (unlikely(page_has_movable_ops(page)) &&
+			    !PageMovableOpsIsolated(page)) {
 				if (locked) {
-					unlock_page_lruvec_irqrestore(locked, flags);
+					lruvec_unlock_irqrestore(locked, flags);
 					locked = NULL;
 				}
 
-				if (isolate_movable_page(page, mode)) {
+				if (isolate_movable_ops_page(page, mode)) {
 					folio = page_folio(page);
 					goto isolate_success;
 				}
@@ -1217,17 +1171,16 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		if (!folio_test_clear_lru(folio))
 			goto isolate_fail_put;
 
-		lruvec = folio_lruvec(folio);
+		if (locked)
+			lruvec = folio_lruvec(folio);
 
 		/* If we already hold the lock, we can skip some rechecking */
-		if (lruvec != locked) {
+		if (lruvec != locked || !locked) {
 			if (locked)
-				unlock_page_lruvec_irqrestore(locked, flags);
+				lruvec_unlock_irqrestore(locked, flags);
 
-			compact_lock_irqsave(&lruvec->lru_lock, &flags, cc);
+			lruvec = compact_folio_lruvec_lock_irqsave(folio, &flags, cc);
 			locked = lruvec;
-
-			lruvec_memcg_debug(lruvec, folio);
 
 			/*
 			 * Try get exclusive access under lock. If marked for
@@ -1290,7 +1243,7 @@ isolate_success_no_list:
 isolate_fail_put:
 		/* Avoid potential deadlock in freeing page under lru_lock */
 		if (locked) {
-			unlock_page_lruvec_irqrestore(locked, flags);
+			lruvec_unlock_irqrestore(locked, flags);
 			locked = NULL;
 		}
 		folio_put(folio);
@@ -1306,7 +1259,7 @@ isolate_fail:
 		 */
 		if (nr_isolated) {
 			if (locked) {
-				unlock_page_lruvec_irqrestore(locked, flags);
+				lruvec_unlock_irqrestore(locked, flags);
 				locked = NULL;
 			}
 			putback_movable_pages(&cc->migratepages);
@@ -1338,7 +1291,7 @@ isolate_fail:
 
 isolate_abort:
 	if (locked)
-		unlock_page_lruvec_irqrestore(locked, flags);
+		lruvec_unlock_irqrestore(locked, flags);
 	if (folio) {
 		folio_set_lru(folio);
 		folio_put(folio);
@@ -1898,6 +1851,7 @@ again:
 	dst = (struct folio *)freepage;
 
 	post_alloc_hook(&dst->page, order, __GFP_MOVABLE);
+	set_page_refcounted(&dst->page);
 	if (order)
 		prep_compound_page(&dst->page, order);
 	cc->nr_freepages -= 1 << order;
@@ -2276,15 +2230,11 @@ static unsigned int fragmentation_score_node(pg_data_t *pgdat)
 
 static unsigned int fragmentation_score_wmark(bool low)
 {
-	unsigned int wmark_low;
+	unsigned int wmark_low, leeway;
 
-	/*
-	 * Cap the low watermark to avoid excessive compaction
-	 * activity in case a user sets the proactiveness tunable
-	 * close to 100 (maximum).
-	 */
-	wmark_low = max(100U - sysctl_compaction_proactiveness, 5U);
-	return low ? wmark_low : min(wmark_low + 10, 100U);
+	wmark_low = 100U - sysctl_compaction_proactiveness;
+	leeway = min(10U, wmark_low / 2);
+	return low ? wmark_low : min(wmark_low + leeway, 100U);
 }
 
 static bool should_proactive_compact_node(pg_data_t *pgdat)
@@ -2355,11 +2305,26 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 	if (!pageblock_aligned(cc->migrate_pfn))
 		return COMPACT_CONTINUE;
 
+	/*
+	 * When defrag_mode is enabled, make kcompactd target
+	 * watermarks in whole pageblocks. Because they can be stolen
+	 * without polluting, no further fallback checks are needed.
+	 */
+	if (defrag_mode && !cc->direct_compaction) {
+		if (__zone_watermark_ok(cc->zone, cc->order,
+					high_wmark_pages(cc->zone),
+					cc->highest_zoneidx, cc->alloc_flags,
+					zone_page_state(cc->zone,
+							NR_FREE_PAGES_BLOCKS)))
+			return COMPACT_SUCCESS;
+
+		return COMPACT_CONTINUE;
+	}
+
 	/* Direct compactor: Is a suitable page free? */
 	ret = COMPACT_NO_SUITABLE_PAGE;
 	for (order = cc->order; order < NR_PAGE_ORDERS; order++) {
 		struct free_area *area = &cc->zone->free_area[order];
-		bool can_steal;
 
 		/* Job done if page is free of the right migratetype */
 		if (!free_area_empty(area, migratetype))
@@ -2375,8 +2340,7 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 		 * Job done if allocation would steal freepages from
 		 * other migratetype buddy lists.
 		 */
-		if (find_suitable_fallback(area, order, migratetype,
-						true, &can_steal) != -1)
+		if (find_suitable_fallback(area, order, migratetype, true) >= 0)
 			/*
 			 * Movable pages are OK in any pageblock. If we are
 			 * stealing for a non-movable allocation, make sure
@@ -2408,40 +2372,42 @@ static enum compact_result compact_finished(struct compact_control *cc)
 }
 
 static bool __compaction_suitable(struct zone *zone, int order,
-				  int highest_zoneidx,
-				  unsigned long wmark_target)
+				  unsigned long watermark, int highest_zoneidx,
+				  unsigned long free_pages)
 {
-	unsigned long watermark;
 	/*
 	 * Watermarks for order-0 must be met for compaction to be able to
 	 * isolate free pages for migration targets. This means that the
-	 * watermark and alloc_flags have to match, or be more pessimistic than
-	 * the check in __isolate_free_page(). We don't use the direct
-	 * compactor's alloc_flags, as they are not relevant for freepage
-	 * isolation. We however do use the direct compactor's highest_zoneidx
-	 * to skip over zones where lowmem reserves would prevent allocation
-	 * even if compaction succeeds.
-	 * For costly orders, we require low watermark instead of min for
-	 * compaction to proceed to increase its chances.
+	 * watermark have to match, or be more pessimistic than the check in
+	 * __isolate_free_page().
+	 *
+	 * For costly orders, we require a higher watermark for compaction to
+	 * proceed to increase its chances.
+	 *
+	 * We use the direct compactor's highest_zoneidx to skip over zones
+	 * where lowmem reserves would prevent allocation even if compaction
+	 * succeeds.
+	 *
 	 * ALLOC_CMA is used, as pages in CMA pageblocks are considered
-	 * suitable migration targets
+	 * suitable migration targets.
 	 */
-	watermark = (order > PAGE_ALLOC_COSTLY_ORDER) ?
-				low_wmark_pages(zone) : min_wmark_pages(zone);
 	watermark += compact_gap(order);
+	if (order > PAGE_ALLOC_COSTLY_ORDER)
+		watermark += low_wmark_pages(zone) - min_wmark_pages(zone);
 	return __zone_watermark_ok(zone, 0, watermark, highest_zoneidx,
-				   ALLOC_CMA, wmark_target);
+				   ALLOC_CMA, free_pages);
 }
 
 /*
  * compaction_suitable: Is this suitable to run compaction on this zone now?
  */
-bool compaction_suitable(struct zone *zone, int order, int highest_zoneidx)
+bool compaction_suitable(struct zone *zone, int order, unsigned long watermark,
+			 int highest_zoneidx)
 {
 	enum compact_result compact_result;
 	bool suitable;
 
-	suitable = __compaction_suitable(zone, order, highest_zoneidx,
+	suitable = __compaction_suitable(zone, order, watermark, highest_zoneidx,
 					 zone_page_state(zone, NR_FREE_PAGES));
 	/*
 	 * fragmentation index determines if allocation failures are due to
@@ -2479,6 +2445,7 @@ bool compaction_suitable(struct zone *zone, int order, int highest_zoneidx)
 	return suitable;
 }
 
+/* Used by direct reclaimers */
 bool compaction_zonelist_suitable(struct alloc_context *ac, int order,
 		int alloc_flags)
 {
@@ -2501,8 +2468,8 @@ bool compaction_zonelist_suitable(struct alloc_context *ac, int order,
 		 */
 		available = zone_reclaimable_pages(zone) / order;
 		available += zone_page_state_snapshot(zone, NR_FREE_PAGES);
-		if (__compaction_suitable(zone, order, ac->highest_zoneidx,
-					  available))
+		if (__compaction_suitable(zone, order, min_wmark_pages(zone),
+					  ac->highest_zoneidx, available))
 			return true;
 	}
 
@@ -2518,16 +2485,40 @@ bool compaction_zonelist_suitable(struct alloc_context *ac, int order,
  */
 static enum compact_result
 compaction_suit_allocation_order(struct zone *zone, unsigned int order,
-				 int highest_zoneidx, unsigned int alloc_flags)
+				 int highest_zoneidx, unsigned int alloc_flags,
+				 bool async, bool kcompactd)
 {
+	unsigned long free_pages;
 	unsigned long watermark;
 
+	if (kcompactd && defrag_mode)
+		free_pages = zone_page_state(zone, NR_FREE_PAGES_BLOCKS);
+	else
+		free_pages = zone_page_state(zone, NR_FREE_PAGES);
+
 	watermark = wmark_pages(zone, alloc_flags & ALLOC_WMARK_MASK);
-	if (zone_watermark_ok(zone, order, watermark, highest_zoneidx,
-			      alloc_flags))
+	if (__zone_watermark_ok(zone, order, watermark, highest_zoneidx,
+				alloc_flags, free_pages))
 		return COMPACT_SUCCESS;
 
-	if (!compaction_suitable(zone, order, highest_zoneidx))
+	/*
+	 * For unmovable allocations (without ALLOC_CMA), check if there is enough
+	 * free memory in the non-CMA pageblocks. Otherwise compaction could form
+	 * the high-order page in CMA pageblocks, which would not help the
+	 * allocation to succeed. However, limit the check to costly order async
+	 * compaction (such as opportunistic THP attempts) because there is the
+	 * possibility that compaction would migrate pages from non-CMA to CMA
+	 * pageblock.
+	 */
+	if (order > PAGE_ALLOC_COSTLY_ORDER && async &&
+	    !(alloc_flags & ALLOC_CMA)) {
+		if (!__zone_watermark_ok(zone, 0, watermark + compact_gap(order),
+					 highest_zoneidx, 0,
+					 zone_page_state(zone, NR_FREE_PAGES)))
+			return COMPACT_SKIPPED;
+	}
+
+	if (!compaction_suitable(zone, order, watermark, highest_zoneidx))
 		return COMPACT_SKIPPED;
 
 	return COMPACT_CONTINUE;
@@ -2562,7 +2553,9 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	if (!is_via_compact_memory(cc->order)) {
 		ret = compaction_suit_allocation_order(cc->zone, cc->order,
 						       cc->highest_zoneidx,
-						       cc->alloc_flags);
+						       cc->alloc_flags,
+						       cc->mode == MIGRATE_ASYNC,
+						       !cc->direct_compaction);
 		if (ret != COMPACT_CONTINUE)
 			return ret;
 	}
@@ -2853,6 +2846,11 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 					ac->highest_zoneidx, ac->nodemask) {
 		enum compact_result status;
 
+		if (cpusets_enabled() &&
+			(alloc_flags & ALLOC_CPUSET) &&
+			!__cpuset_zone_allowed(zone, gfp_mask))
+				continue;
+
 		if (prio > MIN_COMPACT_PRIORITY
 					&& compaction_deferred(zone, order)) {
 			rc = max_t(enum compact_result, COMPACT_DEFERRED, rc);
@@ -3051,6 +3049,8 @@ static bool kcompactd_node_suitable(pg_data_t *pgdat)
 	struct zone *zone;
 	enum zone_type highest_zoneidx = pgdat->kcompactd_highest_zoneidx;
 	enum compact_result ret;
+	unsigned int alloc_flags = defrag_mode ?
+		ALLOC_WMARK_HIGH : ALLOC_WMARK_MIN;
 
 	for (zoneid = 0; zoneid <= highest_zoneidx; zoneid++) {
 		zone = &pgdat->node_zones[zoneid];
@@ -3060,7 +3060,8 @@ static bool kcompactd_node_suitable(pg_data_t *pgdat)
 
 		ret = compaction_suit_allocation_order(zone,
 				pgdat->kcompactd_max_order,
-				highest_zoneidx, ALLOC_WMARK_MIN);
+				highest_zoneidx, alloc_flags,
+				false, true);
 		if (ret == COMPACT_CONTINUE)
 			return true;
 	}
@@ -3083,6 +3084,7 @@ static void kcompactd_do_work(pg_data_t *pgdat)
 		.mode = MIGRATE_SYNC_LIGHT,
 		.ignore_skip_hint = false,
 		.gfp_mask = GFP_KERNEL,
+		.alloc_flags = defrag_mode ? ALLOC_WMARK_HIGH : ALLOC_WMARK_MIN,
 	};
 	enum compact_result ret;
 
@@ -3101,7 +3103,8 @@ static void kcompactd_do_work(pg_data_t *pgdat)
 			continue;
 
 		ret = compaction_suit_allocation_order(zone,
-				cc.order, zoneid, ALLOC_WMARK_MIN);
+				cc.order, zoneid, cc.alloc_flags,
+				false, true);
 		if (ret != COMPACT_CONTINUE)
 			continue;
 
@@ -3179,15 +3182,10 @@ void wakeup_kcompactd(pg_data_t *pgdat, int order, int highest_zoneidx)
 static int kcompactd(void *p)
 {
 	pg_data_t *pgdat = (pg_data_t *)p;
-	struct task_struct *tsk = current;
 	long default_timeout = msecs_to_jiffies(HPAGE_FRAG_CHECK_INTERVAL_MSEC);
 	long timeout = default_timeout;
 
-	const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
-
-	if (!cpumask_empty(cpumask))
-		set_cpus_allowed_ptr(tsk, cpumask);
-
+	current->flags |= PF_KCOMPACTD;
 	set_freezable();
 
 	pgdat->kcompactd_max_order = 0;
@@ -3244,6 +3242,8 @@ static int kcompactd(void *p)
 			pgdat->proactive_compact_trigger = false;
 	}
 
+	current->flags &= ~PF_KCOMPACTD;
+
 	return 0;
 }
 
@@ -3258,10 +3258,12 @@ void __meminit kcompactd_run(int nid)
 	if (pgdat->kcompactd)
 		return;
 
-	pgdat->kcompactd = kthread_run(kcompactd, pgdat, "kcompactd%d", nid);
+	pgdat->kcompactd = kthread_create_on_node(kcompactd, pgdat, nid, "kcompactd%d", nid);
 	if (IS_ERR(pgdat->kcompactd)) {
 		pr_err("Failed to start kcompactd on node %d\n", nid);
 		pgdat->kcompactd = NULL;
+	} else {
+		wake_up_process(pgdat->kcompactd);
 	}
 }
 
@@ -3277,30 +3279,6 @@ void __meminit kcompactd_stop(int nid)
 		kthread_stop(kcompactd);
 		NODE_DATA(nid)->kcompactd = NULL;
 	}
-}
-
-/*
- * It's optimal to keep kcompactd on the same CPUs as their memory, but
- * not required for correctness. So if the last cpu in a node goes
- * away, we get changed to run anywhere: as the first one comes back,
- * restore their cpu bindings.
- */
-static int kcompactd_cpu_online(unsigned int cpu)
-{
-	int nid;
-
-	for_each_node_state(nid, N_MEMORY) {
-		pg_data_t *pgdat = NODE_DATA(nid);
-		const struct cpumask *mask;
-
-		mask = cpumask_of_node(pgdat->node_id);
-
-		if (cpumask_any_and(cpu_online_mask, mask) < nr_cpu_ids)
-			/* One of our CPUs online: restore mask */
-			if (pgdat->kcompactd)
-				set_cpus_allowed_ptr(pgdat->kcompactd, mask);
-	}
-	return 0;
 }
 
 static int proc_dointvec_minmax_warn_RT_change(const struct ctl_table *table,
@@ -3322,7 +3300,7 @@ static int proc_dointvec_minmax_warn_RT_change(const struct ctl_table *table,
 	return ret;
 }
 
-static struct ctl_table vm_compaction[] = {
+static const struct ctl_table vm_compaction[] = {
 	{
 		.procname	= "compact_memory",
 		.data		= &sysctl_compact_memory,
@@ -3362,15 +3340,6 @@ static struct ctl_table vm_compaction[] = {
 static int __init kcompactd_init(void)
 {
 	int nid;
-	int ret;
-
-	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
-					"mm/compaction:online",
-					kcompactd_cpu_online, NULL);
-	if (ret < 0) {
-		pr_err("kcompactd: failed to register hotplug callbacks.\n");
-		return ret;
-	}
 
 	for_each_node_state(nid, N_MEMORY)
 		kcompactd_run(nid);

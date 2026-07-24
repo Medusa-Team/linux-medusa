@@ -64,9 +64,14 @@ DEFINE_SHOW_ATTRIBUTE(identity);
 
 void pdsc_debugfs_add_ident(struct pdsc *pdsc)
 {
+	struct dentry *dentry;
+
 	/* This file will already exist in the reset flow */
-	if (debugfs_lookup("identity", pdsc->dentry))
+	dentry = debugfs_lookup("identity", pdsc->dentry);
+	if (!IS_ERR_OR_NULL(dentry)) {
+		dput(dentry);
 		return;
+	}
 
 	debugfs_create_file("identity", 0400, pdsc->dentry,
 			    pdsc, &identity_fops);
@@ -112,7 +117,7 @@ void pdsc_debugfs_add_qcq(struct pdsc *pdsc, struct pdsc_qcq *qcq)
 	struct pdsc_cq *cq = &qcq->cq;
 
 	qcq_dentry = debugfs_create_dir(q->name, pdsc->dentry);
-	if (IS_ERR_OR_NULL(qcq_dentry))
+	if (IS_ERR(qcq_dentry))
 		return;
 	qcq->dentry = qcq_dentry;
 
@@ -123,7 +128,7 @@ void pdsc_debugfs_add_qcq(struct pdsc *pdsc, struct pdsc_qcq *qcq)
 	debugfs_create_x32("accum_work", 0400, qcq_dentry, &qcq->accum_work);
 
 	q_dentry = debugfs_create_dir("q", qcq->dentry);
-	if (IS_ERR_OR_NULL(q_dentry))
+	if (IS_ERR(q_dentry))
 		return;
 
 	debugfs_create_u32("index", 0400, q_dentry, &q->index);
@@ -135,7 +140,7 @@ void pdsc_debugfs_add_qcq(struct pdsc *pdsc, struct pdsc_qcq *qcq)
 	debugfs_create_u16("head", 0400, q_dentry, &q->head_idx);
 
 	cq_dentry = debugfs_create_dir("cq", qcq->dentry);
-	if (IS_ERR_OR_NULL(cq_dentry))
+	if (IS_ERR(cq_dentry))
 		return;
 
 	debugfs_create_x64("base_pa", 0400, cq_dentry, &cq->base_pa);
@@ -148,14 +153,15 @@ void pdsc_debugfs_add_qcq(struct pdsc *pdsc, struct pdsc_qcq *qcq)
 		struct pdsc_intr_info *intr = &pdsc->intr_info[qcq->intx];
 
 		intr_dentry = debugfs_create_dir("intr", qcq->dentry);
-		if (IS_ERR_OR_NULL(intr_dentry))
+		if (IS_ERR(intr_dentry))
 			return;
 
 		debugfs_create_u32("index", 0400, intr_dentry, &intr->index);
 		debugfs_create_u32("vector", 0400, intr_dentry, &intr->vector);
 
-		intr_ctrl_regset = kzalloc(sizeof(*intr_ctrl_regset),
-					   GFP_KERNEL);
+		intr_ctrl_regset = devm_kzalloc(pdsc->dev,
+						sizeof(*intr_ctrl_regset),
+						GFP_KERNEL);
 		if (!intr_ctrl_regset)
 			return;
 		intr_ctrl_regset->regs = intr_ctrl_regs;

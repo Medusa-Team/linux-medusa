@@ -8,6 +8,8 @@
 #include <trace/events/dma_fence.h>
 #include <uapi/linux/sched/types.h>
 
+#include <drm/drm_print.h>
+
 #include "i915_drv.h"
 #include "i915_trace.h"
 #include "intel_breadcrumbs.h"
@@ -70,7 +72,7 @@ static void __intel_breadcrumbs_disarm_irq(struct intel_breadcrumbs *b)
 	if (!--b->irq_enabled)
 		b->irq_disable(b);
 
-	WRITE_ONCE(b->irq_armed, 0);
+	WRITE_ONCE(b->irq_armed, NULL);
 	intel_gt_pm_put_async(b->irq_engine->gt, wakeref);
 }
 
@@ -146,7 +148,7 @@ __dma_fence_signal__notify(struct dma_fence *fence,
 {
 	struct dma_fence_cb *cur, *tmp;
 
-	lockdep_assert_held(fence->lock);
+	dma_fence_assert_held(fence);
 
 	list_for_each_entry_safe(cur, tmp, list, node) {
 		INIT_LIST_HEAD(&cur->node);
@@ -277,7 +279,7 @@ intel_breadcrumbs_create(struct intel_engine_cs *irq_engine)
 {
 	struct intel_breadcrumbs *b;
 
-	b = kzalloc(sizeof(*b), GFP_KERNEL);
+	b = kzalloc_obj(*b);
 	if (!b)
 		return NULL;
 

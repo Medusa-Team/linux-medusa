@@ -436,7 +436,7 @@ static int img_hash_write_via_dma_stop(struct img_hash_dev *hdev)
 	struct img_hash_request_ctx *ctx = ahash_request_ctx(hdev->req);
 
 	if (ctx->flags & DRIVER_FLAGS_SG)
-		dma_unmap_sg(hdev->dev, ctx->sg, ctx->dma_ct, DMA_TO_DEVICE);
+		dma_unmap_sg(hdev->dev, ctx->sg, 1, DMA_TO_DEVICE);
 
 	return 0;
 }
@@ -491,8 +491,9 @@ static int img_hash_init(struct ahash_request *req)
 	struct img_hash_ctx *ctx = crypto_ahash_ctx(tfm);
 
 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback);
-	rctx->fallback_req.base.flags =	req->base.flags
-		& CRYPTO_TFM_REQ_MAY_SLEEP;
+	ahash_request_set_callback(&rctx->fallback_req,
+				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+				   req->base.complete, req->base.data);
 
 	return crypto_ahash_init(&rctx->fallback_req);
 }
@@ -555,10 +556,10 @@ static int img_hash_update(struct ahash_request *req)
 	struct img_hash_ctx *ctx = crypto_ahash_ctx(tfm);
 
 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback);
-	rctx->fallback_req.base.flags = req->base.flags
-		& CRYPTO_TFM_REQ_MAY_SLEEP;
-	rctx->fallback_req.nbytes = req->nbytes;
-	rctx->fallback_req.src = req->src;
+	ahash_request_set_callback(&rctx->fallback_req,
+				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+				   req->base.complete, req->base.data);
+	ahash_request_set_crypt(&rctx->fallback_req, req->src, NULL, req->nbytes);
 
 	return crypto_ahash_update(&rctx->fallback_req);
 }
@@ -570,9 +571,10 @@ static int img_hash_final(struct ahash_request *req)
 	struct img_hash_ctx *ctx = crypto_ahash_ctx(tfm);
 
 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback);
-	rctx->fallback_req.base.flags = req->base.flags
-		& CRYPTO_TFM_REQ_MAY_SLEEP;
-	rctx->fallback_req.result = req->result;
+	ahash_request_set_callback(&rctx->fallback_req,
+				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+				   req->base.complete, req->base.data);
+	ahash_request_set_crypt(&rctx->fallback_req, NULL, req->result, 0);
 
 	return crypto_ahash_final(&rctx->fallback_req);
 }
@@ -584,11 +586,12 @@ static int img_hash_finup(struct ahash_request *req)
 	struct img_hash_ctx *ctx = crypto_ahash_ctx(tfm);
 
 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback);
-	rctx->fallback_req.base.flags = req->base.flags
-		& CRYPTO_TFM_REQ_MAY_SLEEP;
-	rctx->fallback_req.nbytes = req->nbytes;
-	rctx->fallback_req.src = req->src;
-	rctx->fallback_req.result = req->result;
+	ahash_request_set_callback(&rctx->fallback_req,
+				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+				   req->base.complete, req->base.data);
+	ahash_request_set_crypt(&rctx->fallback_req, req->src, req->result,
+				req->nbytes);
+
 
 	return crypto_ahash_finup(&rctx->fallback_req);
 }
@@ -600,8 +603,9 @@ static int img_hash_import(struct ahash_request *req, const void *in)
 	struct img_hash_ctx *ctx = crypto_ahash_ctx(tfm);
 
 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback);
-	rctx->fallback_req.base.flags = req->base.flags
-		& CRYPTO_TFM_REQ_MAY_SLEEP;
+	ahash_request_set_callback(&rctx->fallback_req,
+				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+				   req->base.complete, req->base.data);
 
 	return crypto_ahash_import(&rctx->fallback_req, in);
 }
@@ -613,8 +617,9 @@ static int img_hash_export(struct ahash_request *req, void *out)
 	struct img_hash_ctx *ctx = crypto_ahash_ctx(tfm);
 
 	ahash_request_set_tfm(&rctx->fallback_req, ctx->fallback);
-	rctx->fallback_req.base.flags = req->base.flags
-		& CRYPTO_TFM_REQ_MAY_SLEEP;
+	ahash_request_set_callback(&rctx->fallback_req,
+				   req->base.flags & CRYPTO_TFM_REQ_MAY_SLEEP,
+				   req->base.complete, req->base.data);
 
 	return crypto_ahash_export(&rctx->fallback_req, out);
 }
@@ -624,24 +629,14 @@ static int img_hash_digest(struct ahash_request *req)
 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
 	struct img_hash_ctx *tctx = crypto_ahash_ctx(tfm);
 	struct img_hash_request_ctx *ctx = ahash_request_ctx(req);
-	struct img_hash_dev *hdev = NULL;
-	struct img_hash_dev *tmp;
-	int err;
 
 	spin_lock(&img_hash.lock);
-	if (!tctx->hdev) {
-		list_for_each_entry(tmp, &img_hash.dev_list, list) {
-			hdev = tmp;
-			break;
-		}
-		tctx->hdev = hdev;
-
-	} else {
-		hdev = tctx->hdev;
-	}
-
+	if (!tctx->hdev)
+		tctx->hdev = list_first_entry_or_null(&img_hash.dev_list,
+						      struct img_hash_dev, list);
+	ctx->hdev = tctx->hdev;
 	spin_unlock(&img_hash.lock);
-	ctx->hdev = hdev;
+
 	ctx->flags = 0;
 	ctx->digsize = crypto_ahash_digestsize(tfm);
 
@@ -670,9 +665,7 @@ static int img_hash_digest(struct ahash_request *req)
 	ctx->sgfirst = req->src;
 	ctx->nents = sg_nents(ctx->sg);
 
-	err = img_hash_handle_queue(tctx->hdev, req);
-
-	return err;
+	return img_hash_handle_queue(ctx->hdev, req);
 }
 
 static int img_hash_cra_init(struct crypto_tfm *tfm, const char *alg_name)
@@ -695,22 +688,22 @@ static int img_hash_cra_init(struct crypto_tfm *tfm, const char *alg_name)
 
 static int img_hash_cra_md5_init(struct crypto_tfm *tfm)
 {
-	return img_hash_cra_init(tfm, "md5-generic");
+	return img_hash_cra_init(tfm, "md5-lib");
 }
 
 static int img_hash_cra_sha1_init(struct crypto_tfm *tfm)
 {
-	return img_hash_cra_init(tfm, "sha1-generic");
+	return img_hash_cra_init(tfm, "sha1-lib");
 }
 
 static int img_hash_cra_sha224_init(struct crypto_tfm *tfm)
 {
-	return img_hash_cra_init(tfm, "sha224-generic");
+	return img_hash_cra_init(tfm, "sha224-lib");
 }
 
 static int img_hash_cra_sha256_init(struct crypto_tfm *tfm)
 {
-	return img_hash_cra_init(tfm, "sha256-generic");
+	return img_hash_cra_init(tfm, "sha256-lib");
 }
 
 static void img_hash_cra_exit(struct crypto_tfm *tfm)
@@ -865,25 +858,18 @@ static int img_register_algs(struct img_hash_dev *hdev)
 
 	for (i = 0; i < ARRAY_SIZE(img_algs); i++) {
 		err = crypto_register_ahash(&img_algs[i]);
-		if (err)
-			goto err_reg;
+		if (err) {
+			crypto_unregister_ahashes(img_algs, i);
+			return err;
+		}
 	}
+
 	return 0;
-
-err_reg:
-	for (; i--; )
-		crypto_unregister_ahash(&img_algs[i]);
-
-	return err;
 }
 
-static int img_unregister_algs(struct img_hash_dev *hdev)
+static void img_unregister_algs(struct img_hash_dev *hdev)
 {
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(img_algs); i++)
-		crypto_unregister_ahash(&img_algs[i]);
-	return 0;
+	crypto_unregister_ahashes(img_algs, ARRAY_SIZE(img_algs));
 }
 
 static void img_hash_done_task(unsigned long data)
@@ -987,31 +973,23 @@ static int img_hash_probe(struct platform_device *pdev)
 	}
 	dev_dbg(dev, "using IRQ channel %d\n", irq);
 
-	hdev->hash_clk = devm_clk_get(&pdev->dev, "hash");
+	hdev->hash_clk = devm_clk_get_enabled(&pdev->dev, "hash");
 	if (IS_ERR(hdev->hash_clk)) {
 		dev_err(dev, "clock initialization failed.\n");
 		err = PTR_ERR(hdev->hash_clk);
 		goto res_err;
 	}
 
-	hdev->sys_clk = devm_clk_get(&pdev->dev, "sys");
+	hdev->sys_clk = devm_clk_get_enabled(&pdev->dev, "sys");
 	if (IS_ERR(hdev->sys_clk)) {
 		dev_err(dev, "clock initialization failed.\n");
 		err = PTR_ERR(hdev->sys_clk);
 		goto res_err;
 	}
 
-	err = clk_prepare_enable(hdev->hash_clk);
-	if (err)
-		goto res_err;
-
-	err = clk_prepare_enable(hdev->sys_clk);
-	if (err)
-		goto clk_err;
-
 	err = img_hash_dma_init(hdev);
 	if (err)
-		goto dma_err;
+		goto res_err;
 
 	dev_dbg(dev, "using %s for DMA transfers\n",
 		dma_chan_name(hdev->dma_lch));
@@ -1032,10 +1010,6 @@ err_algs:
 	list_del(&hdev->list);
 	spin_unlock(&img_hash.lock);
 	dma_release_channel(hdev->dma_lch);
-dma_err:
-	clk_disable_unprepare(hdev->sys_clk);
-clk_err:
-	clk_disable_unprepare(hdev->hash_clk);
 res_err:
 	tasklet_kill(&hdev->done_task);
 	tasklet_kill(&hdev->dma_task);
@@ -1058,9 +1032,6 @@ static void img_hash_remove(struct platform_device *pdev)
 	tasklet_kill(&hdev->dma_task);
 
 	dma_release_channel(hdev->dma_lch);
-
-	clk_disable_unprepare(hdev->hash_clk);
-	clk_disable_unprepare(hdev->sys_clk);
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -1099,7 +1070,7 @@ static const struct dev_pm_ops img_hash_pm_ops = {
 
 static struct platform_driver img_hash_driver = {
 	.probe		= img_hash_probe,
-	.remove_new	= img_hash_remove,
+	.remove		= img_hash_remove,
 	.driver		= {
 		.name	= "img-hash-accelerator",
 		.pm	= &img_hash_pm_ops,

@@ -22,7 +22,7 @@
 #include <linux/spinlock.h>
 #include <linux/types.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #define QUAD8_EXTENT 32
 
@@ -1192,6 +1192,7 @@ static irqreturn_t quad8_irq_handler(int irq, void *private)
 {
 	struct counter_device *counter = private;
 	struct quad8 *const priv = counter_priv(counter);
+	struct device *dev = counter->parent;
 	unsigned int status;
 	unsigned long irq_status;
 	unsigned long channel;
@@ -1200,8 +1201,11 @@ static irqreturn_t quad8_irq_handler(int irq, void *private)
 	int ret;
 
 	ret = regmap_read(priv->map, QUAD8_INTERRUPT_STATUS, &status);
-	if (ret)
-		return ret;
+	if (ret) {
+		dev_WARN_ONCE(dev, true,
+			"Attempt to read Interrupt Status Register failed: %d\n", ret);
+		return IRQ_NONE;
+	}
 	if (!status)
 		return IRQ_NONE;
 
@@ -1223,8 +1227,9 @@ static irqreturn_t quad8_irq_handler(int irq, void *private)
 				break;
 		default:
 			/* should never reach this path */
-			WARN_ONCE(true, "invalid interrupt trigger function %u configured for channel %lu\n",
-				  flg_pins, channel);
+			dev_WARN_ONCE(dev, true,
+				"invalid interrupt trigger function %u configured for channel %lu\n",
+				flg_pins, channel);
 			continue;
 		}
 
@@ -1232,8 +1237,11 @@ static irqreturn_t quad8_irq_handler(int irq, void *private)
 	}
 
 	ret = regmap_write(priv->map, QUAD8_CHANNEL_OPERATION, CLEAR_PENDING_INTERRUPTS);
-	if (ret)
-		return ret;
+	if (ret) {
+		dev_WARN_ONCE(dev, true,
+			"Attempt to clear pending interrupts by writing to Channel Operation Register failed: %d\n", ret);
+		return IRQ_HANDLED;
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1360,4 +1368,4 @@ module_isa_driver_with_irq(quad8_driver, num_quad8, num_irq);
 MODULE_AUTHOR("William Breathitt Gray <vilhelm.gray@gmail.com>");
 MODULE_DESCRIPTION("ACCES 104-QUAD-8 driver");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(COUNTER);
+MODULE_IMPORT_NS("COUNTER");

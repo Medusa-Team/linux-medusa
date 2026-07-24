@@ -372,8 +372,6 @@ static const struct vb2_ops rmi_f54_queue_ops = {
 	.queue_setup            = rmi_f54_queue_setup,
 	.buf_queue              = rmi_f54_buffer_queue,
 	.stop_streaming		= rmi_f54_stop_streaming,
-	.wait_prepare           = vb2_ops_wait_prepare,
-	.wait_finish            = vb2_ops_wait_finish,
 };
 
 static const struct vb2_queue rmi_f54_queue = {
@@ -540,6 +538,8 @@ static void rmi_f54_work(struct work_struct *work)
 	int error;
 	int i;
 
+	mutex_lock(&f54->data_mutex);
+
 	report_size = rmi_f54_get_report_size(f54);
 	if (report_size == 0) {
 		dev_err(&fn->dev, "Bad report size, report type=%d\n",
@@ -547,8 +547,6 @@ static void rmi_f54_work(struct work_struct *work)
 		error = -EINVAL;
 		goto error;     /* retry won't help */
 	}
-
-	mutex_lock(&f54->data_mutex);
 
 	/*
 	 * Need to check if command has completed.

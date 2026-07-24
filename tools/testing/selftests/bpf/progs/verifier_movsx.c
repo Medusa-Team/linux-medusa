@@ -245,7 +245,13 @@ l0_%=:							\
 SEC("socket")
 __description("MOV32SX, S8, var_off not u32_max, positive after s8 extension")
 __success __retval(0)
-__failure_unpriv __msg_unpriv("frame pointer is read only")
+__success_unpriv
+#ifdef SPEC_V1
+__xlated_unpriv("w0 = 0")
+__xlated_unpriv("exit")
+__xlated_unpriv("nospec") /* inserted to prevent `frame pointer is read only` */
+__xlated_unpriv("goto pc-1")
+#endif
 __naked void mov64sx_s32_varoff_2(void)
 {
 	asm volatile ("					\
@@ -267,7 +273,13 @@ l0_%=:							\
 SEC("socket")
 __description("MOV32SX, S8, var_off not u32_max, negative after s8 extension")
 __success __retval(0)
-__failure_unpriv __msg_unpriv("frame pointer is read only")
+__success_unpriv
+#ifdef SPEC_V1
+__xlated_unpriv("w0 = 0")
+__xlated_unpriv("exit")
+__xlated_unpriv("nospec") /* inserted to prevent `frame pointer is read only` */
+__xlated_unpriv("goto pc-1")
+#endif
 __naked void mov64sx_s32_varoff_3(void)
 {
 	asm volatile ("					\
@@ -283,6 +295,46 @@ l0_%=:							\
 	r10 = 1;					\
 	exit;						\
 "	:
+	: __imm(bpf_get_prandom_u32)
+	: __clobber_all);
+}
+
+SEC("socket")
+__description("MOV64SX, S8, unsigned range_check")
+__success __retval(0)
+__naked void mov64sx_s8_range_check(void)
+{
+	asm volatile ("					\
+	call %[bpf_get_prandom_u32];			\
+	r0 &= 0x1;					\
+	r0 += 0xfe;					\
+	r0 = (s8)r0;					\
+	if r0 < 0xfffffffffffffffe goto label_%=;	\
+	r0 = 0;						\
+	exit;						\
+label_%=:						\
+	exit;						\
+"	:
+	: __imm(bpf_get_prandom_u32)
+	: __clobber_all);
+}
+
+SEC("socket")
+__description("MOV32SX, S8, unsigned range_check")
+__success __retval(0)
+__naked void mov32sx_s8_range_check(void)
+{
+	asm volatile ("                                 \
+	call %[bpf_get_prandom_u32];                    \
+	w0 &= 0x1;                                      \
+	w0 += 0xfe;                                     \
+	w0 = (s8)w0;                                    \
+	if w0 < 0xfffffffe goto label_%=;               \
+	r0 = 0;                                         \
+	exit;                                           \
+label_%=: 	                                        \
+	exit;                                           \
+	"      :
 	: __imm(bpf_get_prandom_u32)
 	: __clobber_all);
 }

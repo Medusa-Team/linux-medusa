@@ -238,7 +238,7 @@ uniphier_mdmac_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 	if (!is_slave_direction(direction))
 		return NULL;
 
-	md = kzalloc(sizeof(*md), GFP_NOWAIT);
+	md = kzalloc_obj(*md, GFP_NOWAIT);
 	if (!md)
 		return NULL;
 
@@ -493,7 +493,7 @@ MODULE_DEVICE_TABLE(of, uniphier_mdmac_match);
 
 static struct platform_driver uniphier_mdmac_driver = {
 	.probe = uniphier_mdmac_probe,
-	.remove_new = uniphier_mdmac_remove,
+	.remove = uniphier_mdmac_remove,
 	.driver = {
 		.name = "uniphier-mio-dmac",
 		.of_match_table = uniphier_mdmac_match,

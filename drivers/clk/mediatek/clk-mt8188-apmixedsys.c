@@ -106,7 +106,7 @@ static int clk_mt8188_apmixed_probe(struct platform_device *pdev)
 	if (!clk_data)
 		return -ENOMEM;
 
-	r = mtk_clk_register_plls(node, plls, ARRAY_SIZE(plls), clk_data);
+	r = mtk_clk_register_plls(&pdev->dev, plls, ARRAY_SIZE(plls), clk_data);
 	if (r)
 		goto free_apmixed_data;
 
@@ -145,7 +145,7 @@ static void clk_mt8188_apmixed_remove(struct platform_device *pdev)
 
 static struct platform_driver clk_mt8188_apmixed_drv = {
 	.probe = clk_mt8188_apmixed_probe,
-	.remove_new = clk_mt8188_apmixed_remove,
+	.remove = clk_mt8188_apmixed_remove,
 	.driver = {
 		.name = "clk-mt8188-apmixed",
 		.of_match_table = of_match_clk_mt8188_apmixed,

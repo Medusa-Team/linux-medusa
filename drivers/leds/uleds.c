@@ -53,7 +53,7 @@ static int uleds_open(struct inode *inode, struct file *file)
 {
 	struct uleds_device *udev;
 
-	udev = kzalloc(sizeof(*udev), GFP_KERNEL);
+	udev = kzalloc_obj(*udev);
 	if (!udev)
 		return -ENOMEM;
 
@@ -200,7 +200,6 @@ static const struct file_operations uleds_fops = {
 	.read		= uleds_read,
 	.write		= uleds_write,
 	.poll		= uleds_poll,
-	.llseek		= no_llseek,
 };
 
 static struct miscdevice uleds_misc = {

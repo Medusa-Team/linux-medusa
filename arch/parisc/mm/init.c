@@ -377,10 +377,8 @@ static void __ref map_pages(unsigned long start_vaddr,
 
 #if CONFIG_PGTABLE_LEVELS == 3
 		if (pud_none(*pud)) {
-			pmd = memblock_alloc(PAGE_SIZE << PMD_TABLE_ORDER,
+			pmd = memblock_alloc_or_panic(PAGE_SIZE << PMD_TABLE_ORDER,
 					     PAGE_SIZE << PMD_TABLE_ORDER);
-			if (!pmd)
-				panic("pmd allocation failed.\n");
 			pud_populate(NULL, pud, pmd);
 		}
 #endif
@@ -388,9 +386,7 @@ static void __ref map_pages(unsigned long start_vaddr,
 		pmd = pmd_offset(pud, vaddr);
 		for (tmp1 = start_pmd; tmp1 < PTRS_PER_PMD; tmp1++, pmd++) {
 			if (pmd_none(*pmd)) {
-				pg_table = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-				if (!pg_table)
-					panic("page table allocation failed\n");
+				pg_table = memblock_alloc_or_panic(PAGE_SIZE, PAGE_SIZE);
 				pmd_populate_kernel(NULL, pmd, pg_table);
 			}
 
@@ -566,10 +562,6 @@ void __init mem_init(void)
 	BUILD_BUG_ON(TMPALIAS_MAP_START >= 0x80000000);
 #endif
 
-	high_memory = __va((max_pfn << PAGE_SHIFT));
-	set_max_mapnr(max_low_pfn);
-	memblock_free_all();
-
 #ifdef CONFIG_PA11
 	if (boot_cpu_data.cpu_type == pcxl2 || boot_cpu_data.cpu_type == pcxl) {
 		pcxl_dma_start = (unsigned long)SET_MAP_OFFSET(MAP_START);
@@ -612,9 +604,6 @@ void __init mem_init(void)
 #endif
 }
 
-unsigned long *empty_zero_page __ro_after_init;
-EXPORT_SYMBOL(empty_zero_page);
-
 /*
  * pagetable_init() sets up the page tables
  *
@@ -647,11 +636,6 @@ static void __init pagetable_init(void)
 			  initrd_end - initrd_start, PAGE_KERNEL, 0);
 	}
 #endif
-
-	empty_zero_page = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-	if (!empty_zero_page)
-		panic("zero page allocation failed.\n");
-
 }
 
 static void __init gateway_init(void)
@@ -687,19 +671,15 @@ static void __init fixmap_init(void)
 
 #if CONFIG_PGTABLE_LEVELS == 3
 	if (pud_none(*pud)) {
-		pmd = memblock_alloc(PAGE_SIZE << PMD_TABLE_ORDER,
+		pmd = memblock_alloc_or_panic(PAGE_SIZE << PMD_TABLE_ORDER,
 				     PAGE_SIZE << PMD_TABLE_ORDER);
-		if (!pmd)
-			panic("fixmap: pmd allocation failed.\n");
 		pud_populate(NULL, pud, pmd);
 	}
 #endif
 
 	pmd = pmd_offset(pud, addr);
 	do {
-		pte_t *pte = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
-		if (!pte)
-			panic("fixmap: pte allocation failed.\n");
+		pte_t *pte = memblock_alloc_or_panic(PAGE_SIZE, PAGE_SIZE);
 
 		pmd_populate_kernel(&init_mm, pmd, pte);
 
@@ -707,13 +687,9 @@ static void __init fixmap_init(void)
 	} while (addr < end);
 }
 
-static void __init parisc_bootmem_free(void)
+void __init arch_zone_limits_init(unsigned long *max_zone_pfns)
 {
-	unsigned long max_zone_pfn[MAX_NR_ZONES] = { 0, };
-
-	max_zone_pfn[0] = memblock_end_of_DRAM();
-
-	free_area_init(max_zone_pfn);
+	max_zone_pfns[ZONE_NORMAL] = PFN_DOWN(memblock_end_of_DRAM());
 }
 
 void __init paging_init(void)
@@ -724,9 +700,6 @@ void __init paging_init(void)
 	fixmap_init();
 	flush_cache_all_local(); /* start with known state */
 	flush_tlb_all_local(NULL);
-
-	sparse_init();
-	parisc_bootmem_free();
 }
 
 static void alloc_btlb(unsigned long start, unsigned long end, int *slot,

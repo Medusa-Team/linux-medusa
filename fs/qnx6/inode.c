@@ -75,7 +75,7 @@ static int qnx6_get_block(struct inode *inode, sector_t iblock,
 {
 	unsigned phys;
 
-	pr_debug("qnx6_get_block inode=[%ld] iblock=[%ld]\n",
+	pr_debug("qnx6_get_block inode=[%llu] iblock=[%ld]\n",
 		 inode->i_ino, (unsigned long)iblock);
 
 	phys = qnx6_block_map(inode, iblock);
@@ -179,22 +179,19 @@ static int qnx6_statfs(struct dentry *dentry, struct kstatfs *buf)
  */
 static const char *qnx6_checkroot(struct super_block *s)
 {
-	static char match_root[2][3] = {".\0\0", "..\0"};
-	int i, error = 0;
+	int error = 0;
 	struct qnx6_dir_entry *dir_entry;
 	struct inode *root = d_inode(s->s_root);
 	struct address_space *mapping = root->i_mapping;
-	struct page *page = read_mapping_page(mapping, 0, NULL);
-	if (IS_ERR(page))
+	struct folio *folio = read_mapping_folio(mapping, 0, NULL);
+
+	if (IS_ERR(folio))
 		return "error reading root directory";
-	kmap(page);
-	dir_entry = page_address(page);
-	for (i = 0; i < 2; i++) {
-		/* maximum 3 bytes - due to match_root limitation */
-		if (strncmp(dir_entry[i].de_fname, match_root[i], 3))
-			error = 1;
-	}
-	qnx6_put_page(page);
+	dir_entry = kmap_local_folio(folio, 0);
+	if (memcmp(dir_entry[0].de_fname, ".", 2) ||
+	    memcmp(dir_entry[1].de_fname, "..", 3))
+		error = 1;
+	folio_release_kmap(folio, dir_entry);
 	if (error)
 		return "error reading root directory.";
 	return NULL;
@@ -305,7 +302,7 @@ static int qnx6_fill_super(struct super_block *s, struct fs_context *fc)
 	int bootblock_offset = QNX6_BOOTBLOCK_SIZE;
 	int silent = fc->sb_flags & SB_SILENT;
 
-	qs = kzalloc(sizeof(struct qnx6_sb_info), GFP_KERNEL);
+	qs = kzalloc_obj(struct qnx6_sb_info);
 	if (!qs)
 		return -ENOMEM;
 	s->s_fs_info = qs;
@@ -518,13 +515,13 @@ struct inode *qnx6_iget(struct super_block *sb, unsigned ino)
 	struct inode *inode;
 	struct qnx6_inode_info	*ei;
 	struct address_space *mapping;
-	struct page *page;
+	struct folio *folio;
 	u32 n, offs;
 
 	inode = iget_locked(sb, ino);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
-	if (!(inode->i_state & I_NEW))
+	if (!(inode_state_read_once(inode) & I_NEW))
 		return inode;
 
 	ei = QNX6_I(inode);
@@ -538,17 +535,16 @@ struct inode *qnx6_iget(struct super_block *sb, unsigned ino)
 		return ERR_PTR(-EIO);
 	}
 	n = (ino - 1) >> (PAGE_SHIFT - QNX6_INODE_SIZE_BITS);
-	offs = (ino - 1) & (~PAGE_MASK >> QNX6_INODE_SIZE_BITS);
 	mapping = sbi->inodes->i_mapping;
-	page = read_mapping_page(mapping, n, NULL);
-	if (IS_ERR(page)) {
+	folio = read_mapping_folio(mapping, n, NULL);
+	if (IS_ERR(folio)) {
 		pr_err("major problem: unable to read inode from dev %s\n",
 		       sb->s_id);
 		iget_failed(inode);
-		return ERR_CAST(page);
+		return ERR_CAST(folio);
 	}
-	kmap(page);
-	raw_inode = ((struct qnx6_inode_entry *)page_address(page)) + offs;
+	offs = offset_in_folio(folio, (ino - 1) << QNX6_INODE_SIZE_BITS);
+	raw_inode = kmap_local_folio(folio, offs);
 
 	inode->i_mode    = fs16_to_cpu(sbi, raw_inode->di_mode);
 	i_uid_write(inode, (uid_t)fs32_to_cpu(sbi, raw_inode->di_uid));
@@ -578,7 +574,7 @@ struct inode *qnx6_iget(struct super_block *sb, unsigned ino)
 		inode->i_mapping->a_ops = &qnx6_aops;
 	} else
 		init_special_inode(inode, inode->i_mode, 0);
-	qnx6_put_page(page);
+	folio_release_kmap(folio, raw_inode);
 	unlock_new_inode(inode);
 	return inode;
 }
@@ -649,7 +645,7 @@ static int qnx6_init_fs_context(struct fs_context *fc)
 {
 	struct qnx6_context *ctx;
 
-	ctx = kzalloc(sizeof(struct qnx6_context), GFP_KERNEL);
+	ctx = kzalloc_obj(struct qnx6_context);
 	if (!ctx)
 		return -ENOMEM;
 	fc->ops = &qnx6_context_ops;

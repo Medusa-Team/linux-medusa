@@ -123,7 +123,8 @@ static bool valid_kwork_class_type(enum kwork_class_type type)
 static int setup_filters(struct perf_kwork *kwork)
 {
 	if (kwork->cpu_list) {
-		int idx, nr_cpus, fd;
+		unsigned int idx;
+		int nr_cpus, fd;
 		struct perf_cpu_map *map;
 		struct perf_cpu cpu;
 
@@ -151,14 +152,12 @@ static int setup_filters(struct perf_kwork *kwork)
 			bpf_map_update_elem(fd, &cpu.cpu, &val, BPF_ANY);
 		}
 		perf_cpu_map__put(map);
-
-		skel->bss->has_cpu_filter = 1;
 	}
 
 	return 0;
 }
 
-int perf_kwork__top_prepare_bpf(struct perf_kwork *kwork __maybe_unused)
+int perf_kwork__top_prepare_bpf(struct perf_kwork *kwork)
 {
 	struct bpf_program *prog;
 	struct kwork_class *class;
@@ -192,6 +191,9 @@ int perf_kwork__top_prepare_bpf(struct perf_kwork *kwork __maybe_unused)
 		if (class_bpf->load_prepare)
 			class_bpf->load_prepare();
 	}
+
+	if (kwork->cpu_list)
+		skel->rodata->has_cpu_filter = 1;
 
 	if (kwork_top_bpf__load(skel)) {
 		pr_debug("Failed to load kwork top skeleton\n");
@@ -254,7 +256,7 @@ static int add_work(struct perf_kwork *kwork, struct work_key *key,
 	bpf_trace = kwork_class_bpf_supported_list[type];
 	tmp.class = bpf_trace->class;
 
-	work = perf_kwork_add_work(kwork, tmp.class, &tmp);
+	work = kwork->add_work(kwork, tmp.class, &tmp);
 	if (!work)
 		return -1;
 

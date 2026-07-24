@@ -21,7 +21,7 @@
 #include <asm/processor.h>
 #include <asm/machdep.h>
 #include <asm/debug.h>
-#include <asm/code-patching.h>
+#include <asm/text-patching.h>
 #include <linux/slab.h>
 #include <asm/inst.h>
 
@@ -101,7 +101,6 @@ static int computeSignal(unsigned int tt)
 }
 
 /**
- *
  *	kgdb_skipexception - Bail out of KGDB when we've been triggered.
  *	@exception: Exception vector number
  *	@regs: Current &struct pt_regs.
@@ -109,6 +108,8 @@ static int computeSignal(unsigned int tt)
  *	On some architectures we need to skip a breakpoint exception when
  *	it occurs after a breakpoint has been removed.
  *
+ *	Return: return %1 if the breakpoint for this address has been removed,
+ *		otherwise return %0
  */
 int kgdb_skipexception(int exception, struct pt_regs *regs)
 {

@@ -28,9 +28,12 @@
 
 #include <drm/drm_managed.h>
 
+#include "display/intel_display_device.h"
+
 #include "gt/intel_gt.h"
 #include "gt/intel_gt_requests.h"
 #include "gt/mock_engine.h"
+#include "i915_driver.h"
 #include "intel_memory_region.h"
 #include "intel_region_ttm.h"
 
@@ -137,14 +140,15 @@ static const struct intel_device_info mock_info = {
 
 struct drm_i915_private *mock_gem_device(void)
 {
-#if IS_ENABLED(CONFIG_IOMMU_API) && defined(CONFIG_INTEL_IOMMU)
+#if IS_ENABLED(CONFIG_IOMMU_API) && IS_ENABLED(CONFIG_INTEL_IOMMU)
 	static struct dev_iommu fake_iommu = { .priv = (void *)-1 };
 #endif
 	struct drm_i915_private *i915;
+	struct intel_display *display;
 	struct pci_dev *pdev;
 	int ret;
 
-	pdev = kzalloc(sizeof(*pdev), GFP_KERNEL);
+	pdev = kzalloc_obj(*pdev);
 	if (!pdev)
 		return NULL;
 	device_initialize(&pdev->dev);
@@ -153,7 +157,7 @@ struct drm_i915_private *mock_gem_device(void)
 	dev_set_name(&pdev->dev, "mock");
 	dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
 
-#if IS_ENABLED(CONFIG_IOMMU_API) && defined(CONFIG_INTEL_IOMMU)
+#if IS_ENABLED(CONFIG_IOMMU_API) && IS_ENABLED(CONFIG_INTEL_IOMMU)
 	/* HACK to disable iommu for the fake device; force identity mapping */
 	pdev->dev.iommu = &fake_iommu;
 #endif
@@ -172,7 +176,7 @@ struct drm_i915_private *mock_gem_device(void)
 		return NULL;
 	}
 
-	pci_set_drvdata(pdev, i915);
+	pci_set_drvdata(pdev, &i915->drm);
 
 	/* Device parameters start as a copy of module parameters. */
 	i915_params_copy(&i915->params, &i915_modparams);
@@ -180,7 +184,12 @@ struct drm_i915_private *mock_gem_device(void)
 	/* Set up device info and initial runtime info. */
 	intel_device_info_driver_create(i915, pdev->device, &mock_info);
 
-	intel_display_device_probe(i915);
+	/* FIXME: Can we run selftests using a mock device without display? */
+	display = intel_display_device_probe(pdev, i915_driver_parent_interface());
+	if (IS_ERR(display))
+		goto err_device;
+
+	i915->display = display;
 
 	dev_pm_domain_set(&pdev->dev, &pm_domain);
 	pm_runtime_enable(&pdev->dev);
@@ -203,7 +212,7 @@ struct drm_i915_private *mock_gem_device(void)
 	intel_root_gt_init_early(i915);
 	mock_uncore_init(&i915->uncore, i915);
 	atomic_inc(&to_gt(i915)->wakeref.count); /* disable; no hw support */
-	to_gt(i915)->awake = -ENODEV;
+	to_gt(i915)->awake = INTEL_WAKEREF_MOCK_GT;
 	mock_gt_probe(i915);
 
 	ret = intel_region_ttm_device_init(i915);
@@ -214,7 +223,7 @@ struct drm_i915_private *mock_gem_device(void)
 	if (!i915->wq)
 		goto err_drv;
 
-	i915->unordered_wq = alloc_workqueue("mock-unordered", 0, 0);
+	i915->unordered_wq = alloc_workqueue("mock-unordered", WQ_PERCPU, 0);
 	if (!i915->unordered_wq)
 		goto err_wq;
 
@@ -257,6 +266,7 @@ err_ttm:
 	intel_gt_driver_late_release_all(i915);
 	intel_memory_regions_driver_release(i915);
 	drm_mode_config_cleanup(&i915->drm);
+err_device:
 	mock_destroy_device(i915);
 
 	return NULL;
@@ -265,6 +275,8 @@ err_ttm:
 void mock_destroy_device(struct drm_i915_private *i915)
 {
 	struct device *dev = i915->drm.dev;
+
+	intel_display_device_remove(i915->display);
 
 	devres_release_group(dev, NULL);
 	put_device(dev);

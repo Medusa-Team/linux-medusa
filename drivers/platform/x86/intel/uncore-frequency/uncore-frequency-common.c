@@ -26,21 +26,44 @@ static ssize_t show_domain_id(struct kobject *kobj, struct kobj_attribute *attr,
 {
 	struct uncore_data *data = container_of(attr, struct uncore_data, domain_id_kobj_attr);
 
-	return sprintf(buf, "%u\n", data->domain_id);
+	return sysfs_emit(buf, "%u\n", data->domain_id);
 }
 
 static ssize_t show_fabric_cluster_id(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	struct uncore_data *data = container_of(attr, struct uncore_data, fabric_cluster_id_kobj_attr);
 
-	return sprintf(buf, "%u\n", data->cluster_id);
+	return sysfs_emit(buf, "%u\n", data->cluster_id);
 }
 
 static ssize_t show_package_id(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	struct uncore_data *data = container_of(attr, struct uncore_data, package_id_kobj_attr);
 
-	return sprintf(buf, "%u\n", data->package_id);
+	return sysfs_emit(buf, "%u\n", data->package_id);
+}
+
+#define MAX_UNCORE_AGENT_TYPES	4
+
+/* The order follows AGENT_TYPE_* defines */
+static const char *agent_name[MAX_UNCORE_AGENT_TYPES] = {"core", "cache", "memory", "io"};
+
+static ssize_t show_agent_types(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct uncore_data *data = container_of(attr, struct uncore_data, agent_types_kobj_attr);
+	unsigned long agent_mask = data->agent_type_mask;
+	int agent, length = 0;
+
+	for_each_set_bit(agent, &agent_mask, MAX_UNCORE_AGENT_TYPES) {
+		if (length)
+			length += sysfs_emit_at(buf, length, " ");
+
+		length += sysfs_emit_at(buf, length, "%s", agent_name[agent]);
+	}
+
+	length += sysfs_emit_at(buf, length, "\n");
+
+	return length;
 }
 
 static ssize_t show_attr(struct uncore_data *data, char *buf, enum uncore_index index)
@@ -54,17 +77,22 @@ static ssize_t show_attr(struct uncore_data *data, char *buf, enum uncore_index 
 	if (ret)
 		return ret;
 
-	return sprintf(buf, "%u\n", value);
+	return sysfs_emit(buf, "%u\n", value);
 }
 
 static ssize_t store_attr(struct uncore_data *data, const char *buf, ssize_t count,
 			  enum uncore_index index)
 {
-	unsigned int input;
+	unsigned int input = 0;
 	int ret;
 
-	if (kstrtouint(buf, 10, &input))
-		return -EINVAL;
+	if (index == UNCORE_INDEX_EFF_LAT_CTRL_HIGH_THRESHOLD_ENABLE) {
+		if (kstrtobool(buf, (bool *)&input))
+			return -EINVAL;
+	} else {
+		if (kstrtouint(buf, 10, &input))
+			return -EINVAL;
+	}
 
 	mutex_lock(&uncore_lock);
 	ret = uncore_write(data, input, index);
@@ -102,6 +130,20 @@ show_uncore_attr(min_freq_khz, UNCORE_INDEX_MIN_FREQ);
 show_uncore_attr(max_freq_khz, UNCORE_INDEX_MAX_FREQ);
 
 show_uncore_attr(current_freq_khz, UNCORE_INDEX_CURRENT_FREQ);
+
+store_uncore_attr(elc_low_threshold_percent, UNCORE_INDEX_EFF_LAT_CTRL_LOW_THRESHOLD);
+store_uncore_attr(elc_high_threshold_percent, UNCORE_INDEX_EFF_LAT_CTRL_HIGH_THRESHOLD);
+store_uncore_attr(elc_high_threshold_enable,
+		  UNCORE_INDEX_EFF_LAT_CTRL_HIGH_THRESHOLD_ENABLE);
+store_uncore_attr(elc_floor_freq_khz, UNCORE_INDEX_EFF_LAT_CTRL_FREQ);
+
+show_uncore_attr(elc_low_threshold_percent, UNCORE_INDEX_EFF_LAT_CTRL_LOW_THRESHOLD);
+show_uncore_attr(elc_high_threshold_percent, UNCORE_INDEX_EFF_LAT_CTRL_HIGH_THRESHOLD);
+show_uncore_attr(elc_high_threshold_enable,
+		 UNCORE_INDEX_EFF_LAT_CTRL_HIGH_THRESHOLD_ENABLE);
+show_uncore_attr(elc_floor_freq_khz, UNCORE_INDEX_EFF_LAT_CTRL_FREQ);
+
+show_uncore_attr(die_id, UNCORE_INDEX_DIE_ID);
 
 #define show_uncore_data(member_name)					\
 	static ssize_t show_##member_name(struct kobject *kobj,	\
@@ -146,7 +188,8 @@ show_uncore_data(initial_max_freq_khz);
 
 static int create_attr_group(struct uncore_data *data, char *name)
 {
-	int ret, freq, index = 0;
+	int ret, index = 0;
+	unsigned int val;
 
 	init_attribute_rw(max_freq_khz);
 	init_attribute_rw(min_freq_khz);
@@ -161,6 +204,15 @@ static int create_attr_group(struct uncore_data *data, char *name)
 		data->uncore_attrs[index++] = &data->fabric_cluster_id_kobj_attr.attr;
 		init_attribute_root_ro(package_id);
 		data->uncore_attrs[index++] = &data->package_id_kobj_attr.attr;
+		if (data->agent_type_mask) {
+			init_attribute_ro(agent_types);
+			data->uncore_attrs[index++] = &data->agent_types_kobj_attr.attr;
+		}
+		if (topology_max_dies_per_package() > 1 &&
+		    data->agent_type_mask & AGENT_TYPE_CORE) {
+			init_attribute_ro(die_id);
+			data->uncore_attrs[index++] = &data->die_id_kobj_attr.attr;
+		}
 	}
 
 	data->uncore_attrs[index++] = &data->max_freq_khz_kobj_attr.attr;
@@ -168,9 +220,23 @@ static int create_attr_group(struct uncore_data *data, char *name)
 	data->uncore_attrs[index++] = &data->initial_min_freq_khz_kobj_attr.attr;
 	data->uncore_attrs[index++] = &data->initial_max_freq_khz_kobj_attr.attr;
 
-	ret = uncore_read(data, &freq, UNCORE_INDEX_CURRENT_FREQ);
+	ret = uncore_read(data, &val, UNCORE_INDEX_CURRENT_FREQ);
 	if (!ret)
 		data->uncore_attrs[index++] = &data->current_freq_khz_kobj_attr.attr;
+
+	ret = uncore_read(data, &val, UNCORE_INDEX_EFF_LAT_CTRL_LOW_THRESHOLD);
+	if (!ret) {
+		init_attribute_rw(elc_low_threshold_percent);
+		init_attribute_rw(elc_high_threshold_percent);
+		init_attribute_rw(elc_high_threshold_enable);
+		init_attribute_rw(elc_floor_freq_khz);
+
+		data->uncore_attrs[index++] = &data->elc_low_threshold_percent_kobj_attr.attr;
+		data->uncore_attrs[index++] = &data->elc_high_threshold_percent_kobj_attr.attr;
+		data->uncore_attrs[index++] =
+			&data->elc_high_threshold_enable_kobj_attr.attr;
+		data->uncore_attrs[index++] = &data->elc_floor_freq_khz_kobj_attr.attr;
+	}
 
 	data->uncore_attrs[index] = NULL;
 
@@ -203,9 +269,10 @@ int uncore_freq_add_entry(struct uncore_data *data, int cpu)
 			goto uncore_unlock;
 
 		data->instance_id = ret;
-		sprintf(data->name, "uncore%02d", ret);
+		scnprintf(data->name, sizeof(data->name), "uncore%02d", ret);
 	} else {
-		sprintf(data->name, "package_%02d_die_%02d", data->package_id, data->die_id);
+		scnprintf(data->name, sizeof(data->name), "package_%02d_die_%02d",
+			  data->package_id, data->die_id);
 	}
 
 	uncore_read(data, &data->initial_min_freq_khz, UNCORE_INDEX_MIN_FREQ);
@@ -225,7 +292,7 @@ uncore_unlock:
 
 	return ret;
 }
-EXPORT_SYMBOL_NS_GPL(uncore_freq_add_entry, INTEL_UNCORE_FREQUENCY);
+EXPORT_SYMBOL_NS_GPL(uncore_freq_add_entry, "INTEL_UNCORE_FREQUENCY");
 
 void uncore_freq_remove_die_entry(struct uncore_data *data)
 {
@@ -238,7 +305,7 @@ void uncore_freq_remove_die_entry(struct uncore_data *data)
 
 	mutex_unlock(&uncore_lock);
 }
-EXPORT_SYMBOL_NS_GPL(uncore_freq_remove_die_entry, INTEL_UNCORE_FREQUENCY);
+EXPORT_SYMBOL_NS_GPL(uncore_freq_remove_die_entry, "INTEL_UNCORE_FREQUENCY");
 
 int uncore_freq_common_init(int (*read)(struct uncore_data *data, unsigned int *value,
 					enum uncore_index index),
@@ -265,7 +332,7 @@ int uncore_freq_common_init(int (*read)(struct uncore_data *data, unsigned int *
 
 	return uncore_root_kobj ? 0 : -ENOMEM;
 }
-EXPORT_SYMBOL_NS_GPL(uncore_freq_common_init, INTEL_UNCORE_FREQUENCY);
+EXPORT_SYMBOL_NS_GPL(uncore_freq_common_init, "INTEL_UNCORE_FREQUENCY");
 
 void uncore_freq_common_exit(void)
 {
@@ -277,7 +344,7 @@ void uncore_freq_common_exit(void)
 	}
 	mutex_unlock(&uncore_lock);
 }
-EXPORT_SYMBOL_NS_GPL(uncore_freq_common_exit, INTEL_UNCORE_FREQUENCY);
+EXPORT_SYMBOL_NS_GPL(uncore_freq_common_exit, "INTEL_UNCORE_FREQUENCY");
 
 
 MODULE_LICENSE("GPL v2");

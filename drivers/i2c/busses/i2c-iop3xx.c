@@ -415,13 +415,13 @@ iop3xx_i2c_probe(struct platform_device *pdev)
 	struct i2c_adapter *new_adapter;
 	struct i2c_algo_iop3xx_data *adapter_data;
 
-	new_adapter = kzalloc(sizeof(struct i2c_adapter), GFP_KERNEL);
+	new_adapter = kzalloc_obj(struct i2c_adapter);
 	if (!new_adapter) {
 		ret = -ENOMEM;
 		goto out;
 	}
 
-	adapter_data = kzalloc(sizeof(struct i2c_algo_iop3xx_data), GFP_KERNEL);
+	adapter_data = kzalloc_obj(struct i2c_algo_iop3xx_data);
 	if (!adapter_data) {
 		ret = -ENOMEM;
 		goto free_adapter;
@@ -524,7 +524,7 @@ MODULE_DEVICE_TABLE(of, i2c_iop3xx_match);
 
 static struct platform_driver iop3xx_i2c_driver = {
 	.probe		= iop3xx_i2c_probe,
-	.remove_new	= iop3xx_i2c_remove,
+	.remove		= iop3xx_i2c_remove,
 	.driver		= {
 		.name	= "IOP3xx-I2C",
 		.of_match_table = i2c_iop3xx_match,

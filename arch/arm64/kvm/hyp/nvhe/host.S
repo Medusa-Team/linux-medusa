@@ -120,12 +120,11 @@ SYM_FUNC_START(__hyp_do_panic)
 
 	mov	x29, x0
 
-#ifdef CONFIG_NVHE_EL2_DEBUG
+#ifdef CONFIG_PKVM_DISABLE_STAGE2_ON_PANIC
 	/* Ensure host stage-2 is disabled */
 	mrs	x0, hcr_el2
 	bic	x0, x0, #HCR_VM
-	msr	hcr_el2, x0
-	isb
+	msr_hcr_el2 x0
 	tlbi	vmalls12e1
 	dsb	nsh
 #endif
@@ -188,12 +187,12 @@ SYM_FUNC_END(__host_hvc)
 
 	/*
 	 * Test whether the SP has overflowed, without corrupting a GPR.
-	 * nVHE hypervisor stacks are aligned so that the PAGE_SHIFT bit
+	 * nVHE hypervisor stacks are aligned so that the NVHE_STACK_SHIFT bit
 	 * of SP should always be 1.
 	 */
 	add	sp, sp, x0			// sp' = sp + x0
 	sub	x0, sp, x0			// x0' = sp' - x0 = (sp + x0) - x0 = sp
-	tbz	x0, #PAGE_SHIFT, .L__hyp_sp_overflow\@
+	tbz	x0, #NVHE_STACK_SHIFT, .L__hyp_sp_overflow\@
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
 
@@ -291,13 +290,3 @@ SYM_CODE_START(__kvm_hyp_host_forward_smc)
 
 	ret
 SYM_CODE_END(__kvm_hyp_host_forward_smc)
-
-/*
- * kvm_host_psci_cpu_entry is called through br instruction, which requires
- * bti j instruction as compilers (gcc and llvm) doesn't insert bti j for external
- * functions, but bti c instead.
- */
-SYM_CODE_START(kvm_host_psci_cpu_entry)
-       bti j
-       b __kvm_host_psci_cpu_entry
-SYM_CODE_END(kvm_host_psci_cpu_entry)

@@ -8,7 +8,6 @@
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/gpio/consumer.h>
 #include <linux/power_supply.h>
 #include <linux/regmap.h>
 #include <linux/types.h>
@@ -334,14 +333,6 @@ static const int bq25618_619_ichg_values[] = {
 	1290000, 1360000, 1430000, 1500000
 };
 
-static enum power_supply_usb_type bq256xx_usb_type[] = {
-	POWER_SUPPLY_USB_TYPE_SDP,
-	POWER_SUPPLY_USB_TYPE_CDP,
-	POWER_SUPPLY_USB_TYPE_DCP,
-	POWER_SUPPLY_USB_TYPE_UNKNOWN,
-	POWER_SUPPLY_USB_TYPE_ACA,
-};
-
 static int bq256xx_array_parse(int array_size, int val, const int array[])
 {
 	int i = 0;
@@ -395,7 +386,7 @@ static void bq256xx_usb_work(struct work_struct *data)
 	}
 }
 
-static struct reg_default bq2560x_reg_defs[] = {
+static const struct reg_default bq2560x_reg_defs[] = {
 	{BQ256XX_INPUT_CURRENT_LIMIT, 0x17},
 	{BQ256XX_CHARGER_CONTROL_0, 0x1a},
 	{BQ256XX_CHARGE_CURRENT_LIMIT, 0xa2},
@@ -406,7 +397,7 @@ static struct reg_default bq2560x_reg_defs[] = {
 	{BQ256XX_CHARGER_CONTROL_3, 0x4c},
 };
 
-static struct reg_default bq25611d_reg_defs[] = {
+static const struct reg_default bq25611d_reg_defs[] = {
 	{BQ256XX_INPUT_CURRENT_LIMIT, 0x17},
 	{BQ256XX_CHARGER_CONTROL_0, 0x1a},
 	{BQ256XX_CHARGE_CURRENT_LIMIT, 0x91},
@@ -419,7 +410,7 @@ static struct reg_default bq25611d_reg_defs[] = {
 	{BQ256XX_CHARGER_CONTROL_4, 0x75},
 };
 
-static struct reg_default bq25618_619_reg_defs[] = {
+static const struct reg_default bq25618_619_reg_defs[] = {
 	{BQ256XX_INPUT_CURRENT_LIMIT, 0x17},
 	{BQ256XX_CHARGER_CONTROL_0, 0x1a},
 	{BQ256XX_CHARGE_CURRENT_LIMIT, 0x91},
@@ -1252,8 +1243,11 @@ static int bq256xx_property_is_writeable(struct power_supply *psy,
 static const struct power_supply_desc bq256xx_power_supply_desc = {
 	.name = "bq256xx-charger",
 	.type = POWER_SUPPLY_TYPE_USB,
-	.usb_types = bq256xx_usb_type,
-	.num_usb_types = ARRAY_SIZE(bq256xx_usb_type),
+	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_SDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_CDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_DCP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_ACA) |
+		     BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN),
 	.properties = bq256xx_power_supply_props,
 	.num_properties = ARRAY_SIZE(bq256xx_power_supply_props),
 	.get_property = bq256xx_get_charger_property,
@@ -1662,7 +1656,7 @@ static int bq256xx_parse_dt(struct bq256xx_device *bq,
 	int ret = 0;
 
 	psy_cfg->drv_data = bq;
-	psy_cfg->of_node = dev->of_node;
+	psy_cfg->fwnode = dev_fwnode(dev);
 
 	ret = device_property_read_u32(bq->dev, "ti,watchdog-timeout-ms",
 				       &bq->watchdog_timer);
@@ -1746,6 +1740,12 @@ static int bq256xx_probe(struct i2c_client *client)
 		usb_register_notifier(bq->usb3_phy, &bq->usb_nb);
 	}
 
+	ret = bq256xx_power_supply_init(bq, &psy_cfg, dev);
+	if (ret) {
+		dev_err(dev, "Failed to register power supply\n");
+		return ret;
+	}
+
 	if (client->irq) {
 		ret = devm_request_threaded_irq(dev, client->irq, NULL,
 						bq256xx_irq_handler_thread,
@@ -1756,12 +1756,6 @@ static int bq256xx_probe(struct i2c_client *client)
 			dev_err(dev, "get irq fail: %d\n", ret);
 			return ret;
 		}
-	}
-
-	ret = bq256xx_power_supply_init(bq, &psy_cfg, dev);
-	if (ret) {
-		dev_err(dev, "Failed to register power supply\n");
-		return ret;
 	}
 
 	ret = bq256xx_hw_init(bq);

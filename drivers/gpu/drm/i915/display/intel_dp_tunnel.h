@@ -9,19 +9,19 @@
 #include <linux/errno.h>
 #include <linux/types.h>
 
-struct drm_i915_private;
 struct drm_connector_state;
 struct drm_modeset_acquire_ctx;
-
 struct intel_atomic_state;
 struct intel_connector;
 struct intel_crtc;
 struct intel_crtc_state;
+struct intel_display;
 struct intel_dp;
 struct intel_encoder;
 struct intel_link_bw_limits;
 
-#if defined(CONFIG_DRM_I915_DP_TUNNEL) && defined(I915)
+#if (IS_ENABLED(CONFIG_DRM_I915_DP_TUNNEL) && defined(I915)) || \
+	(IS_ENABLED(CONFIG_DRM_XE_DP_TUNNEL) && !defined(I915))
 
 int intel_dp_tunnel_detect(struct intel_dp *intel_dp, struct drm_modeset_acquire_ctx *ctx);
 void intel_dp_tunnel_disconnect(struct intel_dp *intel_dp);
@@ -40,8 +40,8 @@ int intel_dp_tunnel_atomic_compute_stream_bw(struct intel_atomic_state *state,
 					     struct intel_dp *intel_dp,
 					     const struct intel_connector *connector,
 					     struct intel_crtc_state *crtc_state);
-void intel_dp_tunnel_atomic_clear_stream_bw(struct intel_atomic_state *state,
-					    struct intel_crtc_state *crtc_state);
+int intel_dp_tunnel_atomic_clear_stream_bw(struct intel_atomic_state *state,
+					   struct intel_crtc_state *crtc_state);
 
 int intel_dp_tunnel_atomic_add_state_for_crtc(struct intel_atomic_state *state,
 					      struct intel_crtc *crtc);
@@ -53,8 +53,8 @@ int intel_dp_tunnel_atomic_check_state(struct intel_atomic_state *state,
 
 void intel_dp_tunnel_atomic_alloc_bw(struct intel_atomic_state *state);
 
-int intel_dp_tunnel_mgr_init(struct drm_i915_private *i915);
-void intel_dp_tunnel_mgr_cleanup(struct drm_i915_private *i915);
+int intel_dp_tunnel_mgr_init(struct intel_display *display);
+void intel_dp_tunnel_mgr_cleanup(struct intel_display *display);
 
 #else
 
@@ -88,9 +88,12 @@ intel_dp_tunnel_atomic_compute_stream_bw(struct intel_atomic_state *state,
 	return 0;
 }
 
-static inline void
+static inline int
 intel_dp_tunnel_atomic_clear_stream_bw(struct intel_atomic_state *state,
-				       struct intel_crtc_state *crtc_state) {}
+				       struct intel_crtc_state *crtc_state)
+{
+	return 0;
+}
 
 static inline int
 intel_dp_tunnel_atomic_add_state_for_crtc(struct intel_atomic_state *state,
@@ -121,13 +124,13 @@ intel_dp_tunnel_atomic_alloc_bw(struct intel_atomic_state *state)
 }
 
 static inline int
-intel_dp_tunnel_mgr_init(struct drm_i915_private *i915)
+intel_dp_tunnel_mgr_init(struct intel_display *display)
 {
 	return 0;
 }
 
-static inline void intel_dp_tunnel_mgr_cleanup(struct drm_i915_private *i915) {}
+static inline void intel_dp_tunnel_mgr_cleanup(struct intel_display *display) {}
 
-#endif /* CONFIG_DRM_I915_DP_TUNNEL */
+#endif /* CONFIG_DRM_I915_DP_TUNNEL || CONFIG_DRM_XE_DP_TUNNEL */
 
 #endif /* __INTEL_DP_TUNNEL_H__ */

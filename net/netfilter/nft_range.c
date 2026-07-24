@@ -41,7 +41,7 @@ void nft_range_eval(const struct nft_expr *expr,
 }
 
 static const struct nla_policy nft_range_policy[NFTA_RANGE_MAX + 1] = {
-	[NFTA_RANGE_SREG]		= { .type = NLA_U32 },
+	[NFTA_RANGE_SREG]		= NLA_POLICY_MAX(NLA_BE32, NFT_REG32_MAX),
 	[NFTA_RANGE_OP]			= NLA_POLICY_MAX(NLA_BE32, 255),
 	[NFTA_RANGE_FROM_DATA]		= { .type = NLA_NESTED },
 	[NFTA_RANGE_TO_DATA]		= { .type = NLA_NESTED },
@@ -83,7 +83,7 @@ static int nft_range_init(const struct nft_ctx *ctx, const struct nft_expr *expr
 		goto err2;
 	}
 
-	err = nft_parse_register_load(tb[NFTA_RANGE_SREG], &priv->sreg,
+	err = nft_parse_register_load(ctx, tb[NFTA_RANGE_SREG], &priv->sreg,
 				      desc_from.len);
 	if (err < 0)
 		goto err2;
@@ -138,7 +138,6 @@ static const struct nft_expr_ops nft_range_ops = {
 	.eval		= nft_range_eval,
 	.init		= nft_range_init,
 	.dump		= nft_range_dump,
-	.reduce		= NFT_REDUCE_READONLY,
 };
 
 struct nft_expr_type nft_range_type __read_mostly = {

@@ -276,7 +276,7 @@ static int neponset_probe(struct platform_device *dev)
 		goto err_alloc;
 	}
 
-	d = kzalloc(sizeof(*d), GFP_KERNEL);
+	d = kzalloc_obj(*d);
 	if (!d) {
 		ret = -ENOMEM;
 		goto err_alloc;
@@ -423,7 +423,7 @@ static const struct dev_pm_ops neponset_pm_ops = {
 
 static struct platform_driver neponset_device_driver = {
 	.probe		= neponset_probe,
-	.remove_new	= neponset_remove,
+	.remove		= neponset_remove,
 	.driver		= {
 		.name	= "neponset",
 		.pm	= PM_OPS,

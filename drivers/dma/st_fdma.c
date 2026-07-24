@@ -68,7 +68,7 @@ static void st_fdma_dreq_put(struct st_fdma_chan *fchan)
 {
 	struct st_fdma_dev *fdev = fchan->fdev;
 
-	dev_dbg(fdev->dev, "put dreq_line:%#x\n", fchan->dreq_line);
+	dev_dbg(fdev->dev, "put dreq_line:%#lx\n", fchan->dreq_line);
 	clear_bit(fchan->dreq_line, &fdev->dreq_mask);
 }
 
@@ -241,7 +241,7 @@ static struct st_fdma_desc *st_fdma_alloc_desc(struct st_fdma_chan *fchan,
 	struct st_fdma_desc *fdesc;
 	int i;
 
-	fdesc = kzalloc(struct_size(fdesc, node, sg_len), GFP_NOWAIT);
+	fdesc = kzalloc_flex(*fdesc, node, sg_len, GFP_NOWAIT);
 	if (!fdesc)
 		return NULL;
 
@@ -858,7 +858,7 @@ static struct platform_driver st_fdma_platform_driver = {
 		.of_match_table = st_fdma_match,
 	},
 	.probe = st_fdma_probe,
-	.remove_new = st_fdma_remove,
+	.remove = st_fdma_remove,
 };
 module_platform_driver(st_fdma_platform_driver);
 
@@ -866,4 +866,3 @@ MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("STMicroelectronics FDMA engine driver");
 MODULE_AUTHOR("Ludovic.barre <Ludovic.barre@st.com>");
 MODULE_AUTHOR("Peter Griffin <peter.griffin@linaro.org>");
-MODULE_ALIAS("platform:" DRIVER_NAME);

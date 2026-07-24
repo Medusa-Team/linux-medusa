@@ -286,11 +286,9 @@ static int mixel_lvds_phy_reset(struct device *dev)
 
 	regmap_write(priv->regmap, PHY_CTRL, CTRL_RESET_VAL);
 
-	ret = pm_runtime_put(dev);
-	if (ret < 0)
-		dev_err(dev, "failed to put PM runtime: %d\n", ret);
+	pm_runtime_put(dev);
 
-	return ret;
+	return 0;
 }
 
 static struct phy *mixel_lvds_phy_xlate(struct device *dev,
@@ -433,12 +431,12 @@ static const struct of_device_id mixel_lvds_phy_of_match[] = {
 MODULE_DEVICE_TABLE(of, mixel_lvds_phy_of_match);
 
 static struct platform_driver mixel_lvds_phy_driver = {
-	.probe	= mixel_lvds_phy_probe,
-	.remove_new = mixel_lvds_phy_remove,
+	.probe = mixel_lvds_phy_probe,
+	.remove = mixel_lvds_phy_remove,
 	.driver = {
 		.pm = &mixel_lvds_phy_pm_ops,
 		.name = "mixel-lvds-phy",
-		.of_match_table	= mixel_lvds_phy_of_match,
+		.of_match_table = mixel_lvds_phy_of_match,
 	}
 };
 module_platform_driver(mixel_lvds_phy_driver);

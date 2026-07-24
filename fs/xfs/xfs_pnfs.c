@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2014 Christoph Hellwig.
  */
-#include "xfs.h"
+#include "xfs_platform.h"
 #include "xfs_shared.h"
 #include "xfs_format.h"
 #include "xfs_log_format.h"
@@ -57,9 +57,6 @@ xfs_fs_get_uuid(
 	u64			*offset)
 {
 	struct xfs_mount	*mp = XFS_M(sb);
-
-	xfs_notice_once(mp,
-"Using experimental pNFS feature, use at your own risk!");
 
 	if (*len < sizeof(uuid_t))
 		return -EINVAL;
@@ -121,7 +118,6 @@ xfs_fs_map_blocks(
 	struct xfs_bmbt_irec	imap;
 	xfs_fileoff_t		offset_fsb, end_fsb;
 	loff_t			limit;
-	int			bmapi_flags = XFS_BMAPI_ENTIRE;
 	int			nimaps = 1;
 	uint			lock_flags;
 	int			error = 0;
@@ -175,14 +171,18 @@ xfs_fs_map_blocks(
 	offset_fsb = XFS_B_TO_FSBT(mp, offset);
 
 	lock_flags = xfs_ilock_data_map_shared(ip);
+	/* request mappings for the specified range only */
 	error = xfs_bmapi_read(ip, offset_fsb, end_fsb - offset_fsb,
-				&imap, &nimaps, bmapi_flags);
+				&imap, &nimaps, 0);
+	if (error) {
+		xfs_iunlock(ip, lock_flags);
+		goto out_unlock;
+	}
 	seq = xfs_iomap_inode_sequence(ip, 0);
 
 	ASSERT(!nimaps || imap.br_startblock != DELAYSTARTBLOCK);
 
-	if (!error && write &&
-	    (!nimaps || imap.br_startblock == HOLESTARTBLOCK)) {
+	if (write && (!nimaps || imap.br_startblock == HOLESTARTBLOCK)) {
 		if (offset + length > XFS_ISIZE(ip))
 			end_fsb = xfs_iomap_eof_align_last_fsb(ip, end_fsb);
 		else if (nimaps && imap.br_startblock == HOLESTARTBLOCK)

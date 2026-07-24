@@ -72,7 +72,7 @@ int hda_dsp_ipc_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(hda_dsp_ipc_send_msg, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_ipc_send_msg, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 static inline bool hda_dsp_ipc4_pm_msg(u32 primary)
 {
@@ -96,10 +96,10 @@ void hda_dsp_ipc4_schedule_d0i3_work(struct sof_intel_hda_dev *hdev,
 	if (hda_dsp_ipc4_pm_msg(msg_data->primary))
 		return;
 
-	mod_delayed_work(system_wq, &hdev->d0i3_work,
+	mod_delayed_work(system_dfl_wq, &hdev->d0i3_work,
 			 msecs_to_jiffies(SOF_HDA_D0I3_WORK_DELAY_MS));
 }
-EXPORT_SYMBOL_NS(hda_dsp_ipc4_schedule_d0i3_work, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_ipc4_schedule_d0i3_work, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_dsp_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 {
@@ -126,7 +126,7 @@ int hda_dsp_ipc4_send_msg(struct snd_sof_dev *sdev, struct snd_sof_ipc_msg *msg)
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(hda_dsp_ipc4_send_msg, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_ipc4_send_msg, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 {
@@ -162,7 +162,7 @@ void hda_dsp_ipc_get_reply(struct snd_sof_dev *sdev)
 		snd_sof_ipc_get_reply(sdev);
 	}
 }
-EXPORT_SYMBOL_NS(hda_dsp_ipc_get_reply, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_ipc_get_reply, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 irqreturn_t hda_dsp_ipc4_irq_thread(int irq, void *context)
 {
@@ -204,13 +204,10 @@ irqreturn_t hda_dsp_ipc4_irq_thread(int irq, void *context)
 				data->primary = primary;
 				data->extension = extension;
 
-				spin_lock_irq(&sdev->ipc_lock);
-
+				guard(spinlock_irq)(&sdev->ipc_lock);
 				snd_sof_ipc_get_reply(sdev);
 				hda_dsp_ipc_host_done(sdev);
 				snd_sof_ipc_reply(sdev, data->primary);
-
-				spin_unlock_irq(&sdev->ipc_lock);
 			} else {
 				dev_dbg_ratelimited(sdev->dev,
 						    "IPC reply before FW_READY: %#x|%#x\n",
@@ -245,7 +242,7 @@ irqreturn_t hda_dsp_ipc4_irq_thread(int irq, void *context)
 
 	return IRQ_HANDLED;
 }
-EXPORT_SYMBOL_NS(hda_dsp_ipc4_irq_thread, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_ipc4_irq_thread, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 /* IPC handler thread */
 irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
@@ -289,16 +286,12 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 		 * reply.
 		 */
 		if (likely(sdev->fw_state == SOF_FW_BOOT_COMPLETE)) {
-			spin_lock_irq(&sdev->ipc_lock);
-
 			/* handle immediate reply from DSP core */
+			guard(spinlock_irq)(&sdev->ipc_lock);
 			hda_dsp_ipc_get_reply(sdev);
 			snd_sof_ipc_reply(sdev, msg);
-
 			/* set the done bit */
 			hda_dsp_ipc_dsp_done(sdev);
-
-			spin_unlock_irq(&sdev->ipc_lock);
 		} else {
 			dev_dbg_ratelimited(sdev->dev, "IPC reply before FW_READY: %#x\n",
 					    msg);
@@ -358,7 +351,7 @@ irqreturn_t hda_dsp_ipc_irq_thread(int irq, void *context)
 
 	return IRQ_HANDLED;
 }
-EXPORT_SYMBOL_NS(hda_dsp_ipc_irq_thread, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_ipc_irq_thread, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 /* Check if an IPC IRQ occurred */
 bool hda_dsp_check_ipc_irq(struct snd_sof_dev *sdev)
@@ -392,19 +385,19 @@ bool hda_dsp_check_ipc_irq(struct snd_sof_dev *sdev)
 out:
 	return ret;
 }
-EXPORT_SYMBOL_NS(hda_dsp_check_ipc_irq, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_check_ipc_irq, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_dsp_ipc_get_mailbox_offset(struct snd_sof_dev *sdev)
 {
 	return HDA_DSP_MBOX_UPLINK_OFFSET;
 }
-EXPORT_SYMBOL_NS(hda_dsp_ipc_get_mailbox_offset, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_ipc_get_mailbox_offset, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_dsp_ipc_get_window_offset(struct snd_sof_dev *sdev, u32 id)
 {
 	return SRAM_WINDOW_OFFSET(id);
 }
-EXPORT_SYMBOL_NS(hda_dsp_ipc_get_window_offset, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_dsp_ipc_get_window_offset, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_ipc_msg_data(struct snd_sof_dev *sdev,
 		     struct snd_sof_pcm_stream *sps,
@@ -430,7 +423,7 @@ int hda_ipc_msg_data(struct snd_sof_dev *sdev,
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(hda_ipc_msg_data, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_ipc_msg_data, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 int hda_set_stream_data_offset(struct snd_sof_dev *sdev,
 			       struct snd_sof_pcm_stream *sps,
@@ -455,7 +448,7 @@ int hda_set_stream_data_offset(struct snd_sof_dev *sdev,
 
 	return 0;
 }
-EXPORT_SYMBOL_NS(hda_set_stream_data_offset, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_set_stream_data_offset, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 void hda_ipc4_dsp_dump(struct snd_sof_dev *sdev, u32 flags)
 {
@@ -469,7 +462,7 @@ void hda_ipc4_dsp_dump(struct snd_sof_dev *sdev, u32 flags)
 	else
 		hda_dsp_dump_ext_rom_status(sdev, level, flags);
 }
-EXPORT_SYMBOL_NS(hda_ipc4_dsp_dump, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_ipc4_dsp_dump, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 bool hda_check_ipc_irq(struct snd_sof_dev *sdev)
 {
@@ -481,7 +474,7 @@ bool hda_check_ipc_irq(struct snd_sof_dev *sdev)
 
 	return false;
 }
-EXPORT_SYMBOL_NS(hda_check_ipc_irq, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_check_ipc_irq, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 void hda_ipc_irq_dump(struct snd_sof_dev *sdev)
 {
@@ -502,7 +495,7 @@ void hda_ipc_irq_dump(struct snd_sof_dev *sdev)
 		intsts, intctl, rirbsts);
 	dev_err(sdev->dev, "dsp irq ppsts 0x%8.8x adspis 0x%8.8x\n", ppsts, adspis);
 }
-EXPORT_SYMBOL_NS(hda_ipc_irq_dump, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_ipc_irq_dump, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 void hda_ipc_dump(struct snd_sof_dev *sdev)
 {
@@ -522,7 +515,7 @@ void hda_ipc_dump(struct snd_sof_dev *sdev)
 	dev_err(sdev->dev, "host status 0x%8.8x dsp status 0x%8.8x mask 0x%8.8x\n",
 		hipcie, hipct, hipcctl);
 }
-EXPORT_SYMBOL_NS(hda_ipc_dump, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_ipc_dump, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 void hda_ipc4_dump(struct snd_sof_dev *sdev)
 {
@@ -541,7 +534,7 @@ void hda_ipc4_dump(struct snd_sof_dev *sdev)
 	dev_err(sdev->dev, "Host IPC initiator: %#x|%#x, target: %#x|%#x, ctl: %#x\n",
 		hipci, hipcie, hipct, hipcte, hipcctl);
 }
-EXPORT_SYMBOL_NS(hda_ipc4_dump, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_ipc4_dump, "SND_SOC_SOF_INTEL_HDA_COMMON");
 
 bool hda_ipc4_tx_is_busy(struct snd_sof_dev *sdev)
 {
@@ -553,4 +546,4 @@ bool hda_ipc4_tx_is_busy(struct snd_sof_dev *sdev)
 
 	return !!(val & chip->ipc_req_mask);
 }
-EXPORT_SYMBOL_NS(hda_ipc4_tx_is_busy, SND_SOC_SOF_INTEL_HDA_COMMON);
+EXPORT_SYMBOL_NS(hda_ipc4_tx_is_busy, "SND_SOC_SOF_INTEL_HDA_COMMON");

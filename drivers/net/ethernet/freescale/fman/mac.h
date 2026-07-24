@@ -16,15 +16,21 @@
 #include "fman.h"
 #include "fman_mac.h"
 
+struct ethtool_eth_ctrl_stats;
+struct ethtool_eth_mac_stats;
+struct ethtool_pause_stats;
+struct ethtool_rmon_stats;
+struct ethtool_rmon_hist_range;
 struct fman_mac;
 struct mac_priv_s;
 
+#define PORT_NUM 2
 struct mac_device {
 	void __iomem		*vaddr;
 	struct device		*dev;
 	struct resource		*res;
 	u8			 addr[ETH_ALEN];
-	struct fman_port	*port[2];
+	struct fman_port	*port[PORT_NUM];
 	struct phylink		*phylink;
 	struct phylink_config	phylink_config;
 	phy_interface_t		phy_if;
@@ -39,19 +45,29 @@ struct mac_device {
 	int (*change_addr)(struct fman_mac *mac_dev, const enet_addr_t *enet_addr);
 	int (*set_allmulti)(struct fman_mac *mac_dev, bool enable);
 	int (*set_tstamp)(struct fman_mac *mac_dev, bool enable);
-	int (*set_multi)(struct net_device *net_dev,
-			 struct mac_device *mac_dev);
 	int (*set_exception)(struct fman_mac *mac_dev,
 			     enum fman_mac_exceptions exception, bool enable);
 	int (*add_hash_mac_addr)(struct fman_mac *mac_dev,
 				 enet_addr_t *eth_addr);
 	int (*remove_hash_mac_addr)(struct fman_mac *mac_dev,
 				    enet_addr_t *eth_addr);
+	void (*get_pause_stats)(struct fman_mac *memac,
+				struct ethtool_pause_stats *s);
+	void (*get_rmon_stats)(struct fman_mac *memac,
+			       struct ethtool_rmon_stats *s,
+			       const struct ethtool_rmon_hist_range **ranges);
+	void (*get_eth_ctrl_stats)(struct fman_mac *memac,
+				   struct ethtool_eth_ctrl_stats *s);
+	void (*get_eth_mac_stats)(struct fman_mac *memac,
+				  struct ethtool_eth_mac_stats *s);
 
 	void (*update_speed)(struct mac_device *mac_dev, int speed);
 
 	struct fman_mac		*fman_mac;
 	struct mac_priv_s	*priv;
+
+	struct device		*fman_dev;
+	struct device		*fman_port_devs[PORT_NUM];
 };
 
 static inline struct mac_device

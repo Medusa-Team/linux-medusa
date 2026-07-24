@@ -10,6 +10,9 @@
 
 #include <linux/backing-dev.h>
 #include <linux/netfs.h>
+#include <linux/fs_parser.h>
+#include <net/9p/client.h>
+#include <net/9p/transport.h>
 
 /**
  * enum p9_session_flags - option flags for each 9P session
@@ -163,11 +166,13 @@ static inline struct fscache_volume *v9fs_session_cache(struct v9fs_session_info
 #endif
 }
 
+extern const struct fs_parameter_spec v9fs_param_spec[];
 
+extern int v9fs_parse_param(struct fs_context *fc, struct fs_parameter *param);
 extern int v9fs_show_options(struct seq_file *m, struct dentry *root);
 
 struct p9_fid *v9fs_session_init(struct v9fs_session_info *v9ses,
-				 const char *dev_name, char *data);
+				 struct fs_context *fc);
 extern void v9fs_session_close(struct v9fs_session_info *v9ses);
 extern void v9fs_session_cancel(struct v9fs_session_info *v9ses);
 extern void v9fs_session_begin_cancel(struct v9fs_session_info *v9ses);
@@ -179,14 +184,16 @@ extern int v9fs_vfs_rename(struct mnt_idmap *idmap,
 			   struct inode *old_dir, struct dentry *old_dentry,
 			   struct inode *new_dir, struct dentry *new_dentry,
 			   unsigned int flags);
-extern struct inode *v9fs_fid_iget(struct super_block *sb, struct p9_fid *fid,
-						bool new);
+extern struct inode *v9fs_inode_from_fid(struct v9fs_session_info *v9ses,
+					 struct p9_fid *fid,
+					 struct super_block *sb, int new);
 extern const struct inode_operations v9fs_dir_inode_operations_dotl;
 extern const struct inode_operations v9fs_file_inode_operations_dotl;
 extern const struct inode_operations v9fs_symlink_inode_operations_dotl;
 extern const struct netfs_request_ops v9fs_req_ops;
-extern struct inode *v9fs_fid_iget_dotl(struct super_block *sb,
-						struct p9_fid *fid, bool new);
+extern struct inode *v9fs_inode_from_fid_dotl(struct v9fs_session_info *v9ses,
+					      struct p9_fid *fid,
+					      struct super_block *sb, int new);
 
 /* other default globals */
 #define V9FS_PORT	564
@@ -200,7 +207,7 @@ static inline struct v9fs_session_info *v9fs_inode2v9ses(struct inode *inode)
 	return inode->i_sb->s_fs_info;
 }
 
-static inline struct v9fs_session_info *v9fs_dentry2v9ses(struct dentry *dentry)
+static inline struct v9fs_session_info *v9fs_dentry2v9ses(const struct dentry *dentry)
 {
 	return dentry->d_sb->s_fs_info;
 }
@@ -225,12 +232,30 @@ static inline int v9fs_proto_dotl(struct v9fs_session_info *v9ses)
  */
 static inline struct inode *
 v9fs_get_inode_from_fid(struct v9fs_session_info *v9ses, struct p9_fid *fid,
-			struct super_block *sb, bool new)
+			struct super_block *sb)
 {
 	if (v9fs_proto_dotl(v9ses))
-		return v9fs_fid_iget_dotl(sb, fid, new);
+		return v9fs_inode_from_fid_dotl(v9ses, fid, sb, 0);
 	else
-		return v9fs_fid_iget(sb, fid, new);
+		return v9fs_inode_from_fid(v9ses, fid, sb, 0);
+}
+
+/**
+ * v9fs_get_new_inode_from_fid - Helper routine to populate an inode by
+ * issuing a attribute request
+ * @v9ses: session information
+ * @fid: fid to issue attribute request for
+ * @sb: superblock on which to create inode
+ *
+ */
+static inline struct inode *
+v9fs_get_new_inode_from_fid(struct v9fs_session_info *v9ses, struct p9_fid *fid,
+			    struct super_block *sb)
+{
+	if (v9fs_proto_dotl(v9ses))
+		return v9fs_inode_from_fid_dotl(v9ses, fid, sb, 1);
+	else
+		return v9fs_inode_from_fid(v9ses, fid, sb, 1);
 }
 
 #endif

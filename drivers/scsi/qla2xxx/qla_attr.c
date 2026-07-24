@@ -17,7 +17,7 @@ static int qla24xx_vport_disable(struct fc_vport *, bool);
 
 static ssize_t
 qla2x00_sysfs_read_fw_dump(struct file *filp, struct kobject *kobj,
-			   struct bin_attribute *bin_attr,
+			   const struct bin_attribute *bin_attr,
 			   char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -58,7 +58,7 @@ qla2x00_sysfs_read_fw_dump(struct file *filp, struct kobject *kobj,
 
 static ssize_t
 qla2x00_sysfs_write_fw_dump(struct file *filp, struct kobject *kobj,
-			    struct bin_attribute *bin_attr,
+			    const struct bin_attribute *bin_attr,
 			    char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -168,7 +168,7 @@ qla2x00_sysfs_write_fw_dump(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_fw_dump_attr = {
+static const struct bin_attribute sysfs_fw_dump_attr = {
 	.attr = {
 		.name = "fw_dump",
 		.mode = S_IRUSR | S_IWUSR,
@@ -180,7 +180,7 @@ static struct bin_attribute sysfs_fw_dump_attr = {
 
 static ssize_t
 qla2x00_sysfs_read_nvram(struct file *filp, struct kobject *kobj,
-			 struct bin_attribute *bin_attr,
+			 const struct bin_attribute *bin_attr,
 			 char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -220,7 +220,7 @@ skip:
 
 static ssize_t
 qla2x00_sysfs_write_nvram(struct file *filp, struct kobject *kobj,
-			  struct bin_attribute *bin_attr,
+			  const struct bin_attribute *bin_attr,
 			  char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -282,7 +282,7 @@ qla2x00_sysfs_write_nvram(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_nvram_attr = {
+static const struct bin_attribute sysfs_nvram_attr = {
 	.attr = {
 		.name = "nvram",
 		.mode = S_IRUSR | S_IWUSR,
@@ -294,7 +294,7 @@ static struct bin_attribute sysfs_nvram_attr = {
 
 static ssize_t
 qla2x00_sysfs_read_optrom(struct file *filp, struct kobject *kobj,
-			  struct bin_attribute *bin_attr,
+			  const struct bin_attribute *bin_attr,
 			  char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -318,7 +318,7 @@ out:
 
 static ssize_t
 qla2x00_sysfs_write_optrom(struct file *filp, struct kobject *kobj,
-			   struct bin_attribute *bin_attr,
+			   const struct bin_attribute *bin_attr,
 			   char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -344,7 +344,7 @@ qla2x00_sysfs_write_optrom(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_optrom_attr = {
+static const struct bin_attribute sysfs_optrom_attr = {
 	.attr = {
 		.name = "optrom",
 		.mode = S_IRUSR | S_IWUSR,
@@ -356,7 +356,7 @@ static struct bin_attribute sysfs_optrom_attr = {
 
 static ssize_t
 qla2x00_sysfs_write_optrom_ctl(struct file *filp, struct kobject *kobj,
-			       struct bin_attribute *bin_attr,
+			       const struct bin_attribute *bin_attr,
 			       char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -529,7 +529,7 @@ out:
 	return rval;
 }
 
-static struct bin_attribute sysfs_optrom_ctl_attr = {
+static const struct bin_attribute sysfs_optrom_ctl_attr = {
 	.attr = {
 		.name = "optrom_ctl",
 		.mode = S_IWUSR,
@@ -540,7 +540,7 @@ static struct bin_attribute sysfs_optrom_ctl_attr = {
 
 static ssize_t
 qla2x00_sysfs_read_vpd(struct file *filp, struct kobject *kobj,
-		       struct bin_attribute *bin_attr,
+		       const struct bin_attribute *bin_attr,
 		       char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -587,7 +587,7 @@ skip:
 
 static ssize_t
 qla2x00_sysfs_write_vpd(struct file *filp, struct kobject *kobj,
-			struct bin_attribute *bin_attr,
+			const struct bin_attribute *bin_attr,
 			char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -642,7 +642,7 @@ qla2x00_sysfs_write_vpd(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_vpd_attr = {
+static const struct bin_attribute sysfs_vpd_attr = {
 	.attr = {
 		.name = "vpd",
 		.mode = S_IRUSR | S_IWUSR,
@@ -654,7 +654,7 @@ static struct bin_attribute sysfs_vpd_attr = {
 
 static ssize_t
 qla2x00_sysfs_read_sfp(struct file *filp, struct kobject *kobj,
-		       struct bin_attribute *bin_attr,
+		       const struct bin_attribute *bin_attr,
 		       char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -679,7 +679,7 @@ qla2x00_sysfs_read_sfp(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_sfp_attr = {
+static const struct bin_attribute sysfs_sfp_attr = {
 	.attr = {
 		.name = "sfp",
 		.mode = S_IRUSR | S_IWUSR,
@@ -690,7 +690,7 @@ static struct bin_attribute sysfs_sfp_attr = {
 
 static ssize_t
 qla2x00_sysfs_write_reset(struct file *filp, struct kobject *kobj,
-			struct bin_attribute *bin_attr,
+			const struct bin_attribute *bin_attr,
 			char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -823,7 +823,7 @@ qla2x00_sysfs_write_reset(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_reset_attr = {
+static const struct bin_attribute sysfs_reset_attr = {
 	.attr = {
 		.name = "reset",
 		.mode = S_IWUSR,
@@ -834,8 +834,8 @@ static struct bin_attribute sysfs_reset_attr = {
 
 static ssize_t
 qla2x00_issue_logo(struct file *filp, struct kobject *kobj,
-			struct bin_attribute *bin_attr,
-			char *buf, loff_t off, size_t count)
+		   const struct bin_attribute *bin_attr,
+		   char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
 	    struct device, kobj)));
@@ -866,7 +866,7 @@ qla2x00_issue_logo(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_issue_logo_attr = {
+static const struct bin_attribute sysfs_issue_logo_attr = {
 	.attr = {
 		.name = "issue_logo",
 		.mode = S_IWUSR,
@@ -877,7 +877,7 @@ static struct bin_attribute sysfs_issue_logo_attr = {
 
 static ssize_t
 qla2x00_sysfs_read_xgmac_stats(struct file *filp, struct kobject *kobj,
-		       struct bin_attribute *bin_attr,
+		       const struct bin_attribute *bin_attr,
 		       char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -929,7 +929,7 @@ do_read:
 	return count;
 }
 
-static struct bin_attribute sysfs_xgmac_stats_attr = {
+static const struct bin_attribute sysfs_xgmac_stats_attr = {
 	.attr = {
 		.name = "xgmac_stats",
 		.mode = S_IRUSR,
@@ -940,7 +940,7 @@ static struct bin_attribute sysfs_xgmac_stats_attr = {
 
 static ssize_t
 qla2x00_sysfs_read_dcbx_tlv(struct file *filp, struct kobject *kobj,
-		       struct bin_attribute *bin_attr,
+		       const struct bin_attribute *bin_attr,
 		       char *buf, loff_t off, size_t count)
 {
 	struct scsi_qla_host *vha = shost_priv(dev_to_shost(container_of(kobj,
@@ -987,7 +987,7 @@ do_read:
 	return count;
 }
 
-static struct bin_attribute sysfs_dcbx_tlv_attr = {
+static const struct bin_attribute sysfs_dcbx_tlv_attr = {
 	.attr = {
 		.name = "dcbx_tlv",
 		.mode = S_IRUSR,
@@ -998,7 +998,7 @@ static struct bin_attribute sysfs_dcbx_tlv_attr = {
 
 static struct sysfs_entry {
 	char *name;
-	struct bin_attribute *attr;
+	const struct bin_attribute *attr;
 	int type;
 } bin_file_entries[] = {
 	{ "fw_dump", &sysfs_fw_dump_attr, },
@@ -1638,7 +1638,7 @@ qla2x00_fw_state_show(struct device *dev, struct device_attribute *attr,
 {
 	scsi_qla_host_t *vha = shost_priv(class_to_shost(dev));
 	int rval = QLA_FUNCTION_FAILED;
-	uint16_t state[6];
+	uint16_t state[16];
 	uint32_t pstate;
 
 	if (IS_QLAFX00(vha->hw)) {
@@ -2402,6 +2402,63 @@ qla2x00_dport_diagnostics_show(struct device *dev,
 	    vha->dport_data[0], vha->dport_data[1],
 	    vha->dport_data[2], vha->dport_data[3]);
 }
+
+static ssize_t
+qla2x00_mpi_fw_state_show(struct device *dev, struct device_attribute *attr,
+			  char *buf)
+{
+	scsi_qla_host_t *vha = shost_priv(class_to_shost(dev));
+	int rval = QLA_FUNCTION_FAILED;
+	u16 state[16];
+	u16 mpi_state;
+	struct qla_hw_data *ha = vha->hw;
+
+	if (!(IS_QLA27XX(ha) || IS_QLA28XX(ha)))
+		return scnprintf(buf, PAGE_SIZE,
+				"MPI state reporting is not supported for this HBA.\n");
+
+	memset(state, 0, sizeof(state));
+
+	mutex_lock(&vha->hw->optrom_mutex);
+	if (qla2x00_chip_is_down(vha)) {
+		mutex_unlock(&vha->hw->optrom_mutex);
+		ql_dbg(ql_dbg_user, vha, 0x70df,
+		       "ISP reset is in progress, failing mpi_fw_state.\n");
+		return -EBUSY;
+	} else if (vha->hw->flags.eeh_busy) {
+		mutex_unlock(&vha->hw->optrom_mutex);
+		ql_dbg(ql_dbg_user, vha, 0x70ea,
+		       "HBA in PCI error state, failing mpi_fw_state.\n");
+		return -EBUSY;
+	}
+
+	rval = qla2x00_get_firmware_state(vha, state);
+	mutex_unlock(&vha->hw->optrom_mutex);
+	if (rval != QLA_SUCCESS) {
+		ql_dbg(ql_dbg_user, vha, 0x70eb,
+		       "MB Command to retrieve MPI state failed (%d), failing mpi_fw_state.\n",
+				rval);
+		return -EIO;
+	}
+
+	mpi_state = state[11];
+
+	if (!(mpi_state & BIT_15))
+		return scnprintf(buf, PAGE_SIZE,
+				 "MPI firmware state reporting is not supported by this firmware. (0x%02x)\n",
+				mpi_state);
+
+	if (!(mpi_state & BIT_8))
+		return scnprintf(buf, PAGE_SIZE,
+				 "MPI firmware is disabled. (0x%02x)\n",
+				mpi_state);
+
+	return scnprintf(buf, PAGE_SIZE,
+			 "MPI firmware is enabled, state is %s. (0x%02x)\n",
+			 mpi_state & BIT_9 ? "active" : "inactive",
+			 mpi_state);
+}
+
 static DEVICE_ATTR(dport_diagnostics, 0444,
 	   qla2x00_dport_diagnostics_show, NULL);
 
@@ -2469,6 +2526,8 @@ static DEVICE_ATTR(port_speed, 0644, qla2x00_port_speed_show,
     qla2x00_port_speed_store);
 static DEVICE_ATTR(port_no, 0444, qla2x00_port_no_show, NULL);
 static DEVICE_ATTR(fw_attr, 0444, qla2x00_fw_attr_show, NULL);
+static DEVICE_ATTR(mpi_fw_state, 0444, qla2x00_mpi_fw_state_show, NULL);
+
 
 static struct attribute *qla2x00_host_attrs[] = {
 	&dev_attr_driver_version.attr.attr,
@@ -2517,6 +2576,7 @@ static struct attribute *qla2x00_host_attrs[] = {
 	&dev_attr_qlini_mode.attr,
 	&dev_attr_ql2xiniexchg.attr,
 	&dev_attr_ql2xexchoffld.attr,
+	&dev_attr_mpi_fw_state.attr,
 	NULL,
 };
 
@@ -3304,6 +3364,7 @@ struct fc_function_template qla2xxx_transport_vport_functions = {
 	.show_host_node_name = 1,
 	.show_host_port_name = 1,
 	.show_host_supported_classes = 1,
+	.show_host_supported_speeds = 1,
 
 	.get_host_port_id = qla2x00_get_host_port_id,
 	.show_host_port_id = 1,

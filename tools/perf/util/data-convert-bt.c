@@ -34,9 +34,11 @@
 #include "util.h"
 #include "clockid.h"
 #include "util/sample.h"
+#include "util/time-utils.h"
+#include "header.h"
 
 #ifdef HAVE_LIBTRACEEVENT
-#include <traceevent/event-parse.h>
+#include <event-parse.h>
 #endif
 
 #define pr_N(n, fmt, ...) \
@@ -91,9 +93,14 @@ struct convert {
 	struct perf_tool	tool;
 	struct ctf_writer	writer;
 
+	struct perf_time_interval *ptime_range;
+	int range_size;
+	int range_num;
+
 	u64			events_size;
 	u64			events_count;
 	u64			non_sample_count;
+	u64			skipped;
 
 	/* Ordered events configured queue size. */
 	u64			queue_size;
@@ -426,8 +433,9 @@ static int add_tracepoint_values(struct ctf_writer *cw,
 				 struct evsel *evsel,
 				 struct perf_sample *sample)
 {
-	struct tep_format_field *common_fields = evsel->tp_format->format.common_fields;
-	struct tep_format_field *fields        = evsel->tp_format->format.fields;
+	const struct tep_event *tp_format = evsel__tp_format(evsel);
+	struct tep_format_field *common_fields = tp_format->format.common_fields;
+	struct tep_format_field *fields        = tp_format->format.fields;
 	int ret;
 
 	ret = add_tracepoint_fields_values(cw, event_class, event,
@@ -792,7 +800,7 @@ static bool is_flush_needed(struct ctf_stream *cs)
 	return cs->count >= STREAM_FLUSH_COUNT;
 }
 
-static int process_sample_event(struct perf_tool *tool,
+static int process_sample_event(const struct perf_tool *tool,
 				union perf_event *_event,
 				struct perf_sample *sample,
 				struct evsel *evsel,
@@ -809,6 +817,11 @@ static int process_sample_event(struct perf_tool *tool,
 
 	if (WARN_ONCE(!priv, "Failed to setup all events.\n"))
 		return 0;
+
+	if (perf_time__ranges_skip_sample(c->ptime_range, c->range_num, sample->time)) {
+		++c->skipped;
+		return 0;
+	}
 
 	event_class = priv->event_class;
 
@@ -871,7 +884,7 @@ do {							\
 } while(0)
 
 #define __FUNC_PROCESS_NON_SAMPLE(_name, body) 	\
-static int process_##_name##_event(struct perf_tool *tool,	\
+static int process_##_name##_event(const struct perf_tool *tool,	\
 				   union perf_event *_event,	\
 				   struct perf_sample *sample,	\
 				   struct machine *machine)	\
@@ -1064,8 +1077,9 @@ static int add_tracepoint_types(struct ctf_writer *cw,
 				struct evsel *evsel,
 				struct bt_ctf_event_class *class)
 {
-	struct tep_format_field *common_fields = evsel->tp_format->format.common_fields;
-	struct tep_format_field *fields        = evsel->tp_format->format.fields;
+	const struct tep_event *tp_format = evsel__tp_format(evsel);
+	struct tep_format_field *common_fields = tp_format ? tp_format->format.common_fields : NULL;
+	struct tep_format_field *fields        = tp_format ? tp_format->format.fields : NULL;
 	int ret;
 
 	ret = add_tracepoint_fields_types(cw, common_fields, class);
@@ -1167,6 +1181,10 @@ static int add_event(struct ctf_writer *cw, struct evsel *evsel)
 	const char *name = evsel__name(evsel);
 	int ret;
 
+	if (evsel->priv) {
+		pr_err("Error: attempt to add already added event %s\n", name);
+		return -1;
+	}
 	pr("Adding event '%s' (type %d)\n", name, evsel->core.attr.type);
 
 	event_class = bt_ctf_event_class_create(name);
@@ -1209,13 +1227,28 @@ err:
 	return -1;
 }
 
-static int setup_events(struct ctf_writer *cw, struct perf_session *session)
+enum setup_events_type {
+	SETUP_EVENTS_ALL,
+	SETUP_EVENTS_NOT_TRACEPOINT,
+	SETUP_EVENTS_TRACEPOINT_ONLY,
+};
+
+static int setup_events(struct ctf_writer *cw, struct perf_session *session,
+			enum setup_events_type type)
 {
 	struct evlist *evlist = session->evlist;
 	struct evsel *evsel;
 	int ret;
 
 	evlist__for_each_entry(evlist, evsel) {
+		bool is_tracepoint = evsel->core.attr.type == PERF_TYPE_TRACEPOINT;
+
+		if (is_tracepoint && type == SETUP_EVENTS_NOT_TRACEPOINT)
+			continue;
+
+		if (!is_tracepoint && type == SETUP_EVENTS_TRACEPOINT_ONLY)
+			continue;
+
 		ret = add_event(cw, evsel);
 		if (ret)
 			return ret;
@@ -1325,7 +1358,8 @@ static void cleanup_events(struct perf_session *session)
 		struct evsel_priv *priv;
 
 		priv = evsel->priv;
-		bt_ctf_event_class_put(priv->event_class);
+		if (priv)
+			bt_ctf_event_class_put(priv->event_class);
 		zfree(&evsel->priv);
 	}
 
@@ -1336,16 +1370,16 @@ static void cleanup_events(struct perf_session *session)
 static int setup_streams(struct ctf_writer *cw, struct perf_session *session)
 {
 	struct ctf_stream **stream;
-	struct perf_header *ph = &session->header;
+	struct perf_env *env = perf_session__env(session);
 	int ncpus;
 
 	/*
 	 * Try to get the number of cpus used in the data file,
 	 * if not present fallback to the MAX_CPUS.
 	 */
-	ncpus = ph->env.nr_cpus_avail ?: MAX_CPUS;
+	ncpus = env->nr_cpus_avail ?: MAX_CPUS;
 
-	stream = zalloc(sizeof(*stream) * ncpus);
+	stream = calloc(ncpus, sizeof(*stream));
 	if (!stream) {
 		pr_err("Failed to allocate streams.\n");
 		return -ENOMEM;
@@ -1369,25 +1403,100 @@ static void free_streams(struct ctf_writer *cw)
 static int ctf_writer__setup_env(struct ctf_writer *cw,
 				 struct perf_session *session)
 {
-	struct perf_header *header = &session->header;
+	struct perf_env *env = perf_session__env(session);
 	struct bt_ctf_writer *writer = cw->writer;
 
 #define ADD(__n, __v)							\
 do {									\
-	if (bt_ctf_writer_add_environment_field(writer, __n, __v))	\
+	if (__v && bt_ctf_writer_add_environment_field(writer, __n, __v))	\
 		return -1;						\
 } while (0)
 
-	ADD("host",    header->env.hostname);
+	ADD("host",    env->hostname);
 	ADD("sysname", "Linux");
-	ADD("release", header->env.os_release);
-	ADD("version", header->env.version);
-	ADD("machine", header->env.arch);
+	ADD("release", env->os_release);
+	ADD("version", env->version);
+	ADD("machine", env->arch);
 	ADD("domain", "kernel");
 	ADD("tracer_name", "perf");
 
 #undef ADD
 	return 0;
+}
+
+static int process_feature_event(const struct perf_tool *tool,
+				 struct perf_session *session,
+				 union perf_event *event)
+{
+	struct convert *c = container_of(tool, struct convert, tool);
+	struct ctf_writer *cw = &c->writer;
+	struct perf_record_header_feature *fe = &event->feat;
+	int ret = perf_event__process_feature(tool, session, event);
+
+	if (ret)
+		return ret;
+
+	switch (fe->feat_id) {
+	case HEADER_EVENT_DESC:
+		/*
+		 * In non-pipe mode (not here) the evsels combine the desc with
+		 * the perf_event_attr when it is parsed. In pipe mode the
+		 * perf_event_attr events appear first and then the event desc
+		 * feature events that set the names appear after. Once we have
+		 * the full evsel data we can generate the babeltrace
+		 * events. For tracepoint events we still don't have the tracing
+		 * data and so need to wait until the tracing data event to add
+		 * those events to babeltrace.
+		 */
+		return setup_events(cw, session, SETUP_EVENTS_NOT_TRACEPOINT);
+	case HEADER_HOSTNAME:
+		if (session->header.env.hostname) {
+			return bt_ctf_writer_add_environment_field(cw->writer, "host",
+								   session->header.env.hostname);
+		}
+		break;
+	case HEADER_OSRELEASE:
+		if (session->header.env.os_release) {
+			return bt_ctf_writer_add_environment_field(cw->writer, "release",
+								   session->header.env.os_release);
+		}
+		break;
+	case HEADER_VERSION:
+		if (session->header.env.version) {
+			return bt_ctf_writer_add_environment_field(cw->writer, "version",
+								   session->header.env.version);
+		}
+		break;
+	case HEADER_ARCH:
+		if (session->header.env.arch) {
+			return bt_ctf_writer_add_environment_field(cw->writer, "machine",
+								   session->header.env.arch);
+		}
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+static int process_tracing_data(const struct perf_tool *tool,
+				struct perf_session *session,
+				union perf_event *event)
+{
+	struct convert *c = container_of(tool, struct convert, tool);
+	struct ctf_writer *cw = &c->writer;
+	int ret;
+
+	ret = perf_event__process_tracing_data(tool, session, event);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * Now the attr was set up by the attr event, the name by the feature
+	 * event desc event and the tracepoint data set up above, the tracepoint
+	 * babeltrace events can be added.
+	 */
+	return setup_events(cw, session, SETUP_EVENTS_TRACEPOINT_ONLY);
 }
 
 static int ctf_writer__setup_clock(struct ctf_writer *cw,
@@ -1399,7 +1508,7 @@ static int ctf_writer__setup_clock(struct ctf_writer *cw,
 	int64_t offset = 0;
 
 	if (tod) {
-		struct perf_env *env = &session->header.env;
+		struct perf_env *env = perf_session__env(session);
 
 		if (!env->clock.enabled) {
 			pr_err("Can't provide --tod time, missing clock data. "
@@ -1607,24 +1716,25 @@ int bt_convert__perf2ctf(const char *input, const char *path,
 		.mode      = PERF_DATA_MODE_READ,
 		.force     = opts->force,
 	};
-	struct convert c = {
-		.tool = {
-			.sample          = process_sample_event,
-			.mmap            = perf_event__process_mmap,
-			.mmap2           = perf_event__process_mmap2,
-			.comm            = perf_event__process_comm,
-			.exit            = perf_event__process_exit,
-			.fork            = perf_event__process_fork,
-			.lost            = perf_event__process_lost,
-			.tracing_data    = perf_event__process_tracing_data,
-			.build_id        = perf_event__process_build_id,
-			.namespaces      = perf_event__process_namespaces,
-			.ordered_events  = true,
-			.ordering_requires_timestamps = true,
-		},
-	};
+	struct convert c = {};
 	struct ctf_writer *cw = &c.writer;
 	int err;
+
+	perf_tool__init(&c.tool, /*ordered_events=*/true);
+	c.tool.sample          = process_sample_event;
+	c.tool.mmap            = perf_event__process_mmap;
+	c.tool.mmap2           = perf_event__process_mmap2;
+	c.tool.comm            = perf_event__process_comm;
+	c.tool.exit            = perf_event__process_exit;
+	c.tool.fork            = perf_event__process_fork;
+	c.tool.lost            = perf_event__process_lost;
+	c.tool.tracing_data    = process_tracing_data;
+	c.tool.build_id        = perf_event__process_build_id;
+	c.tool.namespaces      = perf_event__process_namespaces;
+	c.tool.finished_round  = perf_event__process_finished_round;
+	c.tool.attr            = perf_event__process_attr;
+	c.tool.feature         = process_feature_event;
+	c.tool.ordering_requires_timestamps = true;
 
 	if (opts->all) {
 		c.tool.comm = process_comm_event;
@@ -1644,6 +1754,15 @@ int bt_convert__perf2ctf(const char *input, const char *path,
 	if (IS_ERR(session))
 		return PTR_ERR(session);
 
+	if (opts->time_str) {
+		err = perf_time__parse_for_ranges(opts->time_str, session,
+						  &c.ptime_range,
+						  &c.range_size,
+						  &c.range_num);
+		if (err < 0)
+			goto free_session;
+	}
+
 	/* CTF writer */
 	if (ctf_writer__init(cw, path, session, opts->tod))
 		goto free_session;
@@ -1657,8 +1776,11 @@ int bt_convert__perf2ctf(const char *input, const char *path,
 	if (ctf_writer__setup_env(cw, session))
 		goto free_writer;
 
-	/* CTF events setup */
-	if (setup_events(cw, session))
+	/*
+	 * CTF events setup. Note, in pipe mode no events exist yet (they come
+	 * in via header feature events) and so this does nothing.
+	 */
+	if (setup_events(cw, session, SETUP_EVENTS_ALL))
 		goto free_writer;
 
 	if (opts->all && setup_non_sample_events(cw, session))
@@ -1673,12 +1795,10 @@ int bt_convert__perf2ctf(const char *input, const char *path,
 	else
 		pr_err("Error during conversion.\n");
 
-	fprintf(stderr,
-		"[ perf data convert: Converted '%s' into CTF data '%s' ]\n",
+	fprintf(stderr,	"[ perf data convert: Converted '%s' into CTF data '%s' ]\n",
 		data.path, path);
 
-	fprintf(stderr,
-		"[ perf data convert: Converted and wrote %.3f MB (%" PRIu64 " samples",
+	fprintf(stderr,	"[ perf data convert: Converted and wrote %.3f MB (%" PRIu64 " samples",
 		(double) c.events_size / 1024.0 / 1024.0,
 		c.events_count);
 
@@ -1686,6 +1806,14 @@ int bt_convert__perf2ctf(const char *input, const char *path,
 		fprintf(stderr, ") ]\n");
 	else
 		fprintf(stderr, ", %" PRIu64 " non-samples) ]\n", c.non_sample_count);
+
+	if (c.skipped) {
+		fprintf(stderr,	"[ perf data convert: Skipped %" PRIu64 " samples ]\n",
+			c.skipped);
+	}
+
+	if (c.ptime_range)
+		zfree(&c.ptime_range);
 
 	cleanup_events(session);
 	perf_session__delete(session);
@@ -1696,6 +1824,9 @@ int bt_convert__perf2ctf(const char *input, const char *path,
 free_writer:
 	ctf_writer__cleanup(cw);
 free_session:
+	if (c.ptime_range)
+		zfree(&c.ptime_range);
+
 	perf_session__delete(session);
 	pr_err("Error during conversion setup.\n");
 	return err;

@@ -8,43 +8,60 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <hash.h>
 #include <hashtable.h>
+#include <xalloc.h>
 #include "lkc.h"
-
-unsigned int strhash(const char *s)
-{
-	/* fnv32 hash */
-	unsigned int hash = 2166136261U;
-
-	for (; *s; s++)
-		hash = (hash ^ *s) * 0x01000193;
-	return hash;
-}
 
 /* hash table of all parsed Kconfig files */
 static HASHTABLE_DEFINE(file_hashtable, 1U << 11);
 
 struct file {
 	struct hlist_node node;
+	struct {
+		const char *name;
+		int lineno;
+	} parent;
 	char name[];
 };
 
-/* file already present in list? If not add it */
-const char *file_lookup(const char *name)
+static void die_duplicated_include(struct file *file,
+				   const char *parent, int lineno)
 {
+	fprintf(stderr,
+		"%s:%d: error: repeated inclusion of %s\n"
+		"%s:%d: note: location of first inclusion of %s\n",
+		parent, lineno, file->name,
+		file->parent.name, file->parent.lineno, file->name);
+	exit(1);
+}
+
+/* file already present in list? If not add it */
+const char *file_lookup(const char *name,
+			const char *parent_name, int parent_lineno)
+{
+	const char *parent = NULL;
 	struct file *file;
 	size_t len;
-	int hash = strhash(name);
+	int hash = hash_str(name);
+
+	if (parent_name)
+		parent = file_lookup(parent_name, NULL, 0);
 
 	hash_for_each_possible(file_hashtable, file, node, hash)
-		if (!strcmp(name, file->name))
-			return file->name;
+		if (!strcmp(name, file->name)) {
+			if (!parent_name)
+				return file->name;
+			die_duplicated_include(file, parent, parent_lineno);
+		}
 
 	len = strlen(name);
 	file = xmalloc(sizeof(*file) + len + 1);
 	memset(file, 0, sizeof(*file));
 	memcpy(file->name, name, len);
 	file->name[len] = '\0';
+	file->parent.name = parent;
+	file->parent.lineno = parent_lineno;
 
 	hash_add(file_hashtable, &file->node, hash);
 
@@ -101,53 +118,4 @@ void str_printf(struct gstr *gs, const char *fmt, ...)
 char *str_get(const struct gstr *gs)
 {
 	return gs->s;
-}
-
-void *xmalloc(size_t size)
-{
-	void *p = malloc(size);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
-}
-
-void *xcalloc(size_t nmemb, size_t size)
-{
-	void *p = calloc(nmemb, size);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
-}
-
-void *xrealloc(void *p, size_t size)
-{
-	p = realloc(p, size);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
-}
-
-char *xstrdup(const char *s)
-{
-	char *p;
-
-	p = strdup(s);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
-}
-
-char *xstrndup(const char *s, size_t n)
-{
-	char *p;
-
-	p = strndup(s, n);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
 }

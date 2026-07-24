@@ -771,7 +771,7 @@ static struct sunqec *get_qec(struct platform_device *child)
 
 	qecp = platform_get_drvdata(op);
 	if (!qecp) {
-		qecp = kzalloc(sizeof(struct sunqec), GFP_KERNEL);
+		qecp = kzalloc_obj(struct sunqec);
 		if (qecp) {
 			u32 ctrl;
 
@@ -965,7 +965,7 @@ static struct platform_driver qec_sbus_driver = {
 		.of_match_table = qec_sbus_match,
 	},
 	.probe		= qec_sbus_probe,
-	.remove_new	= qec_sbus_remove,
+	.remove		= qec_sbus_remove,
 };
 
 static int __init qec_init(void)

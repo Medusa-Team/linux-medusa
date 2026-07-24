@@ -310,13 +310,14 @@ static void omfs_write_failed(struct address_space *mapping, loff_t to)
 	}
 }
 
-static int omfs_write_begin(struct file *file, struct address_space *mapping,
-			loff_t pos, unsigned len,
-			struct page **pagep, void **fsdata)
+static int omfs_write_begin(const struct kiocb *iocb,
+			    struct address_space *mapping,
+			    loff_t pos, unsigned len,
+			    struct folio **foliop, void **fsdata)
 {
 	int ret;
 
-	ret = block_write_begin(mapping, pos, len, pagep, omfs_get_block);
+	ret = block_write_begin(mapping, pos, len, foliop, omfs_get_block);
 	if (unlikely(ret))
 		omfs_write_failed(mapping, pos + len);
 
@@ -332,8 +333,8 @@ const struct file_operations omfs_file_operations = {
 	.llseek = generic_file_llseek,
 	.read_iter = generic_file_read_iter,
 	.write_iter = generic_file_write_iter,
-	.mmap = generic_file_mmap,
-	.fsync = generic_file_fsync,
+	.mmap_prepare = generic_file_mmap_prepare,
+	.fsync = simple_fsync,
 	.splice_read = filemap_splice_read,
 };
 

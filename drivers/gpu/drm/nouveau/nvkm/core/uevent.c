@@ -73,7 +73,7 @@ nvkm_uevent_mthd(struct nvkm_object *object, u32 mthd, void *argv, u32 argc)
 }
 
 static int
-nvkm_uevent_fini(struct nvkm_object *object, bool suspend)
+nvkm_uevent_fini(struct nvkm_object *object, enum nvkm_suspend_state suspend)
 {
 	struct nvkm_uevent *uevent = nvkm_uevent(object);
 
@@ -116,9 +116,9 @@ nvkm_uevent_ntfy(struct nvkm_event_ntfy *ntfy, u32 bits)
 	struct nvkm_client *client = uevent->object.client;
 
 	if (uevent->func)
-		return uevent->func(uevent->parent, uevent->object.token, bits);
+		return uevent->func(uevent->parent, uevent->object.object, bits);
 
-	return client->event(uevent->object.token, NULL, 0);
+	return client->event(uevent->object.object, NULL, 0);
 }
 
 int
@@ -144,7 +144,7 @@ nvkm_uevent_new(const struct nvkm_oclass *oclass, void *argv, u32 argc,
 	if (argc < sizeof(args->v0) || args->v0.version != 0)
 		return -ENOSYS;
 
-	if (!(uevent = kzalloc(sizeof(*uevent), GFP_KERNEL)))
+	if (!(uevent = kzalloc_obj(*uevent)))
 		return -ENOMEM;
 	*pobject = &uevent->object;
 

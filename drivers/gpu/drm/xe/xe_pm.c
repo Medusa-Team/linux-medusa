@@ -5,7 +5,10 @@
 
 #include "xe_pm.h"
 
+#include <linux/fault-inject.h>
 #include <linux/pm_runtime.h>
+#include <linux/suspend.h>
+#include <linux/dmi.h>
 
 #include <drm/drm_managed.h>
 #include <drm/ttm/ttm_placement.h>
@@ -14,12 +17,17 @@
 #include "xe_bo.h"
 #include "xe_bo_evict.h"
 #include "xe_device.h"
-#include "xe_device_sysfs.h"
 #include "xe_ggtt.h"
 #include "xe_gt.h"
-#include "xe_guc.h"
+#include "xe_gt_idle.h"
+#include "xe_i2c.h"
 #include "xe_irq.h"
+#include "xe_late_bind_fw.h"
 #include "xe_pcode.h"
+#include "xe_pxp.h"
+#include "xe_sriov_vf_ccs.h"
+#include "xe_trace.h"
+#include "xe_vm.h"
 #include "xe_wa.h"
 
 /**
@@ -69,10 +77,90 @@
  */
 
 #ifdef CONFIG_LOCKDEP
-static struct lockdep_map xe_pm_runtime_lockdep_map = {
-	.name = "xe_pm_runtime_lockdep_map"
+static struct lockdep_map xe_pm_runtime_d3cold_map = {
+	.name = "xe_rpm_d3cold_map"
+};
+
+static struct lockdep_map xe_pm_runtime_nod3cold_map = {
+	.name = "xe_rpm_nod3cold_map"
+};
+
+static struct lockdep_map xe_pm_block_lockdep_map = {
+	.name = "xe_pm_block_map",
 };
 #endif
+
+static void xe_pm_block_begin_signalling(void)
+{
+	lock_acquire_shared_recursive(&xe_pm_block_lockdep_map, 0, 1, NULL, _RET_IP_);
+}
+
+static void xe_pm_block_end_signalling(void)
+{
+	lock_release(&xe_pm_block_lockdep_map, _RET_IP_);
+}
+
+/**
+ * xe_pm_might_block_on_suspend() - Annotate that the code might block on suspend
+ *
+ * Annotation to use where the code might block or seize to make
+ * progress pending resume completion.
+ */
+void xe_pm_might_block_on_suspend(void)
+{
+	lock_map_acquire(&xe_pm_block_lockdep_map);
+	lock_map_release(&xe_pm_block_lockdep_map);
+}
+
+/**
+ * xe_pm_block_on_suspend() - Block pending suspend.
+ * @xe: The xe device about to be suspended.
+ *
+ * Block if the pm notifier has start evicting bos, to avoid
+ * racing and validating those bos back. The function is
+ * annotated to ensure no locks are held that are also grabbed
+ * in the pm notifier or the device suspend / resume.
+ * This is intended to be used by freezable tasks only.
+ * (Not freezable workqueues), with the intention that the function
+ * returns %-ERESTARTSYS when tasks are frozen during suspend,
+ * and allows the task to freeze. The caller must be able to
+ * handle the %-ERESTARTSYS.
+ *
+ * Return: %0 on success, %-ERESTARTSYS on signal pending or
+ * if freezing requested.
+ */
+int xe_pm_block_on_suspend(struct xe_device *xe)
+{
+	xe_pm_might_block_on_suspend();
+
+	return wait_for_completion_interruptible(&xe->pm_block);
+}
+
+/**
+ * xe_rpm_reclaim_safe() - Whether runtime resume can be done from reclaim context
+ * @xe: The xe device.
+ *
+ * Return: true if it is safe to runtime resume from reclaim context.
+ * false otherwise.
+ */
+bool xe_rpm_reclaim_safe(const struct xe_device *xe)
+{
+	return !xe->d3cold.capable;
+}
+
+static void xe_rpm_lockmap_acquire(const struct xe_device *xe)
+{
+	lock_map_acquire(xe_rpm_reclaim_safe(xe) ?
+			 &xe_pm_runtime_nod3cold_map :
+			 &xe_pm_runtime_d3cold_map);
+}
+
+static void xe_rpm_lockmap_release(const struct xe_device *xe)
+{
+	lock_map_release(xe_rpm_reclaim_safe(xe) ?
+			 &xe_pm_runtime_nod3cold_map :
+			 &xe_pm_runtime_d3cold_map);
+}
 
 /**
  * xe_pm_suspend - Helper for System suspend, i.e. S0->S3 / S0->S2idle
@@ -87,33 +175,48 @@ int xe_pm_suspend(struct xe_device *xe)
 	int err;
 
 	drm_dbg(&xe->drm, "Suspending device\n");
+	xe_pm_block_begin_signalling();
+	trace_xe_pm_suspend(xe, __builtin_return_address(0));
+
+	err = xe_pxp_pm_suspend(xe->pxp);
+	if (err)
+		goto err;
+
+	xe_late_bind_wait_for_worker_completion(&xe->late_bind);
 
 	for_each_gt(gt, xe, id)
 		xe_gt_suspend_prepare(gt);
 
-	xe_display_pm_suspend(xe, false);
+	xe_display_pm_suspend(xe);
 
 	/* FIXME: Super racey... */
 	err = xe_bo_evict_all(xe);
 	if (err)
-		goto err;
+		goto err_display;
 
 	for_each_gt(gt, xe, id) {
 		err = xe_gt_suspend(gt);
-		if (err) {
-			xe_display_pm_resume(xe, false);
-			goto err;
-		}
+		if (err)
+			goto err_display;
 	}
 
 	xe_irq_suspend(xe);
 
 	xe_display_pm_suspend_late(xe);
 
+	xe_i2c_pm_suspend(xe);
+
 	drm_dbg(&xe->drm, "Device suspended\n");
+	xe_pm_block_end_signalling();
+
 	return 0;
+
+err_display:
+	xe_display_pm_resume(xe);
+	xe_pxp_pm_resume(xe->pxp);
 err:
 	drm_dbg(&xe->drm, "Device suspend failed %d\n", err);
+	xe_pm_block_end_signalling();
 	return err;
 }
 
@@ -130,7 +233,12 @@ int xe_pm_resume(struct xe_device *xe)
 	u8 id;
 	int err;
 
+	xe_pm_block_begin_signalling();
 	drm_dbg(&xe->drm, "Resuming device\n");
+	trace_xe_pm_resume(xe, __builtin_return_address(0));
+
+	for_each_gt(gt, xe, id)
+		xe_gt_idle_disable_c6(gt);
 
 	for_each_tile(tile, xe, id)
 		xe_wa_apply_tile_workarounds(tile);
@@ -145,25 +253,45 @@ int xe_pm_resume(struct xe_device *xe)
 	 * This only restores pinned memory which is the memory required for the
 	 * GT(s) to resume.
 	 */
-	err = xe_bo_restore_kernel(xe);
+	err = xe_bo_restore_early(xe);
 	if (err)
 		goto err;
+
+	xe_i2c_pm_resume(xe, true);
 
 	xe_irq_resume(xe);
 
-	for_each_gt(gt, xe, id)
-		xe_gt_resume(gt);
+	for_each_gt(gt, xe, id) {
+		err = xe_gt_resume(gt);
+		if (err)
+			break;
+	}
 
-	xe_display_pm_resume(xe, false);
-
-	err = xe_bo_restore_user(xe);
+	/*
+	 * Try to bring up display before bailing from GT resume failure,
+	 * so we don't leave the user clueless with a blank screen.
+	 */
+	xe_display_pm_resume(xe);
 	if (err)
 		goto err;
 
+	err = xe_bo_restore_late(xe);
+	if (err)
+		goto err;
+
+	xe_pxp_pm_resume(xe->pxp);
+
+	if (IS_VF_CCS_READY(xe))
+		xe_sriov_vf_ccs_register_context(xe);
+
+	xe_late_bind_fw_load(&xe->late_bind);
+
 	drm_dbg(&xe->drm, "Device resumed\n");
+	xe_pm_block_end_signalling();
 	return 0;
 err:
 	drm_dbg(&xe->drm, "Device resume failed %d\n", err);
+	xe_pm_block_end_signalling();
 	return err;
 }
 
@@ -194,6 +322,10 @@ static bool xe_pm_pci_d3cold_capable(struct xe_device *xe)
 static void xe_pm_runtime_init(struct xe_device *xe)
 {
 	struct device *dev = xe->drm.dev;
+
+	/* Our current VFs do not support RPM. so, disable it */
+	if (IS_SRIOV_VF(xe))
+		return;
 
 	/*
 	 * Disable the system suspend direct complete optimization.
@@ -228,7 +360,82 @@ int xe_pm_init_early(struct xe_device *xe)
 	if (err)
 		return err;
 
+	xe->d3cold.capable = xe_pm_pci_d3cold_capable(xe);
 	return 0;
+}
+ALLOW_ERROR_INJECTION(xe_pm_init_early, ERRNO); /* See xe_pci_probe() */
+
+static u32 vram_threshold_value(struct xe_device *xe)
+{
+	if (xe->info.platform == XE_BATTLEMAGE) {
+		const char *product_name;
+
+		product_name = dmi_get_system_info(DMI_PRODUCT_NAME);
+		if (product_name && strstr(product_name, "NUC13RNG")) {
+			drm_warn(&xe->drm, "BMG + D3Cold not supported on this platform\n");
+			return 0;
+		}
+	}
+
+	return DEFAULT_VRAM_THRESHOLD;
+}
+
+static void xe_pm_wake_rebind_workers(struct xe_device *xe)
+{
+	struct xe_vm *vm, *next;
+
+	mutex_lock(&xe->rebind_resume_lock);
+	list_for_each_entry_safe(vm, next, &xe->rebind_resume_list,
+				 preempt.pm_activate_link) {
+		list_del_init(&vm->preempt.pm_activate_link);
+		xe_vm_resume_rebind_worker(vm);
+	}
+	mutex_unlock(&xe->rebind_resume_lock);
+}
+
+static int xe_pm_notifier_callback(struct notifier_block *nb,
+				   unsigned long action, void *data)
+{
+	struct xe_device *xe = container_of(nb, struct xe_device, pm_notifier);
+	int err = 0;
+
+	switch (action) {
+	case PM_HIBERNATION_PREPARE:
+	case PM_SUSPEND_PREPARE:
+	{
+		struct xe_validation_ctx ctx;
+
+		reinit_completion(&xe->pm_block);
+		xe_pm_block_begin_signalling();
+		xe_pm_runtime_get(xe);
+		(void)xe_validation_ctx_init(&ctx, &xe->val, NULL,
+					     (struct xe_val_flags) {.exclusive = true});
+		err = xe_bo_evict_all_user(xe);
+		xe_validation_ctx_fini(&ctx);
+		if (err)
+			drm_dbg(&xe->drm, "Notifier evict user failed (%d)\n", err);
+
+		err = xe_bo_notifier_prepare_all_pinned(xe);
+		if (err)
+			drm_dbg(&xe->drm, "Notifier prepare pin failed (%d)\n", err);
+		/*
+		 * Keep the runtime pm reference until post hibernation / post suspend to
+		 * avoid a runtime suspend interfering with evicted objects or backup
+		 * allocations.
+		 */
+		xe_pm_block_end_signalling();
+		break;
+	}
+	case PM_POST_HIBERNATION:
+	case PM_POST_SUSPEND:
+		complete_all(&xe->pm_block);
+		xe_pm_wake_rebind_workers(xe);
+		xe_bo_notifier_unprepare_all_pinned(xe);
+		xe_pm_runtime_put(xe);
+		break;
+	}
+
+	return NOTIFY_DONE;
 }
 
 /**
@@ -241,39 +448,63 @@ int xe_pm_init_early(struct xe_device *xe)
  */
 int xe_pm_init(struct xe_device *xe)
 {
+	u32 vram_threshold;
 	int err;
+
+	xe->pm_notifier.notifier_call = xe_pm_notifier_callback;
+	err = register_pm_notifier(&xe->pm_notifier);
+	if (err)
+		return err;
+
+	err = drmm_mutex_init(&xe->drm, &xe->rebind_resume_lock);
+	if (err)
+		goto err_unregister;
+
+	init_completion(&xe->pm_block);
+	complete_all(&xe->pm_block);
+	INIT_LIST_HEAD(&xe->rebind_resume_list);
 
 	/* For now suspend/resume is only allowed with GuC */
 	if (!xe_device_uc_enabled(xe))
 		return 0;
 
-	xe->d3cold.capable = xe_pm_pci_d3cold_capable(xe);
-
 	if (xe->d3cold.capable) {
-		err = xe_device_sysfs_init(xe);
+		vram_threshold = vram_threshold_value(xe);
+		err = xe_pm_set_vram_threshold(xe, vram_threshold);
 		if (err)
-			return err;
-
-		err = xe_pm_set_vram_threshold(xe, DEFAULT_VRAM_THRESHOLD);
-		if (err)
-			return err;
+			goto err_unregister;
 	}
 
 	xe_pm_runtime_init(xe);
-
 	return 0;
+
+err_unregister:
+	unregister_pm_notifier(&xe->pm_notifier);
+	return err;
 }
 
-/**
- * xe_pm_runtime_fini - Finalize Runtime PM
- * @xe: xe device instance
- */
-void xe_pm_runtime_fini(struct xe_device *xe)
+static void xe_pm_runtime_fini(struct xe_device *xe)
 {
 	struct device *dev = xe->drm.dev;
 
+	/* Our current VFs do not support RPM. so, disable it */
+	if (IS_SRIOV_VF(xe))
+		return;
+
 	pm_runtime_get_sync(dev);
 	pm_runtime_forbid(dev);
+}
+
+/**
+ * xe_pm_fini - Finalize PM
+ * @xe: xe device instance
+ */
+void xe_pm_fini(struct xe_device *xe)
+{
+	if (xe_device_uc_enabled(xe))
+		xe_pm_runtime_fini(xe);
+
+	unregister_pm_notifier(&xe->pm_notifier);
 }
 
 static void xe_pm_write_callback_task(struct xe_device *xe,
@@ -326,6 +557,7 @@ int xe_pm_runtime_suspend(struct xe_device *xe)
 	u8 id;
 	int err = 0;
 
+	trace_xe_pm_runtime_suspend(xe, __builtin_return_address(0));
 	/* Disable access_ongoing asserts and prevent recursive pm calls */
 	xe_pm_write_callback_task(xe, current);
 
@@ -350,11 +582,15 @@ int xe_pm_runtime_suspend(struct xe_device *xe)
 	 * annotation here and in xe_pm_runtime_get() lockdep will see
 	 * the potential lock inversion and give us a nice splat.
 	 */
-	lock_map_acquire(&xe_pm_runtime_lockdep_map);
+	xe_rpm_lockmap_acquire(xe);
+
+	err = xe_pxp_pm_suspend(xe->pxp);
+	if (err)
+		goto out;
 
 	/*
 	 * Applying lock for entire list op as xe_ttm_bo_destroy and xe_bo_move_notify
-	 * also checks and delets bo entry from user fault list.
+	 * also checks and deletes bo entry from user fault list.
 	 */
 	mutex_lock(&xe->mem_access.vram_userfault.lock);
 	list_for_each_entry_safe(bo, on,
@@ -362,28 +598,35 @@ int xe_pm_runtime_suspend(struct xe_device *xe)
 		xe_bo_runtime_pm_release_mmap_offset(bo);
 	mutex_unlock(&xe->mem_access.vram_userfault.lock);
 
-	if (xe->d3cold.allowed) {
-		xe_display_pm_suspend(xe, true);
+	xe_display_pm_runtime_suspend(xe);
 
+	if (xe->d3cold.allowed) {
 		err = xe_bo_evict_all(xe);
 		if (err)
-			goto out;
+			goto out_resume;
 	}
 
 	for_each_gt(gt, xe, id) {
-		err = xe_gt_suspend(gt);
+		err = xe->d3cold.allowed ? xe_gt_suspend(gt) : xe_gt_runtime_suspend(gt);
 		if (err)
-			goto out;
+			goto out_resume;
 	}
 
 	xe_irq_suspend(xe);
 
-	if (xe->d3cold.allowed)
-		xe_display_pm_suspend_late(xe);
+	xe_display_pm_runtime_suspend_late(xe);
+
+	xe_i2c_pm_suspend(xe);
+
+	xe_rpm_lockmap_release(xe);
+	xe_pm_write_callback_task(xe, NULL);
+	return 0;
+
+out_resume:
+	xe_display_pm_runtime_resume(xe);
+	xe_pxp_pm_resume(xe->pxp);
 out:
-	if (err)
-		xe_display_pm_resume(xe, true);
-	lock_map_release(&xe_pm_runtime_lockdep_map);
+	xe_rpm_lockmap_release(xe);
 	xe_pm_write_callback_task(xe, NULL);
 	return err;
 }
@@ -400,12 +643,16 @@ int xe_pm_runtime_resume(struct xe_device *xe)
 	u8 id;
 	int err = 0;
 
+	trace_xe_pm_runtime_resume(xe, __builtin_return_address(0));
 	/* Disable access_ongoing asserts and prevent recursive pm calls */
 	xe_pm_write_callback_task(xe, current);
 
-	lock_map_acquire(&xe_pm_runtime_lockdep_map);
+	xe_rpm_lockmap_acquire(xe);
 
 	if (xe->d3cold.allowed) {
+		for_each_gt(gt, xe, id)
+			xe_gt_idle_disable_c6(gt);
+
 		err = xe_pcode_ready(xe, true);
 		if (err)
 			goto out;
@@ -416,24 +663,45 @@ int xe_pm_runtime_resume(struct xe_device *xe)
 		 * This only restores pinned memory which is the memory
 		 * required for the GT(s) to resume.
 		 */
-		err = xe_bo_restore_kernel(xe);
+		err = xe_bo_restore_early(xe);
 		if (err)
 			goto out;
 	}
+
+	xe_i2c_pm_resume(xe, xe->d3cold.allowed);
 
 	xe_irq_resume(xe);
 
-	for_each_gt(gt, xe, id)
-		xe_gt_resume(gt);
+	for_each_gt(gt, xe, id) {
+		err = xe->d3cold.allowed ? xe_gt_resume(gt) : xe_gt_runtime_resume(gt);
+		if (err)
+			break;
+	}
+
+	/*
+	 * Try to bring up display before bailing from GT resume failure,
+	 * so we don't leave the user clueless with a blank screen.
+	 */
+	xe_display_pm_runtime_resume(xe);
+	if (err)
+		goto out;
 
 	if (xe->d3cold.allowed) {
-		xe_display_pm_resume(xe, true);
-		err = xe_bo_restore_user(xe);
+		err = xe_bo_restore_late(xe);
 		if (err)
 			goto out;
 	}
+
+	xe_pxp_pm_resume(xe->pxp);
+
+	if (IS_VF_CCS_READY(xe))
+		xe_sriov_vf_ccs_register_context(xe);
+
+	if (xe->d3cold.allowed)
+		xe_late_bind_fw_load(&xe->late_bind);
+
 out:
-	lock_map_release(&xe_pm_runtime_lockdep_map);
+	xe_rpm_lockmap_release(xe);
 	xe_pm_write_callback_task(xe, NULL);
 	return err;
 }
@@ -447,29 +715,59 @@ out:
  * stuff that can happen inside the runtime_resume callback by acquiring
  * a dummy lock (it doesn't protect anything and gets compiled out on
  * non-debug builds).  Lockdep then only needs to see the
- * xe_pm_runtime_lockdep_map -> runtime_resume callback once, and then can
- * hopefully validate all the (callers_locks) -> xe_pm_runtime_lockdep_map.
+ * xe_pm_runtime_xxx_map -> runtime_resume callback once, and then can
+ * hopefully validate all the (callers_locks) -> xe_pm_runtime_xxx_map.
  * For example if the (callers_locks) are ever grabbed in the
  * runtime_resume callback, lockdep should give us a nice splat.
  */
-static void pm_runtime_lockdep_prime(void)
+static void xe_rpm_might_enter_cb(const struct xe_device *xe)
 {
-	lock_map_acquire(&xe_pm_runtime_lockdep_map);
-	lock_map_release(&xe_pm_runtime_lockdep_map);
+	xe_rpm_lockmap_acquire(xe);
+	xe_rpm_lockmap_release(xe);
+}
+
+/*
+ * Prime the lockdep maps for known locking orders that need to
+ * be supported but that may not always occur on all systems.
+ */
+static void xe_pm_runtime_lockdep_prime(void)
+{
+	struct dma_resv lockdep_resv;
+
+	dma_resv_init(&lockdep_resv);
+	lock_map_acquire(&xe_pm_runtime_d3cold_map);
+	/* D3Cold takes the dma_resv locks to evict bos */
+	dma_resv_lock(&lockdep_resv, NULL);
+	dma_resv_unlock(&lockdep_resv);
+	lock_map_release(&xe_pm_runtime_d3cold_map);
+
+	/* Shrinkers might like to wake up the device under reclaim. */
+	fs_reclaim_acquire(GFP_KERNEL);
+	lock_map_acquire(&xe_pm_runtime_nod3cold_map);
+	lock_map_release(&xe_pm_runtime_nod3cold_map);
+	fs_reclaim_release(GFP_KERNEL);
 }
 
 /**
  * xe_pm_runtime_get - Get a runtime_pm reference and resume synchronously
  * @xe: xe device instance
+ *
+ * When possible, scope-based runtime PM (through guard(xe_pm_runtime)) is
+ * be preferred over direct usage of this function.  Manual get/put handling
+ * should only be used when the function contains goto-based logic which
+ * can break scope-based handling, or when the lifetime of the runtime PM
+ * reference does not match a specific scope (e.g., runtime PM obtained in one
+ * function and released in a different one).
  */
 void xe_pm_runtime_get(struct xe_device *xe)
 {
+	trace_xe_pm_runtime_get(xe, __builtin_return_address(0));
 	pm_runtime_get_noresume(xe->drm.dev);
 
 	if (xe_pm_read_callback_task(xe) == current)
 		return;
 
-	pm_runtime_lockdep_prime();
+	xe_rpm_might_enter_cb(xe);
 	pm_runtime_resume(xe->drm.dev);
 }
 
@@ -479,6 +777,7 @@ void xe_pm_runtime_get(struct xe_device *xe)
  */
 void xe_pm_runtime_put(struct xe_device *xe)
 {
+	trace_xe_pm_runtime_put(xe, __builtin_return_address(0));
 	if (xe_pm_read_callback_task(xe) == current) {
 		pm_runtime_put_noidle(xe->drm.dev);
 	} else {
@@ -491,15 +790,23 @@ void xe_pm_runtime_put(struct xe_device *xe)
  * xe_pm_runtime_get_ioctl - Get a runtime_pm reference before ioctl
  * @xe: xe device instance
  *
+ * When possible, scope-based runtime PM (through
+ * ACQUIRE(xe_pm_runtime_ioctl, ...)) is be preferred over direct usage of this
+ * function.  Manual get/put handling should only be used when the function
+ * contains goto-based logic which can break scope-based handling, or when the
+ * lifetime of the runtime PM reference does not match a specific scope (e.g.,
+ * runtime PM obtained in one function and released in a different one).
+ *
  * Returns: Any number greater than or equal to 0 for success, negative error
  * code otherwise.
  */
 int xe_pm_runtime_get_ioctl(struct xe_device *xe)
 {
+	trace_xe_pm_runtime_get_ioctl(xe, __builtin_return_address(0));
 	if (WARN_ON(xe_pm_read_callback_task(xe) == current))
 		return -ELOOP;
 
-	pm_runtime_lockdep_prime();
+	xe_rpm_might_enter_cb(xe);
 	return pm_runtime_get_sync(xe->drm.dev);
 }
 
@@ -533,6 +840,23 @@ bool xe_pm_runtime_get_if_in_use(struct xe_device *xe)
 	return pm_runtime_get_if_in_use(xe->drm.dev) > 0;
 }
 
+/*
+ * Very unreliable! Should only be used to suppress the false positive case
+ * in the missing outer rpm protection warning.
+ */
+static bool xe_pm_suspending_or_resuming(struct xe_device *xe)
+{
+#ifdef CONFIG_PM
+	struct device *dev = xe->drm.dev;
+
+	return dev->power.runtime_status == RPM_SUSPENDING ||
+		dev->power.runtime_status == RPM_RESUMING ||
+		pm_suspend_in_progress();
+#else
+	return false;
+#endif
+}
+
 /**
  * xe_pm_runtime_get_noresume - Bump runtime PM usage counter without resuming
  * @xe: xe device instance
@@ -542,6 +866,13 @@ bool xe_pm_runtime_get_if_in_use(struct xe_device *xe)
  * It will warn if not protected.
  * The reference should be put back after this function regardless, since it
  * will always bump the usage counter, regardless.
+ *
+ * When possible, scope-based runtime PM (through guard(xe_pm_runtime_noresume))
+ * is be preferred over direct usage of this function.  Manual get/put handling
+ * should only be used when the function contains goto-based logic which can
+ * break scope-based handling, or when the lifetime of the runtime PM reference
+ * does not match a specific scope (e.g., runtime PM obtained in one function
+ * and released in a different one).
  */
 void xe_pm_runtime_get_noresume(struct xe_device *xe)
 {
@@ -549,8 +880,11 @@ void xe_pm_runtime_get_noresume(struct xe_device *xe)
 
 	ref = xe_pm_runtime_get_if_in_use(xe);
 
-	if (drm_WARN(&xe->drm, !ref, "Missing outer runtime PM protection\n"))
+	if (!ref) {
 		pm_runtime_get_noresume(xe->drm.dev);
+		drm_WARN(&xe->drm, !xe_pm_suspending_or_resuming(xe),
+			 "Missing outer runtime PM protection\n");
+	}
 }
 
 /**
@@ -567,7 +901,7 @@ bool xe_pm_runtime_resume_and_get(struct xe_device *xe)
 		return true;
 	}
 
-	pm_runtime_lockdep_prime();
+	xe_rpm_might_enter_cb(xe);
 	return pm_runtime_resume_and_get(xe->drm.dev) >= 0;
 }
 
@@ -590,11 +924,13 @@ void xe_pm_assert_unbounded_bridge(struct xe_device *xe)
 }
 
 /**
- * xe_pm_set_vram_threshold - Set a vram threshold for allowing/blocking D3Cold
+ * xe_pm_set_vram_threshold - Set a VRAM threshold for allowing/blocking D3Cold
  * @xe: xe device instance
- * @threshold: VRAM size in bites for the D3cold threshold
+ * @threshold: VRAM size in MiB for the D3cold threshold
  *
- * Returns 0 for success, negative error code otherwise.
+ * Return:
+ * * 0		- success
+ * * -EINVAL	- invalid argument
  */
 int xe_pm_set_vram_threshold(struct xe_device *xe, u32 threshold)
 {
@@ -655,7 +991,15 @@ void xe_pm_d3cold_allowed_toggle(struct xe_device *xe)
 		xe->d3cold.allowed = false;
 
 	mutex_unlock(&xe->d3cold.lock);
+}
 
-	drm_dbg(&xe->drm,
-		"d3cold: allowed=%s\n", str_yes_no(xe->d3cold.allowed));
+/**
+ * xe_pm_module_init() - Perform xe_pm specific module initialization.
+ *
+ * Return: 0 on success. Currently doesn't fail.
+ */
+int __init xe_pm_module_init(void)
+{
+	xe_pm_runtime_lockdep_prime();
+	return 0;
 }

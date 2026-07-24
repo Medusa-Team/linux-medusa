@@ -10,15 +10,14 @@
  * Tested on x86, 32-bit and 64-bit.  It may work on other architectures, too.
  */
 
-#include <stdint.h>
-#include <elf.h>
 #include <stdio.h>
 #include <sys/auxv.h>
 #include <sys/time.h>
 
-#include "../kselftest.h"
+#include "kselftest.h"
 #include "parse_vdso.h"
 #include "vdso_config.h"
+#include "vdso_call.h"
 
 int main(int argc, char **argv)
 {
@@ -43,7 +42,7 @@ int main(int argc, char **argv)
 	}
 
 	struct timeval tv;
-	long ret = gtod(&tv, 0);
+	long ret = VDSO_CALL(gtod, 2, &tv, 0);
 
 	if (ret == 0) {
 		printf("The time is %lld.%06lld\n",

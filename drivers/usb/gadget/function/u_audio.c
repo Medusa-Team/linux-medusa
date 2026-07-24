@@ -1140,35 +1140,35 @@ static int u_audio_rate_get(struct snd_kcontrol *kcontrol,
 }
 
 static struct snd_kcontrol_new u_audio_controls[]  = {
-  [UAC_FBACK_CTRL] {
+	[UAC_FBACK_CTRL] = {
     .iface =        SNDRV_CTL_ELEM_IFACE_PCM,
     .name =         "Capture Pitch 1000000",
     .info =         u_audio_pitch_info,
     .get =          u_audio_pitch_get,
     .put =          u_audio_pitch_put,
   },
-	[UAC_P_PITCH_CTRL] {
+	[UAC_P_PITCH_CTRL] = {
 		.iface =        SNDRV_CTL_ELEM_IFACE_PCM,
 		.name =         "Playback Pitch 1000000",
 		.info =         u_audio_pitch_info,
 		.get =          u_audio_pitch_get,
 		.put =          u_audio_pitch_put,
 	},
-  [UAC_MUTE_CTRL] {
+	[UAC_MUTE_CTRL] = {
 		.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name =		"", /* will be filled later */
 		.info =		u_audio_mute_info,
 		.get =		u_audio_mute_get,
 		.put =		u_audio_mute_put,
 	},
-	[UAC_VOLUME_CTRL] {
+	[UAC_VOLUME_CTRL] = {
 		.iface =	SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name =		"", /* will be filled later */
 		.info =		u_audio_volume_info,
 		.get =		u_audio_volume_get,
 		.put =		u_audio_volume_put,
 	},
-	[UAC_RATE_CTRL] {
+	[UAC_RATE_CTRL] = {
 		.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
 		.name =		"", /* will be filled later */
 		.access =	SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
@@ -1191,7 +1191,7 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 	if (!g_audio)
 		return -EINVAL;
 
-	uac = kzalloc(sizeof(*uac), GFP_KERNEL);
+	uac = kzalloc_obj(*uac);
 	if (!uac)
 		return -ENOMEM;
 	g_audio->uac = uac;
@@ -1209,9 +1209,8 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 		prm->max_psize = g_audio->out_ep_maxpsize;
 		prm->srate = params->c_srates[0];
 
-		prm->reqs = kcalloc(params->req_number,
-				    sizeof(struct usb_request *),
-				    GFP_KERNEL);
+		prm->reqs = kzalloc_objs(struct usb_request *,
+					 params->req_number);
 		if (!prm->reqs) {
 			err = -ENOMEM;
 			goto fail;
@@ -1234,9 +1233,8 @@ int g_audio_setup(struct g_audio *g_audio, const char *pcm_name,
 		prm->max_psize = g_audio->in_ep_maxpsize;
 		prm->srate = params->p_srates[0];
 
-		prm->reqs = kcalloc(params->req_number,
-				    sizeof(struct usb_request *),
-				    GFP_KERNEL);
+		prm->reqs = kzalloc_objs(struct usb_request *,
+					 params->req_number);
 		if (!prm->reqs) {
 			err = -ENOMEM;
 			goto fail;

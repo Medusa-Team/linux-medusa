@@ -31,6 +31,11 @@
 	};
 
 	host1x@50000000 {
+		dpaux1: dpaux@54040000 {
+			vdd-supply = <&pp3300>;
+			status = "okay";
+		};
+
 		dsia: dsi@54300000 {
 			avdd-dsi-csi-supply = <&vdd_dsi_csi>;
 			status = "okay";
@@ -56,6 +61,13 @@
 				link2 = <&link2>;
 				backlight = <&backlight>;
 			};
+		};
+
+		sor1: sor@54580000 {
+			avdd-io-hdmi-dp-supply = <&pp1800>;
+			vdd-hdmi-dp-pll-supply = <&avddio_1v05>;
+			nvidia,dpaux = <&dpaux1>;
+			status = "okay";
 		};
 
 		dpaux: dpaux@545c0000 {
@@ -1362,6 +1374,19 @@
 		};
 	};
 
+	i2c@7000c000 {
+		status = "okay";
+		clock-frequency = <1000000>;
+
+		touchscreen: i2c-hid-dev@20 {
+				compatible = "hid-over-i2c";
+				reg = <0x20>;
+				hid-descr-addr = <0x0020>;
+				interrupt-parent = <&gpio>;
+				interrupts = <TEGRA_GPIO(X, 1) IRQ_TYPE_EDGE_FALLING>;
+		};
+	};
+
 	i2c@7000c400 {
 		status = "okay";
 		clock-frequency = <1000000>;
@@ -1384,6 +1409,11 @@
 					compatible = "ti,bq27742";
 					reg = <0x55>;
 				};
+			};
+
+			usbc_extcon0: extcon0 {
+				compatible = "google,extcon-usbc-cros-ec";
+				google,usb-port-id = <0>;
 			};
 		};
 	};
@@ -1719,6 +1749,15 @@
 			#gpio-cells = <2>;
 			status = "okay";
 		};
+
+		tmp451: temperature-sensor@4c {
+			compatible = "ti,tmp451";
+			reg = <0x4c>;
+			interrupt-parent = <&gpio>;
+			interrupts = <TEGRA_GPIO(X, 4) IRQ_TYPE_LEVEL_LOW>;
+			vcc-supply = <&pp1800>;
+			#thermal-sensor-cells = <1>;
+		};
 	};
 
 	pmc@7000e400 {
@@ -1782,6 +1821,8 @@
 				status = "okay";
 				vbus-supply = <&usbc_vbus>;
 				mode = "otg";
+				usb-role-switch;
+				role-switch-default-mode = "host";
 			};
 
 			usb3-0 {
@@ -1816,6 +1857,17 @@
 		status = "okay";
 	};
 
+	usb@700d0000 {
+		phys = <&{/padctl@7009f000/pads/usb2/lanes/usb2-0}>,
+		       <&{/padctl@7009f000/pads/pcie/lanes/pcie-6}>;
+		phy-names = "usb2-0", "usb3-0";
+
+		avddio-usb-supply = <&avddio_1v05>;
+		hvdd-usb-supply = <&pp3300>;
+
+		status = "okay";
+	};
+
 	clock@70110000 {
 		status = "okay";
 		nvidia,cf = <6>;
@@ -1837,6 +1889,18 @@
 
 		interrupt-controller@702f9000 {
 			status = "okay";
+		};
+	};
+
+	spi@70410000 {
+		status = "okay";
+
+		flash@0 {
+			compatible = "jedec,spi-nor";
+			reg = <0>;
+			spi-max-frequency = <104000000>;
+			spi-tx-bus-width = <2>;
+			spi-rx-bus-width = <2>;
 		};
 	};
 

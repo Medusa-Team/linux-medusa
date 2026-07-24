@@ -61,7 +61,7 @@ static int uflash_devinit(struct platform_device *op, struct device_node *dp)
 		return -ENODEV;
 	}
 
-	up = kzalloc(sizeof(struct uflash_dev), GFP_KERNEL);
+	up = kzalloc_obj(struct uflash_dev);
 	if (!up)
 		return -ENOMEM;
 
@@ -149,7 +149,7 @@ static struct platform_driver uflash_driver = {
 		.of_match_table = uflash_match,
 	},
 	.probe		= uflash_probe,
-	.remove_new	= uflash_remove,
+	.remove		= uflash_remove,
 };
 
 module_platform_driver(uflash_driver);

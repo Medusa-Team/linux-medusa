@@ -64,6 +64,8 @@ static void cpuidle_cpu_output(unsigned int cpu, int verbose)
 
 		printf(_("Latency: %lu\n"),
 		       cpuidle_state_latency(cpu, idlestate));
+		printf(_("Residency: %lu\n"),
+		       cpuidle_state_residency(cpu, idlestate));
 		printf(_("Usage: %lu\n"),
 		       cpuidle_state_usage(cpu, idlestate));
 		printf(_("Duration: %llu\n"),
@@ -109,12 +111,14 @@ static void proc_cpuidle_cpu_output(unsigned int cpu)
 	printf(_("max_cstate:              C%u\n"), cstates-1);
 	printf(_("maximum allowed latency: %lu usec\n"), max_allowed_cstate);
 	printf(_("states:\t\n"));
-	for (cstate = 1; cstate < cstates; cstate++) {
+	for (cstate = 0; cstate < cstates; cstate++) {
 		printf(_("    C%d:                  "
 			 "type[C%d] "), cstate, cstate);
 		printf(_("promotion[--] demotion[--] "));
 		printf(_("latency[%03lu] "),
 		       cpuidle_state_latency(cpu, cstate));
+		printf(_("residency[%05lu] "),
+		       cpuidle_state_residency(cpu, cstate));
 		printf(_("usage[%08lu] "),
 		       cpuidle_state_usage(cpu, cstate));
 		printf(_("duration[%020Lu] \n"),
@@ -135,8 +139,6 @@ static inline void cpuidle_exit(int fail)
 
 int cmd_idle_info(int argc, char **argv)
 {
-	extern char *optarg;
-	extern int optind, opterr, optopt;
 	int ret = 0, cont = 1, output_param = 0, verbose = 1;
 	unsigned int cpu = 0;
 

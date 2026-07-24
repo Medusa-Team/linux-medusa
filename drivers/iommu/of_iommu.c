@@ -29,8 +29,6 @@ static int of_iommu_xlate(struct device *dev,
 		return -ENODEV;
 
 	ret = iommu_fwspec_init(dev, of_fwnode_handle(iommu_spec->np));
-	if (ret == -EPROBE_DEFER)
-		return driver_deferred_probe_check_state(dev);
 	if (ret)
 		return ret;
 
@@ -118,6 +116,7 @@ static void of_pci_check_device_ats(struct device *dev, struct device_node *np)
 int of_iommu_configure(struct device *dev, struct device_node *master_np,
 		       const u32 *id)
 {
+	bool dev_iommu_present;
 	int err;
 
 	if (!master_np)
@@ -129,6 +128,7 @@ int of_iommu_configure(struct device *dev, struct device_node *master_np,
 		mutex_unlock(&iommu_probe_device_lock);
 		return 0;
 	}
+	dev_iommu_present = dev->iommu;
 
 	/*
 	 * We don't currently walk up the tree looking for a parent IOMMU.
@@ -149,11 +149,18 @@ int of_iommu_configure(struct device *dev, struct device_node *master_np,
 		err = of_iommu_configure_device(master_np, dev, id);
 	}
 
-	if (err)
+	if (err && dev_iommu_present)
 		iommu_fwspec_free(dev);
+	else if (err && dev->iommu)
+		dev_iommu_free(dev);
 	mutex_unlock(&iommu_probe_device_lock);
 
-	if (!err && dev->bus)
+	/*
+	 * If we're not on the iommu_probe_device() path (as indicated by the
+	 * initial dev->iommu) then try to simulate it. This should no longer
+	 * happen unless of_dma_configure() is being misused outside bus code.
+	 */
+	if (!err && dev->bus && !dev_iommu_present)
 		err = iommu_probe_device(dev);
 
 	if (err && err != -EPROBE_DEFER)
@@ -214,7 +221,7 @@ void of_iommu_get_resv_regions(struct device *dev, struct list_head *list)
 		 * that represent reservations in the IOVA space, which are regions that should
 		 * not be mapped.
 		 */
-		if (of_find_property(it.node, "reg", NULL)) {
+		if (of_property_present(it.node, "reg")) {
 			err = of_address_to_resource(it.node, 0, &phys);
 			if (err < 0) {
 				dev_err(dev, "failed to parse memory region %pOF: %d\n",

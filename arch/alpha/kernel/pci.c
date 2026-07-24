@@ -125,6 +125,7 @@ DECLARE_PCI_FIXUP_FINAL(PCI_ANY_ID, PCI_ANY_ID, pcibios_fixup_final);
 
 resource_size_t
 pcibios_align_resource(void *data, const struct resource *res,
+		       const struct resource *empty_res,
 		       resource_size_t size, resource_size_t align)
 {
 	struct pci_dev *dev = data;
@@ -220,7 +221,7 @@ static void pdev_save_srm_config(struct pci_dev *dev)
 		printed = 1;
 	}
 
-	tmp = kmalloc(sizeof(*tmp), GFP_KERNEL);
+	tmp = kmalloc_obj(*tmp);
 	if (!tmp) {
 		printk(KERN_ERR "%s: kmalloc() failed!\n", __func__);
 		return;
@@ -391,10 +392,7 @@ alloc_pci_controller(void)
 {
 	struct pci_controller *hose;
 
-	hose = memblock_alloc(sizeof(*hose), SMP_CACHE_BYTES);
-	if (!hose)
-		panic("%s: Failed to allocate %zu bytes\n", __func__,
-		      sizeof(*hose));
+	hose = memblock_alloc_or_panic(sizeof(*hose), SMP_CACHE_BYTES);
 
 	*hose_tail = hose;
 	hose_tail = &hose->next;
@@ -405,13 +403,7 @@ alloc_pci_controller(void)
 struct resource * __init
 alloc_resource(void)
 {
-	void *ptr = memblock_alloc(sizeof(struct resource), SMP_CACHE_BYTES);
-
-	if (!ptr)
-		panic("%s: Failed to allocate %zu bytes\n", __func__,
-		      sizeof(struct resource));
-
-	return ptr;
+	return memblock_alloc_or_panic(sizeof(struct resource), SMP_CACHE_BYTES);
 }
 
 

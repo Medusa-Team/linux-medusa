@@ -28,6 +28,8 @@
 #include "dccg.h"
 #include "clk_mgr.h"
 
+#define DC_LOGGER link->ctx->logger
+
 void set_hpo_dp_throttled_vcp_size(struct pipe_ctx *pipe_ctx,
 		struct fixed31_32 throttled_vcp_size)
 {
@@ -108,6 +110,13 @@ void enable_hpo_dp_link_output(struct dc_link *link,
 		enum clock_source_id clock_source,
 		const struct dc_link_settings *link_settings)
 {
+	(void)signal;
+	(void)clock_source;
+	if (!link_res->hpo_dp_link_enc) {
+		DC_LOG_ERROR("%s: invalid hpo_dp_link_enc\n", __func__);
+		return;
+	}
+
 	if (link->dc->res_pool->dccg->funcs->set_symclk32_le_root_clock_gating)
 		link->dc->res_pool->dccg->funcs->set_symclk32_le_root_clock_gating(
 				link->dc->res_pool->dccg,
@@ -124,6 +133,11 @@ void disable_hpo_dp_link_output(struct dc_link *link,
 		const struct link_resource *link_res,
 		enum signal_type signal)
 {
+	if (!link_res->hpo_dp_link_enc) {
+		DC_LOG_ERROR("%s: invalid hpo_dp_link_enc\n", __func__);
+		return;
+	}
+
 		link_res->hpo_dp_link_enc->funcs->link_disable(link_res->hpo_dp_link_enc);
 		link_res->hpo_dp_link_enc->funcs->disable_link_phy(
 				link_res->hpo_dp_link_enc, signal);
@@ -148,6 +162,7 @@ static void set_hpo_dp_lane_settings(struct dc_link *link,
 		const struct dc_link_settings *link_settings,
 		const struct dc_lane_settings lane_settings[LANE_COUNT_DP_MAX])
 {
+	(void)link;
 	link_res->hpo_dp_link_enc->funcs->set_ffe(
 			link_res->hpo_dp_link_enc,
 			link_settings,
@@ -158,6 +173,7 @@ void update_hpo_dp_stream_allocation_table(struct dc_link *link,
 		const struct link_resource *link_res,
 		const struct link_mst_stream_allocation_table *table)
 {
+	(void)link;
 	link_res->hpo_dp_link_enc->funcs->update_stream_allocation_table(
 			link_res->hpo_dp_link_enc,
 			table);
@@ -166,6 +182,7 @@ void update_hpo_dp_stream_allocation_table(struct dc_link *link,
 void setup_hpo_dp_audio_output(struct pipe_ctx *pipe_ctx,
 		struct audio_output *audio_output, uint32_t audio_inst)
 {
+	(void)audio_output;
 	pipe_ctx->stream_res.hpo_dp_stream_enc->funcs->dp_audio_setup(
 			pipe_ctx->stream_res.hpo_dp_stream_enc,
 			audio_inst,
@@ -206,6 +223,7 @@ static const struct link_hwss hpo_dp_link_hwss = {
 bool can_use_hpo_dp_link_hwss(const struct dc_link *link,
 		const struct link_resource *link_res)
 {
+	(void)link;
 	return link_res->hpo_dp_link_enc != NULL;
 }
 

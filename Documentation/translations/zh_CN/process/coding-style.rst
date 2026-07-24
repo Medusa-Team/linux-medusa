@@ -545,7 +545,7 @@ Linux 里这是提倡的做法，因为这样可以很简单的给读者提供�
 也可以加上它做这些事情的原因。
 
 当注释内核 API 函数时，请使用 kernel-doc 格式。详见
-Documentation/translations/zh_CN/doc-guide/index.rst 和 scripts/kernel-doc 。
+Documentation/translations/zh_CN/doc-guide/index.rst 和 tools/docs/kernel-doc 。
 
 长 (多行) 注释的首选风格是：
 
@@ -558,17 +558,6 @@ Documentation/translations/zh_CN/doc-guide/index.rst 和 scripts/kernel-doc 。
 	 *
 	 * Description:  A column of asterisks on the left side,
 	 * with beginning and ending almost-blank lines.
-	 */
-
-对于在 net/ 和 drivers/net/ 的文件，首选的长 (多行) 注释风格有些不同。
-
-.. code-block:: c
-
-	/* The preferred comment style for files in net/ and drivers/net
-	 * looks like this.
-	 *
-	 * It is nearly the same as the generally preferred comment style,
-	 * but there is no initial almost-blank line.
 	 */
 
 注释数据也是很重要的，不管是基本类型还是衍生类型。为了方便实现这一点，每一行

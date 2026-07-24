@@ -3,7 +3,7 @@
  * Copyright (C) 2023 Oracle.  All Rights Reserved.
  * Author: Darrick J. Wong <djwong@kernel.org>
  */
-#include "xfs.h"
+#include "xfs_platform.h"
 #include "xfs_fs.h"
 #include "xfs_shared.h"
 #include "xfs_format.h"
@@ -80,6 +80,10 @@ static const char *name_map[XFS_SCRUB_TYPE_NR] = {
 	[XFS_SCRUB_TYPE_QUOTACHECK]	= "quotacheck",
 	[XFS_SCRUB_TYPE_NLINKS]		= "nlinks",
 	[XFS_SCRUB_TYPE_DIRTREE]	= "dirtree",
+	[XFS_SCRUB_TYPE_METAPATH]	= "metapath",
+	[XFS_SCRUB_TYPE_RGSUPER]	= "rgsuper",
+	[XFS_SCRUB_TYPE_RTRMAPBT]	= "rtrmapbt",
+	[XFS_SCRUB_TYPE_RTREFCBT]	= "rtrefcountbt",
 };
 
 /* Format the scrub stats into a text buffer, similar to pcp style. */
@@ -385,7 +389,7 @@ xchk_mount_stats_alloc(
 	struct xchk_stats	*cs;
 	int			error;
 
-	cs = kvzalloc(sizeof(struct xchk_stats), GFP_KERNEL);
+	cs = kvzalloc_obj(struct xchk_stats);
 	if (!cs)
 		return -ENOMEM;
 

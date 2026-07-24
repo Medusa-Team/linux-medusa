@@ -3,7 +3,7 @@
  * drivers/uio/uio.c
  *
  * Copyright(C) 2005, Benedikt Spranger <b.spranger@linutronix.de>
- * Copyright(C) 2005, Thomas Gleixner <tglx@linutronix.de>
+ * Copyright(C) 2005, Linutronix GmbH, Thomas Gleixner <tglx@kernel.org>
  * Copyright(C) 2006, Hans J. Koch <hjk@hansjkoch.de>
  * Copyright(C) 2006, Greg Kroah-Hartman <greg@kroah.com>
  *
@@ -118,7 +118,7 @@ static const struct sysfs_ops map_sysfs_ops = {
 	.show = map_type_show,
 };
 
-static struct kobj_type map_attr_type = {
+static const struct kobj_type map_attr_type = {
 	.release	= map_release,
 	.sysfs_ops	= &map_sysfs_ops,
 	.default_groups	= map_groups,
@@ -207,7 +207,7 @@ static const struct sysfs_ops portio_sysfs_ops = {
 	.show = portio_type_show,
 };
 
-static struct kobj_type portio_attr_type = {
+static const struct kobj_type portio_attr_type = {
 	.release	= portio_release,
 	.sysfs_ops	= &portio_sysfs_ops,
 	.default_groups	= portio_groups,
@@ -306,7 +306,7 @@ static int uio_dev_add_attributes(struct uio_device *idev)
 				goto err_map;
 			}
 		}
-		map = kzalloc(sizeof(*map), GFP_KERNEL);
+		map = kzalloc_obj(*map);
 		if (!map) {
 			ret = -ENOMEM;
 			goto err_map;
@@ -335,7 +335,7 @@ static int uio_dev_add_attributes(struct uio_device *idev)
 				goto err_portio;
 			}
 		}
-		portio = kzalloc(sizeof(*portio), GFP_KERNEL);
+		portio = kzalloc_obj(*portio);
 		if (!portio) {
 			ret = -ENOMEM;
 			goto err_portio;
@@ -494,7 +494,7 @@ static int uio_open(struct inode *inode, struct file *filep)
 		goto err_module_get;
 	}
 
-	listener = kmalloc(sizeof(*listener), GFP_KERNEL);
+	listener = kmalloc_obj(*listener);
 	if (!listener) {
 		ret = -ENOMEM;
 		goto err_alloc_listener;
@@ -565,7 +565,7 @@ static __poll_t uio_poll(struct file *filep, poll_table *wait)
 
 	mutex_lock(&idev->info_lock);
 	if (!idev->info || !idev->info->irq)
-		ret = -EIO;
+		ret = EPOLLERR;
 	mutex_unlock(&idev->info_lock);
 
 	if (ret)
@@ -850,8 +850,14 @@ static int uio_mmap(struct file *filep, struct vm_area_struct *vma)
 		goto out;
 	}
 
-	if (idev->info->mmap) {
-		ret = idev->info->mmap(idev->info, vma);
+	if (idev->info->mmap_prepare) {
+		struct vm_area_desc desc;
+
+		compat_set_desc_from_vma(&desc, filep, vma);
+		ret = idev->info->mmap_prepare(idev->info, &desc);
+		if (ret)
+			goto out;
+		ret = __compat_vma_mmap(&desc, vma);
 		goto out;
 	}
 
@@ -991,7 +997,7 @@ int __uio_register_device(struct module *owner,
 
 	info->uio_dev = NULL;
 
-	idev = kzalloc(sizeof(*idev), GFP_KERNEL);
+	idev = kzalloc_obj(*idev);
 	if (!idev) {
 		return -ENOMEM;
 	}

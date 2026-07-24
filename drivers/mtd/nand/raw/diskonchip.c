@@ -11,7 +11,7 @@
  * Error correction code lifted from the old docecc code
  * Author: Fabrice Bellard (fabrice.bellard@netgem.com)
  * Copyright (C) 2000 Netgem S.A.
- * converted to the generic Reed-Solomon library by Thomas Gleixner <tglx@linutronix.de>
+ * converted to the generic Reed-Solomon library by Thomas Gleixner <tglx@kernel.org>
  *
  * Interface to generic NAND code for M-Systems DiskOnChip devices
  */
@@ -1098,7 +1098,7 @@ static inline int __init inftl_partscan(struct mtd_info *mtd, struct mtd_partiti
 		    (i == 0) && (ip->firstUnit > 0)) {
 			parts[0].name = " DiskOnChip IPL / Media Header partition";
 			parts[0].offset = 0;
-			parts[0].size = mtd->erasesize * ip->firstUnit;
+			parts[0].size = (uint64_t)mtd->erasesize * ip->firstUnit;
 			numparts = 1;
 		}
 

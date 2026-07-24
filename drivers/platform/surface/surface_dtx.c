@@ -403,7 +403,7 @@ static int surface_dtx_open(struct inode *inode, struct file *file)
 	struct sdtx_client *client;
 
 	/* Initialize client. */
-	client = kzalloc(sizeof(*client), GFP_KERNEL);
+	client = kzalloc_obj(*client);
 	if (!client)
 		return -ENOMEM;
 
@@ -555,7 +555,6 @@ static const struct file_operations surface_dtx_fops = {
 	.fasync         = surface_dtx_fasync,
 	.unlocked_ioctl = surface_dtx_ioctl,
 	.compat_ioctl   = surface_dtx_ioctl,
-	.llseek         = no_llseek,
 };
 
 
@@ -1045,7 +1044,7 @@ static struct sdtx_device *sdtx_device_create(struct device *dev, struct ssam_co
 	struct sdtx_device *ddev;
 	int status;
 
-	ddev = kzalloc(sizeof(*ddev), GFP_KERNEL);
+	ddev = kzalloc_obj(*ddev);
 	if (!ddev)
 		return ERR_PTR(-ENOMEM);
 
@@ -1181,7 +1180,7 @@ MODULE_DEVICE_TABLE(acpi, surface_dtx_acpi_match);
 
 static struct platform_driver surface_dtx_platform_driver = {
 	.probe = surface_dtx_platform_probe,
-	.remove_new = surface_dtx_platform_remove,
+	.remove = surface_dtx_platform_remove,
 	.driver = {
 		.name = "surface_dtx_pltf",
 		.acpi_match_table = surface_dtx_acpi_match,

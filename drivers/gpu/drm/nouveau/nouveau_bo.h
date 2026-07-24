@@ -9,6 +9,7 @@ struct nouveau_channel;
 struct nouveau_cli;
 struct nouveau_drm;
 struct nouveau_fence;
+struct nouveau_vma;
 
 struct nouveau_bo {
 	struct ttm_buffer_object bo;
@@ -53,25 +54,10 @@ nouveau_bo(struct ttm_buffer_object *bo)
 	return container_of(bo, struct nouveau_bo, bo);
 }
 
-static inline int
-nouveau_bo_ref(struct nouveau_bo *ref, struct nouveau_bo **pnvbo)
+static inline void
+nouveau_bo_fini(struct nouveau_bo *bo)
 {
-	struct nouveau_bo *prev;
-
-	if (!pnvbo)
-		return -EINVAL;
-	prev = *pnvbo;
-
-	if (ref) {
-		ttm_bo_get(&ref->bo);
-		*pnvbo = nouveau_bo(&ref->bo);
-	} else {
-		*pnvbo = NULL;
-	}
-	if (prev)
-		ttm_bo_put(&prev->bo);
-
-	return 0;
+	ttm_bo_fini(&bo->bo);
 }
 
 extern struct ttm_device_funcs nouveau_bo_driver;
@@ -104,6 +90,12 @@ void nouveau_bo_sync_for_cpu(struct nouveau_bo *nvbo);
 void nouveau_bo_add_io_reserve_lru(struct ttm_buffer_object *bo);
 void nouveau_bo_del_io_reserve_lru(struct ttm_buffer_object *bo);
 
+int nouveau_bo_new_pin(struct nouveau_cli *, u32 domain, u32 size, struct nouveau_bo **);
+int nouveau_bo_new_map(struct nouveau_cli *, u32 domain, u32 size, struct nouveau_bo **);
+int nouveau_bo_new_map_gpu(struct nouveau_cli *, u32 domain, u32 size,
+			   struct nouveau_bo **, struct nouveau_vma **);
+void nouveau_bo_unpin_del(struct nouveau_bo **);
+
 /* TODO: submit equivalent to TTM generic API upstream? */
 static inline void __iomem *
 nvbo_kmap_obj_iovirtual(struct nouveau_bo *nvbo)
@@ -113,35 +105,6 @@ nvbo_kmap_obj_iovirtual(struct nouveau_bo *nvbo)
 						&nvbo->kmap, &is_iomem);
 	WARN_ON_ONCE(ioptr && !is_iomem);
 	return ioptr;
-}
-
-static inline void
-nouveau_bo_unmap_unpin_unref(struct nouveau_bo **pnvbo)
-{
-	if (*pnvbo) {
-		nouveau_bo_unmap(*pnvbo);
-		nouveau_bo_unpin(*pnvbo);
-		nouveau_bo_ref(NULL, pnvbo);
-	}
-}
-
-static inline int
-nouveau_bo_new_pin_map(struct nouveau_cli *cli, u64 size, int align, u32 domain,
-		       struct nouveau_bo **pnvbo)
-{
-	int ret = nouveau_bo_new(cli, size, align, domain,
-				 0, 0, NULL, NULL, pnvbo);
-	if (ret == 0) {
-		ret = nouveau_bo_pin(*pnvbo, domain, true);
-		if (ret == 0) {
-			ret = nouveau_bo_map(*pnvbo);
-			if (ret == 0)
-				return ret;
-			nouveau_bo_unpin(*pnvbo);
-		}
-		nouveau_bo_ref(NULL, pnvbo);
-	}
-	return ret;
 }
 
 int nv04_bo_move_init(struct nouveau_channel *, u32);

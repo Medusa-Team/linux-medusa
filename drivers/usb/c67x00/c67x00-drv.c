@@ -121,7 +121,7 @@ static int c67x00_drv_probe(struct platform_device *pdev)
 	if (!pdata)
 		return -ENODEV;
 
-	c67x00 = kzalloc(sizeof(*c67x00), GFP_KERNEL);
+	c67x00 = kzalloc_obj(*c67x00);
 	if (!c67x00)
 		return -ENOMEM;
 
@@ -201,7 +201,7 @@ static void c67x00_drv_remove(struct platform_device *pdev)
 
 static struct platform_driver c67x00_driver = {
 	.probe	= c67x00_drv_probe,
-	.remove_new = c67x00_drv_remove,
+	.remove = c67x00_drv_remove,
 	.driver	= {
 		.name = "c67x00",
 	},

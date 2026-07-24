@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /* netfilter.c: look after the filters for various protocols.
  * Heavily influenced by the old firewall.c by David Bonn and Alan Cox.
  *
  * Thanks to Rob `CmdrTaco' Malda for not influencing this code in any
  * way.
- *
- * This code is GPL.
  */
 #include <linux/kernel.h>
 #include <linux/netfilter.h>
@@ -27,12 +26,6 @@
 #include <net/sock.h>
 
 #include "nf_internals.h"
-
-const struct nf_ipv6_ops __rcu *nf_ipv6_ops __read_mostly;
-EXPORT_SYMBOL_GPL(nf_ipv6_ops);
-
-DEFINE_PER_CPU(bool, nf_skb_duplicated);
-EXPORT_SYMBOL_GPL(nf_skb_duplicated);
 
 #ifdef CONFIG_JUMP_LABEL
 struct static_key nf_hooks_needed[NFPROTO_NUMPROTO][NF_MAX_HOOKS];
@@ -655,10 +648,8 @@ void nf_hook_slow_list(struct list_head *head, struct nf_hook_state *state,
 		       const struct nf_hook_entries *e)
 {
 	struct sk_buff *skb, *next;
-	struct list_head sublist;
+	LIST_HEAD(sublist);
 	int ret;
-
-	INIT_LIST_HEAD(&sublist);
 
 	list_for_each_entry_safe(skb, next, head, list) {
 		skb_list_del_init(skb);

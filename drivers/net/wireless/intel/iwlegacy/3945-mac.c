@@ -269,7 +269,7 @@ il3945_get_free_frame(struct il_priv *il)
 	struct il3945_frame *frame;
 	struct list_head *element;
 	if (list_empty(&il->free_frames)) {
-		frame = kzalloc(sizeof(*frame), GFP_KERNEL);
+		frame = kzalloc_obj(*frame);
 		if (!frame) {
 			IL_ERR("Could not allocate frame!\n");
 			return NULL;
@@ -979,9 +979,10 @@ il3945_rx_allocate(struct il_priv *il, gfp_t priority)
 	struct page *page;
 	dma_addr_t page_dma;
 	unsigned long flags;
-	gfp_t gfp_mask = priority;
 
 	while (1) {
+		gfp_t gfp_mask = priority;
+
 		spin_lock_irqsave(&rxq->lock, flags);
 		if (list_empty(&rxq->rx_used)) {
 			spin_unlock_irqrestore(&rxq->lock, flags);
@@ -1002,9 +1003,9 @@ il3945_rx_allocate(struct il_priv *il, gfp_t priority)
 				D_INFO("Failed to allocate SKB buffer.\n");
 			if (rxq->free_count <= RX_LOW_WATERMARK &&
 			    net_ratelimit())
-				IL_ERR("Failed to allocate SKB buffer with %0x."
+				IL_ERR("Failed to allocate SKB buffer with %pGg. "
 				       "Only %u free buffers remaining.\n",
-				       priority, rxq->free_count);
+				       &gfp_mask, rxq->free_count);
 			/* We don't reschedule replenish work here -- we will
 			 * call the restock method and if it still needs
 			 * more buffers it will schedule replenish */
@@ -1125,44 +1126,6 @@ il3945_rx_queue_free(struct il_priv *il, struct il_rx_queue *rxq)
 			  rxq->rb_stts, rxq->rb_stts_dma);
 	rxq->bd = NULL;
 	rxq->rb_stts = NULL;
-}
-
-/* Convert linear signal-to-noise ratio into dB */
-static u8 ratio2dB[100] = {
-/*	 0   1   2   3   4   5   6   7   8   9 */
-	0, 0, 6, 10, 12, 14, 16, 17, 18, 19,	/* 00 - 09 */
-	20, 21, 22, 22, 23, 23, 24, 25, 26, 26,	/* 10 - 19 */
-	26, 26, 26, 27, 27, 28, 28, 28, 29, 29,	/* 20 - 29 */
-	29, 30, 30, 30, 31, 31, 31, 31, 32, 32,	/* 30 - 39 */
-	32, 32, 32, 33, 33, 33, 33, 33, 34, 34,	/* 40 - 49 */
-	34, 34, 34, 34, 35, 35, 35, 35, 35, 35,	/* 50 - 59 */
-	36, 36, 36, 36, 36, 36, 36, 37, 37, 37,	/* 60 - 69 */
-	37, 37, 37, 37, 37, 38, 38, 38, 38, 38,	/* 70 - 79 */
-	38, 38, 38, 38, 38, 39, 39, 39, 39, 39,	/* 80 - 89 */
-	39, 39, 39, 39, 39, 40, 40, 40, 40, 40	/* 90 - 99 */
-};
-
-/* Calculates a relative dB value from a ratio of linear
- *   (i.e. not dB) signal levels.
- * Conversion assumes that levels are voltages (20*log), not powers (10*log). */
-int
-il3945_calc_db_from_ratio(int sig_ratio)
-{
-	/* 1000:1 or higher just report as 60 dB */
-	if (sig_ratio >= 1000)
-		return 60;
-
-	/* 100:1 or higher, divide by 10 and use table,
-	 *   add 20 dB to make up for divide by 10 */
-	if (sig_ratio >= 100)
-		return 20 + (int)ratio2dB[sig_ratio / 10];
-
-	/* We shouldn't see this */
-	if (sig_ratio < 1)
-		return 0;
-
-	/* Use table for ratios 1:1 - 99:1 */
-	return (int)ratio2dB[sig_ratio];
 }
 
 /*
@@ -2226,7 +2189,7 @@ __il3945_down(struct il_priv *il)
 
 	/* Stop TX queues watchdog. We need to have S_EXIT_PENDING bit set
 	 * to prevent rearm timer */
-	del_timer_sync(&il->watchdog);
+	timer_delete_sync(&il->watchdog);
 
 	/* Station information will now be cleared in device */
 	il_clear_ucode_stations(il);
@@ -3262,7 +3225,9 @@ il3945_store_measurement(struct device *d, struct device_attribute *attr,
 
 	D_INFO("Invoking measurement of type %d on " "channel %d (for '%s')\n",
 	       type, params.channel, buf);
+	mutex_lock(&il->mutex);
 	il3945_get_measurement(il, &params, type);
+	mutex_unlock(&il->mutex);
 
 	return count;
 }

@@ -13,6 +13,7 @@
 #include <linux/falloc.h>
 #include <linux/sched/mm.h>
 #include <trace/events/fscache.h>
+#include <trace/events/netfs.h>
 #include "internal.h"
 
 struct cachefiles_kiocb {
@@ -62,7 +63,7 @@ static void cachefiles_read_complete(struct kiocb *iocb, long ret)
 				ret = -ESTALE;
 		}
 
-		ki->term_func(ki->term_func_priv, ret, ki->was_async);
+		ki->term_func(ki->term_func_priv, ret);
 	}
 
 	cachefiles_put_kiocb(ki);
@@ -92,7 +93,7 @@ static int cachefiles_read(struct netfs_cache_resources *cres,
 	object = cachefiles_cres_object(cres);
 	file = cachefiles_cres_file(cres);
 
-	_enter("%pD,%li,%llx,%zx/%llx",
+	_enter("%pD,%llu,%llx,%zx/%llx",
 	       file, file_inode(file)->i_ino, start_pos, len,
 	       i_size_read(file_inode(file)));
 
@@ -131,7 +132,7 @@ static int cachefiles_read(struct netfs_cache_resources *cres,
 	}
 
 	ret = -ENOMEM;
-	ki = kzalloc(sizeof(struct cachefiles_kiocb), GFP_KERNEL);
+	ki = kzalloc_obj(struct cachefiles_kiocb);
 	if (!ki)
 		goto presubmission_error;
 
@@ -187,7 +188,7 @@ in_progress:
 
 presubmission_error:
 	if (term_func)
-		term_func(term_func_priv, ret < 0 ? ret : skipped, false);
+		term_func(term_func_priv, ret < 0 ? ret : skipped);
 	return ret;
 }
 
@@ -213,7 +214,7 @@ static int cachefiles_query_occupancy(struct netfs_cache_resources *cres,
 	file = cachefiles_cres_file(cres);
 	granularity = max_t(size_t, object->volume->cache->bsize, granularity);
 
-	_enter("%pD,%li,%llx,%zx/%llx",
+	_enter("%pD,%llu,%llx,%zx/%llx",
 	       file, file_inode(file)->i_ino, start, len,
 	       i_size_read(file_inode(file)));
 
@@ -270,7 +271,7 @@ static void cachefiles_write_complete(struct kiocb *iocb, long ret)
 	atomic_long_sub(ki->b_writing, &object->volume->cache->b_writing);
 	set_bit(FSCACHE_COOKIE_HAVE_DATA, &object->cookie->flags);
 	if (ki->term_func)
-		ki->term_func(ki->term_func_priv, ret, ki->was_async);
+		ki->term_func(ki->term_func_priv, ret);
 	cachefiles_put_kiocb(ki);
 }
 
@@ -293,14 +294,14 @@ int __cachefiles_write(struct cachefiles_object *object,
 	fscache_count_write();
 	cache = object->volume->cache;
 
-	_enter("%pD,%li,%llx,%zx/%llx",
+	_enter("%pD,%llu,%llx,%zx/%llx",
 	       file, file_inode(file)->i_ino, start_pos, len,
 	       i_size_read(file_inode(file)));
 
-	ki = kzalloc(sizeof(struct cachefiles_kiocb), GFP_KERNEL);
+	ki = kzalloc_obj(struct cachefiles_kiocb);
 	if (!ki) {
 		if (term_func)
-			term_func(term_func_priv, -ENOMEM, false);
+			term_func(term_func_priv, -ENOMEM);
 		return -ENOMEM;
 	}
 
@@ -346,8 +347,6 @@ int __cachefiles_write(struct cachefiles_object *object,
 	default:
 		ki->was_async = false;
 		cachefiles_write_complete(&ki->iocb, ret);
-		if (ret > 0)
-			ret = 0;
 		break;
 	}
 
@@ -365,7 +364,8 @@ static int cachefiles_write(struct netfs_cache_resources *cres,
 {
 	if (!fscache_wait_for_operation(cres, FSCACHE_WANT_WRITE)) {
 		if (term_func)
-			term_func(term_func_priv, -ENOBUFS, false);
+			term_func(term_func_priv, -ENOBUFS);
+		trace_netfs_sreq(term_func_priv, netfs_sreq_trace_cache_nowrite);
 		return -ENOBUFS;
 	}
 
@@ -627,11 +627,12 @@ static void cachefiles_prepare_write_subreq(struct netfs_io_subrequest *subreq)
 {
 	struct netfs_io_request *wreq = subreq->rreq;
 	struct netfs_cache_resources *cres = &wreq->cache_resources;
+	struct netfs_io_stream *stream = &wreq->io_streams[subreq->stream_nr];
 
 	_enter("W=%x[%x] %llx", wreq->debug_id, subreq->debug_index, subreq->start);
 
-	subreq->max_len = MAX_RW_COUNT;
-	subreq->max_nr_segs = BIO_MAX_VECS;
+	stream->sreq_max_len = MAX_RW_COUNT;
+	stream->sreq_max_segs = BIO_MAX_VECS;
 
 	if (!cachefiles_cres_file(cres)) {
 		if (!fscache_wait_for_operation(cres, FSCACHE_WANT_WRITE))
@@ -647,6 +648,7 @@ static void cachefiles_issue_write(struct netfs_io_subrequest *subreq)
 	struct netfs_cache_resources *cres = &wreq->cache_resources;
 	struct cachefiles_object *object = cachefiles_cres_object(cres);
 	struct cachefiles_cache *cache = object->volume->cache;
+	struct netfs_io_stream *stream = &wreq->io_streams[subreq->stream_nr];
 	const struct cred *saved_cred;
 	size_t off, pre, post, len = subreq->len;
 	loff_t start = subreq->start;
@@ -660,7 +662,8 @@ static void cachefiles_issue_write(struct netfs_io_subrequest *subreq)
 	if (off) {
 		pre = CACHEFILES_DIO_BLOCK_SIZE - off;
 		if (pre >= len) {
-			netfs_write_subrequest_terminated(subreq, len, false);
+			fscache_count_dio_misfit();
+			netfs_write_subrequest_terminated(subreq, len);
 			return;
 		}
 		subreq->transferred += pre;
@@ -670,25 +673,39 @@ static void cachefiles_issue_write(struct netfs_io_subrequest *subreq)
 	}
 
 	/* We also need to end on the cache granularity boundary */
+	if (start + len == wreq->i_size) {
+		size_t part = len % CACHEFILES_DIO_BLOCK_SIZE;
+		size_t need = CACHEFILES_DIO_BLOCK_SIZE - part;
+
+		if (part && stream->submit_extendable_to >= need) {
+			len += need;
+			subreq->len += need;
+			subreq->io_iter.count += need;
+		}
+	}
+
 	post = len & (CACHEFILES_DIO_BLOCK_SIZE - 1);
 	if (post) {
 		len -= post;
 		if (len == 0) {
-			netfs_write_subrequest_terminated(subreq, post, false);
+			fscache_count_dio_misfit();
+			netfs_write_subrequest_terminated(subreq, post);
 			return;
 		}
 		iov_iter_truncate(&subreq->io_iter, len);
 	}
 
+	trace_netfs_sreq(subreq, netfs_sreq_trace_cache_prepare);
 	cachefiles_begin_secure(cache, &saved_cred);
 	ret = __cachefiles_prepare_write(object, cachefiles_cres_file(cres),
 					 &start, &len, len, true);
 	cachefiles_end_secure(cache, saved_cred);
 	if (ret < 0) {
-		netfs_write_subrequest_terminated(subreq, ret, false);
+		netfs_write_subrequest_terminated(subreq, ret);
 		return;
 	}
 
+	trace_netfs_sreq(subreq, netfs_sreq_trace_cache_write);
 	cachefiles_write(&subreq->rreq->cache_resources,
 			 subreq->start, &subreq->io_iter,
 			 netfs_write_subrequest_terminated, subreq);

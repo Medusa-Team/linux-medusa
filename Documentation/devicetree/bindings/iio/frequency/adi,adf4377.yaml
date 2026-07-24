@@ -17,6 +17,7 @@ description: |
    applications.
 
    https://www.analog.com/en/products/adf4377.html
+   https://www.analog.com/en/products/adf4378.html
 
 properties:
   compatible:
@@ -38,6 +39,12 @@ properties:
       External clock that provides reference input frequency.
     items:
       - const: ref_in
+
+  '#clock-cells':
+    const: 0
+
+  clock-output-names:
+    maxItems: 1
 
   chip-enable-gpios:
     description:
@@ -73,6 +80,15 @@ required:
 
 allOf:
   - $ref: /schemas/spi/spi-peripheral-props.yaml#
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - adi,adf4378
+    then:
+      properties:
+        clk2-enable-gpios: false
 
 unevaluatedProperties: false
 
@@ -87,6 +103,8 @@ examples:
             spi-max-frequency = <10000000>;
             clocks = <&adf4377_ref_in>;
             clock-names = "ref_in";
+            #clock-cells = <0>;
+            clock-output-names = "adf4377";
         };
     };
 ...

@@ -30,6 +30,7 @@ enum samsung_pll_type {
 	pll_2650x,
 	pll_2650xx,
 	pll_1417x,
+	pll_1418x,
 	pll_1450x,
 	pll_1451x,
 	pll_1452x,
@@ -41,12 +42,28 @@ enum samsung_pll_type {
 	pll_0516x,
 	pll_0517x,
 	pll_0518x,
+	pll_531x,
+	pll_1051x,
+	pll_1052x,
+	pll_0717x,
+	pll_0718x,
+	pll_0732x,
+	pll_4311,
+	pll_1017x,
+	pll_1031x,
+	pll_a9fracm,
+	pll_a9fraco,
 };
 
 #define PLL_RATE(_fin, _m, _p, _s, _k, _ks) \
 	((u64)(_fin) * (BIT(_ks) * (_m) + (_k)) / BIT(_ks) / ((_p) << (_s)))
 #define PLL_VALID_RATE(_fin, _fout, _m, _p, _s, _k, _ks) ((_fout) + \
 	BUILD_BUG_ON_ZERO(PLL_RATE(_fin, _m, _p, _s, _k, _ks) != (_fout)))
+
+#define PLL_FRACO_RATE(_fin, _m, _p, _s, _k, _ks) \
+	((u64)(_fin) * (BIT(_ks) * (_m) + (_k)) / BIT(_ks) / ((_p) * ((_s) + 1)))
+#define PLL_FRACO_VALID_RATE(_fin, _fout, _m, _p, _s, _k, _ks) ((_fout) + \
+	BUILD_BUG_ON_ZERO(PLL_FRACO_RATE(_fin, _m, _p, _s, _k, _ks) != (_fout)))
 
 #define PLL_35XX_RATE(_fin, _rate, _m, _p, _s)			\
 	{							\
@@ -99,6 +116,16 @@ enum samsung_pll_type {
 		.mfr	=	(_mfr),				\
 		.mrr	=	(_mrr),				\
 		.vsel	=	(_vsel),			\
+	}
+
+#define PLL_A9FRACO_RATE(_fin, _rate, _m, _p, _s, _k)		\
+	{							\
+		.rate	=	PLL_FRACO_VALID_RATE(_fin, _rate, \
+				_m, _p, _s, _k, 24),		\
+		.mdiv	=	(_m),				\
+		.pdiv	=	(_p),				\
+		.sdiv	=	(_s),				\
+		.kdiv	=	(_k),				\
 	}
 
 /* NOTE: Rate table should be kept sorted in descending order. */

@@ -7,11 +7,12 @@
 
 #include <drm/drm_debugfs.h>
 
-#include "xe_gt.h"
+#include "xe_gsc_debugfs.h"
 #include "xe_guc_debugfs.h"
 #include "xe_huc_debugfs.h"
 #include "xe_macros.h"
 #include "xe_uc_debugfs.h"
+#include "xe_uc_types.h"
 
 void xe_uc_debugfs_register(struct xe_uc *uc, struct dentry *parent)
 {
@@ -23,6 +24,7 @@ void xe_uc_debugfs_register(struct xe_uc *uc, struct dentry *parent)
 		return;
 	}
 
+	xe_gsc_debugfs_register(&uc->gsc, root);
 	xe_guc_debugfs_register(&uc->guc, root);
 	xe_huc_debugfs_register(&uc->huc, root);
 }

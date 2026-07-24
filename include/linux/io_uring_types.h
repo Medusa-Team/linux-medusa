@@ -8,6 +8,9 @@
 #include <linux/llist.h>
 #include <uapi/linux/io_uring.h>
 
+struct iou_loop_params;
+struct io_uring_bpf_ops;
+
 enum {
 	/*
 	 * A hint to not wake right away but delay until there are enough of
@@ -26,6 +29,8 @@ enum io_uring_cmd_flags {
 	IO_URING_F_MULTISHOT		= 4,
 	/* executed by io-wq */
 	IO_URING_F_IOWQ			= 8,
+	/* executed inline from syscall */
+	IO_URING_F_INLINE		= 16,
 	/* int's last bit, sign checks are usually faster than a bit test */
 	IO_URING_F_NONBLOCK		= INT_MIN,
 
@@ -38,6 +43,8 @@ enum io_uring_cmd_flags {
 	IO_URING_F_CANCEL		= (1 << 11),
 	IO_URING_F_COMPAT		= (1 << 12),
 };
+
+struct iou_loop_params;
 
 struct io_wq_work_node {
 	struct io_wq_work_node *next;
@@ -55,19 +62,18 @@ struct io_wq_work {
 	int cancel_seq;
 };
 
-struct io_fixed_file {
-	/* file * with additional FFS_* flags */
-	unsigned long file_ptr;
+struct io_rsrc_data {
+	unsigned int			nr;
+	struct io_rsrc_node		**nodes;
 };
 
 struct io_file_table {
-	struct io_fixed_file *files;
+	struct io_rsrc_data data;
 	unsigned long *bitmap;
 	unsigned int alloc_hint;
 };
 
 struct io_hash_bucket {
-	spinlock_t		lock;
 	struct hlist_head	list;
 } ____cacheline_aligned_in_smp;
 
@@ -75,6 +81,32 @@ struct io_hash_table {
 	struct io_hash_bucket	*hbs;
 	unsigned		hash_bits;
 };
+
+struct io_mapped_region {
+	struct page		**pages;
+	void			*ptr;
+	unsigned		nr_pages;
+	unsigned		flags;
+};
+
+/*
+ * Return value from io_buffer_list selection, to avoid stashing it in
+ * struct io_kiocb. For legacy/classic provided buffers, keeping a reference
+ * across execution contexts are fine. But for ring provided buffers, the
+ * list may go away as soon as ->uring_lock is dropped. As the io_kiocb
+ * persists, it's better to just keep the buffer local for those cases.
+ */
+struct io_br_sel {
+	struct io_buffer_list *buf_list;
+	/*
+	 * Some selection parts return the user address, others return an error.
+	 */
+	union {
+		void __user *addr;
+		ssize_t val;
+	};
+};
+
 
 /*
  * Arbitrary limit, can be raised if need be
@@ -85,6 +117,7 @@ struct io_uring_task {
 	/* submission side */
 	int				cached_refs;
 	const struct io_ring_ctx 	*last;
+	struct task_struct		*task;
 	struct io_wq			*io_wq;
 	struct file			*registered_rings[IO_RINGFD_REG_MAX];
 
@@ -98,6 +131,14 @@ struct io_uring_task {
 		struct llist_head	task_list;
 		struct callback_head	task_work;
 	} ____cacheline_aligned_in_smp;
+};
+
+struct iou_vec {
+	union {
+		struct iovec	*iovec;
+		struct bio_vec	*bvec;
+	};
+	unsigned		nr; /* number of struct iovec it can hold */
 };
 
 struct io_uring {
@@ -183,12 +224,26 @@ struct io_rings {
 	struct io_uring_cqe	cqes[] ____cacheline_aligned_in_smp;
 };
 
+struct io_bpf_filter;
+struct io_bpf_filters {
+	refcount_t refs;	/* ref for ->bpf_filters */
+	spinlock_t lock;	/* protects ->bpf_filters modifications */
+	struct io_bpf_filter __rcu **filters;
+	struct rcu_head rcu_head;
+};
+
 struct io_restriction {
 	DECLARE_BITMAP(register_op, IORING_REGISTER_LAST);
 	DECLARE_BITMAP(sqe_op, IORING_OP_LAST);
+	struct io_bpf_filters *bpf_filters;
+	/* ->bpf_filters needs COW on modification */
+	bool bpf_filters_cow;
 	u8 sqe_flags_allowed;
 	u8 sqe_flags_required;
-	bool registered;
+	/* IORING_OP_* restrictions exist */
+	bool op_registered;
+	/* IORING_REGISTER_* restrictions exist */
+	bool reg_registered;
 };
 
 struct io_submit_link {
@@ -214,30 +269,43 @@ struct io_alloc_cache {
 	void			**entries;
 	unsigned int		nr_cached;
 	unsigned int		max_cached;
-	size_t			elem_size;
+	unsigned int		elem_size;
+	unsigned int		init_clear;
+};
+
+enum {
+	IO_RING_F_DRAIN_NEXT		= BIT(0),
+	IO_RING_F_OP_RESTRICTED		= BIT(1),
+	IO_RING_F_REG_RESTRICTED	= BIT(2),
+	IO_RING_F_OFF_TIMEOUT_USED	= BIT(3),
+	IO_RING_F_DRAIN_ACTIVE		= BIT(4),
+	IO_RING_F_HAS_EVFD		= BIT(5),
+	/* all CQEs should be posted only by the submitter task */
+	IO_RING_F_TASK_COMPLETE		= BIT(6),
+	IO_RING_F_LOCKLESS_CQ		= BIT(7),
+	IO_RING_F_SYSCALL_IOPOLL	= BIT(8),
+	IO_RING_F_POLL_ACTIVATED	= BIT(9),
+	IO_RING_F_DRAIN_DISABLED	= BIT(10),
+	IO_RING_F_COMPAT		= BIT(11),
+	IO_RING_F_IOWQ_LIMITS_SET	= BIT(12),
 };
 
 struct io_ring_ctx {
 	/* const or read-mostly hot data */
 	struct {
+		/* ring setup flags */
 		unsigned int		flags;
-		unsigned int		drain_next: 1;
-		unsigned int		restricted: 1;
-		unsigned int		off_timeout_used: 1;
-		unsigned int		drain_active: 1;
-		unsigned int		has_evfd: 1;
-		/* all CQEs should be posted only by the submitter task */
-		unsigned int		task_complete: 1;
-		unsigned int		lockless_cq: 1;
-		unsigned int		syscall_iopoll: 1;
-		unsigned int		poll_activated: 1;
-		unsigned int		drain_disabled: 1;
-		unsigned int		compat: 1;
-		unsigned int		iowq_limits_set : 1;
+		/* internal state flags IO_RING_F_* flags , mostly read-only */
+		unsigned int		int_flags;
 
 		struct task_struct	*submitter_task;
 		struct io_rings		*rings;
+		/* cache of ->restrictions.bpf_filters->filters */
+		struct io_bpf_filter __rcu	**bpf_filters;
 		struct percpu_ref	refs;
+
+		clockid_t		clockid;
+		enum tk_offsets		clock_offset;
 
 		enum task_work_notify_mode	notify_method;
 		unsigned			sq_thread_idle;
@@ -267,7 +335,6 @@ struct io_ring_ctx {
 		 * Fixed resources fast path, should be accessed only under
 		 * uring_lock, and updated through io_uring_register(2)
 		 */
-		struct io_rsrc_node	*rsrc_node;
 		atomic_t		cancel_seq;
 
 		/*
@@ -277,28 +344,41 @@ struct io_ring_ctx {
 		 * manipulate the list, hence no extra locking is needed there.
 		 */
 		bool			poll_multi_queue;
-		struct io_wq_work_list	iopoll_list;
+		struct list_head	iopoll_list;
 
 		struct io_file_table	file_table;
-		struct io_mapped_ubuf	**user_bufs;
-		unsigned		nr_user_files;
-		unsigned		nr_user_bufs;
+		struct io_rsrc_data	buf_table;
+		struct io_alloc_cache	node_cache;
+		struct io_alloc_cache	imu_cache;
 
 		struct io_submit_state	submit_state;
 
+		/*
+		 * Modifications are protected by ->uring_lock and ->mmap_lock.
+		 * The buffer list's io mapped region should be stable once
+		 * published.
+		 */
 		struct xarray		io_bl_xa;
 
-		struct io_hash_table	cancel_table_locked;
+		struct io_hash_table	cancel_table;
 		struct io_alloc_cache	apoll_cache;
 		struct io_alloc_cache	netmsg_cache;
 		struct io_alloc_cache	rw_cache;
-		struct io_alloc_cache	uring_cache;
+		struct io_alloc_cache	cmd_cache;
+
+		int (*loop_step)(struct io_ring_ctx *ctx,
+				 struct iou_loop_params *);
 
 		/*
 		 * Any cancelable uring_cmd is added to this list in
 		 * ->uring_cmd() by io_uring_cmd_insert_cancelable()
 		 */
 		struct hlist_head	cancelable_uring_cmd;
+		/*
+		 * For Hybrid IOPOLL, runtime in hybrid polling, without
+		 * scheduling time
+		 */
+		u64					hybrid_poll_time;
 	} ____cacheline_aligned_in_smp;
 
 	struct {
@@ -312,7 +392,9 @@ struct io_ring_ctx {
 		unsigned		cached_cq_tail;
 		unsigned		cq_entries;
 		struct io_ev_fd	__rcu	*io_ev_fd;
-		unsigned		cq_extra;
+
+		void			*cq_wait_arg;
+		size_t			cq_wait_size;
 	} ____cacheline_aligned_in_smp;
 
 	/*
@@ -320,7 +402,9 @@ struct io_ring_ctx {
 	 * regularly bounce b/w CPUs.
 	 */
 	struct {
+		struct io_rings	__rcu	*rings_rcu;
 		struct llist_head	work_llist;
+		struct llist_head	retry_llist;
 		unsigned long		check_cq;
 		atomic_t		cq_wait_nr;
 		atomic_t		cq_timeouts;
@@ -329,7 +413,7 @@ struct io_ring_ctx {
 
 	/* timeouts */
 	struct {
-		spinlock_t		timeout_lock;
+		raw_spinlock_t		timeout_lock;
 		struct list_head	timeout_list;
 		struct list_head	ltimeout_list;
 		unsigned		cq_last_tm_flush;
@@ -337,9 +421,7 @@ struct io_ring_ctx {
 
 	spinlock_t		completion_lock;
 
-	struct list_head	io_buffers_comp;
 	struct list_head	cq_overflow_list;
-	struct io_hash_table	cancel_table;
 
 	struct hlist_head	waitid_list;
 
@@ -357,21 +439,12 @@ struct io_ring_ctx {
 	unsigned int		file_alloc_start;
 	unsigned int		file_alloc_end;
 
-	struct list_head	io_buffers_cache;
-
 	/* Keep this last, we don't need it for the fast path */
 	struct wait_queue_head		poll_wq;
 	struct io_restriction		restrictions;
 
-	/* slow path rsrc auxilary data, used by update/register */
-	struct io_rsrc_data		*file_data;
-	struct io_rsrc_data		*buf_data;
-
-	/* protected by ->uring_lock */
-	struct list_head		rsrc_ref_list;
-	struct io_alloc_cache		rsrc_node_cache;
-	struct wait_queue_head		rsrc_quiesce_wq;
-	unsigned			rsrc_quiesce;
+	/* Stores zcrx object pointers of type struct io_zcrx_ifq */
+	struct xarray			zcrx_ctxs;
 
 	u32			pers_next;
 	struct xarray		personalities;
@@ -383,11 +456,17 @@ struct io_ring_ctx {
 	struct user_struct		*user;
 	struct mm_struct		*mm_account;
 
+	/*
+	 * List of tctx nodes for this ctx, protected by tctx_lock. For
+	 * cancelation purposes, nests under uring_lock.
+	 */
+	struct list_head		tctx_list;
+	struct mutex			tctx_lock;
+
 	/* ctx exit and cancelation */
 	struct llist_head		fallback_llist;
 	struct delayed_work		fallback_work;
 	struct work_struct		exit_work;
-	struct list_head		tctx_list;
 	struct completion		ref_comp;
 
 	/* io-wq management, e.g. thread count */
@@ -395,9 +474,10 @@ struct io_ring_ctx {
 
 	struct callback_head		poll_wq_task_work;
 	struct list_head		defer_list;
+	unsigned			nr_drained;
 
-	struct io_alloc_cache		msg_cache;
-	spinlock_t			msg_lock;
+	/* protected by ->completion_lock */
+	unsigned			nr_req_allocated;
 
 #ifdef CONFIG_NET_RX_BUSY_POLL
 	struct list_head	napi_list;	/* track busy poll napi_id */
@@ -406,26 +486,36 @@ struct io_ring_ctx {
 	/* napi busy poll default timeout */
 	ktime_t			napi_busy_poll_dt;
 	bool			napi_prefer_busy_poll;
-	bool			napi_enabled;
+	u8			napi_track_mode;
 
 	DECLARE_HASHTABLE(napi_ht, 4);
 #endif
 
-	/* protected by ->completion_lock */
-	unsigned			evfd_last_cq_tail;
+	struct io_uring_bpf_ops		*bpf_ops;
 
 	/*
-	 * If IORING_SETUP_NO_MMAP is used, then the below holds
-	 * the gup'ed pages for the two rings, and the sqes.
+	 * Protection for resize vs mmap races - both the mmap and resize
+	 * side will need to grab this lock, to prevent either side from
+	 * being run concurrently with the other.
 	 */
-	unsigned short			n_ring_pages;
-	unsigned short			n_sqe_pages;
-	struct page			**ring_pages;
-	struct page			**sqe_pages;
+	struct mutex			mmap_lock;
+
+	struct io_mapped_region		sq_region;
+	struct io_mapped_region		ring_region;
+	/* used for optimised request parameter and wait argument passing  */
+	struct io_mapped_region		param_region;
 };
 
+/*
+ * Token indicating function is called in task work context:
+ * ctx->uring_lock is held and any completions generated will be flushed.
+ * ONLY core io_uring.c should instantiate this struct.
+ */
 struct io_tw_state {
+	bool cancel;
 };
+/* Alias to use in code that doesn't instantiate struct io_tw_state */
+typedef struct io_tw_state io_tw_token_t;
 
 enum {
 	REQ_F_FIXED_FILE_BIT	= IOSQE_FIXED_FILE_BIT,
@@ -444,6 +534,7 @@ enum {
 	REQ_F_LINK_TIMEOUT_BIT,
 	REQ_F_NEED_CLEANUP_BIT,
 	REQ_F_POLLED_BIT,
+	REQ_F_HYBRID_IOPOLL_STATE_BIT,
 	REQ_F_BUFFER_SELECTED_BIT,
 	REQ_F_BUFFER_RING_BIT,
 	REQ_F_REISSUE_BIT,
@@ -454,9 +545,9 @@ enum {
 	REQ_F_SKIP_LINK_CQES_BIT,
 	REQ_F_SINGLE_POLL_BIT,
 	REQ_F_DOUBLE_POLL_BIT,
+	REQ_F_MULTISHOT_BIT,
 	REQ_F_APOLL_MULTISHOT_BIT,
 	REQ_F_CLEAR_POLLIN_BIT,
-	REQ_F_HASH_LOCKED_BIT,
 	/* keep async read/write and isreg together and in order */
 	REQ_F_SUPPORT_NOWAIT_BIT,
 	REQ_F_ISREG_BIT,
@@ -465,6 +556,12 @@ enum {
 	REQ_F_BL_EMPTY_BIT,
 	REQ_F_BL_NO_RECYCLE_BIT,
 	REQ_F_BUFFERS_COMMIT_BIT,
+	REQ_F_BUF_NODE_BIT,
+	REQ_F_BUF_MORE_BIT,
+	REQ_F_HAS_METADATA_BIT,
+	REQ_F_IMPORT_BUFFER_BIT,
+	REQ_F_SQE_COPIED_BIT,
+	REQ_F_IOPOLL_BIT,
 
 	/* not a real bit, just to check we're not overflowing the space */
 	__REQ_F_LAST_BIT,
@@ -503,6 +600,8 @@ enum {
 	REQ_F_NEED_CLEANUP	= IO_REQ_FLAG(REQ_F_NEED_CLEANUP_BIT),
 	/* already went through poll handler */
 	REQ_F_POLLED		= IO_REQ_FLAG(REQ_F_POLLED_BIT),
+	/* every req only blocks once in hybrid poll */
+	REQ_F_IOPOLL_STATE        = IO_REQ_FLAG(REQ_F_HYBRID_IOPOLL_STATE_BIT),
 	/* buffer already selected */
 	REQ_F_BUFFER_SELECTED	= IO_REQ_FLAG(REQ_F_BUFFER_SELECTED_BIT),
 	/* buffer selected from ring, needs commit */
@@ -527,12 +626,12 @@ enum {
 	REQ_F_SINGLE_POLL	= IO_REQ_FLAG(REQ_F_SINGLE_POLL_BIT),
 	/* double poll may active */
 	REQ_F_DOUBLE_POLL	= IO_REQ_FLAG(REQ_F_DOUBLE_POLL_BIT),
+	/* request posts multiple completions, should be set at prep time */
+	REQ_F_MULTISHOT		= IO_REQ_FLAG(REQ_F_MULTISHOT_BIT),
 	/* fast poll multishot mode */
 	REQ_F_APOLL_MULTISHOT	= IO_REQ_FLAG(REQ_F_APOLL_MULTISHOT_BIT),
 	/* recvmsg special flag, clear EPOLLIN */
 	REQ_F_CLEAR_POLLIN	= IO_REQ_FLAG(REQ_F_CLEAR_POLLIN_BIT),
-	/* hashed into ->cancel_hash_locked, protected by ->uring_lock */
-	REQ_F_HASH_LOCKED	= IO_REQ_FLAG(REQ_F_HASH_LOCKED_BIT),
 	/* don't use lazy poll wake for this request */
 	REQ_F_POLL_NO_LAZY	= IO_REQ_FLAG(REQ_F_POLL_NO_LAZY_BIT),
 	/* file is pollable */
@@ -543,9 +642,28 @@ enum {
 	REQ_F_BL_NO_RECYCLE	= IO_REQ_FLAG(REQ_F_BL_NO_RECYCLE_BIT),
 	/* buffer ring head needs incrementing on put */
 	REQ_F_BUFFERS_COMMIT	= IO_REQ_FLAG(REQ_F_BUFFERS_COMMIT_BIT),
+	/* buf node is valid */
+	REQ_F_BUF_NODE		= IO_REQ_FLAG(REQ_F_BUF_NODE_BIT),
+	/* incremental buffer consumption, more space available */
+	REQ_F_BUF_MORE		= IO_REQ_FLAG(REQ_F_BUF_MORE_BIT),
+	/* request has read/write metadata assigned */
+	REQ_F_HAS_METADATA	= IO_REQ_FLAG(REQ_F_HAS_METADATA_BIT),
+	/*
+	 * For vectored fixed buffers, resolve iovec to registered buffers.
+	 * For SEND_ZC, whether to import buffers (i.e. the first issue).
+	 */
+	REQ_F_IMPORT_BUFFER	= IO_REQ_FLAG(REQ_F_IMPORT_BUFFER_BIT),
+	/* ->sqe_copy() has been called, if necessary */
+	REQ_F_SQE_COPIED	= IO_REQ_FLAG(REQ_F_SQE_COPIED_BIT),
+	/* request must be iopolled to completion (set in ->issue()) */
+	REQ_F_IOPOLL		= IO_REQ_FLAG(REQ_F_IOPOLL_BIT),
 };
 
-typedef void (*io_req_tw_func_t)(struct io_kiocb *req, struct io_tw_state *ts);
+struct io_tw_req {
+	struct io_kiocb *req;
+};
+
+typedef void (*io_req_tw_func_t)(struct io_tw_req tw_req, io_tw_token_t tw);
 
 struct io_task_work {
 	struct llist_node		node;
@@ -580,7 +698,11 @@ static inline void io_kiocb_cmd_sz_check(size_t cmd_sz)
 	io_kiocb_cmd_sz_check(sizeof(cmd_type)) , \
 	((cmd_type *)&(req)->cmd) \
 )
-#define cmd_to_io_kiocb(ptr)	((struct io_kiocb *) ptr)
+
+static inline struct io_kiocb *cmd_to_io_kiocb(void *ptr)
+{
+	return ptr;
+}
 
 struct io_kiocb {
 	union {
@@ -599,8 +721,7 @@ struct io_kiocb {
 	u8				iopoll_completed;
 	/*
 	 * Can be either a fixed buffer index, or used with provided buffers.
-	 * For the latter, before issue it points to the buffer group ID,
-	 * and after selection it points to the buffer ID itself.
+	 * For the latter, it points to the selected buffer ID.
 	 */
 	u16				buf_index;
 
@@ -612,20 +733,13 @@ struct io_kiocb {
 	struct io_cqe			cqe;
 
 	struct io_ring_ctx		*ctx;
-	struct task_struct		*task;
+	struct io_uring_task		*tctx;
 
 	union {
-		/* store used ubuf, so we can prevent reloading */
-		struct io_mapped_ubuf	*imu;
-
 		/* stores selected buf, valid IFF REQ_F_BUFFER_SELECTED is set */
 		struct io_buffer	*kbuf;
 
-		/*
-		 * stores buffer ID for ring provided buffers, valid IFF
-		 * REQ_F_BUFFER_RING is set.
-		 */
-		struct io_buffer_list	*buf_list;
+		struct io_rsrc_node	*buf_node;
 	};
 
 	union {
@@ -635,13 +749,28 @@ struct io_kiocb {
 		__poll_t apoll_events;
 	};
 
-	struct io_rsrc_node		*rsrc_node;
+	struct io_rsrc_node		*file_node;
 
 	atomic_t			refs;
 	bool				cancel_seq_set;
-	struct io_task_work		io_task_work;
-	/* for polled requests, i.e. IORING_OP_POLL_ADD and async armed poll */
-	struct hlist_node		hash_node;
+
+	union {
+		struct io_task_work	io_task_work;
+		/* For IOPOLL setup queues, with hybrid polling */
+		u64                     iopoll_start;
+	};
+
+	union {
+		/*
+		 * for polled requests, i.e. IORING_OP_POLL_ADD and async armed
+		 * poll
+		 */
+		struct hlist_node	hash_node;
+		/* IOPOLL completion handling */
+		struct list_head	iopoll_node;
+		/* for private io_kiocb freeing */
+		struct rcu_head		rcu_head;
+	};
 	/* internal polling, see IORING_FEAT_FAST_POLL */
 	struct async_poll		*apoll;
 	/* opcode allocated if it needs to store data for async defer */
@@ -653,7 +782,7 @@ struct io_kiocb {
 	const struct cred		*creds;
 	struct io_wq_work		work;
 
-	struct {
+	struct io_big_cqe {
 		u64			extra1;
 		u64			extra2;
 	} big_cqe;
@@ -663,5 +792,4 @@ struct io_overflow_cqe {
 	struct list_head list;
 	struct io_uring_cqe cqe;
 };
-
 #endif

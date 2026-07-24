@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2012-2014, 2018-2024 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2025 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -18,13 +18,8 @@ enum iwl_regulatory_and_nvm_subcmd_ids {
 
 	/**
 	 * @LARI_CONFIG_CHANGE: &struct iwl_lari_config_change_cmd_v1,
-	 *	&struct iwl_lari_config_change_cmd_v2,
-	 *	&struct iwl_lari_config_change_cmd_v3,
-	 *	&struct iwl_lari_config_change_cmd_v4,
-	 *	&struct iwl_lari_config_change_cmd_v5,
 	 *	&struct iwl_lari_config_change_cmd_v6,
-	 *	&struct iwl_lari_config_change_cmd_v7,
-	 *	&struct iwl_lari_config_change_cmd_v10 or
+	 *	&struct iwl_lari_config_change_cmd_v8,
 	 *	&struct iwl_lari_config_change_cmd
 	 */
 	LARI_CONFIG_CHANGE = 0x1,
@@ -209,7 +204,7 @@ struct iwl_nvm_get_info_phy {
 } __packed; /* REGULATORY_NVM_GET_INFO_PHY_SKU_SECTION_S_VER_1 */
 
 #define IWL_NUM_CHANNELS_V1	51
-#define IWL_NUM_CHANNELS	110
+#define IWL_NUM_CHANNELS_V2	110
 
 /**
  * struct iwl_nvm_get_info_regulatory_v1 - regulatory information
@@ -232,7 +227,7 @@ struct iwl_nvm_get_info_regulatory_v1 {
 struct iwl_nvm_get_info_regulatory {
 	__le32 lar_enabled;
 	__le32 n_channels;
-	__le32 channel_profile[IWL_NUM_CHANNELS];
+	__le32 channel_profile[IWL_NUM_CHANNELS_V2];
 } __packed; /* REGULATORY_NVM_GET_INFO_REGULATORY_S_VER_2 */
 
 /**
@@ -464,27 +459,84 @@ struct iwl_tas_config_cmd_v3 {
 } __packed; /* TAS_CONFIG_CMD_API_S_VER_3 */
 
 /**
+ * enum iwl_tas_uhb_allowed_flags - per country TAS UHB allowed flags.
+ * @TAS_UHB_ALLOWED_CANADA: TAS UHB is allowed in Canada. This flag is valid
+ *	only when fw has %IWL_UCODE_TLV_CAPA_UHB_CANADA_TAS_SUPPORT capability.
+ */
+enum iwl_tas_uhb_allowed_flags {
+	TAS_UHB_ALLOWED_CANADA	= BIT(0),
+};
+
+/**
  * struct iwl_tas_config_cmd_v4 - configures the TAS
  * @override_tas_iec: indicates whether to override default value of IEC regulatory
  * @enable_tas_iec: in case override_tas_iec is set -
  *	indicates whether IEC regulatory is enabled or disabled
  * @usa_tas_uhb_allowed: if set, allow TAS UHB in the USA
- * @reserved: reserved
-*/
+ * @uhb_allowed_flags: see &enum iwl_tas_uhb_allowed_flags.
+ */
 struct iwl_tas_config_cmd_v4 {
 	u8 override_tas_iec;
 	u8 enable_tas_iec;
 	u8 usa_tas_uhb_allowed;
-	u8 reserved;
+	u8 uhb_allowed_flags;
 } __packed; /* TAS_CONFIG_CMD_API_S_VER_4 */
 
-struct iwl_tas_config_cmd {
+struct iwl_tas_config_cmd_v2_v4 {
 	struct iwl_tas_config_cmd_common common;
 	union {
 		struct iwl_tas_config_cmd_v3 v3;
 		struct iwl_tas_config_cmd_v4 v4;
 	};
 };
+
+/**
+ * enum bios_source - source of bios data
+ * @BIOS_SOURCE_NONE: BIOS source is not defined
+ * @BIOS_SOURCE_ACPI: BIOS source is ACPI
+ * @BIOS_SOURCE_UEFI: BIOS source is UEFI
+ */
+enum bios_source {
+	BIOS_SOURCE_NONE,
+	BIOS_SOURCE_ACPI,
+	BIOS_SOURCE_UEFI,
+};
+
+/**
+ * struct iwl_bios_config_hdr - BIOS configuration header
+ * @table_source: see &enum bios_source
+ * @table_revision: table revision.
+ * @reserved: reserved
+ */
+struct iwl_bios_config_hdr {
+	u8 table_source;
+	u8 table_revision;
+	u8 reserved[2];
+} __packed; /* BIOS_CONFIG_HDR_API_S_VER_1 */
+
+/**
+ * struct bios_value_u32 - BIOS configuration.
+ * @hdr: bios config header
+ * @value: value in bios.
+ */
+struct bios_value_u32 {
+	struct iwl_bios_config_hdr hdr;
+	__le32 value;
+} __packed; /* BIOS_CONFIG_DATA_U32_API_S_VER_1 */
+
+/**
+ * struct iwl_tas_config_cmd - configures the TAS.
+ * @block_list_size: size of relevant field in block_list_array
+ * @block_list_array: list of countries where TAS must be disabled
+ * @reserved: reserved
+ * @tas_config_info: see @struct bios_value_u32
+ */
+struct iwl_tas_config_cmd {
+	__le16 block_list_size;
+	__le16 block_list_array[IWL_WTAS_BLACK_LIST_MAX];
+	u8 reserved[2];
+	struct bios_value_u32 tas_config_info;
+} __packed; /* TAS_CONFIG_CMD_API_S_VER_5 */
 
 /**
  * enum iwl_lari_config_masks - bit masks for the various LARI config operations
@@ -516,74 +568,6 @@ struct iwl_lari_config_change_cmd_v1 {
 } __packed; /* LARI_CHANGE_CONF_CMD_S_VER_1 */
 
 /**
- * struct iwl_lari_config_change_cmd_v2 - change LARI configuration
- * @config_bitmap: bit map of the config commands. each bit will trigger a
- * different predefined FW config operation
- * @oem_uhb_allow_bitmap: bitmap of UHB enabled MCC sets
- */
-struct iwl_lari_config_change_cmd_v2 {
-	__le32 config_bitmap;
-	__le32 oem_uhb_allow_bitmap;
-} __packed; /* LARI_CHANGE_CONF_CMD_S_VER_2 */
-
-/**
- * struct iwl_lari_config_change_cmd_v3 - change LARI configuration
- * @config_bitmap: bit map of the config commands. each bit will trigger a
- * different predefined FW config operation
- * @oem_uhb_allow_bitmap: bitmap of UHB enabled MCC sets
- * @oem_11ax_allow_bitmap: bitmap of 11ax allowed MCCs.
- * For each supported country, a pair of regulatory override bit and 11ax mode exist
- * in the bit field.
- */
-struct iwl_lari_config_change_cmd_v3 {
-	__le32 config_bitmap;
-	__le32 oem_uhb_allow_bitmap;
-	__le32 oem_11ax_allow_bitmap;
-} __packed; /* LARI_CHANGE_CONF_CMD_S_VER_3 */
-
-/**
- * struct iwl_lari_config_change_cmd_v4 - change LARI configuration
- * @config_bitmap: Bitmap of the config commands. Each bit will trigger a
- *     different predefined FW config operation.
- * @oem_uhb_allow_bitmap: Bitmap of UHB enabled MCC sets.
- * @oem_11ax_allow_bitmap: Bitmap of 11ax allowed MCCs. There are two bits
- *     per country, one to indicate whether to override and the other to
- *     indicate the value to use.
- * @oem_unii4_allow_bitmap: Bitmap of unii4 allowed MCCs.There are two bits
- *     per country, one to indicate whether to override and the other to
- *     indicate allow/disallow unii4 channels.
- */
-struct iwl_lari_config_change_cmd_v4 {
-	__le32 config_bitmap;
-	__le32 oem_uhb_allow_bitmap;
-	__le32 oem_11ax_allow_bitmap;
-	__le32 oem_unii4_allow_bitmap;
-} __packed; /* LARI_CHANGE_CONF_CMD_S_VER_4 */
-
-/**
- * struct iwl_lari_config_change_cmd_v5 - change LARI configuration
- * @config_bitmap: Bitmap of the config commands. Each bit will trigger a
- *     different predefined FW config operation.
- * @oem_uhb_allow_bitmap: Bitmap of UHB enabled MCC sets.
- * @oem_11ax_allow_bitmap: Bitmap of 11ax allowed MCCs. There are two bits
- *     per country, one to indicate whether to override and the other to
- *     indicate the value to use.
- * @oem_unii4_allow_bitmap: Bitmap of unii4 allowed MCCs.There are two bits
- *     per country, one to indicate whether to override and the other to
- *     indicate allow/disallow unii4 channels.
- * @chan_state_active_bitmap: Bitmap for overriding channel state to active.
- *     Each bit represents a country or region to activate, according to the BIOS
- *     definitions.
- */
-struct iwl_lari_config_change_cmd_v5 {
-	__le32 config_bitmap;
-	__le32 oem_uhb_allow_bitmap;
-	__le32 oem_11ax_allow_bitmap;
-	__le32 oem_unii4_allow_bitmap;
-	__le32 chan_state_active_bitmap;
-} __packed; /* LARI_CHANGE_CONF_CMD_S_VER_5 */
-
-/**
  * struct iwl_lari_config_change_cmd_v6 - change LARI configuration
  * @config_bitmap: Bitmap of the config commands. Each bit will trigger a
  *     different predefined FW config operation.
@@ -610,8 +594,7 @@ struct iwl_lari_config_change_cmd_v6 {
 } __packed; /* LARI_CHANGE_CONF_CMD_S_VER_6 */
 
 /**
- * struct iwl_lari_config_change_cmd_v7 - change LARI configuration
- * This structure is used also for lari cmd version 8 and 9.
+ * struct iwl_lari_config_change_cmd_v8 - change LARI configuration
  * @config_bitmap: Bitmap of the config commands. Each bit will trigger a
  *     different predefined FW config operation.
  * @oem_uhb_allow_bitmap: Bitmap of UHB enabled MCC sets.
@@ -621,21 +604,19 @@ struct iwl_lari_config_change_cmd_v6 {
  * @oem_unii4_allow_bitmap: Bitmap of unii4 allowed MCCs.There are two bits
  *     per country, one to indicate whether to override and the other to
  *     indicate allow/disallow unii4 channels.
- *     For LARI cmd version 4 to 8 - bits 0:3 are supported.
- *     For LARI cmd version 9 - bits 0:5 are supported.
+ *     bit 0 - 3: supported.
  * @chan_state_active_bitmap: Bitmap to enable different bands per country
  *     or region.
  *     Each bit represents a country or region, and a band to activate
  *     according to the BIOS definitions.
- *     For LARI cmd version 7 - bits 0:3 are supported.
- *     For LARI cmd version 8 - bits 0:4 are supported.
+ *     bit 0 - 4: supported.
  * @force_disable_channels_bitmap: Bitmap of disabled bands/channels.
  *     Each bit represents a set of channels in a specific band that should be
  *     disabled
  * @edt_bitmap: Bitmap of energy detection threshold table.
  *	Disable/enable the EDT optimization method for different band.
  */
-struct iwl_lari_config_change_cmd_v7 {
+struct iwl_lari_config_change_cmd_v8 {
 	__le32 config_bitmap;
 	__le32 oem_uhb_allow_bitmap;
 	__le32 oem_11ax_allow_bitmap;
@@ -644,48 +625,8 @@ struct iwl_lari_config_change_cmd_v7 {
 	__le32 force_disable_channels_bitmap;
 	__le32 edt_bitmap;
 } __packed;
-/* LARI_CHANGE_CONF_CMD_S_VER_7 */
 /* LARI_CHANGE_CONF_CMD_S_VER_8 */
-/* LARI_CHANGE_CONF_CMD_S_VER_9 */
 
-/**
- * struct iwl_lari_config_change_cmd_v10 - change LARI configuration
- * @config_bitmap: Bitmap of the config commands. Each bit will trigger a
- *	different predefined FW config operation.
- * @oem_uhb_allow_bitmap: Bitmap of UHB enabled MCC sets.
- * @oem_11ax_allow_bitmap: Bitmap of 11ax allowed MCCs. There are two bits
- *	per country, one to indicate whether to override and the other to
- *	indicate the value to use.
- * @oem_unii4_allow_bitmap: Bitmap of unii4 allowed MCCs.There are two bits
- *	per country, one to indicate whether to override and the other to
- *	indicate allow/disallow unii4 channels.
- *	For LARI cmd version 10 - bits 0:5 are supported.
- * @chan_state_active_bitmap: Bitmap to enable different bands per country
- *	or region.
- *	Each bit represents a country or region, and a band to activate
- *	according to the BIOS definitions.
- *	For LARI cmd version 10 - bits 0:4 are supported.
- * @force_disable_channels_bitmap: Bitmap of disabled bands/channels.
- *	Each bit represents a set of channels in a specific band that should be
- *	disabled
- * @edt_bitmap: Bitmap of energy detection threshold table.
- *	Disable/enable the EDT optimization method for different band.
- * @oem_320mhz_allow_bitmap: 320Mhz bandwidth enablement bitmap per MCC.
- *	bit0: enable 320Mhz in Japan.
- *	bit1: enable 320Mhz in South Korea.
- *	bit 2 - 31: reserved.
- */
-struct iwl_lari_config_change_cmd_v10 {
-	__le32 config_bitmap;
-	__le32 oem_uhb_allow_bitmap;
-	__le32 oem_11ax_allow_bitmap;
-	__le32 oem_unii4_allow_bitmap;
-	__le32 chan_state_active_bitmap;
-	__le32 force_disable_channels_bitmap;
-	__le32 edt_bitmap;
-	__le32 oem_320mhz_allow_bitmap;
-} __packed;
-/* LARI_CHANGE_CONF_CMD_S_VER_10 */
 
 /**
  * struct iwl_lari_config_change_cmd - change LARI configuration
@@ -698,14 +639,11 @@ struct iwl_lari_config_change_cmd_v10 {
  * @oem_unii4_allow_bitmap: Bitmap of unii4 allowed MCCs.There are two bits
  *	per country, one to indicate whether to override and the other to
  *	indicate allow/disallow unii4 channels.
- *	For LARI cmd version 11 - bits 0:5 are supported.
  * @chan_state_active_bitmap: Bitmap to enable different bands per country
  *	or region.
  *	Each bit represents a country or region, and a band to activate
  *	according to the BIOS definitions.
- *	For LARI cmd version 11 - bits 0:4 are supported.
- *	For LARI cmd version 12 - bits 0:6 are supported and bits 7:31 are
- *	reserved. No need to mask out the reserved bits.
+ *	bit 0 - 6: supported.
  * @force_disable_channels_bitmap: Bitmap of disabled bands/channels.
  *	Each bit represents a set of channels in a specific band that should be
  *	disabled
@@ -720,6 +658,10 @@ struct iwl_lari_config_change_cmd_v10 {
  *	bit0: enable 11be in China(CB/CN).
  *	bit1: enable 11be in South Korea.
  *	bit 2 - 31: reserved.
+ * @oem_11bn_allow_bitmap: Bitmap of 11bn allowed MCCs. The firmware expects to
+ *	get the data from the BIOS.
+ * @oem_unii9_enable: UNII-9 enablement as read from the BIOS
+ * @bios_hdr: bios config header
  */
 struct iwl_lari_config_change_cmd {
 	__le32 config_bitmap;
@@ -731,13 +673,21 @@ struct iwl_lari_config_change_cmd {
 	__le32 edt_bitmap;
 	__le32 oem_320mhz_allow_bitmap;
 	__le32 oem_11be_allow_bitmap;
+	/* since version 13 */
+	__le32 oem_11bn_allow_bitmap;
+	/* since version 13 */
+	__le32 oem_unii9_enable;
+	/* since version 13 */
+	struct iwl_bios_config_hdr bios_hdr;
 } __packed;
-/* LARI_CHANGE_CONF_CMD_S_VER_11 */
-/* LARI_CHANGE_CONF_CMD_S_VER_12 */
+/* LARI_CHANGE_CONF_CMD_S_VER_12
+ * LARI_CHANGE_CONF_CMD_S_VER_13
+ */
 
 /* Activate UNII-1 (5.2GHz) for World Wide */
 #define ACTIVATE_5G2_IN_WW_MASK			BIT(4)
-#define CHAN_STATE_ACTIVE_BITMAP_CMD_V11	0x1F
+#define CHAN_STATE_ACTIVE_BITMAP_CMD_V8		0x1F
+#define CHAN_STATE_ACTIVE_BITMAP_CMD_V12	0x7F
 
 /**
  * struct iwl_pnvm_init_complete_ntfy - PNVM initialization complete
@@ -751,13 +701,23 @@ struct iwl_pnvm_init_complete_ntfy {
 #define UATS_TABLE_COL_SIZE	13
 
 /**
- * struct iwl_mcc_allowed_ap_type_cmd - struct for MCC_ALLOWED_AP_TYPE_CMD
- * @offset_map: mapping a mcc to UHB AP type support (UATS) allowed
+ * struct iwl_mcc_allowed_ap_type_cmd_v1 - struct for MCC_ALLOWED_AP_TYPE_CMD
+ * @mcc_to_ap_type_map: mapping an MCC to 6 GHz AP type support (UATS)
  * @reserved: reserved
  */
-struct iwl_mcc_allowed_ap_type_cmd {
-	u8 offset_map[UATS_TABLE_ROW_SIZE][UATS_TABLE_COL_SIZE];
+struct iwl_mcc_allowed_ap_type_cmd_v1 {
+	u8 mcc_to_ap_type_map[UATS_TABLE_ROW_SIZE][UATS_TABLE_COL_SIZE];
 	__le16 reserved;
 } __packed; /* MCC_ALLOWED_AP_TYPE_CMD_API_S_VER_1 */
+
+/**
+ * struct iwl_mcc_allowed_ap_type_cmd - struct for MCC_ALLOWED_AP_TYPE_CMD
+ * @mcc_to_ap_type_map: mapping an MCC to 6 GHz AP type support (UATS)
+ * @mcc_to_ap_type_unii9_map: mapping an MCC to UNII-9 AP type support allowed
+ */
+struct iwl_mcc_allowed_ap_type_cmd {
+	u8 mcc_to_ap_type_map[UATS_TABLE_ROW_SIZE][UATS_TABLE_COL_SIZE];
+	u8 mcc_to_ap_type_unii9_map[UATS_TABLE_ROW_SIZE][UATS_TABLE_COL_SIZE];
+} __packed; /* MCC_ALLOWED_AP_TYPE_CMD_API_S_VER_2 */
 
 #endif /* __iwl_fw_api_nvm_reg_h__ */

@@ -260,7 +260,7 @@ static void shmob_drm_plane_reset(struct drm_plane *plane)
 		plane->state = NULL;
 	}
 
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	state = kzalloc_obj(*state);
 	if (state == NULL)
 		return;
 
@@ -271,6 +271,13 @@ static const struct drm_plane_helper_funcs shmob_drm_plane_helper_funcs = {
 	.atomic_check = shmob_drm_plane_atomic_check,
 	.atomic_update = shmob_drm_plane_atomic_update,
 	.atomic_disable = shmob_drm_plane_atomic_disable,
+};
+
+static const struct drm_plane_helper_funcs shmob_drm_primary_plane_helper_funcs = {
+	.atomic_check = shmob_drm_plane_atomic_check,
+	.atomic_update = shmob_drm_plane_atomic_update,
+	.atomic_disable = shmob_drm_plane_atomic_disable,
+	.get_scanout_buffer = drm_fb_dma_get_scanout_buffer,
 };
 
 static const struct drm_plane_funcs shmob_drm_plane_funcs = {
@@ -310,7 +317,12 @@ struct drm_plane *shmob_drm_plane_create(struct shmob_drm_device *sdev,
 
 	splane->index = index;
 
-	drm_plane_helper_add(&splane->base, &shmob_drm_plane_helper_funcs);
+	if (type == DRM_PLANE_TYPE_PRIMARY)
+		drm_plane_helper_add(&splane->base,
+				     &shmob_drm_primary_plane_helper_funcs);
+	else
+		drm_plane_helper_add(&splane->base,
+				     &shmob_drm_plane_helper_funcs);
 
 	return &splane->base;
 }

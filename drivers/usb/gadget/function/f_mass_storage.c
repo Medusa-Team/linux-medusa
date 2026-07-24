@@ -180,6 +180,7 @@
 #include <linux/kthread.h>
 #include <linux/sched/signal.h>
 #include <linux/limits.h>
+#include <linux/overflow.h>
 #include <linux/pagemap.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>
@@ -188,7 +189,7 @@
 #include <linux/freezer.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -500,7 +501,7 @@ static int fsg_setup(struct usb_function *f,
 		*(u8 *)req->buf = _fsg_common_get_max_lun(fsg->common);
 
 		/* Respond with data/status */
-		req->length = min((u16)1, w_length);
+		req->length = min_t(u16, 1, w_length);
 		return ep0_queue(fsg->common);
 	}
 
@@ -655,7 +656,7 @@ static int do_read(struct fsg_common *common)
 		 * And don't try to read past the end of the file.
 		 */
 		amount = min(amount_left, FSG_BUFLEN);
-		amount = min((loff_t)amount,
+		amount = min_t(loff_t, amount,
 			     curlun->file_length - file_offset);
 
 		/* Wait for the next buffer to become available */
@@ -1005,7 +1006,7 @@ static int do_verify(struct fsg_common *common)
 		 * And don't try to read past the end of the file.
 		 */
 		amount = min(amount_left, FSG_BUFLEN);
-		amount = min((loff_t)amount,
+		amount = min_t(loff_t, amount,
 			     curlun->file_length - file_offset);
 		if (amount == 0) {
 			curlun->sense_data =
@@ -1853,8 +1854,15 @@ static int check_command_size_in_blocks(struct fsg_common *common,
 		int cmnd_size, enum data_direction data_dir,
 		unsigned int mask, int needs_medium, const char *name)
 {
-	if (common->curlun)
-		common->data_size_from_cmnd <<= common->curlun->blkbits;
+	if (common->curlun) {
+		if (check_shl_overflow(common->data_size_from_cmnd,
+				       common->curlun->blkbits,
+				       &common->data_size_from_cmnd)) {
+			common->phase_error = 1;
+			return -EINVAL;
+		}
+	}
+
 	return check_command(common, cmnd_size, data_dir,
 			mask, needs_medium, name);
 }
@@ -2142,8 +2150,8 @@ static int do_scsi_command(struct fsg_common *common)
 	 * of Posix locks.
 	 */
 	case FORMAT_UNIT:
-	case RELEASE:
-	case RESERVE:
+	case RELEASE_6:
+	case RESERVE_6:
 	case SEND_DIAGNOSTIC:
 
 	default:
@@ -2167,7 +2175,7 @@ unknown_cmnd:
 	if (reply == -EINVAL)
 		reply = 0;		/* Error reply length */
 	if (reply >= 0 && common->data_dir == DATA_DIR_TO_HOST) {
-		reply = min((u32)reply, common->data_size_from_cmnd);
+		reply = min_t(u32, reply, common->data_size_from_cmnd);
 		bh->inreq->length = reply;
 		bh->state = BUF_STATE_FULL;
 		common->residue -= reply;
@@ -2699,7 +2707,7 @@ static void fsg_lun_release(struct device *dev)
 static struct fsg_common *fsg_common_setup(struct fsg_common *common)
 {
 	if (!common) {
-		common = kzalloc(sizeof(*common), GFP_KERNEL);
+		common = kzalloc_obj(*common);
 		if (!common)
 			return ERR_PTR(-ENOMEM);
 		common->free_storage_on_release = 1;
@@ -2740,7 +2748,7 @@ int fsg_common_set_num_buffers(struct fsg_common *common, unsigned int n)
 	struct fsg_buffhd *bh, *buffhds;
 	int i;
 
-	buffhds = kcalloc(n, sizeof(*buffhds), GFP_KERNEL);
+	buffhds = kzalloc_objs(*buffhds, n);
 	if (!buffhds)
 		return -ENOMEM;
 
@@ -2887,7 +2895,7 @@ int fsg_common_create_lun(struct fsg_common *common, struct fsg_lun_config *cfg,
 		return -EINVAL;
 	}
 
-	lun = kzalloc(sizeof(*lun), GFP_KERNEL);
+	lun = kzalloc_obj(*lun);
 	if (!lun)
 		return -ENOMEM;
 
@@ -3050,7 +3058,7 @@ static int fsg_bind(struct usb_configuration *c, struct usb_function *f)
 	if (!common->thread_task) {
 		common->state = FSG_STATE_NORMAL;
 		common->thread_task =
-			kthread_create(fsg_main_thread, common, "file-storage");
+			kthread_run(fsg_main_thread, common, "file-storage");
 		if (IS_ERR(common->thread_task)) {
 			ret = PTR_ERR(common->thread_task);
 			common->thread_task = NULL;
@@ -3059,7 +3067,6 @@ static int fsg_bind(struct usb_configuration *c, struct usb_function *f)
 		}
 		DBG(common, "I/O thread pid: %d\n",
 		    task_pid_nr(common->thread_task));
-		wake_up_process(common->thread_task);
 	}
 
 	fsg->gadget = gadget;
@@ -3154,7 +3161,7 @@ static void fsg_lun_attr_release(struct config_item *item)
 	kfree(lun_opts);
 }
 
-static struct configfs_item_operations fsg_lun_item_ops = {
+static const struct configfs_item_operations fsg_lun_item_ops = {
 	.release		= fsg_lun_attr_release,
 };
 
@@ -3312,7 +3319,7 @@ static struct config_group *fsg_lun_make(struct config_group *group,
 		goto out;
 	}
 
-	opts = kzalloc(sizeof(*opts), GFP_KERNEL);
+	opts = kzalloc_obj(*opts);
 	if (!opts) {
 		ret = -ENOMEM;
 		goto out;
@@ -3370,7 +3377,7 @@ static void fsg_attr_release(struct config_item *item)
 	usb_put_function_instance(&opts->func_inst);
 }
 
-static struct configfs_item_operations fsg_item_ops = {
+static const struct configfs_item_operations fsg_item_ops = {
 	.release		= fsg_attr_release,
 };
 
@@ -3463,7 +3470,7 @@ static struct configfs_attribute *fsg_attrs[] = {
 	NULL,
 };
 
-static struct configfs_group_operations fsg_group_ops = {
+static const struct configfs_group_operations fsg_group_ops = {
 	.make_group	= fsg_lun_make,
 	.drop_item	= fsg_lun_drop,
 };
@@ -3490,7 +3497,7 @@ static struct usb_function_instance *fsg_alloc_inst(void)
 	struct fsg_lun_config config;
 	int rc;
 
-	opts = kzalloc(sizeof(*opts), GFP_KERNEL);
+	opts = kzalloc_obj(*opts);
 	if (!opts)
 		return ERR_PTR(-ENOMEM);
 	mutex_init(&opts->lock);
@@ -3555,7 +3562,7 @@ static struct usb_function *fsg_alloc(struct usb_function_instance *fi)
 	struct fsg_common *common = opts->common;
 	struct fsg_dev *fsg;
 
-	fsg = kzalloc(sizeof(*fsg), GFP_KERNEL);
+	fsg = kzalloc_obj(*fsg);
 	if (unlikely(!fsg))
 		return ERR_PTR(-ENOMEM);
 

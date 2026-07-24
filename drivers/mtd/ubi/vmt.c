@@ -143,8 +143,10 @@ static struct fwnode_handle *find_volume_fwnode(struct ubi_volume *vol)
 		    vol->vol_id != volid)
 			continue;
 
+		fwnode_handle_put(fw_vols);
 		return fw_vol;
 	}
+	fwnode_handle_put(fw_vols);
 
 	return NULL;
 }
@@ -170,7 +172,7 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 	if (ubi->ro_mode)
 		return -EROFS;
 
-	vol = kzalloc(sizeof(struct ubi_volume), GFP_KERNEL);
+	vol = kzalloc_obj(struct ubi_volume);
 	if (!vol)
 		return -ENOMEM;
 

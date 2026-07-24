@@ -36,7 +36,7 @@
 #include <linux/kfifo.h>
 #include <linux/delay.h>
 #include <linux/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "cypress_m8.h"
 
@@ -139,7 +139,6 @@ static void cypress_write_int_callback(struct urb *urb);
 
 static struct usb_serial_driver cypress_earthmate_device = {
 	.driver = {
-		.owner =		THIS_MODULE,
 		.name =			"earthmate",
 	},
 	.description =			"DeLorme Earthmate USB",
@@ -166,7 +165,6 @@ static struct usb_serial_driver cypress_earthmate_device = {
 
 static struct usb_serial_driver cypress_hidcom_device = {
 	.driver = {
-		.owner =		THIS_MODULE,
 		.name =			"cyphidcom",
 	},
 	.description =			"HID->COM RS232 Adapter",
@@ -192,7 +190,6 @@ static struct usb_serial_driver cypress_hidcom_device = {
 
 static struct usb_serial_driver cypress_ca42v2_device = {
 	.driver = {
-		.owner =		THIS_MODULE,
 		.name =			"nokiaca42v2",
 	},
 	.description =			"Nokia CA-42 V2 Adapter",
@@ -448,7 +445,15 @@ static int cypress_generic_port_probe(struct usb_serial_port *port)
 		return -ENODEV;
 	}
 
-	priv = kzalloc(sizeof(struct cypress_private), GFP_KERNEL);
+	/*
+	 * The buffer must be large enough for the one or two-byte header (and
+	 * following data), but assume anything smaller than eight bytes is
+	 * broken.
+	 */
+	if (port->interrupt_out_size < 8)
+		return -EINVAL;
+
+	priv = kzalloc_obj(struct cypress_private);
 	if (!priv)
 		return -ENOMEM;
 
@@ -1020,8 +1025,8 @@ static void cypress_read_int_callback(struct urb *urb)
 	char tty_flag = TTY_NORMAL;
 	int bytes = 0;
 	int result;
-	int i = 0;
 	int status = urb->status;
+	int i;
 
 	switch (status) {
 	case 0: /* success */
@@ -1059,22 +1064,32 @@ static void cypress_read_int_callback(struct urb *urb)
 
 	spin_lock_irqsave(&priv->lock, flags);
 	result = urb->actual_length;
+	i = 0;
 	switch (priv->pkt_fmt) {
 	default:
 	case packet_format_1:
 		/* This is for the CY7C64013... */
+		if (result < 2)
+			break;
 		priv->current_status = data[0] & 0xF8;
 		bytes = data[1] + 2;
 		i = 2;
 		break;
 	case packet_format_2:
 		/* This is for the CY7C63743... */
+		if (result < 1)
+			break;
 		priv->current_status = data[0] & 0xF8;
 		bytes = (data[0] & 0x07) + 1;
 		i = 1;
 		break;
 	}
 	spin_unlock_irqrestore(&priv->lock, flags);
+	if (i == 0) {
+		dev_dbg(dev, "%s - short packet received: %d bytes\n",
+			__func__, result);
+		goto continue_read;
+	}
 	if (result < bytes) {
 		dev_dbg(dev,
 			"%s - wrong packet size - received %d bytes but packet said %d bytes\n",

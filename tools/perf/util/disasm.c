@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <ctype.h>
+#include <elf.h>
+#ifndef EF_CSKY_ABIMASK
+#define EF_CSKY_ABIMASK	0XF0000000
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -9,40 +13,45 @@
 #include <unistd.h>
 
 #include <linux/string.h>
+#include <linux/zalloc.h>
 #include <subcmd/run-command.h>
 
 #include "annotate.h"
+#include "annotate-data.h"
 #include "build-id.h"
+#include "capstone.h"
 #include "debug.h"
 #include "disasm.h"
 #include "dso.h"
+#include "dwarf-regs.h"
 #include "env.h"
 #include "evsel.h"
+#include "libbfd.h"
+#include "llvm.h"
 #include "map.h"
 #include "maps.h"
 #include "namespaces.h"
 #include "srcline.h"
 #include "symbol.h"
+#include "thread.h"
 #include "util.h"
 
 static regex_t	 file_lineno;
 
 /* These can be referred from the arch-dependent code */
-static struct ins_ops call_ops;
-static struct ins_ops dec_ops;
-static struct ins_ops jump_ops;
-static struct ins_ops mov_ops;
-static struct ins_ops nop_ops;
-static struct ins_ops lock_ops;
-static struct ins_ops ret_ops;
-
-static int jump__scnprintf(struct ins *ins, char *bf, size_t size,
-			   struct ins_operands *ops, int max_ins_name);
-static int call__scnprintf(struct ins *ins, char *bf, size_t size,
-			   struct ins_operands *ops, int max_ins_name);
+const struct ins_ops call_ops;
+const struct ins_ops dec_ops;
+const struct ins_ops jump_ops;
+const struct ins_ops mov_ops;
+const struct ins_ops nop_ops;
+const struct ins_ops lock_ops;
+const struct ins_ops ret_ops;
+const struct ins_ops load_store_ops;
+const struct ins_ops arithmetic_ops;
 
 static void ins__sort(struct arch *arch);
 static int disasm_line__parse(char *line, const char **namep, char **rawp);
+static int disasm_line__parse_powerpc(struct disasm_line *dl, struct annotate_args *args);
 
 static __attribute__((constructor)) void symbol__init_regexpr(void)
 {
@@ -58,7 +67,8 @@ static int arch__grow_instructions(struct arch *arch)
 		goto grow_from_non_allocated_table;
 
 	new_nr_allocated = arch->nr_instructions_allocated + 128;
-	new_instructions = realloc(arch->instructions, new_nr_allocated * sizeof(struct ins));
+	new_instructions = realloc((void *)arch->instructions,
+				   new_nr_allocated * sizeof(struct ins));
 	if (new_instructions == NULL)
 		return -1;
 
@@ -73,11 +83,11 @@ grow_from_non_allocated_table:
 	if (new_instructions == NULL)
 		return -1;
 
-	memcpy(new_instructions, arch->instructions, arch->nr_instructions);
+	memcpy(new_instructions, arch->instructions, arch->nr_instructions * sizeof(struct ins));
 	goto out_update_instructions;
 }
 
-static int arch__associate_ins_ops(struct arch* arch, const char *name, struct ins_ops *ops)
+int arch__associate_ins_ops(struct arch *arch, const char *name, const struct ins_ops *ops)
 {
 	struct ins *ins;
 
@@ -85,7 +95,7 @@ static int arch__associate_ins_ops(struct arch* arch, const char *name, struct i
 	    arch__grow_instructions(arch))
 		return -1;
 
-	ins = &arch->instructions[arch->nr_instructions];
+	ins = (struct ins *)&arch->instructions[arch->nr_instructions];
 	ins->name = strdup(name);
 	if (!ins->name)
 		return -1;
@@ -97,124 +107,100 @@ static int arch__associate_ins_ops(struct arch* arch, const char *name, struct i
 	return 0;
 }
 
-#include "arch/arc/annotate/instructions.c"
-#include "arch/arm/annotate/instructions.c"
-#include "arch/arm64/annotate/instructions.c"
-#include "arch/csky/annotate/instructions.c"
-#include "arch/loongarch/annotate/instructions.c"
-#include "arch/mips/annotate/instructions.c"
-#include "arch/x86/annotate/instructions.c"
-#include "arch/powerpc/annotate/instructions.c"
-#include "arch/riscv64/annotate/instructions.c"
-#include "arch/s390/annotate/instructions.c"
-#include "arch/sparc/annotate/instructions.c"
-
-static struct arch architectures[] = {
-	{
-		.name = "arc",
-		.init = arc__annotate_init,
-	},
-	{
-		.name = "arm",
-		.init = arm__annotate_init,
-	},
-	{
-		.name = "arm64",
-		.init = arm64__annotate_init,
-	},
-	{
-		.name = "csky",
-		.init = csky__annotate_init,
-	},
-	{
-		.name = "mips",
-		.init = mips__annotate_init,
-		.objdump = {
-			.comment_char = '#',
-		},
-	},
-	{
-		.name = "x86",
-		.init = x86__annotate_init,
-		.instructions = x86__instructions,
-		.nr_instructions = ARRAY_SIZE(x86__instructions),
-		.insn_suffix = "bwlq",
-		.objdump =  {
-			.comment_char = '#',
-			.register_char = '%',
-			.memory_ref_char = '(',
-			.imm_char = '$',
-		},
-	},
-	{
-		.name = "powerpc",
-		.init = powerpc__annotate_init,
-	},
-	{
-		.name = "riscv64",
-		.init = riscv64__annotate_init,
-	},
-	{
-		.name = "s390",
-		.init = s390__annotate_init,
-		.objdump =  {
-			.comment_char = '#',
-		},
-	},
-	{
-		.name = "sparc",
-		.init = sparc__annotate_init,
-		.objdump = {
-			.comment_char = '#',
-		},
-	},
-	{
-		.name = "loongarch",
-		.init = loongarch__annotate_init,
-		.objdump = {
-			.comment_char = '#',
-		},
-	},
-};
-
-static int arch__key_cmp(const void *name, const void *archp)
+static int e_machine_and_eflags__cmp(const struct e_machine_and_e_flags *val1,
+				     const struct e_machine_and_e_flags *val2)
 {
-	const struct arch *arch = archp;
+	if (val1->e_machine == val2->e_machine) {
+		if (val1->e_machine != EM_CSKY)
+			return 0;
+		if ((val1->e_flags & EF_CSKY_ABIMASK) < (val2->e_flags & EF_CSKY_ABIMASK))
+			return -1;
+		return (val1->e_flags & EF_CSKY_ABIMASK) > (val2->e_flags & EF_CSKY_ABIMASK);
+	}
+	return val1->e_machine < val2->e_machine ? -1 : 1;
+}
 
-	return strcmp(name, arch->name);
+static int arch__key_cmp(const void *key, const void *archp)
+{
+	const struct arch *const *arch = archp;
+
+	return e_machine_and_eflags__cmp(key, &(*arch)->id);
 }
 
 static int arch__cmp(const void *a, const void *b)
 {
-	const struct arch *aa = a;
-	const struct arch *ab = b;
+	const struct arch *const *aa = a;
+	const struct arch *const *ab = b;
 
-	return strcmp(aa->name, ab->name);
+	return e_machine_and_eflags__cmp(&(*aa)->id, &(*ab)->id);
 }
 
-static void arch__sort(void)
+const struct arch *arch__find(uint16_t e_machine, uint32_t e_flags, const char *cpuid)
 {
-	const int nmemb = ARRAY_SIZE(architectures);
+	static const struct arch *(*const arch_new_fn[])(const struct e_machine_and_e_flags *id,
+							 const char *cpuid) = {
+		[EM_386]	= arch__new_x86,
+		[EM_ARC]	= arch__new_arc,
+		[EM_ARM]	= arch__new_arm,
+		[EM_AARCH64]	= arch__new_arm64,
+		[EM_CSKY]	= arch__new_csky,
+		[EM_LOONGARCH]	= arch__new_loongarch,
+		[EM_MIPS]	= arch__new_mips,
+		[EM_PPC64]	= arch__new_powerpc,
+		[EM_PPC]	= arch__new_powerpc,
+		[EM_RISCV]	= arch__new_riscv64,
+		[EM_S390]	= arch__new_s390,
+		[EM_SPARC]	= arch__new_sparc,
+		[EM_SPARCV9]	= arch__new_sparc,
+		[EM_X86_64]	= arch__new_x86,
+	};
+	static const struct arch **archs;
+	static size_t num_archs;
+	struct e_machine_and_e_flags key = {
+		.e_machine = e_machine,
+		.e_flags = e_flags,
+	};
+	const struct arch *result = NULL, **tmp;
 
-	qsort(architectures, nmemb, sizeof(struct arch), arch__cmp);
-}
-
-struct arch *arch__find(const char *name)
-{
-	const int nmemb = ARRAY_SIZE(architectures);
-	static bool sorted;
-
-	if (!sorted) {
-		arch__sort();
-		sorted = true;
+	if (num_archs > 0) {
+		tmp = bsearch(&key, archs, num_archs, sizeof(*archs), arch__key_cmp);
+		if (tmp)
+			result = *tmp;
 	}
 
-	return bsearch(name, architectures, nmemb, sizeof(struct arch), arch__key_cmp);
+	if (result)
+		return result;
+
+	if (e_machine >= ARRAY_SIZE(arch_new_fn) || arch_new_fn[e_machine] == NULL) {
+		errno = ENOTSUP;
+		return NULL;
+	}
+
+	tmp = reallocarray(archs, num_archs + 1, sizeof(*archs));
+	if (!tmp)
+		return NULL;
+
+	result = arch_new_fn[e_machine](&key, cpuid);
+	if (!result) {
+		pr_err("%s: failed to initialize %s (%u) arch priv area\n",
+			__func__, result->name, e_machine);
+		free(tmp);
+		return NULL;
+	}
+	archs = tmp;
+	archs[num_archs++] = result;
+	qsort(archs, num_archs, sizeof(*archs), arch__cmp);
+	return result;
 }
 
-bool arch__is(struct arch *arch, const char *name)
+bool arch__is_x86(const struct arch *arch)
 {
-	return !strcmp(arch->name, name);
+	return arch->id.e_machine == EM_386 || arch->id.e_machine == EM_X86_64;
+}
+
+bool arch__is_powerpc(const struct arch *arch)
+{
+	return arch->id.e_machine == EM_PPC || arch->id.e_machine == EM_PPC64;
 }
 
 static void ins_ops__delete(struct ins_operands *ops)
@@ -227,13 +213,13 @@ static void ins_ops__delete(struct ins_operands *ops)
 	zfree(&ops->target.name);
 }
 
-static int ins__raw_scnprintf(struct ins *ins, char *bf, size_t size,
-			      struct ins_operands *ops, int max_ins_name)
+int ins__raw_scnprintf(const struct ins *ins, char *bf, size_t size,
+			   struct ins_operands *ops, int max_ins_name)
 {
 	return scnprintf(bf, size, "%-*s %s", max_ins_name, ins->name, ops->raw);
 }
 
-int ins__scnprintf(struct ins *ins, char *bf, size_t size,
+int ins__scnprintf(const struct ins *ins, char *bf, size_t size,
 		   struct ins_operands *ops, int max_ins_name)
 {
 	if (ins->ops->scnprintf)
@@ -242,7 +228,7 @@ int ins__scnprintf(struct ins *ins, char *bf, size_t size,
 	return ins__raw_scnprintf(ins, bf, size, ops, max_ins_name);
 }
 
-bool ins__is_fused(struct arch *arch, const char *ins1, const char *ins2)
+bool ins__is_fused(const struct arch *arch, const char *ins1, const char *ins2)
 {
 	if (!arch || !arch->ins_is_fused)
 		return false;
@@ -250,13 +236,12 @@ bool ins__is_fused(struct arch *arch, const char *ins1, const char *ins2)
 	return arch->ins_is_fused(arch, ins1, ins2);
 }
 
-static int call__parse(struct arch *arch, struct ins_operands *ops, struct map_symbol *ms)
+static int call__parse(const struct arch *arch, struct ins_operands *ops, struct map_symbol *ms,
+		struct disasm_line *dl __maybe_unused)
 {
 	char *endptr, *tok, *name;
 	struct map *map = ms->map;
-	struct addr_map_symbol target = {
-		.ms = { .map = map, },
-	};
+	struct addr_map_symbol target;
 
 	ops->target.addr = strtoull(ops->raw, &endptr, 16);
 
@@ -281,12 +266,16 @@ static int call__parse(struct arch *arch, struct ins_operands *ops, struct map_s
 	if (ops->target.name == NULL)
 		return -1;
 find_target:
-	target.addr = map__objdump_2mem(map, ops->target.addr);
+	target = (struct addr_map_symbol) {
+		.ms = { .map = map__get(map), },
+		.addr = map__objdump_2mem(map, ops->target.addr),
+	};
 
-	if (maps__find_ams(ms->maps, &target) == 0 &&
+	if (maps__find_ams(thread__maps(ms->thread), &target) == 0 &&
 	    map__rip_2objdump(target.ms.map, map__map_ip(target.ms.map, target.addr)) == ops->target.addr)
 		ops->target.sym = target.ms.sym;
 
+	addr_map_symbol__exit(&target);
 	return 0;
 
 indirect_call:
@@ -302,8 +291,8 @@ indirect_call:
 	goto find_target;
 }
 
-static int call__scnprintf(struct ins *ins, char *bf, size_t size,
-			   struct ins_operands *ops, int max_ins_name)
+int call__scnprintf(const struct ins *ins, char *bf, size_t size,
+		      struct ins_operands *ops, int max_ins_name)
 {
 	if (ops->target.sym)
 		return scnprintf(bf, size, "%-*s %s", max_ins_name, ins->name, ops->target.sym->name);
@@ -317,14 +306,15 @@ static int call__scnprintf(struct ins *ins, char *bf, size_t size,
 	return scnprintf(bf, size, "%-*s *%" PRIx64, max_ins_name, ins->name, ops->target.addr);
 }
 
-static struct ins_ops call_ops = {
+const struct ins_ops call_ops = {
 	.parse	   = call__parse,
 	.scnprintf = call__scnprintf,
+	.is_call   = true,
 };
 
 bool ins__is_call(const struct ins *ins)
 {
-	return ins->ops == &call_ops || ins->ops == &s390_call_ops || ins->ops == &loongarch_call_ops;
+	return ins->ops && ins->ops->is_call;
 }
 
 /*
@@ -345,12 +335,13 @@ static inline const char *validate_comma(const char *c, struct ins_operands *ops
 	return c;
 }
 
-static int jump__parse(struct arch *arch, struct ins_operands *ops, struct map_symbol *ms)
+static int jump__parse(const struct arch *arch, struct ins_operands *ops, struct map_symbol *ms,
+		struct disasm_line *dl __maybe_unused)
 {
 	struct map *map = ms->map;
 	struct symbol *sym = ms->sym;
 	struct addr_map_symbol target = {
-		.ms = { .map = map, },
+		.ms = { .map = map__get(map), },
 	};
 	const char *c = strchr(ops->raw, ',');
 	u64 start, end;
@@ -375,13 +366,16 @@ static int jump__parse(struct arch *arch, struct ins_operands *ops, struct map_s
 	 * skip over possible up to 2 operands to get to address, e.g.:
 	 * tbnz	 w0, #26, ffff0000083cd190 <security_file_permission+0xd0>
 	 */
-	if (c++ != NULL) {
+	if (c != NULL) {
+		c++;
 		ops->target.addr = strtoull(c, NULL, 16);
 		if (!ops->target.addr) {
 			c = strchr(c, ',');
 			c = validate_comma(c, ops);
-			if (c++ != NULL)
+			if (c != NULL) {
+				c++;
 				ops->target.addr = strtoull(c, NULL, 16);
+			}
 		}
 	} else {
 		ops->target.addr = strtoull(ops->raw, NULL, 16);
@@ -391,7 +385,7 @@ static int jump__parse(struct arch *arch, struct ins_operands *ops, struct map_s
 	start = map__unmap_ip(map, sym->start);
 	end = map__unmap_ip(map, sym->end);
 
-	ops->target.outside = target.addr < start || target.addr > end;
+	ops->target.outside = target.addr < start || target.addr >= end;
 
 	/*
 	 * FIXME: things like this in _cpp_lex_token (gcc's cc1 program):
@@ -411,7 +405,7 @@ static int jump__parse(struct arch *arch, struct ins_operands *ops, struct map_s
 	 * Actual navigation will come next, with further understanding of how
 	 * the symbol searching and disassembly should be done.
 	 */
-	if (maps__find_ams(ms->maps, &target) == 0 &&
+	if (maps__find_ams(thread__maps(ms->thread), &target) == 0 &&
 	    map__rip_2objdump(target.ms.map, map__map_ip(target.ms.map, target.addr)) == ops->target.addr)
 		ops->target.sym = target.ms.sym;
 
@@ -421,12 +415,12 @@ static int jump__parse(struct arch *arch, struct ins_operands *ops, struct map_s
 	} else {
 		ops->target.offset_avail = false;
 	}
-
+	addr_map_symbol__exit(&target);
 	return 0;
 }
 
-static int jump__scnprintf(struct ins *ins, char *bf, size_t size,
-			   struct ins_operands *ops, int max_ins_name)
+int jump__scnprintf(const struct ins *ins, char *bf, size_t size,
+		      struct ins_operands *ops, int max_ins_name)
 {
 	const char *c;
 
@@ -458,7 +452,7 @@ static int jump__scnprintf(struct ins *ins, char *bf, size_t size,
 			 ops->target.offset);
 }
 
-static void jump__delete(struct ins_operands *ops __maybe_unused)
+void jump__delete(struct ins_operands *ops __maybe_unused)
 {
 	/*
 	 * The ops->jump.raw_comment and ops->jump.raw_func_start belong to the
@@ -466,15 +460,16 @@ static void jump__delete(struct ins_operands *ops __maybe_unused)
 	 */
 }
 
-static struct ins_ops jump_ops = {
+const struct ins_ops jump_ops = {
 	.free	   = jump__delete,
 	.parse	   = jump__parse,
 	.scnprintf = jump__scnprintf,
+	.is_jump   = true,
 };
 
 bool ins__is_jump(const struct ins *ins)
 {
-	return ins->ops == &jump_ops || ins->ops == &loongarch_jump_ops;
+	return ins->ops && ins->ops->is_jump;
 }
 
 static int comment__symbol(char *raw, char *comment, u64 *addrp, char **namep)
@@ -504,7 +499,8 @@ static int comment__symbol(char *raw, char *comment, u64 *addrp, char **namep)
 	return 0;
 }
 
-static int lock__parse(struct arch *arch, struct ins_operands *ops, struct map_symbol *ms)
+static int lock__parse(const struct arch *arch, struct ins_operands *ops, struct map_symbol *ms,
+		struct disasm_line *dl __maybe_unused)
 {
 	ops->locked.ops = zalloc(sizeof(*ops->locked.ops));
 	if (ops->locked.ops == NULL)
@@ -513,13 +509,13 @@ static int lock__parse(struct arch *arch, struct ins_operands *ops, struct map_s
 	if (disasm_line__parse(ops->raw, &ops->locked.ins.name, &ops->locked.ops->raw) < 0)
 		goto out_free_ops;
 
-	ops->locked.ins.ops = ins__find(arch, ops->locked.ins.name);
+	ops->locked.ins.ops = ins__find(arch, ops->locked.ins.name, 0);
 
 	if (ops->locked.ins.ops == NULL)
 		goto out_free_ops;
 
 	if (ops->locked.ins.ops->parse &&
-	    ops->locked.ins.ops->parse(arch, ops->locked.ops, ms) < 0)
+	    ops->locked.ins.ops->parse(arch, ops->locked.ops, ms, NULL) < 0)
 		goto out_free_ops;
 
 	return 0;
@@ -529,7 +525,7 @@ out_free_ops:
 	return 0;
 }
 
-static int lock__scnprintf(struct ins *ins, char *bf, size_t size,
+static int lock__scnprintf(const struct ins *ins, char *bf, size_t size,
 			   struct ins_operands *ops, int max_ins_name)
 {
 	int printed;
@@ -552,11 +548,12 @@ static void lock__delete(struct ins_operands *ops)
 		ins_ops__delete(ops->locked.ops);
 
 	zfree(&ops->locked.ops);
+	zfree(&ops->locked.ins.name);
 	zfree(&ops->target.raw);
 	zfree(&ops->target.name);
 }
 
-static struct ins_ops lock_ops = {
+const struct ins_ops lock_ops = {
 	.free	   = lock__delete,
 	.parse	   = lock__parse,
 	.scnprintf = lock__scnprintf,
@@ -569,7 +566,7 @@ static struct ins_ops lock_ops = {
  * But it doesn't care segment selectors like %gs:0x5678(%rcx), so just check
  * the input string after 'memory_ref_char' if exists.
  */
-static bool check_multi_regs(struct arch *arch, const char *op)
+static bool check_multi_regs(const struct arch *arch, const char *op)
 {
 	int count = 0;
 
@@ -590,7 +587,9 @@ static bool check_multi_regs(struct arch *arch, const char *op)
 	return count > 1;
 }
 
-static int mov__parse(struct arch *arch, struct ins_operands *ops, struct map_symbol *ms __maybe_unused)
+static int mov__parse(const struct arch *arch, struct ins_operands *ops,
+		      struct map_symbol *ms __maybe_unused,
+		      struct disasm_line *dl __maybe_unused)
 {
 	char *s = strchr(ops->raw, ','), *target, *comment, prev;
 
@@ -655,20 +654,22 @@ out_free_source:
 	return -1;
 }
 
-static int mov__scnprintf(struct ins *ins, char *bf, size_t size,
-			   struct ins_operands *ops, int max_ins_name)
+int mov__scnprintf(const struct ins *ins, char *bf, size_t size,
+		     struct ins_operands *ops, int max_ins_name)
 {
 	return scnprintf(bf, size, "%-*s %s,%s", max_ins_name, ins->name,
 			 ops->source.name ?: ops->source.raw,
 			 ops->target.name ?: ops->target.raw);
 }
 
-static struct ins_ops mov_ops = {
+const struct ins_ops mov_ops = {
 	.parse	   = mov__parse,
 	.scnprintf = mov__scnprintf,
 };
 
-static int dec__parse(struct arch *arch __maybe_unused, struct ins_operands *ops, struct map_symbol *ms __maybe_unused)
+static int dec__parse(const struct arch *arch __maybe_unused, struct ins_operands *ops,
+		      struct map_symbol *ms __maybe_unused,
+		      struct disasm_line *dl __maybe_unused)
 {
 	char *target, *comment, *s, prev;
 
@@ -695,33 +696,33 @@ static int dec__parse(struct arch *arch __maybe_unused, struct ins_operands *ops
 	return 0;
 }
 
-static int dec__scnprintf(struct ins *ins, char *bf, size_t size,
+static int dec__scnprintf(const struct ins *ins, char *bf, size_t size,
 			   struct ins_operands *ops, int max_ins_name)
 {
 	return scnprintf(bf, size, "%-*s %s", max_ins_name, ins->name,
 			 ops->target.name ?: ops->target.raw);
 }
 
-static struct ins_ops dec_ops = {
+const struct ins_ops dec_ops = {
 	.parse	   = dec__parse,
 	.scnprintf = dec__scnprintf,
 };
 
-static int nop__scnprintf(struct ins *ins __maybe_unused, char *bf, size_t size,
+static int nop__scnprintf(const struct ins *ins __maybe_unused, char *bf, size_t size,
 			  struct ins_operands *ops __maybe_unused, int max_ins_name)
 {
 	return scnprintf(bf, size, "%-*s", max_ins_name, "nop");
 }
 
-static struct ins_ops nop_ops = {
+const struct ins_ops nop_ops = {
 	.scnprintf = nop__scnprintf,
 };
 
-static struct ins_ops ret_ops = {
+const struct ins_ops ret_ops = {
 	.scnprintf = ins__raw_scnprintf,
 };
 
-bool ins__is_nop(const struct ins *ins)
+static bool ins__is_nop(const struct ins *ins)
 {
 	return ins->ops == &nop_ops;
 }
@@ -755,17 +756,30 @@ static void ins__sort(struct arch *arch)
 {
 	const int nmemb = arch->nr_instructions;
 
-	qsort(arch->instructions, nmemb, sizeof(struct ins), ins__cmp);
+	qsort((void *)arch->instructions, nmemb, sizeof(struct ins), ins__cmp);
 }
 
-static struct ins_ops *__ins__find(struct arch *arch, const char *name)
+static const struct ins_ops *__ins__find(const struct arch *arch, const char *name,
+				     struct disasm_line *dl)
 {
-	struct ins *ins;
+	const struct ins *ins;
 	const int nmemb = arch->nr_instructions;
 
+	if (arch__is_powerpc(arch)) {
+		/*
+		 * For powerpc, identify the instruction ops
+		 * from the opcode using raw_insn.
+		 */
+		const struct ins_ops *ops;
+
+		ops = check_ppc_insn(dl);
+		if (ops)
+			return ops;
+	}
+
 	if (!arch->sorted_instructions) {
-		ins__sort(arch);
-		arch->sorted_instructions = true;
+		ins__sort((struct arch *)arch);
+		((struct arch *)arch)->sorted_instructions = true;
 	}
 
 	ins = bsearch(name, arch->instructions, nmemb, sizeof(struct ins), ins__key_cmp);
@@ -792,24 +806,25 @@ static struct ins_ops *__ins__find(struct arch *arch, const char *name)
 	return ins ? ins->ops : NULL;
 }
 
-struct ins_ops *ins__find(struct arch *arch, const char *name)
+const struct ins_ops *ins__find(const struct arch *arch, const char *name, struct disasm_line *dl)
 {
-	struct ins_ops *ops = __ins__find(arch, name);
+	const struct ins_ops *ops = __ins__find(arch, name, dl);
 
 	if (!ops && arch->associate_instruction_ops)
-		ops = arch->associate_instruction_ops(arch, name);
+		ops = arch->associate_instruction_ops((struct arch *)arch, name);
 
 	return ops;
 }
 
-static void disasm_line__init_ins(struct disasm_line *dl, struct arch *arch, struct map_symbol *ms)
+static void disasm_line__init_ins(struct disasm_line *dl, const struct arch *arch,
+				    struct map_symbol *ms)
 {
-	dl->ins.ops = ins__find(arch, dl->ins.name);
+	dl->ins.ops = ins__find(arch, dl->ins.name, dl);
 
 	if (!dl->ins.ops)
 		return;
 
-	if (dl->ins.ops->parse && dl->ins.ops->parse(arch, &dl->ops, ms) < 0)
+	if (dl->ins.ops->parse && dl->ins.ops->parse(arch, &dl->ops, ms, dl) < 0)
 		dl->ins.ops = NULL;
 }
 
@@ -841,6 +856,52 @@ out:
 	return -1;
 }
 
+/*
+ * Parses the result captured from symbol__disassemble_*
+ * Example, line read from DSO file in powerpc:
+ * line:    38 01 81 e8
+ * opcode: fetched from arch specific get_opcode_insn
+ * rawp_insn: e8810138
+ *
+ * rawp_insn is used later to extract the reg/offset fields
+ */
+#define	PPC_OP(op)	(((op) >> 26) & 0x3F)
+#define	RAW_BYTES	11
+
+static int disasm_line__parse_powerpc(struct disasm_line *dl, struct annotate_args *args)
+{
+	char *line = dl->al.line;
+	const char **namep = &dl->ins.name;
+	char **rawp = &dl->ops.raw;
+	char *tmp_raw_insn, *name_raw_insn = skip_spaces(line);
+	char *name = skip_spaces(name_raw_insn + RAW_BYTES);
+	int disasm = 0;
+	int ret = 0;
+
+	if (args->options->disassembler_used)
+		disasm = 1;
+
+	if (name_raw_insn[0] == '\0')
+		return -1;
+
+	if (disasm)
+		ret = disasm_line__parse(name, namep, rawp);
+	else
+		*namep = "";
+
+	tmp_raw_insn = strndup(name_raw_insn, 11);
+	if (tmp_raw_insn == NULL)
+		return -1;
+
+	remove_spaces(tmp_raw_insn);
+
+	sscanf(tmp_raw_insn, "%x", &dl->raw.raw_insn);
+	if (disasm)
+		dl->raw.raw_insn = be32_to_cpu(dl->raw.raw_insn);
+
+	return ret;
+}
+
 static void annotation_line__init(struct annotation_line *al,
 				  struct annotate_args *args,
 				  int nr)
@@ -848,15 +909,17 @@ static void annotation_line__init(struct annotation_line *al,
 	al->offset = args->offset;
 	al->line = strdup(args->line);
 	al->line_nr = args->line_nr;
-	al->fileloc = args->fileloc;
+	al->fileloc = args->fileloc ? strdup(args->fileloc) : NULL;
 	al->data_nr = nr;
 }
 
 static void annotation_line__exit(struct annotation_line *al)
 {
 	zfree_srcline(&al->path);
+	zfree(&al->fileloc);
 	zfree(&al->line);
 	zfree(&al->cycles);
+	zfree(&al->br_cntr);
 }
 
 static size_t disasm_line_size(int nr)
@@ -880,10 +943,8 @@ static size_t disasm_line_size(int nr)
 struct disasm_line *disasm_line__new(struct annotate_args *args)
 {
 	struct disasm_line *dl = NULL;
-	int nr = 1;
-
-	if (evsel__is_group_event(args->evsel))
-		nr = args->evsel->core.nr_members;
+	struct annotation *notes = symbol__annotation(args->ms->sym);
+	int nr = notes->src->nr_events;
 
 	dl = zalloc(disasm_line_size(nr));
 	if (!dl)
@@ -891,20 +952,22 @@ struct disasm_line *disasm_line__new(struct annotate_args *args)
 
 	annotation_line__init(&dl->al, args, nr);
 	if (dl->al.line == NULL)
-		goto out_delete;
+		goto out_free_line;
 
 	if (args->offset != -1) {
-		if (disasm_line__parse(dl->al.line, &dl->ins.name, &dl->ops.raw) < 0)
+		if (arch__is_powerpc(args->arch)) {
+			if (disasm_line__parse_powerpc(dl, args) < 0)
+				goto out_free_line;
+		} else if (disasm_line__parse(dl->al.line, &dl->ins.name, &dl->ops.raw) < 0)
 			goto out_free_line;
 
-		disasm_line__init_ins(dl, args->arch, &args->ms);
+		disasm_line__init_ins(dl, args->arch, args->ms);
 	}
 
 	return dl;
 
 out_free_line:
-	zfree(&dl->al.line);
-out_delete:
+	annotation_line__exit(&dl->al);
 	free(dl);
 	return NULL;
 }
@@ -952,7 +1015,7 @@ static int symbol__parse_objdump_line(struct symbol *sym,
 				      struct annotate_args *args,
 				      char *parsed_line, int *line_nr, char **fileloc)
 {
-	struct map *map = args->ms.map;
+	struct map *map = args->ms->map;
 	struct annotation *notes = symbol__annotation(sym);
 	struct disasm_line *dl;
 	char *tmp;
@@ -984,7 +1047,7 @@ static int symbol__parse_objdump_line(struct symbol *sym,
 	args->line    = parsed_line;
 	args->line_nr = *line_nr;
 	args->fileloc = *fileloc;
-	args->ms.sym  = sym;
+	args->ms->sym  = sym;
 
 	dl = disasm_line__new(args);
 	(*line_nr)++;
@@ -1002,12 +1065,14 @@ static int symbol__parse_objdump_line(struct symbol *sym,
 	if (dl->ins.ops && ins__is_call(&dl->ins) && !dl->ops.target.sym) {
 		struct addr_map_symbol target = {
 			.addr = dl->ops.target.addr,
-			.ms = { .map = map, },
+			.ms = { .map = map__get(map), },
 		};
 
-		if (!maps__find_ams(args->ms.maps, &target) &&
+		if (!maps__find_ams(thread__maps(args->ms->thread), &target) &&
 		    target.ms.sym->start == target.al_addr)
 			dl->ops.target.sym = target.ms.sym;
+
+		addr_map_symbol__exit(&target);
 	}
 
 	annotation_line__add(&dl->al, &notes->src->source);
@@ -1055,7 +1120,7 @@ int symbol__strerror_disassemble(struct map_symbol *ms, int errnum, char *buf, s
 		char *build_id_msg = NULL;
 
 		if (dso__has_build_id(dso)) {
-			build_id__sprintf(dso__bid(dso), bf + 15);
+			build_id__snprintf(dso__bid(dso), bf + 15, sizeof(bf) - 15);
 			build_id_msg = bf;
 		}
 		scnprintf(buf, buflen,
@@ -1082,6 +1147,9 @@ int symbol__strerror_disassemble(struct map_symbol *ms, int errnum, char *buf, s
 	case SYMBOL_ANNOTATE_ERRNO__BPF_MISSING_BTF:
 		scnprintf(buf, buflen, "The %s BPF file has no BTF section, compile with -g or use pahole -J.",
 			  dso__long_name(dso));
+		break;
+	case SYMBOL_ANNOTATE_ERRNO__COULDNT_DETERMINE_FILE_TYPE:
+		scnprintf(buf, buflen, "Couldn't determine the file %s type.", dso__long_name(dso));
 		break;
 	default:
 		scnprintf(buf, buflen, "Internal error: Invalid %d error code\n", errnum);
@@ -1164,343 +1232,35 @@ fallback:
 	return 0;
 }
 
-#if defined(HAVE_LIBBFD_SUPPORT) && defined(HAVE_LIBBPF_SUPPORT)
-#define PACKAGE "perf"
-#include <bfd.h>
-#include <dis-asm.h>
-#include <bpf/bpf.h>
-#include <bpf/btf.h>
-#include <bpf/libbpf.h>
-#include <linux/btf.h>
-#include <tools/dis-asm-compat.h>
-
-#include "bpf-event.h"
-#include "bpf-utils.h"
-
-static int symbol__disassemble_bpf(struct symbol *sym,
-				   struct annotate_args *args)
-{
-	struct annotation *notes = symbol__annotation(sym);
-	struct bpf_prog_linfo *prog_linfo = NULL;
-	struct bpf_prog_info_node *info_node;
-	int len = sym->end - sym->start;
-	disassembler_ftype disassemble;
-	struct map *map = args->ms.map;
-	struct perf_bpil *info_linear;
-	struct disassemble_info info;
-	struct dso *dso = map__dso(map);
-	int pc = 0, count, sub_id;
-	struct btf *btf = NULL;
-	char tpath[PATH_MAX];
-	size_t buf_size;
-	int nr_skip = 0;
-	char *buf;
-	bfd *bfdf;
-	int ret;
-	FILE *s;
-
-	if (dso__binary_type(dso) != DSO_BINARY_TYPE__BPF_PROG_INFO)
-		return SYMBOL_ANNOTATE_ERRNO__BPF_INVALID_FILE;
-
-	pr_debug("%s: handling sym %s addr %" PRIx64 " len %" PRIx64 "\n", __func__,
-		  sym->name, sym->start, sym->end - sym->start);
-
-	memset(tpath, 0, sizeof(tpath));
-	perf_exe(tpath, sizeof(tpath));
-
-	bfdf = bfd_openr(tpath, NULL);
-	if (bfdf == NULL)
-		abort();
-
-	if (!bfd_check_format(bfdf, bfd_object))
-		abort();
-
-	s = open_memstream(&buf, &buf_size);
-	if (!s) {
-		ret = errno;
-		goto out;
-	}
-	init_disassemble_info_compat(&info, s,
-				     (fprintf_ftype) fprintf,
-				     fprintf_styled);
-	info.arch = bfd_get_arch(bfdf);
-	info.mach = bfd_get_mach(bfdf);
-
-	info_node = perf_env__find_bpf_prog_info(dso__bpf_prog(dso)->env,
-						 dso__bpf_prog(dso)->id);
-	if (!info_node) {
-		ret = SYMBOL_ANNOTATE_ERRNO__BPF_MISSING_BTF;
-		goto out;
-	}
-	info_linear = info_node->info_linear;
-	sub_id = dso__bpf_prog(dso)->sub_id;
-
-	info.buffer = (void *)(uintptr_t)(info_linear->info.jited_prog_insns);
-	info.buffer_length = info_linear->info.jited_prog_len;
-
-	if (info_linear->info.nr_line_info)
-		prog_linfo = bpf_prog_linfo__new(&info_linear->info);
-
-	if (info_linear->info.btf_id) {
-		struct btf_node *node;
-
-		node = perf_env__find_btf(dso__bpf_prog(dso)->env,
-					  info_linear->info.btf_id);
-		if (node)
-			btf = btf__new((__u8 *)(node->data),
-				       node->data_size);
-	}
-
-	disassemble_init_for_target(&info);
-
-#ifdef DISASM_FOUR_ARGS_SIGNATURE
-	disassemble = disassembler(info.arch,
-				   bfd_big_endian(bfdf),
-				   info.mach,
-				   bfdf);
-#else
-	disassemble = disassembler(bfdf);
-#endif
-	if (disassemble == NULL)
-		abort();
-
-	fflush(s);
-	do {
-		const struct bpf_line_info *linfo = NULL;
-		struct disasm_line *dl;
-		size_t prev_buf_size;
-		const char *srcline;
-		u64 addr;
-
-		addr = pc + ((u64 *)(uintptr_t)(info_linear->info.jited_ksyms))[sub_id];
-		count = disassemble(pc, &info);
-
-		if (prog_linfo)
-			linfo = bpf_prog_linfo__lfind_addr_func(prog_linfo,
-								addr, sub_id,
-								nr_skip);
-
-		if (linfo && btf) {
-			srcline = btf__name_by_offset(btf, linfo->line_off);
-			nr_skip++;
-		} else
-			srcline = NULL;
-
-		fprintf(s, "\n");
-		prev_buf_size = buf_size;
-		fflush(s);
-
-		if (!annotate_opts.hide_src_code && srcline) {
-			args->offset = -1;
-			args->line = strdup(srcline);
-			args->line_nr = 0;
-			args->fileloc = NULL;
-			args->ms.sym  = sym;
-			dl = disasm_line__new(args);
-			if (dl) {
-				annotation_line__add(&dl->al,
-						     &notes->src->source);
-			}
-		}
-
-		args->offset = pc;
-		args->line = buf + prev_buf_size;
-		args->line_nr = 0;
-		args->fileloc = NULL;
-		args->ms.sym  = sym;
-		dl = disasm_line__new(args);
-		if (dl)
-			annotation_line__add(&dl->al, &notes->src->source);
-
-		pc += count;
-	} while (count > 0 && pc < len);
-
-	ret = 0;
-out:
-	free(prog_linfo);
-	btf__free(btf);
-	fclose(s);
-	bfd_close(bfdf);
-	return ret;
-}
-#else // defined(HAVE_LIBBFD_SUPPORT) && defined(HAVE_LIBBPF_SUPPORT)
-static int symbol__disassemble_bpf(struct symbol *sym __maybe_unused,
-				   struct annotate_args *args __maybe_unused)
-{
-	return SYMBOL_ANNOTATE_ERRNO__NO_LIBOPCODES_FOR_BPF;
-}
-#endif // defined(HAVE_LIBBFD_SUPPORT) && defined(HAVE_LIBBPF_SUPPORT)
-
-static int
-symbol__disassemble_bpf_image(struct symbol *sym,
-			      struct annotate_args *args)
-{
-	struct annotation *notes = symbol__annotation(sym);
-	struct disasm_line *dl;
-
-	args->offset = -1;
-	args->line = strdup("to be implemented");
-	args->line_nr = 0;
-	args->fileloc = NULL;
-	dl = disasm_line__new(args);
-	if (dl)
-		annotation_line__add(&dl->al, &notes->src->source);
-
-	zfree(&args->line);
-	return 0;
-}
-
-#ifdef HAVE_LIBCAPSTONE_SUPPORT
-#include <capstone/capstone.h>
-
-static int open_capstone_handle(struct annotate_args *args, bool is_64bit,
-				csh *handle)
-{
-	struct annotation_options *opt = args->options;
-	cs_mode mode = is_64bit ? CS_MODE_64 : CS_MODE_32;
-
-	/* TODO: support more architectures */
-	if (!arch__is(args->arch, "x86"))
-		return -1;
-
-	if (cs_open(CS_ARCH_X86, mode, handle) != CS_ERR_OK)
-		return -1;
-
-	if (!opt->disassembler_style ||
-	    !strcmp(opt->disassembler_style, "att"))
-		cs_option(*handle, CS_OPT_SYNTAX, CS_OPT_SYNTAX_ATT);
-
-	/*
-	 * Resolving address operands to symbols is implemented
-	 * on x86 by investigating instruction details.
-	 */
-	cs_option(*handle, CS_OPT_DETAIL, CS_OPT_ON);
-
-	return 0;
-}
-
-struct find_file_offset_data {
-	u64 ip;
-	u64 offset;
-};
-
-/* This will be called for each PHDR in an ELF binary */
-static int find_file_offset(u64 start, u64 len, u64 pgoff, void *arg)
-{
-	struct find_file_offset_data *data = arg;
-
-	if (start <= data->ip && data->ip < start + len) {
-		data->offset = pgoff + data->ip - start;
-		return 1;
-	}
-	return 0;
-}
-
-static void print_capstone_detail(cs_insn *insn, char *buf, size_t len,
-				  struct annotate_args *args, u64 addr)
-{
-	int i;
-	struct map *map = args->ms.map;
-	struct symbol *sym;
-
-	/* TODO: support more architectures */
-	if (!arch__is(args->arch, "x86"))
-		return;
-
-	if (insn->detail == NULL)
-		return;
-
-	for (i = 0; i < insn->detail->x86.op_count; i++) {
-		cs_x86_op *op = &insn->detail->x86.operands[i];
-		u64 orig_addr;
-
-		if (op->type != X86_OP_MEM)
-			continue;
-
-		/* only print RIP-based global symbols for now */
-		if (op->mem.base != X86_REG_RIP)
-			continue;
-
-		/* get the target address */
-		orig_addr = addr + insn->size + op->mem.disp;
-		addr = map__objdump_2mem(map, orig_addr);
-
-		if (dso__kernel(map__dso(map))) {
-			/*
-			 * The kernel maps can be splitted into sections,
-			 * let's find the map first and the search the symbol.
-			 */
-			map = maps__find(map__kmaps(map), addr);
-			if (map == NULL)
-				continue;
-		}
-
-		/* convert it to map-relative address for search */
-		addr = map__map_ip(map, addr);
-
-		sym = map__find_symbol(map, addr);
-		if (sym == NULL)
-			continue;
-
-		if (addr == sym->start) {
-			scnprintf(buf, len, "\t# %"PRIx64" <%s>",
-				  orig_addr, sym->name);
-		} else {
-			scnprintf(buf, len, "\t# %"PRIx64" <%s+%#"PRIx64">",
-				  orig_addr, sym->name, addr - sym->start);
-		}
-		break;
-	}
-}
-
-static int symbol__disassemble_capstone(char *filename, struct symbol *sym,
+static int symbol__disassemble_raw(char *filename, struct symbol *sym,
 					struct annotate_args *args)
 {
 	struct annotation *notes = symbol__annotation(sym);
-	struct map *map = args->ms.map;
+	struct map *map = args->ms->map;
 	struct dso *dso = map__dso(map);
-	struct nscookie nsc;
 	u64 start = map__rip_2objdump(map, sym->start);
 	u64 end = map__rip_2objdump(map, sym->end);
 	u64 len = end - start;
 	u64 offset;
-	int i, fd, count;
-	bool is_64bit = false;
-	bool needs_cs_close = false;
+	int i, count;
 	u8 *buf = NULL;
-	struct find_file_offset_data data = {
-		.ip = start,
-	};
-	csh handle;
-	cs_insn *insn;
 	char disasm_buf[512];
 	struct disasm_line *dl;
+	u32 *line;
 
+	/* Return if objdump is specified explicitly */
 	if (args->options->objdump_path)
 		return -1;
 
-	nsinfo__mountns_enter(dso__nsinfo(dso), &nsc);
-	fd = open(filename, O_RDONLY);
-	nsinfo__mountns_exit(&nsc);
-	if (fd < 0)
-		return -1;
-
-	if (file__read_maps(fd, /*exe=*/true, find_file_offset, &data,
-			    &is_64bit) == 0)
-		goto err;
-
-	if (open_capstone_handle(args, is_64bit, &handle) < 0)
-		goto err;
-
-	needs_cs_close = true;
+	pr_debug("Reading raw instruction from : %s using dso__data_read_offset\n", filename);
 
 	buf = malloc(len);
 	if (buf == NULL)
 		goto err;
 
-	count = pread(fd, buf, len, data.offset);
-	close(fd);
-	fd = -1;
+	count = dso__data_read_offset(dso, NULL, sym->start, buf, len);
+
+	line = (u32 *)buf;
 
 	if ((u64)count != len)
 		goto err;
@@ -1513,7 +1273,7 @@ static int symbol__disassemble_capstone(char *filename, struct symbol *sym,
 	args->line = disasm_buf;
 	args->line_nr = 0;
 	args->fileloc = NULL;
-	args->ms.sym = sym;
+	args->ms->sym = sym;
 
 	dl = disasm_line__new(args);
 	if (dl == NULL)
@@ -1521,30 +1281,21 @@ static int symbol__disassemble_capstone(char *filename, struct symbol *sym,
 
 	annotation_line__add(&dl->al, &notes->src->source);
 
-	count = cs_disasm(handle, buf, len, start, len, &insn);
+	/* Each raw instruction is 4 byte */
+	count = len/4;
+
 	for (i = 0, offset = 0; i < count; i++) {
-		int printed;
-
-		printed = scnprintf(disasm_buf, sizeof(disasm_buf),
-				    "       %-7s %s",
-				    insn[i].mnemonic, insn[i].op_str);
-		print_capstone_detail(&insn[i], disasm_buf + printed,
-				      sizeof(disasm_buf) - printed, args,
-				      start + offset);
-
 		args->offset = offset;
-		args->line = disasm_buf;
-
+		sprintf(args->line, "%x", line[i]);
 		dl = disasm_line__new(args);
 		if (dl == NULL)
-			goto err;
+			break;
 
 		annotation_line__add(&dl->al, &notes->src->source);
-
-		offset += insn[i].size;
+		offset += 4;
 	}
 
-	/* It failed in the middle: probably due to unknown instructions */
+	/* It failed in the middle */
 	if (offset != len) {
 		struct list_head *list = &notes->src->source;
 
@@ -1559,37 +1310,20 @@ static int symbol__disassemble_capstone(char *filename, struct symbol *sym,
 	}
 
 out:
-	if (needs_cs_close)
-		cs_close(&handle);
 	free(buf);
 	return count < 0 ? count : 0;
 
 err:
-	if (fd >= 0)
-		close(fd);
-	if (needs_cs_close) {
-		struct disasm_line *tmp;
-
-		/*
-		 * It probably failed in the middle of the above loop.
-		 * Release any resources it might add.
-		 */
-		list_for_each_entry_safe(dl, tmp, &notes->src->source, al.node) {
-			list_del(&dl->al.node);
-			free(dl);
-		}
-	}
 	count = -1;
 	goto out;
 }
-#endif
 
 /*
  * Possibly create a new version of line with tabs expanded. Returns the
  * existing or new line, storage is updated if a new line is allocated. If
  * allocation fails then NULL is returned.
  */
-static char *expand_tabs(char *line, char **storage, size_t *storage_len)
+char *expand_tabs(char *line, char **storage, size_t *storage_len)
 {
 	size_t i, src, dst, len, new_storage_len, num_tabs;
 	char *new_line;
@@ -1644,17 +1378,31 @@ static char *expand_tabs(char *line, char **storage, size_t *storage_len)
 	return new_line;
 }
 
-int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
+static int symbol__disassemble_bpf_image(struct symbol *sym, struct annotate_args *args)
+{
+	struct annotation *notes = symbol__annotation(sym);
+	struct disasm_line *dl;
+
+	args->offset = -1;
+	args->line = strdup("to be implemented");
+	args->line_nr = 0;
+	args->fileloc = NULL;
+	dl = disasm_line__new(args);
+	if (dl)
+		annotation_line__add(&dl->al, &notes->src->source);
+
+	zfree(&args->line);
+	return 0;
+}
+
+static int symbol__disassemble_objdump(const char *filename, struct symbol *sym,
+				       struct annotate_args *args)
 {
 	struct annotation_options *opts = &annotate_opts;
-	struct map *map = args->ms.map;
+	struct map *map = args->ms->map;
 	struct dso *dso = map__dso(map);
 	char *command;
 	FILE *file;
-	char symfs_filename[PATH_MAX];
-	struct kcore_extract kce;
-	bool delete_extract = false;
-	bool decomp = false;
 	int lineno = 0;
 	char *fileloc = NULL;
 	int nline;
@@ -1669,50 +1417,13 @@ int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
 		NULL,
 	};
 	struct child_process objdump_process;
-	int err = dso__disassemble_filename(dso, symfs_filename, sizeof(symfs_filename));
+	int err;
 
-	if (err)
-		return err;
+	if (dso__binary_type(dso) == DSO_BINARY_TYPE__BPF_PROG_INFO)
+		return symbol__disassemble_bpf_libbfd(sym, args);
 
-	pr_debug("%s: filename=%s, sym=%s, start=%#" PRIx64 ", end=%#" PRIx64 "\n", __func__,
-		 symfs_filename, sym->name, map__unmap_ip(map, sym->start),
-		 map__unmap_ip(map, sym->end));
-
-	pr_debug("annotating [%p] %30s : [%p] %30s\n",
-		 dso, dso__long_name(dso), sym, sym->name);
-
-	if (dso__binary_type(dso) == DSO_BINARY_TYPE__BPF_PROG_INFO) {
-		return symbol__disassemble_bpf(sym, args);
-	} else if (dso__binary_type(dso) == DSO_BINARY_TYPE__BPF_IMAGE) {
+	if (dso__binary_type(dso) == DSO_BINARY_TYPE__BPF_IMAGE)
 		return symbol__disassemble_bpf_image(sym, args);
-	} else if (dso__binary_type(dso) == DSO_BINARY_TYPE__NOT_FOUND) {
-		return -1;
-	} else if (dso__is_kcore(dso)) {
-		kce.kcore_filename = symfs_filename;
-		kce.addr = map__rip_2objdump(map, sym->start);
-		kce.offs = sym->start;
-		kce.len = sym->end - sym->start;
-		if (!kcore_extract__create(&kce)) {
-			delete_extract = true;
-			strlcpy(symfs_filename, kce.extract_filename,
-				sizeof(symfs_filename));
-		}
-	} else if (dso__needs_decompress(dso)) {
-		char tmp[KMOD_DECOMP_LEN];
-
-		if (dso__decompress_kmodule_path(dso, symfs_filename,
-						 tmp, sizeof(tmp)) < 0)
-			return -1;
-
-		decomp = true;
-		strcpy(symfs_filename, tmp);
-	}
-
-#ifdef HAVE_LIBCAPSTONE_SUPPORT
-	err = symbol__disassemble_capstone(symfs_filename, sym, args);
-	if (err == 0)
-		goto out_remove_tmp;
-#endif
 
 	err = asprintf(&command,
 		 "%s %s%s --start-address=0x%016" PRIx64
@@ -1735,13 +1446,13 @@ int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
 
 	if (err < 0) {
 		pr_err("Failure allocating memory for the command to run\n");
-		goto out_remove_tmp;
+		return err;
 	}
 
 	pr_debug("Executing: %s\n", command);
 
 	objdump_argv[2] = command;
-	objdump_argv[4] = symfs_filename;
+	objdump_argv[4] = filename;
 
 	/* Create a pipe to read from for stdout */
 	memset(&objdump_process, 0, sizeof(objdump_process));
@@ -1779,8 +1490,8 @@ int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
 			break;
 
 		/* Skip lines containing "filename:" */
-		match = strstr(line, symfs_filename);
-		if (match && match[strlen(symfs_filename)] == ':')
+		match = strstr(line, filename);
+		if (match && match[strlen(filename)] == ':')
 			continue;
 
 		expanded_line = strim(line);
@@ -1825,7 +1536,104 @@ out_close_stdout:
 
 out_free_command:
 	free(command);
+	return err;
+}
 
+int symbol__disassemble(struct symbol *sym, struct annotate_args *args)
+{
+	struct annotation_options *options = args->options;
+	struct map *map = args->ms->map;
+	struct dso *dso = map__dso(map);
+	char symfs_filename[PATH_MAX];
+	bool delete_extract = false;
+	struct kcore_extract kce;
+	bool decomp = false;
+	int err = dso__disassemble_filename(dso, symfs_filename, sizeof(symfs_filename));
+
+	if (err)
+		return err;
+
+	pr_debug("%s: filename=%s, sym=%s, start=%#" PRIx64 ", end=%#" PRIx64 "\n", __func__,
+		 symfs_filename, sym->name, map__unmap_ip(map, sym->start),
+		 map__unmap_ip(map, sym->end));
+
+	pr_debug("annotating [%p] %30s : [%p] %30s\n", dso, dso__long_name(dso), sym, sym->name);
+
+	if (dso__binary_type(dso) == DSO_BINARY_TYPE__NOT_FOUND) {
+		return SYMBOL_ANNOTATE_ERRNO__COULDNT_DETERMINE_FILE_TYPE;
+	} else if (dso__is_kcore(dso)) {
+		kce.addr = map__rip_2objdump(map, sym->start);
+		kce.kcore_filename = symfs_filename;
+		kce.len = sym->end - sym->start;
+		kce.offs = sym->start;
+
+		if (!kcore_extract__create(&kce)) {
+			delete_extract = true;
+			strlcpy(symfs_filename, kce.extract_filename, sizeof(symfs_filename));
+		}
+	} else if (dso__needs_decompress(dso)) {
+		char tmp[KMOD_DECOMP_LEN];
+
+		if (dso__decompress_kmodule_path(dso, symfs_filename, tmp, sizeof(tmp)) < 0)
+			return -1;
+
+		decomp = true;
+		strcpy(symfs_filename, tmp);
+	}
+
+	/*
+	 * For powerpc data type profiling, use the dso__data_read_offset to
+	 * read raw instruction directly and interpret the binary code to
+	 * understand instructions and register fields. For sort keys as type
+	 * and typeoff, disassemble to mnemonic notation is not required in
+	 * case of powerpc.
+	 */
+	if (arch__is_powerpc(args->arch)) {
+		extern const char *sort_order;
+
+		if (sort_order && !strstr(sort_order, "sym")) {
+			err = symbol__disassemble_raw(symfs_filename, sym, args);
+			if (err == 0)
+				goto out_remove_tmp;
+
+			err = symbol__disassemble_capstone_powerpc(symfs_filename, sym, args);
+			if (err == 0)
+				goto out_remove_tmp;
+		}
+	}
+
+	/* FIXME: LLVM and CAPSTONE should support source code */
+	if (options->annotate_src && !options->hide_src_code) {
+		err = symbol__disassemble_objdump(symfs_filename, sym, args);
+		if (err == 0)
+			goto out_remove_tmp;
+	}
+
+	err = -1;
+	for (u8 i = 0; i < ARRAY_SIZE(options->disassemblers) && err != 0; i++) {
+		enum perf_disassembler dis = options->disassemblers[i];
+
+		switch (dis) {
+		case PERF_DISASM_LLVM:
+			args->options->disassembler_used = PERF_DISASM_LLVM;
+			err = symbol__disassemble_llvm(symfs_filename, sym, args);
+			break;
+		case PERF_DISASM_CAPSTONE:
+			args->options->disassembler_used = PERF_DISASM_CAPSTONE;
+			err = symbol__disassemble_capstone(symfs_filename, sym, args);
+			break;
+		case PERF_DISASM_OBJDUMP:
+			args->options->disassembler_used = PERF_DISASM_OBJDUMP;
+			err = symbol__disassemble_objdump(symfs_filename, sym, args);
+			break;
+		case PERF_DISASM_UNKNOWN: /* End of disassemblers. */
+		default:
+			args->options->disassembler_used = PERF_DISASM_UNKNOWN;
+			goto out_remove_tmp;
+		}
+		if (err == 0)
+			pr_debug("Disassembled with %s\n", perf_disassembler__strs[dis]);
+	}
 out_remove_tmp:
 	if (decomp)
 		unlink(symfs_filename);

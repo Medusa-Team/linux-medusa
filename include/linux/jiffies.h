@@ -59,17 +59,13 @@
 /* LATCH is used in the interval timer and ftape setup. */
 #define LATCH ((CLOCK_TICK_RATE + HZ/2) / HZ)	/* For divider */
 
-extern int register_refined_jiffies(long clock_tick_rate);
+extern void register_refined_jiffies(long clock_tick_rate);
 
-/* TICK_USEC is the time between ticks in usec assuming SHIFTED_HZ */
+/* TICK_USEC is the time between ticks in usec */
 #define TICK_USEC ((USEC_PER_SEC + HZ/2) / HZ)
 
 /* USER_TICK_USEC is the time between ticks in usec assuming fake USER_HZ */
 #define USER_TICK_USEC ((1000000UL + USER_HZ/2) / USER_HZ)
-
-#ifndef __jiffy_arch_data
-#define __jiffy_arch_data
-#endif
 
 /*
  * The 64-bit value is not atomic on 32-bit systems - you MUST NOT read it
@@ -83,7 +79,7 @@ extern int register_refined_jiffies(long clock_tick_rate);
  * See arch/ARCH/kernel/vmlinux.lds.S
  */
 extern u64 __cacheline_aligned_in_smp jiffies_64;
-extern unsigned long volatile __cacheline_aligned_in_smp __jiffy_arch_data jiffies;
+extern unsigned long volatile __cacheline_aligned_in_smp jiffies;
 
 #if (BITS_PER_LONG < 64)
 u64 get_jiffies_64(void);
@@ -418,7 +414,7 @@ extern unsigned long preset_lpj;
 #define NSEC_CONVERSION ((unsigned long)((((u64)1 << NSEC_JIFFIE_SC) +\
                                         TICK_NSEC -1) / (u64)TICK_NSEC))
 /*
- * The maximum jiffie value is (MAX_INT >> 1).  Here we translate that
+ * The maximum jiffy value is (MAX_INT >> 1).  Here we translate that
  * into seconds.  The 64-bit case will overflow if we are not careful,
  * so use the messy SH_DIV macro to do it.  Still all constants.
  */
@@ -434,8 +430,44 @@ extern unsigned long preset_lpj;
 /*
  * Convert various time units to each other:
  */
-extern unsigned int jiffies_to_msecs(const unsigned long j);
-extern unsigned int jiffies_to_usecs(const unsigned long j);
+
+#if HZ <= MSEC_PER_SEC && !(MSEC_PER_SEC % HZ)
+/**
+ * jiffies_to_msecs - Convert jiffies to milliseconds
+ * @j: jiffies value
+ *
+ * This inline version takes care of HZ in {100,250,1000}.
+ *
+ * Return: milliseconds value
+ */
+static inline unsigned int jiffies_to_msecs(const unsigned long j)
+{
+	return (MSEC_PER_SEC / HZ) * j;
+}
+#else
+unsigned int jiffies_to_msecs(const unsigned long j);
+#endif
+
+#if !(USEC_PER_SEC % HZ)
+/**
+ * jiffies_to_usecs - Convert jiffies to microseconds
+ * @j: jiffies value
+ *
+ * Return: microseconds value
+ */
+static inline unsigned int jiffies_to_usecs(const unsigned long j)
+{
+	/*
+	 * Hz usually doesn't go much further MSEC_PER_SEC.
+	 * jiffies_to_usecs() and usecs_to_jiffies() depend on that.
+	 */
+	BUILD_BUG_ON(HZ > USEC_PER_SEC);
+
+	return (USEC_PER_SEC / HZ) * j;
+}
+#else
+unsigned int jiffies_to_usecs(const unsigned long j);
+#endif
 
 /**
  * jiffies_to_nsecs - Convert jiffies to nanoseconds
@@ -502,7 +534,7 @@ static inline unsigned long _msecs_to_jiffies(const unsigned int m)
  * - all other values are converted to jiffies by either multiplying
  *   the input value by a factor or dividing it with a factor and
  *   handling any 32-bit overflows.
- *   for the details see __msecs_to_jiffies()
+ *   for the details see _msecs_to_jiffies()
  *
  * msecs_to_jiffies() checks for the passed in value being a constant
  * via __builtin_constant_p() allowing gcc to eliminate most of the
@@ -525,6 +557,19 @@ static __always_inline unsigned long msecs_to_jiffies(const unsigned int m)
 		return __msecs_to_jiffies(m);
 	}
 }
+
+/**
+ * secs_to_jiffies: - convert seconds to jiffies
+ * @_secs: time in seconds
+ *
+ * Conversion is done by simple multiplication with HZ
+ *
+ * secs_to_jiffies() is defined as a macro rather than a static inline
+ * function so it can be used in static initializers.
+ *
+ * Return: jiffies value
+ */
+#define secs_to_jiffies(_secs) (unsigned long)((_secs) * HZ)
 
 extern unsigned long __usecs_to_jiffies(const unsigned int u);
 #if !(USEC_PER_SEC % HZ)
@@ -597,5 +642,17 @@ extern u64 nsecs_to_jiffies64(u64 n);
 extern unsigned long nsecs_to_jiffies(u64 n);
 
 #define TIMESTAMP_SIZE	30
+
+struct ctl_table;
+int proc_dointvec_jiffies(const struct ctl_table *table, int dir, void *buffer,
+			  size_t *lenp, loff_t *ppos);
+int proc_dointvec_ms_jiffies_minmax(const struct ctl_table *table, int dir,
+				    void *buffer, size_t *lenp, loff_t *ppos);
+int proc_dointvec_userhz_jiffies(const struct ctl_table *table, int dir,
+				 void *buffer, size_t *lenp, loff_t *ppos);
+int proc_dointvec_ms_jiffies(const struct ctl_table *table, int dir, void *buffer,
+			     size_t *lenp, loff_t *ppos);
+int proc_doulongvec_ms_jiffies_minmax(const struct ctl_table *table, int dir,
+				      void *buffer, size_t *lenp, loff_t *ppos);
 
 #endif

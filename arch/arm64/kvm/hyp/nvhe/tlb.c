@@ -132,10 +132,10 @@ static void exit_vmid_context(struct tlb_inv_context *cxt)
 	else
 		__load_host_stage2();
 
-	if (cpus_have_final_cap(ARM64_WORKAROUND_SPECULATIVE_AT)) {
-		/* Ensure write of the old VMID */
-		isb();
+	/* Ensure write of the old VMID */
+	isb();
 
+	if (cpus_have_final_cap(ARM64_WORKAROUND_SPECULATIVE_AT)) {
 		if (!(cxt->sctlr & SCTLR_ELx_M)) {
 			write_sysreg_el1(cxt->sctlr, SYS_SCTLR);
 			isb();
@@ -158,7 +158,6 @@ void __kvm_tlb_flush_vmid_ipa(struct kvm_s2_mmu *mmu,
 	 * Instead, we invalidate Stage-2 for this IPA, and the
 	 * whole of Stage-1. Weep...
 	 */
-	ipa >>= 12;
 	__tlbi_level(ipas2e1is, ipa, level);
 
 	/*
@@ -169,7 +168,7 @@ void __kvm_tlb_flush_vmid_ipa(struct kvm_s2_mmu *mmu,
 	 */
 	dsb(ish);
 	__tlbi(vmalle1is);
-	dsb(ish);
+	__tlbi_sync_s1ish_hyp();
 	isb();
 
 	exit_vmid_context(&cxt);
@@ -188,7 +187,6 @@ void __kvm_tlb_flush_vmid_ipa_nsh(struct kvm_s2_mmu *mmu,
 	 * Instead, we invalidate Stage-2 for this IPA, and the
 	 * whole of Stage-1. Weep...
 	 */
-	ipa >>= 12;
 	__tlbi_level(ipas2e1, ipa, level);
 
 	/*
@@ -226,7 +224,7 @@ void __kvm_tlb_flush_vmid_range(struct kvm_s2_mmu *mmu,
 
 	dsb(ish);
 	__tlbi(vmalle1is);
-	dsb(ish);
+	__tlbi_sync_s1ish_hyp();
 	isb();
 
 	exit_vmid_context(&cxt);
@@ -240,7 +238,7 @@ void __kvm_tlb_flush_vmid(struct kvm_s2_mmu *mmu)
 	enter_vmid_context(mmu, &cxt, false);
 
 	__tlbi(vmalls12e1is);
-	dsb(ish);
+	__tlbi_sync_s1ish_hyp();
 	isb();
 
 	exit_vmid_context(&cxt);
@@ -266,5 +264,5 @@ void __kvm_flush_vm_context(void)
 	/* Same remark as in enter_vmid_context() */
 	dsb(ish);
 	__tlbi(alle1is);
-	dsb(ish);
+	__tlbi_sync_s1ish_hyp();
 }

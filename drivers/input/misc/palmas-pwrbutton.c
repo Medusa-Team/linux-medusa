@@ -91,7 +91,7 @@ static irqreturn_t pwron_irq(int irq, void *palmas_pwron)
 	pm_wakeup_event(input_dev->dev.parent, 0);
 	input_sync(input_dev);
 
-	mod_delayed_work(system_wq, &pwron->input_work,
+	mod_delayed_work(system_dfl_wq, &pwron->input_work,
 			 msecs_to_jiffies(PALMAS_PWR_KEY_Q_TIME_MS));
 
 	return IRQ_HANDLED;
@@ -164,7 +164,7 @@ static int palmas_pwron_probe(struct platform_device *pdev)
 
 	palmas_pwron_params_ofinit(dev, &config);
 
-	pwron = kzalloc(sizeof(*pwron), GFP_KERNEL);
+	pwron = kzalloc_obj(*pwron);
 	if (!pwron)
 		return -ENOMEM;
 
@@ -310,7 +310,7 @@ MODULE_DEVICE_TABLE(of, of_palmas_pwr_match);
 
 static struct platform_driver palmas_pwron_driver = {
 	.probe	= palmas_pwron_probe,
-	.remove_new = palmas_pwron_remove,
+	.remove	= palmas_pwron_remove,
 	.driver	= {
 		.name	= "palmas_pwrbutton",
 		.of_match_table = of_match_ptr(of_palmas_pwr_match),

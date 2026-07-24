@@ -92,7 +92,7 @@
 		      <0x1f000100 0x100>;
 	};
 
-	L2: cache-controller {
+	L2: cache-controller@1f002000 {
 		compatible = "arm,l220-cache";
 		reg = <0x1f002000 0x1000>;
 		interrupt-parent = <&intc_tc11mp>;
@@ -343,7 +343,7 @@
 				reg = <0x0c 0x04>;
 				#clock-cells = <0>;
 				lock-offset = <0x20>;
-				vco-offset = <0x0C>;
+				vco-offset = <0x0c>;
 				clocks = <&xtal24mhz>;
 			};
 			oscclk1: clock-controller@10 {

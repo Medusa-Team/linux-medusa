@@ -190,7 +190,7 @@ static int hclge_get_32_bit_regs(struct hclge_dev *hdev, u32 regs_num,
 	nodata_num = HCLGE_32_BIT_DESC_NODATA_LEN;
 	cmd_num = DIV_ROUND_UP(regs_num + nodata_num,
 			       HCLGE_32_BIT_REG_RTN_DATANUM);
-	desc = kcalloc(cmd_num, sizeof(struct hclge_desc), GFP_KERNEL);
+	desc = kzalloc_objs(struct hclge_desc, cmd_num);
 	if (!desc)
 		return -ENOMEM;
 
@@ -244,7 +244,7 @@ static int hclge_get_64_bit_regs(struct hclge_dev *hdev, u32 regs_num,
 	nodata_len = HCLGE_64_BIT_DESC_NODATA_LEN;
 	cmd_num = DIV_ROUND_UP(regs_num + nodata_len,
 			       HCLGE_64_BIT_REG_RTN_DATANUM);
-	desc = kcalloc(cmd_num, sizeof(struct hclge_desc), GFP_KERNEL);
+	desc = kzalloc_objs(struct hclge_desc, cmd_num);
 	if (!desc)
 		return -ENOMEM;
 
@@ -394,7 +394,7 @@ static int hclge_get_dfx_reg_len(struct hclge_dev *hdev, int *len)
 	int ret;
 	u32 i;
 
-	bd_num_list = kcalloc(dfx_reg_type_num, sizeof(int), GFP_KERNEL);
+	bd_num_list = kzalloc_objs(int, dfx_reg_type_num);
 	if (!bd_num_list)
 		return -ENOMEM;
 
@@ -455,7 +455,7 @@ static int hclge_get_dfx_reg(struct hclge_dev *hdev, void *data)
 	int ret;
 	u32 i;
 
-	bd_num_list = kcalloc(dfx_reg_type_num, sizeof(int), GFP_KERNEL);
+	bd_num_list = kzalloc_objs(int, dfx_reg_type_num);
 	if (!bd_num_list)
 		return -ENOMEM;
 
@@ -510,9 +510,9 @@ out:
 static int hclge_fetch_pf_reg(struct hclge_dev *hdev, void *data,
 			      struct hnae3_knic_private_info *kinfo)
 {
-#define HCLGE_RING_REG_OFFSET		0x200
 #define HCLGE_RING_INT_REG_OFFSET	0x4
 
+	struct hnae3_queue *tqp;
 	int i, j, reg_num;
 	int data_num_sum;
 	u32 *reg = data;
@@ -533,10 +533,11 @@ static int hclge_fetch_pf_reg(struct hclge_dev *hdev, void *data,
 	reg_num = ARRAY_SIZE(ring_reg_addr_list);
 	for (j = 0; j < kinfo->num_tqps; j++) {
 		reg += hclge_reg_get_tlv(HCLGE_REG_TAG_RING, reg_num, reg);
+		tqp = kinfo->tqp[j];
 		for (i = 0; i < reg_num; i++)
-			*reg++ = hclge_read_dev(&hdev->hw,
-						ring_reg_addr_list[i] +
-						HCLGE_RING_REG_OFFSET * j);
+			*reg++ = readl_relaxed(tqp->io_base -
+					       HCLGE_TQP_REG_OFFSET +
+					       ring_reg_addr_list[i]);
 	}
 	data_num_sum += (reg_num + HCLGE_REG_TLV_SPACE) * kinfo->num_tqps;
 

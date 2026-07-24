@@ -330,7 +330,7 @@ static int mon_text_open(struct inode *inode, struct file *file)
 	mutex_lock(&mon_lock);
 	mbus = inode->i_private;
 
-	rp = kzalloc(sizeof(struct mon_reader_text), GFP_KERNEL);
+	rp = kzalloc_obj(struct mon_reader_text);
 	if (rp == NULL) {
 		rc = -ENOMEM;
 		goto err_alloc;
@@ -685,7 +685,6 @@ static int mon_text_release(struct inode *inode, struct file *file)
 static const struct file_operations mon_fops_text_t = {
 	.owner =	THIS_MODULE,
 	.open =		mon_text_open,
-	.llseek =	no_llseek,
 	.read =		mon_text_read_t,
 	.release =	mon_text_release,
 };
@@ -693,7 +692,6 @@ static const struct file_operations mon_fops_text_t = {
 static const struct file_operations mon_fops_text_u = {
 	.owner =	THIS_MODULE,
 	.open =		mon_text_open,
-	.llseek =	no_llseek,
 	.read =		mon_text_read_u,
 	.release =	mon_text_release,
 };

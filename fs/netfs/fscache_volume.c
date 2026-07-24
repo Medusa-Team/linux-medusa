@@ -230,8 +230,7 @@ static struct fscache_volume *fscache_alloc_volume(const char *volume_key,
 	if (IS_ERR(cache))
 		return NULL;
 
-	volume = kzalloc(struct_size(volume, coherency, coherency_len),
-			 GFP_KERNEL);
+	volume = kzalloc_flex(*volume, coherency, coherency_len);
 	if (!volume)
 		goto err_cache;
 
@@ -322,8 +321,7 @@ maybe_wait:
 	}
 	return;
 no_wait:
-	clear_bit_unlock(FSCACHE_VOLUME_CREATING, &volume->flags);
-	wake_up_bit(&volume->flags, FSCACHE_VOLUME_CREATING);
+	clear_and_wake_up_bit(FSCACHE_VOLUME_CREATING, &volume->flags);
 }
 
 /*

@@ -29,12 +29,26 @@ enum expr_type {
 };
 
 union expr_data {
-	struct expr *expr;
-	struct symbol *sym;
+	struct expr * const expr;
+	struct symbol * const sym;
+	void *_initdata;
 };
 
+/**
+ * struct expr - expression
+ *
+ * @node:  link node for the hash table
+ * @type:  expressoin type
+ * @val: calculated tristate value
+ * @val_is_valid: indicate whether the value is valid
+ * @left:  left node
+ * @right: right node
+ */
 struct expr {
+	struct hlist_node node;
 	enum expr_type type;
+	tristate val;
+	bool val_is_valid;
 	union expr_data left, right;
 };
 
@@ -131,6 +145,7 @@ struct symbol {
 #define SYMBOL_CONST      0x0001  /* symbol is const */
 #define SYMBOL_CHECK      0x0008  /* used during dependency checking */
 #define SYMBOL_VALID      0x0080  /* set when symbol.curr is calculated */
+#define SYMBOL_TRANS      0x0100  /* symbol is transitional only (not visible)*/
 #define SYMBOL_WRITE      0x0200  /* write symbol to file (KCONFIG_CONFIG) */
 #define SYMBOL_WRITTEN    0x0800  /* track info to avoid double-write to .config */
 #define SYMBOL_CHECKED    0x2000  /* used during dependency checking */
@@ -168,7 +183,6 @@ enum prop_type {
 	P_SELECT,   /* select BAR */
 	P_IMPLY,    /* imply BAR */
 	P_RANGE,    /* range 7..100 (for a symbol) */
-	P_SYMBOL,   /* where a symbol is defined */
 };
 
 struct property {
@@ -192,15 +206,26 @@ struct property {
 	for (st = sym->prop; st; st = st->next) \
 		if (st->text)
 
+enum menu_type {
+	M_CHOICE,  // "choice"
+	M_COMMENT, // "comment"
+	M_IF,      // "if"
+	M_MENU,    // "mainmenu", "menu", "menuconfig"
+	M_NORMAL,  // others, i.e., "config"
+};
+
 /*
  * Represents a node in the menu tree, as seen in e.g. menuconfig (though used
  * for all front ends). Each symbol, menu, etc. defined in the Kconfig files
  * gets a node. A symbol defined in multiple locations gets one node at each
  * location.
  *
+ * @type: type of the menu entry
  * @choice_members: list of choice members with priority.
  */
 struct menu {
+	enum menu_type type;
+
 	/* The next menu node at the same level */
 	struct menu *next;
 
@@ -276,14 +301,12 @@ struct expr *expr_alloc_two(enum expr_type type, struct expr *e1, struct expr *e
 struct expr *expr_alloc_comp(enum expr_type type, struct symbol *s1, struct symbol *s2);
 struct expr *expr_alloc_and(struct expr *e1, struct expr *e2);
 struct expr *expr_alloc_or(struct expr *e1, struct expr *e2);
-struct expr *expr_copy(const struct expr *org);
-void expr_free(struct expr *e);
 void expr_eliminate_eq(struct expr **ep1, struct expr **ep2);
-int expr_eq(struct expr *e1, struct expr *e2);
+bool expr_eq(struct expr *e1, struct expr *e2);
 tristate expr_calc_value(struct expr *e);
 struct expr *expr_eliminate_dups(struct expr *e);
 struct expr *expr_transform(struct expr *e);
-int expr_contains_symbol(struct expr *dep, struct symbol *sym);
+bool expr_contains_symbol(struct expr *dep, struct symbol *sym);
 bool expr_depends_symbol(struct expr *dep, struct symbol *sym);
 struct expr *expr_trans_compare(struct expr *e, enum expr_type type, struct symbol *sym);
 
@@ -293,7 +316,7 @@ void expr_gstr_print(const struct expr *e, struct gstr *gs);
 void expr_gstr_print_revdep(struct expr *e, struct gstr *gs,
 			    tristate pr_type, const char *title);
 
-static inline int expr_is_yes(const struct expr *e)
+static inline bool expr_is_yes(const struct expr *e)
 {
 	return !e || (e->type == E_SYMBOL && e->left.sym == &symbol_yes);
 }

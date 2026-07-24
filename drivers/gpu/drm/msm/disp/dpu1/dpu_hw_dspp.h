@@ -22,7 +22,7 @@ struct dpu_hw_pcc_coeff {
 };
 
 /**
- * struct dpu_hw_pcc - pcc feature structure
+ * struct dpu_hw_pcc_cfg - pcc feature structure
  * @r: red coefficients.
  * @g: green coefficients.
  * @b: blue coefficients.
@@ -33,6 +33,25 @@ struct dpu_hw_pcc_cfg {
 	struct dpu_hw_pcc_coeff b;
 };
 
+#define DPU_GAMMA_LUT_SIZE 1024
+#define PGC_TBL_LEN 512
+#define PGC_8B_ROUND BIT(0)
+
+/**
+ * struct dpu_hw_gc_lut - gc lut feature structure
+ * @flags: flags for the feature values can be:
+ *         - PGC_8B_ROUND
+ * @c0: color0 component lut
+ * @c1: color1 component lut
+ * @c2: color2 component lut
+ */
+struct dpu_hw_gc_lut {
+	__u64 flags;
+	__u32 c0[PGC_TBL_LEN];
+	__u32 c1[PGC_TBL_LEN];
+	__u32 c2[PGC_TBL_LEN];
+};
+
 /**
  * struct dpu_hw_dspp_ops - interface to the dspp hardware driver functions
  * Caller must call the init function to get the dspp context for each dspp
@@ -40,11 +59,18 @@ struct dpu_hw_pcc_cfg {
  */
 struct dpu_hw_dspp_ops {
 	/**
-	 * setup_pcc - setup dspp pcc
+	 * @setup_pcc: setup_pcc - setup dspp pcc
 	 * @ctx: Pointer to dspp context
 	 * @cfg: Pointer to configuration
 	 */
 	void (*setup_pcc)(struct dpu_hw_dspp *ctx, struct dpu_hw_pcc_cfg *cfg);
+
+	/**
+	 * setup_gc - setup dspp gc
+	 * @ctx: Pointer to dspp context
+	 * @gc_lut: Pointer to lut content
+	 */
+	void (*setup_gc)(struct dpu_hw_dspp *ctx, struct dpu_hw_gc_lut *gc_lut);
 
 };
 
@@ -69,7 +95,7 @@ struct dpu_hw_dspp {
 };
 
 /**
- * dpu_hw_dspp - convert base object dpu_hw_base to container
+ * to_dpu_hw_dspp - convert base object dpu_hw_base to container
  * @hw: Pointer to base hardware block
  * return: Pointer to hardware block container
  */
@@ -78,14 +104,6 @@ static inline struct dpu_hw_dspp *to_dpu_hw_dspp(struct dpu_hw_blk *hw)
 	return container_of(hw, struct dpu_hw_dspp, base);
 }
 
-/**
- * dpu_hw_dspp_init() - Initializes the DSPP hw driver object.
- * should be called once before accessing every DSPP.
- * @dev:  Corresponding device for devres management
- * @cfg:  DSPP catalog entry for which driver object is required
- * @addr: Mapped register io address of MDP
- * Return: pointer to structure or ERR_PTR
- */
 struct dpu_hw_dspp *dpu_hw_dspp_init(struct drm_device *dev,
 				     const struct dpu_dspp_cfg *cfg,
 				     void __iomem *addr);

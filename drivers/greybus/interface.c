@@ -780,7 +780,7 @@ const struct device_type greybus_interface_type = {
  * The position of interface within the Endo is encoded in "interface_id"
  * argument.
  *
- * Returns a pointer to the new interfce or a null pointer if a
+ * Returns a pointer to the new interface or a null pointer if a
  * failure occurs due to memory exhaustion.
  */
 struct gb_interface *gb_interface_create(struct gb_module *module,
@@ -789,7 +789,7 @@ struct gb_interface *gb_interface_create(struct gb_module *module,
 	struct gb_host_device *hd = module->hd;
 	struct gb_interface *intf;
 
-	intf = kzalloc(sizeof(*intf), GFP_KERNEL);
+	intf = kzalloc_obj(*intf);
 	if (!intf)
 		return NULL;
 

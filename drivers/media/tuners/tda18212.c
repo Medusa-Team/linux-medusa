@@ -186,7 +186,7 @@ static int tda18212_probe(struct i2c_client *client)
 		.val_bits = 8,
 	};
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (dev == NULL) {
 		ret = -ENOMEM;
 		dev_err(&client->dev, "kzalloc() failed\n");
@@ -254,7 +254,7 @@ static void tda18212_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id tda18212_id[] = {
-	{"tda18212", 0},
+	{ "tda18212" },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, tda18212_id);

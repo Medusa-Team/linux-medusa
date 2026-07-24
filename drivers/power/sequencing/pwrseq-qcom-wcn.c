@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <linux/pwrseq/provider.h>
 #include <linux/string.h>
@@ -22,6 +23,9 @@ struct pwrseq_qcom_wcn_pdata {
 	size_t num_vregs;
 	unsigned int pwup_delay_ms;
 	unsigned int gpio_enable_delay_ms;
+	const struct pwrseq_target_data **targets;
+	bool has_vddio; /* separate VDD IO regulator */
+	int (*match)(struct pwrseq_device *pwrseq, struct device *dev);
 };
 
 struct pwrseq_qcom_wcn_ctx {
@@ -29,8 +33,10 @@ struct pwrseq_qcom_wcn_ctx {
 	struct device_node *of_node;
 	const struct pwrseq_qcom_wcn_pdata *pdata;
 	struct regulator_bulk_data *regs;
+	struct regulator *vddio;
 	struct gpio_desc *bt_gpio;
 	struct gpio_desc *wlan_gpio;
+	struct gpio_desc *xo_clk_gpio;
 	struct clk *clk;
 	unsigned long last_gpio_enable_jf;
 };
@@ -49,6 +55,26 @@ static void pwrseq_qcom_wcn_ensure_gpio_delay(struct pwrseq_qcom_wcn_ctx *ctx)
 	if (diff_msecs < ctx->pdata->gpio_enable_delay_ms)
 		msleep(ctx->pdata->gpio_enable_delay_ms - diff_msecs);
 }
+
+static int pwrseq_qcom_wcn_vddio_enable(struct pwrseq_device *pwrseq)
+{
+	struct pwrseq_qcom_wcn_ctx *ctx = pwrseq_device_get_drvdata(pwrseq);
+
+	return regulator_enable(ctx->vddio);
+}
+
+static int pwrseq_qcom_wcn_vddio_disable(struct pwrseq_device *pwrseq)
+{
+	struct pwrseq_qcom_wcn_ctx *ctx = pwrseq_device_get_drvdata(pwrseq);
+
+	return regulator_disable(ctx->vddio);
+}
+
+static const struct pwrseq_unit_data pwrseq_qcom_wcn_vddio_unit_data = {
+	.name = "vddio-enable",
+	.enable = pwrseq_qcom_wcn_vddio_enable,
+	.disable = pwrseq_qcom_wcn_vddio_disable,
+};
 
 static int pwrseq_qcom_wcn_vregs_enable(struct pwrseq_device *pwrseq)
 {
@@ -92,9 +118,49 @@ static const struct pwrseq_unit_data pwrseq_qcom_wcn_clk_unit_data = {
 	.disable = pwrseq_qcom_wcn_clk_disable,
 };
 
+static const struct pwrseq_unit_data *pwrseq_qcom_wcn3990_unit_deps[] = {
+	&pwrseq_qcom_wcn_vddio_unit_data,
+	&pwrseq_qcom_wcn_vregs_unit_data,
+	NULL,
+};
+
+static const struct pwrseq_unit_data pwrseq_qcom_wcn3990_unit_data = {
+	.name = "clock-enable",
+	.deps = pwrseq_qcom_wcn3990_unit_deps,
+	.enable = pwrseq_qcom_wcn_clk_enable,
+	.disable = pwrseq_qcom_wcn_clk_disable,
+};
+
 static const struct pwrseq_unit_data *pwrseq_qcom_wcn_unit_deps[] = {
 	&pwrseq_qcom_wcn_vregs_unit_data,
 	&pwrseq_qcom_wcn_clk_unit_data,
+	NULL
+};
+
+static int pwrseq_qcom_wcn6855_clk_assert(struct pwrseq_device *pwrseq)
+{
+	struct pwrseq_qcom_wcn_ctx *ctx = pwrseq_device_get_drvdata(pwrseq);
+
+	if (!ctx->xo_clk_gpio)
+		return 0;
+
+	msleep(1);
+
+	gpiod_set_value_cansleep(ctx->xo_clk_gpio, 1);
+	usleep_range(100, 200);
+
+	return 0;
+}
+
+static const struct pwrseq_unit_data pwrseq_qcom_wcn6855_xo_clk_assert = {
+	.name = "xo-clk-assert",
+	.enable = pwrseq_qcom_wcn6855_clk_assert,
+};
+
+static const struct pwrseq_unit_data *pwrseq_qcom_wcn6855_unit_deps[] = {
+	&pwrseq_qcom_wcn_vregs_unit_data,
+	&pwrseq_qcom_wcn_clk_unit_data,
+	&pwrseq_qcom_wcn6855_xo_clk_assert,
 	NULL
 };
 
@@ -121,6 +187,13 @@ static int pwrseq_qcom_wcn_bt_disable(struct pwrseq_device *pwrseq)
 static const struct pwrseq_unit_data pwrseq_qcom_wcn_bt_unit_data = {
 	.name = "bluetooth-enable",
 	.deps = pwrseq_qcom_wcn_unit_deps,
+	.enable = pwrseq_qcom_wcn_bt_enable,
+	.disable = pwrseq_qcom_wcn_bt_disable,
+};
+
+static const struct pwrseq_unit_data pwrseq_qcom_wcn6855_bt_unit_data = {
+	.name = "bluetooth-enable",
+	.deps = pwrseq_qcom_wcn6855_unit_deps,
 	.enable = pwrseq_qcom_wcn_bt_enable,
 	.disable = pwrseq_qcom_wcn_bt_disable,
 };
@@ -152,6 +225,13 @@ static const struct pwrseq_unit_data pwrseq_qcom_wcn_wlan_unit_data = {
 	.disable = pwrseq_qcom_wcn_wlan_disable,
 };
 
+static const struct pwrseq_unit_data pwrseq_qcom_wcn6855_wlan_unit_data = {
+	.name = "wlan-enable",
+	.deps = pwrseq_qcom_wcn6855_unit_deps,
+	.enable = pwrseq_qcom_wcn_wlan_enable,
+	.disable = pwrseq_qcom_wcn_wlan_disable,
+};
+
 static int pwrseq_qcom_wcn_pwup_delay(struct pwrseq_device *pwrseq)
 {
 	struct pwrseq_qcom_wcn_ctx *ctx = pwrseq_device_get_drvdata(pwrseq);
@@ -160,6 +240,18 @@ static int pwrseq_qcom_wcn_pwup_delay(struct pwrseq_device *pwrseq)
 		msleep(ctx->pdata->pwup_delay_ms);
 
 	return 0;
+}
+
+static int pwrseq_qcom_wcn6855_xo_clk_deassert(struct pwrseq_device *pwrseq)
+{
+	struct pwrseq_qcom_wcn_ctx *ctx = pwrseq_device_get_drvdata(pwrseq);
+
+	if (ctx->xo_clk_gpio) {
+		usleep_range(2000, 5000);
+		gpiod_set_value_cansleep(ctx->xo_clk_gpio, 0);
+	}
+
+	return pwrseq_qcom_wcn_pwup_delay(pwrseq);
 }
 
 static const struct pwrseq_target_data pwrseq_qcom_wcn_bt_target_data = {
@@ -174,9 +266,44 @@ static const struct pwrseq_target_data pwrseq_qcom_wcn_wlan_target_data = {
 	.post_enable = pwrseq_qcom_wcn_pwup_delay,
 };
 
+/* There are no separate BT and WLAN enablement pins */
+static const struct pwrseq_target_data pwrseq_qcom_wcn3990_bt_target_data = {
+	.name = "bluetooth",
+	.unit = &pwrseq_qcom_wcn3990_unit_data,
+};
+
+static const struct pwrseq_target_data pwrseq_qcom_wcn3990_wlan_target_data = {
+	.name = "wlan",
+	.unit = &pwrseq_qcom_wcn3990_unit_data,
+};
+
+static const struct pwrseq_target_data pwrseq_qcom_wcn6855_bt_target_data = {
+	.name = "bluetooth",
+	.unit = &pwrseq_qcom_wcn6855_bt_unit_data,
+	.post_enable = pwrseq_qcom_wcn6855_xo_clk_deassert,
+};
+
+static const struct pwrseq_target_data pwrseq_qcom_wcn6855_wlan_target_data = {
+	.name = "wlan",
+	.unit = &pwrseq_qcom_wcn6855_wlan_unit_data,
+	.post_enable = pwrseq_qcom_wcn6855_xo_clk_deassert,
+};
+
 static const struct pwrseq_target_data *pwrseq_qcom_wcn_targets[] = {
 	&pwrseq_qcom_wcn_bt_target_data,
 	&pwrseq_qcom_wcn_wlan_target_data,
+	NULL
+};
+
+static const struct pwrseq_target_data *pwrseq_qcom_wcn3990_targets[] = {
+	&pwrseq_qcom_wcn3990_bt_target_data,
+	&pwrseq_qcom_wcn3990_wlan_target_data,
+	NULL
+};
+
+static const struct pwrseq_target_data *pwrseq_qcom_wcn6855_targets[] = {
+	&pwrseq_qcom_wcn6855_bt_target_data,
+	&pwrseq_qcom_wcn6855_wlan_target_data,
 	NULL
 };
 
@@ -196,6 +323,66 @@ static const struct pwrseq_qcom_wcn_pdata pwrseq_qca6390_of_data = {
 	.num_vregs = ARRAY_SIZE(pwrseq_qca6390_vregs),
 	.pwup_delay_ms = 60,
 	.gpio_enable_delay_ms = 100,
+	.targets = pwrseq_qcom_wcn_targets,
+};
+
+static const char *const pwrseq_wcn3990_vregs[] = {
+	/* vddio is handled separately */
+	"vddxo",
+	"vddrf",
+	"vddch0",
+	"vddch1",
+};
+
+static int pwrseq_qcom_wcn3990_match(struct pwrseq_device *pwrseq,
+				     struct device *dev);
+
+static const struct pwrseq_qcom_wcn_pdata pwrseq_wcn3990_of_data = {
+	.vregs = pwrseq_wcn3990_vregs,
+	.num_vregs = ARRAY_SIZE(pwrseq_wcn3990_vregs),
+	.pwup_delay_ms = 50,
+	.targets = pwrseq_qcom_wcn3990_targets,
+	.has_vddio = true,
+	.match = pwrseq_qcom_wcn3990_match,
+};
+
+static const char *const pwrseq_wcn6750_vregs[] = {
+	"vddaon",
+	"vddasd",
+	"vddpmu",
+	"vddrfa0p8",
+	"vddrfa1p2",
+	"vddrfa1p7",
+	"vddrfa2p2",
+};
+
+static const struct pwrseq_qcom_wcn_pdata pwrseq_wcn6750_of_data = {
+	.vregs = pwrseq_wcn6750_vregs,
+	.num_vregs = ARRAY_SIZE(pwrseq_wcn6750_vregs),
+	.pwup_delay_ms = 50,
+	.gpio_enable_delay_ms = 5,
+	.targets = pwrseq_qcom_wcn_targets,
+};
+
+static const char *const pwrseq_wcn6855_vregs[] = {
+	"vddio",
+	"vddaon",
+	"vddpmu",
+	"vddpmumx",
+	"vddpmucx",
+	"vddrfa0p95",
+	"vddrfa1p3",
+	"vddrfa1p9",
+	"vddpcie1p3",
+	"vddpcie1p9",
+};
+
+static const struct pwrseq_qcom_wcn_pdata pwrseq_wcn6855_of_data = {
+	.vregs = pwrseq_wcn6855_vregs,
+	.num_vregs = ARRAY_SIZE(pwrseq_wcn6855_vregs),
+	.pwup_delay_ms = 50,
+	.gpio_enable_delay_ms = 5,
+	.targets = pwrseq_qcom_wcn6855_targets,
 };
 
 static const char *const pwrseq_wcn7850_vregs[] = {
@@ -212,10 +399,12 @@ static const struct pwrseq_qcom_wcn_pdata pwrseq_wcn7850_of_data = {
 	.vregs = pwrseq_wcn7850_vregs,
 	.num_vregs = ARRAY_SIZE(pwrseq_wcn7850_vregs),
 	.pwup_delay_ms = 50,
+	.targets = pwrseq_qcom_wcn_targets,
 };
 
-static int pwrseq_qcom_wcn_match(struct pwrseq_device *pwrseq,
-				 struct device *dev)
+static int pwrseq_qcom_wcn_match_regulator(struct pwrseq_device *pwrseq,
+					   struct device *dev,
+					   const char *name)
 {
 	struct pwrseq_qcom_wcn_ctx *ctx = pwrseq_device_get_drvdata(pwrseq);
 	struct device_node *dev_node = dev->of_node;
@@ -226,13 +415,13 @@ static int pwrseq_qcom_wcn_match(struct pwrseq_device *pwrseq,
 	 * 'vddaon-supply' property and whether it leads us to the right
 	 * device.
 	 */
-	if (!of_property_present(dev_node, "vddaon-supply"))
-		return 0;
+	if (!of_property_present(dev_node, name))
+		return PWRSEQ_NO_MATCH;
 
 	struct device_node *reg_node __free(device_node) =
-			of_parse_phandle(dev_node, "vddaon-supply", 0);
+			of_parse_phandle(dev_node, name, 0);
 	if (!reg_node)
-		return 0;
+		return PWRSEQ_NO_MATCH;
 
 	/*
 	 * `reg_node` is the PMU AON regulator, its parent is the `regulators`
@@ -241,9 +430,29 @@ static int pwrseq_qcom_wcn_match(struct pwrseq_device *pwrseq,
 	 */
 	if (!reg_node->parent || !reg_node->parent->parent ||
 	    reg_node->parent->parent != ctx->of_node)
-		return 0;
+		return PWRSEQ_NO_MATCH;
 
-	return 1;
+	return PWRSEQ_MATCH_OK;
+}
+
+static int pwrseq_qcom_wcn_match(struct pwrseq_device *pwrseq,
+				 struct device *dev)
+{
+	return pwrseq_qcom_wcn_match_regulator(pwrseq, dev, "vddaon-supply");
+}
+
+static int pwrseq_qcom_wcn3990_match(struct pwrseq_device *pwrseq,
+				     struct device *dev)
+{
+	int ret;
+
+	/* BT device */
+	ret = pwrseq_qcom_wcn_match_regulator(pwrseq, dev, "vddio-supply");
+	if (ret == PWRSEQ_MATCH_OK)
+		return ret;
+
+	/* WiFi device match */
+	return pwrseq_qcom_wcn_match_regulator(pwrseq, dev, "vdd-1.8-xo-supply");
 }
 
 static int pwrseq_qcom_wcn_probe(struct platform_device *pdev)
@@ -259,7 +468,7 @@ static int pwrseq_qcom_wcn_probe(struct platform_device *pdev)
 
 	ctx->of_node = dev->of_node;
 
-	ctx->pdata = of_device_get_match_data(dev);
+	ctx->pdata = device_get_match_data(dev);
 	if (!ctx->pdata)
 		return dev_err_probe(dev, -ENODEV,
 				     "Failed to obtain platform data\n");
@@ -277,16 +486,35 @@ static int pwrseq_qcom_wcn_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret,
 				     "Failed to get all regulators\n");
 
+	if (ctx->pdata->has_vddio) {
+		ctx->vddio = devm_regulator_get(dev, "vddio");
+		if (IS_ERR(ctx->vddio))
+			return dev_err_probe(dev, PTR_ERR(ctx->vddio), "Failed to get VDDIO\n");
+	}
+
 	ctx->bt_gpio = devm_gpiod_get_optional(dev, "bt-enable", GPIOD_OUT_LOW);
 	if (IS_ERR(ctx->bt_gpio))
 		return dev_err_probe(dev, PTR_ERR(ctx->bt_gpio),
 				     "Failed to get the Bluetooth enable GPIO\n");
 
+	/*
+	 * FIXME: This should actually be GPIOD_OUT_LOW, but doing so would
+	 * cause the WLAN power to be toggled, resulting in PCIe link down.
+	 * Since the PCIe controller driver is not handling link down currently,
+	 * the device becomes unusable. So we need to keep this workaround until
+	 * the link down handling is implemented in the controller driver.
+	 */
 	ctx->wlan_gpio = devm_gpiod_get_optional(dev, "wlan-enable",
 						 GPIOD_ASIS);
 	if (IS_ERR(ctx->wlan_gpio))
 		return dev_err_probe(dev, PTR_ERR(ctx->wlan_gpio),
 				     "Failed to get the WLAN enable GPIO\n");
+
+	ctx->xo_clk_gpio = devm_gpiod_get_optional(dev, "xo-clk",
+						   GPIOD_OUT_LOW);
+	if (IS_ERR(ctx->xo_clk_gpio))
+		return dev_err_probe(dev, PTR_ERR(ctx->xo_clk_gpio),
+				     "Failed to get the XO_CLK GPIO\n");
 
 	/*
 	 * Set direction to output but keep the current value in order to not
@@ -305,8 +533,8 @@ static int pwrseq_qcom_wcn_probe(struct platform_device *pdev)
 	config.parent = dev;
 	config.owner = THIS_MODULE;
 	config.drvdata = ctx;
-	config.match = pwrseq_qcom_wcn_match;
-	config.targets = pwrseq_qcom_wcn_targets;
+	config.match = ctx->pdata->match ? : pwrseq_qcom_wcn_match;
+	config.targets = ctx->pdata->targets;
 
 	ctx->pwrseq = devm_pwrseq_device_register(dev, &config);
 	if (IS_ERR(ctx->pwrseq))
@@ -318,12 +546,40 @@ static int pwrseq_qcom_wcn_probe(struct platform_device *pdev)
 
 static const struct of_device_id pwrseq_qcom_wcn_of_match[] = {
 	{
+		.compatible = "qcom,wcn3950-pmu",
+		.data = &pwrseq_wcn3990_of_data,
+	},
+	{
+		.compatible = "qcom,wcn3988-pmu",
+		.data = &pwrseq_wcn3990_of_data,
+	},
+	{
+		.compatible = "qcom,wcn3990-pmu",
+		.data = &pwrseq_wcn3990_of_data,
+	},
+	{
+		.compatible = "qcom,wcn3991-pmu",
+		.data = &pwrseq_wcn3990_of_data,
+	},
+	{
+		.compatible = "qcom,wcn3998-pmu",
+		.data = &pwrseq_wcn3990_of_data,
+	},
+	{
 		.compatible = "qcom,qca6390-pmu",
 		.data = &pwrseq_qca6390_of_data,
 	},
 	{
+		.compatible = "qcom,wcn6855-pmu",
+		.data = &pwrseq_wcn6855_of_data,
+	},
+	{
 		.compatible = "qcom,wcn7850-pmu",
 		.data = &pwrseq_wcn7850_of_data,
+	},
+	{
+		.compatible = "qcom,wcn6750-pmu",
+		.data = &pwrseq_wcn6750_of_data,
 	},
 	{ }
 };

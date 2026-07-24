@@ -17,7 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/serio.h>
 #include <linux/libps2.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include "psmouse.h"
 #include "elantech.h"
 #include "elan_i2c.h"
@@ -2074,7 +2074,7 @@ static int elantech_setup_ps2(struct psmouse *psmouse,
 	int error = -EINVAL;
 	struct input_dev *tp_dev;
 
-	psmouse->private = etd = kzalloc(sizeof(*etd), GFP_KERNEL);
+	psmouse->private = etd = kzalloc_obj(*etd);
 	if (!etd)
 		return -ENOMEM;
 

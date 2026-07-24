@@ -17,6 +17,7 @@
 #include <sound/sof/info.h>
 #include <sound/sof/pm.h>
 #include <sound/sof/trace.h>
+#include <sound/compress_params.h>
 #include <uapi/sound/sof/fw.h>
 #include <sound/sof/ext_manifest.h>
 
@@ -76,14 +77,6 @@ bool sof_debug_check_flag(int mask);
 #define SOF_IPC_DSP_REPLY		0
 #define SOF_IPC_HOST_REPLY		1
 
-/* convenience constructor for DAI driver streams */
-#define SOF_DAI_STREAM(sname, scmin, scmax, srates, sfmt) \
-	{.stream_name = sname, .channels_min = scmin, .channels_max = scmax, \
-	 .rates = srates, .formats = sfmt}
-
-#define SOF_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE | \
-	SNDRV_PCM_FMTBIT_S32_LE | SNDRV_PCM_FMTBIT_FLOAT)
-
 /* So far the primary core on all DSPs has ID 0 */
 #define SOF_DSP_PRIMARY_CORE 0
 
@@ -119,6 +112,7 @@ struct sof_compr_stream {
 	u32 sampling_rate;
 	u16 channels;
 	u16 sample_container_bytes;
+	struct snd_codec codec_params;
 	size_t posn_offset;
 };
 
@@ -132,16 +126,17 @@ struct snd_sof_pdata;
 
 /**
  * struct snd_sof_platform_stream_params - platform dependent stream parameters
- * @stream_tag:		Stream tag to use
- * @use_phy_addr:	Use the provided @phy_addr for configuration
  * @phy_addr:		Platform dependent address to be used, if  @use_phy_addr
  *			is true
+ * @stream_tag:		Stream tag to use
+ * @use_phy_addr:	Use the provided @phy_addr for configuration
  * @no_ipc_position:	Disable position update IPC from firmware
+ * @cont_update_posn:	Continuous position update.
  */
 struct snd_sof_platform_stream_params {
+	u32 phy_addr;
 	u16 stream_tag;
 	bool use_phy_address;
-	u32 phy_addr;
 	bool no_ipc_position;
 	bool cont_update_posn;
 };
@@ -411,8 +406,8 @@ struct snd_sof_debugfs_map {
 
 /* mailbox descriptor, used for host <-> DSP IPC */
 struct snd_sof_mailbox {
-	u32 offset;
 	size_t size;
+	u32 offset;
 };
 
 /* IPC message descriptor for host <-> DSP IO */
@@ -424,11 +419,12 @@ struct snd_sof_ipc_msg {
 	size_t reply_size;
 	int reply_error;
 
-	/* notification, firmware initiated messages */
-	void *rx_data;
+	bool ipc_complete;
 
 	wait_queue_head_t waitq;
-	bool ipc_complete;
+
+	/* notification, firmware initiated messages */
+	void *rx_data;
 };
 
 /**
@@ -586,6 +582,8 @@ struct snd_sof_dev {
 	wait_queue_head_t boot_wait;
 	enum sof_fw_state fw_state;
 	bool first_boot;
+	/* mutex to protect DSP firmware boot (except initial, probe time boot */
+	struct mutex dsp_fw_boot_mutex;
 
 	/* work queue in case the probe is implemented in two steps */
 	struct work_struct probe_work;
@@ -709,6 +707,7 @@ int snd_sof_suspend(struct device *dev);
 int snd_sof_dsp_power_down_notify(struct snd_sof_dev *sdev);
 int snd_sof_prepare(struct device *dev);
 void snd_sof_complete(struct device *dev);
+int snd_sof_boot_dsp_firmware(struct snd_sof_dev *sdev);
 
 void snd_sof_new_platform_drv(struct snd_sof_dev *sdev);
 
@@ -844,7 +843,11 @@ int sof_stream_pcm_close(struct snd_sof_dev *sdev,
 			 struct snd_pcm_substream *substream);
 
 /* SOF client support */
+struct sof_client_dev;
+
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_CLIENT)
+struct snd_sof_dev *sof_client_dev_to_sof_dev(struct sof_client_dev *cdev);
+
 int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name, u32 id,
 			    const void *data, size_t size);
 void sof_client_dev_unregister(struct snd_sof_dev *sdev, const char *name, u32 id);
@@ -855,6 +858,11 @@ void sof_client_fw_state_dispatcher(struct snd_sof_dev *sdev);
 int sof_suspend_clients(struct snd_sof_dev *sdev, pm_message_t state);
 int sof_resume_clients(struct snd_sof_dev *sdev);
 #else /* CONFIG_SND_SOC_SOF_CLIENT */
+static inline struct snd_sof_dev *
+sof_client_dev_to_sof_dev(struct sof_client_dev *cdev) {
+	return NULL;
+}
+
 static inline int sof_client_dev_register(struct snd_sof_dev *sdev, const char *name,
 					  u32 id, const void *data, size_t size)
 {

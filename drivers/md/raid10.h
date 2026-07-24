@@ -18,11 +18,6 @@
 struct raid10_info {
 	struct md_rdev	*rdev, *replacement;
 	sector_t	head_position;
-	int		recovery_disabled;	/* matches
-						 * mddev->recovery_disabled
-						 * when we shouldn't try
-						 * recovering this device.
-						 */
 };
 
 struct r10conf {
@@ -161,11 +156,12 @@ enum r10bio_state {
 	R10BIO_IsSync,
 	R10BIO_IsRecover,
 	R10BIO_IsReshape,
-	R10BIO_Degraded,
 /* Set ReadError on bios that experience a read error
  * so that raid10d knows what to do with them.
  */
 	R10BIO_ReadError,
+/* For bio_split errors, record that bi_end_io was called. */
+	R10BIO_Returned,
 /* If a write for this request means we can clear some
  * known-bad-block records, we set this flag.
  */

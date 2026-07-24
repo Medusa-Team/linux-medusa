@@ -40,7 +40,7 @@ The '$HOME/.perfconfig' file is used to store a per-user configuration.
 The file '$(sysconfdir)/perfconfig' can be used to
 store a system-wide default configuration.
 
-One an disable reading config files by setting the PERF_CONFIG environment
+One can disable reading config files by setting the PERF_CONFIG environment
 variable to /dev/null, or provide an alternate config file by setting that
 variable.
 
@@ -210,6 +210,12 @@ core.*::
 		Sets a timeout (in milliseconds) for parsing /proc/<pid>/maps files.
 		Can be overridden by the --proc-map-timeout option on supported
 		subcommands. The default timeout is 500ms.
+	addr2line-disable-warn::
+		When set to 'true' disable all warnings from 'addr2line' output.
+		Default setting is 'false' to show these warnings.
+	addr2line-timeout::
+		Sets a timeout (in milliseconds) for parsing 'addr2line'
+		output.  The default timeout is 5s.
 
 tui.*, gtk.*::
 	Subcommands that can be configured here are 'top', 'report' and 'annotate'.
@@ -246,6 +252,19 @@ buildid-cache.*::
 annotate.*::
 	These are in control of addresses, jump function, source code
 	in lines of assembly code from a specific program.
+
+	annotate.disassemblers::
+		Choose the disassembler to use: "objdump", "llvm",  "capstone",
+		if not specified it will first try, if available, the "llvm" one,
+		then, if it fails, "capstone", and finally the original "objdump"
+		based one.
+
+		Choosing a different one is useful when handling some feature that
+		is known to be best support at some point by one of the options,
+		to compare the output when in doubt about some bug, etc.
+
+		This can be a list, in order of preference, the first one that works
+		finishes the process.
 
 	annotate.addr2line::
 		addr2line binary to use for file names and line numbers.
@@ -438,6 +457,9 @@ call-graph.*::
 		the value 'lbr' only works for certain cpus. The method for
 		kernel space is controlled not by this option but by the
 		kernel config (CONFIG_UNWINDER_*).
+
+		The 'defer' mode can be used with 'fp' mode to enable deferred
+		user callchains (like 'fp,defer').
 
 	call-graph.dump-size::
 		The size of stack to dump in order to do post-unwinding. Default is 8192 (byte).
@@ -694,6 +716,10 @@ intel-pt.*::
 		branches decoded without consuming any trace packets. If
 		the maximum is exceeded there will be a "Never-ending loop"
 		error. The default is 100000.
+
+	intel-pt.all-switch-events::
+		If the user has permission to do so, always record all context
+		switch events on all CPUs.
 
 auxtrace.*::
 

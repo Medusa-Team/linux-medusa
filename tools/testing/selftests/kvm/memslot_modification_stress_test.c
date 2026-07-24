@@ -22,6 +22,7 @@
 #include "processor.h"
 #include "test_util.h"
 #include "guest_modes.h"
+#include "ucall_common.h"
 
 #define DUMMY_MEMSLOT_INDEX 7
 
@@ -29,7 +30,7 @@
 
 
 static int nr_vcpus = 1;
-static uint64_t guest_percpu_mem_size = DEFAULT_PER_VCPU_MEM_SIZE;
+static u64 guest_percpu_mem_size = DEFAULT_PER_VCPU_MEM_SIZE;
 
 static void vcpu_worker(struct memstress_vcpu_args *vcpu_args)
 {
@@ -54,10 +55,10 @@ static void vcpu_worker(struct memstress_vcpu_args *vcpu_args)
 }
 
 static void add_remove_memslot(struct kvm_vm *vm, useconds_t delay,
-			       uint64_t nr_modifications)
+			       u64 nr_modifications)
 {
-	uint64_t pages = max_t(int, vm->page_size, getpagesize()) / vm->page_size;
-	uint64_t gpa;
+	u64 pages = max_t(int, vm->page_size, getpagesize()) / vm->page_size;
+	gpa_t gpa;
 	int i;
 
 	/*
@@ -77,8 +78,9 @@ static void add_remove_memslot(struct kvm_vm *vm, useconds_t delay,
 
 struct test_params {
 	useconds_t delay;
-	uint64_t nr_iterations;
+	u64 nr_iterations;
 	bool partition_vcpu_memory_access;
+	bool disable_slot_zap_quirk;
 };
 
 static void run_test(enum vm_guest_mode mode, void *arg)
@@ -89,6 +91,13 @@ static void run_test(enum vm_guest_mode mode, void *arg)
 	vm = memstress_create_vm(mode, nr_vcpus, guest_percpu_mem_size, 1,
 				 VM_MEM_SRC_ANONYMOUS,
 				 p->partition_vcpu_memory_access);
+#ifdef __x86_64__
+	if (p->disable_slot_zap_quirk)
+		vm_enable_cap(vm, KVM_CAP_DISABLE_QUIRKS2, KVM_X86_QUIRK_SLOT_ZAP_ALL);
+
+	pr_info("Memslot zap quirk %s\n", p->disable_slot_zap_quirk ?
+		"disabled" : "enabled");
+#endif
 
 	pr_info("Finished creating vCPUs\n");
 
@@ -107,11 +116,12 @@ static void run_test(enum vm_guest_mode mode, void *arg)
 static void help(char *name)
 {
 	puts("");
-	printf("usage: %s [-h] [-m mode] [-d delay_usec]\n"
+	printf("usage: %s [-h] [-m mode] [-d delay_usec] [-q]\n"
 	       "          [-b memory] [-v vcpus] [-o] [-i iterations]\n", name);
 	guest_modes_help();
 	printf(" -d: add a delay between each iteration of adding and\n"
 	       "     deleting a memslot in usec.\n");
+	printf(" -q: Disable memslot zap quirk.\n");
 	printf(" -b: specify the size of the memory region which should be\n"
 	       "     accessed by each vCPU. e.g. 10M or 3G.\n"
 	       "     Default: 1G\n");
@@ -137,7 +147,7 @@ int main(int argc, char *argv[])
 
 	guest_modes_append_default();
 
-	while ((opt = getopt(argc, argv, "hm:d:b:v:oi:")) != -1) {
+	while ((opt = getopt(argc, argv, "hm:d:qb:v:oi:")) != -1) {
 		switch (opt) {
 		case 'm':
 			guest_modes_cmdline(optarg);
@@ -160,6 +170,14 @@ int main(int argc, char *argv[])
 		case 'i':
 			p.nr_iterations = atoi_positive("Number of iterations", optarg);
 			break;
+#ifdef __x86_64__
+		case 'q':
+			p.disable_slot_zap_quirk = true;
+
+			TEST_REQUIRE(kvm_check_cap(KVM_CAP_DISABLE_QUIRKS2) &
+				     KVM_X86_QUIRK_SLOT_ZAP_ALL);
+			break;
+#endif
 		case 'h':
 		default:
 			help(argv[0]);

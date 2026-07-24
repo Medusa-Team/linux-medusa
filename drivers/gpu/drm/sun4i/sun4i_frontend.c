@@ -19,6 +19,7 @@
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_plane.h>
+#include <drm/drm_print.h>
 
 #include "sun4i_drv.h"
 #include "sun4i_frontend.h"
@@ -717,7 +718,7 @@ MODULE_DEVICE_TABLE(of, sun4i_frontend_of_table);
 
 static struct platform_driver sun4i_frontend_driver = {
 	.probe		= sun4i_frontend_probe,
-	.remove_new	= sun4i_frontend_remove,
+	.remove		= sun4i_frontend_remove,
 	.driver		= {
 		.name		= "sun4i-frontend",
 		.of_match_table	= sun4i_frontend_of_table,

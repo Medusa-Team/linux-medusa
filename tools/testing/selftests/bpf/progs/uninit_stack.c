@@ -70,16 +70,18 @@ __naked int helper_uninit_to_misc(void *ctx)
 		r1 = r10;				\
 		r1 += -128;				\
 		r2 = 32;				\
-		call %[bpf_trace_printk];		\
+		r3 = 0;					\
+		call %[bpf_probe_read_user];		\
 		/* Call to dummy() forces print_verifier_state(..., true),	\
 		 * thus showing the stack state, matched by __msg().		\
 		 */					\
 		call %[dummy];				\
+		r1 = *(u64*)(r10 - 104);		\
 		r0 = 0;					\
 		exit;					\
 "
 		      :
-		      : __imm(bpf_trace_printk),
+		      : __imm(bpf_probe_read_user),
 			__imm(dummy)
 		      : __clobber_all);
 }

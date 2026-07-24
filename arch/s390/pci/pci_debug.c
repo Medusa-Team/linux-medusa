@@ -6,8 +6,7 @@
  *    Jan Glauber <jang@linux.vnet.ibm.com>
  */
 
-#define KMSG_COMPONENT "zpci"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "zpci: " fmt
 
 #include <linux/kernel.h>
 #include <linux/seq_file.h>
@@ -71,17 +70,23 @@ static void pci_fmb_show(struct seq_file *m, char *name[], int length,
 
 static void pci_sw_counter_show(struct seq_file *m)
 {
-	struct zpci_iommu_ctrs  *ctrs = zpci_get_iommu_ctrs(m->private);
+	struct zpci_dev *zdev = m->private;
+	struct zpci_iommu_ctrs *ctrs;
 	atomic64_t *counter;
+	unsigned long flags;
 	int i;
 
+	spin_lock_irqsave(&zdev->dom_lock, flags);
+	ctrs = zpci_get_iommu_ctrs(m->private);
 	if (!ctrs)
-		return;
+		goto unlock;
 
 	counter = &ctrs->mapped_pages;
 	for (i = 0; i < ARRAY_SIZE(pci_sw_names); i++, counter++)
 		seq_printf(m, "%26s:\t%llu\n", pci_sw_names[i],
 			   atomic64_read(counter));
+unlock:
+	spin_unlock_irqrestore(&zdev->dom_lock, flags);
 }
 
 static int pci_perf_show(struct seq_file *m, void *v)

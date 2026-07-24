@@ -185,10 +185,10 @@ static ssize_t tsl2550_store_power_state(struct device *dev,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct tsl2550_data *data = i2c_get_clientdata(client);
-	unsigned long val = simple_strtoul(buf, NULL, 10);
+	unsigned long val;
 	int ret;
 
-	if (val > 1)
+	if (kstrtoul(buf, 10, &val) || val > 1)
 		return -EINVAL;
 
 	mutex_lock(&data->update_lock);
@@ -217,10 +217,10 @@ static ssize_t tsl2550_store_operating_mode(struct device *dev,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct tsl2550_data *data = i2c_get_clientdata(client);
-	unsigned long val = simple_strtoul(buf, NULL, 10);
+	unsigned long val;
 	int ret;
 
-	if (val > 1)
+	if (kstrtoul(buf, 10, &val) || val > 1)
 		return -EINVAL;
 
 	if (data->power_state == 0)
@@ -343,7 +343,7 @@ static int tsl2550_probe(struct i2c_client *client)
 		goto exit;
 	}
 
-	data = kzalloc(sizeof(struct tsl2550_data), GFP_KERNEL);
+	data = kzalloc_obj(struct tsl2550_data);
 	if (!data) {
 		err = -ENOMEM;
 		goto exit;

@@ -70,10 +70,8 @@ static int rtl92du_init_shared_data(struct ieee80211_hw *hw)
 	rtlpriv->curveindex_5g = kcalloc(TARGET_CHNL_NUM_5G,
 					 sizeof(*rtlpriv->curveindex_5g),
 					 GFP_KERNEL);
-	rtlpriv->mutex_for_power_on_off =
-		kzalloc(sizeof(*rtlpriv->mutex_for_power_on_off), GFP_KERNEL);
-	rtlpriv->mutex_for_hw_init =
-		kzalloc(sizeof(*rtlpriv->mutex_for_hw_init), GFP_KERNEL);
+	rtlpriv->mutex_for_power_on_off = kzalloc_obj(*rtlpriv->mutex_for_power_on_off);
+	rtlpriv->mutex_for_hw_init = kzalloc_obj(*rtlpriv->mutex_for_hw_init);
 
 	if (!rtlpriv->curveindex_2g || !rtlpriv->curveindex_5g ||
 	    !rtlpriv->mutex_for_power_on_off || !rtlpriv->mutex_for_hw_init) {
@@ -352,7 +350,6 @@ static const struct usb_device_id rtl8192d_usb_ids[] = {
 	{RTL_USB_DEVICE(USB_VENDOR_ID_REALTEK, 0x8194, rtl92du_hal_cfg)},
 	{RTL_USB_DEVICE(USB_VENDOR_ID_REALTEK, 0x8111, rtl92du_hal_cfg)},
 	{RTL_USB_DEVICE(USB_VENDOR_ID_REALTEK, 0x0193, rtl92du_hal_cfg)},
-	{RTL_USB_DEVICE(USB_VENDOR_ID_REALTEK, 0x8171, rtl92du_hal_cfg)},
 	{RTL_USB_DEVICE(USB_VENDOR_ID_REALTEK, 0xe194, rtl92du_hal_cfg)},
 	{RTL_USB_DEVICE(0x2019, 0xab2c, rtl92du_hal_cfg)},
 	{RTL_USB_DEVICE(0x2019, 0xab2d, rtl92du_hal_cfg)},

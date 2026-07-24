@@ -146,6 +146,11 @@ integrity:<bytes>:<type>
     integrity for the encrypted device. The additional space is then
     used for storing authentication tag (and persistent IV if needed).
 
+integrity_key_size:<bytes>
+    Optionally set the integrity key size if it differs from the digest size.
+    It allows the use of wrapped key algorithms where the key size is
+    independent of the cryptographic key size.
+
 sector_size:<bytes>
     Use <bytes> as the encryption unit instead of 512 bytes sectors.
     This option can be in range 512 - 4096 bytes and must be power of two.
@@ -160,15 +165,24 @@ iv_large_sectors
    The <iv_offset> must be multiple of <sector_size> (in 512 bytes units)
    if this flag is specified.
 
+integrity_key_size:<bytes>
+   Use an integrity key of <bytes> size instead of using an integrity key size
+   of the digest size of the used HMAC algorithm.
+
 
 Module parameters::
-
    max_read_size
-   max_write_size
-      Maximum size of read or write requests. When a request larger than this size
+      Maximum size of read requests. When a request larger than this size
       is received, dm-crypt will split the request. The splitting improves
       concurrency (the split requests could be encrypted in parallel by multiple
-      cores), but it also causes overhead. The user should tune these parameters to
+      cores), but it also causes overhead. The user should tune this parameters to
+      fit the actual workload.
+
+   max_write_size
+      Maximum size of write requests. When a request larger than this size
+      is received, dm-crypt will split the request. The splitting improves
+      concurrency (the split requests could be encrypted in parallel by multiple
+      cores), but it also causes overhead. The user should tune this parameters to
       fit the actual workload.
 
 

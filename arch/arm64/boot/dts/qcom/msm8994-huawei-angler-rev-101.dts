@@ -2,12 +2,13 @@
 /*
  * Copyright (c) 2015, Huawei Inc. All rights reserved.
  * Copyright (c) 2016, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023, Petr Vorel <petr.vorel@gmail.com>
+ * Copyright (c) 2021-2024, Petr Vorel <petr.vorel@gmail.com>
  */
 
 /dts-v1/;
 
 #include "msm8994.dtsi"
+#include "pm8994.dtsi"
 
 / {
 	model = "Huawei Nexus 6P";
@@ -15,7 +16,7 @@
 	chassis-type = "handset";
 	/* required for bootloader to select correct board */
 	qcom,msm-id = <207 0x20000>;
-	qcom,pmic-id = <0x10009 0x1000A 0x0 0x0>;
+	qcom,pmic-id = <0x10009 0x1000a 0x0 0x0>;
 	qcom,board-id = <8026 0>;
 
 	aliases {
@@ -46,6 +47,24 @@
 			no-map;
 		};
 	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+		autorepeat;
+
+		button-vol-up {
+			label = "volume up";
+			gpios = <&pm8994_gpios 3 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			wakeup-source;
+			debounce-interval = <15>;
+		};
+	};
+};
+
+&pm8994_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
 };
 
 &blsp1_uart2 {

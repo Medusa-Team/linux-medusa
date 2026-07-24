@@ -201,8 +201,7 @@ static int max_98373_trigger(struct snd_pcm_substream *substream, int cmd)
 
 	cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	for_each_rtd_codec_dais(rtd, j, codec_dai) {
-		struct snd_soc_dapm_context *dapm =
-				snd_soc_component_get_dapm(cpu_dai->component);
+		struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(cpu_dai->component);
 		char pin_name[MAX_98373_PIN_NAME];
 
 		snprintf(pin_name, ARRAY_SIZE(pin_name), "%s Spk",
@@ -239,12 +238,13 @@ static const struct snd_soc_ops max_98373_ops = {
 static int max_98373_spk_codec_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_card_to_dapm(card);
 	unsigned int num_codecs = get_num_codecs(MAX_98373_ACPI_HID);
 	int ret;
 
 	switch (num_codecs) {
 	case 2:
-		ret = snd_soc_dapm_new_controls(&card->dapm, maxim_2spk_widgets,
+		ret = snd_soc_dapm_new_controls(dapm, maxim_2spk_widgets,
 						ARRAY_SIZE(maxim_2spk_widgets));
 		if (ret) {
 			dev_err(rtd->dev, "fail to add max98373 widgets, ret %d\n",
@@ -260,7 +260,7 @@ static int max_98373_spk_codec_init(struct snd_soc_pcm_runtime *rtd)
 			return ret;
 		}
 
-		ret = snd_soc_dapm_add_routes(&card->dapm, max_98373_dapm_routes,
+		ret = snd_soc_dapm_add_routes(dapm, max_98373_dapm_routes,
 					      ARRAY_SIZE(max_98373_dapm_routes));
 		if (ret) {
 			dev_err(rtd->dev, "fail to add max98373 routes, ret %d\n",
@@ -283,14 +283,14 @@ void max_98373_dai_link(struct device *dev, struct snd_soc_dai_link *link)
 	link->init = max_98373_spk_codec_init;
 	link->ops = &max_98373_ops;
 }
-EXPORT_SYMBOL_NS(max_98373_dai_link, SND_SOC_INTEL_SOF_MAXIM_COMMON);
+EXPORT_SYMBOL_NS(max_98373_dai_link, "SND_SOC_INTEL_SOF_MAXIM_COMMON");
 
 void max_98373_set_codec_conf(struct snd_soc_card *card)
 {
 	card->codec_conf = max_98373_codec_conf;
 	card->num_configs = ARRAY_SIZE(max_98373_codec_conf);
 }
-EXPORT_SYMBOL_NS(max_98373_set_codec_conf, SND_SOC_INTEL_SOF_MAXIM_COMMON);
+EXPORT_SYMBOL_NS(max_98373_set_codec_conf, "SND_SOC_INTEL_SOF_MAXIM_COMMON");
 
 /*
  * Maxim MAX98390
@@ -416,13 +416,14 @@ static int max_98390_hw_params(struct snd_pcm_substream *substream,
 static int max_98390_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_card_to_dapm(card);
 	unsigned int num_codecs = get_num_codecs(MAX_98390_ACPI_HID);
 	int ret;
 
 	switch (num_codecs) {
 	case 4:
 		/* add widgets/controls/dapm for tweeter speakers */
-		ret = snd_soc_dapm_new_controls(&card->dapm, max_98390_tt_dapm_widgets,
+		ret = snd_soc_dapm_new_controls(dapm, max_98390_tt_dapm_widgets,
 						ARRAY_SIZE(max_98390_tt_dapm_widgets));
 		if (ret) {
 			dev_err(rtd->dev, "unable to add tweeter dapm widgets, ret %d\n",
@@ -439,7 +440,7 @@ static int max_98390_init(struct snd_soc_pcm_runtime *rtd)
 			return ret;
 		}
 
-		ret = snd_soc_dapm_add_routes(&card->dapm, max_98390_tt_dapm_routes,
+		ret = snd_soc_dapm_add_routes(dapm, max_98390_tt_dapm_routes,
 					      ARRAY_SIZE(max_98390_tt_dapm_routes));
 		if (ret) {
 			dev_err(rtd->dev, "unable to add tweeter dapm routes, ret %d\n",
@@ -450,7 +451,7 @@ static int max_98390_init(struct snd_soc_pcm_runtime *rtd)
 		fallthrough;
 	case 2:
 		/* add regular speakers dapm route */
-		ret = snd_soc_dapm_new_controls(&card->dapm, maxim_2spk_widgets,
+		ret = snd_soc_dapm_new_controls(dapm, maxim_2spk_widgets,
 						ARRAY_SIZE(maxim_2spk_widgets));
 		if (ret) {
 			dev_err(rtd->dev, "fail to add max98390 woofer widgets, ret %d\n",
@@ -466,7 +467,7 @@ static int max_98390_init(struct snd_soc_pcm_runtime *rtd)
 			return ret;
 		}
 
-		ret = snd_soc_dapm_add_routes(&card->dapm, max_98390_dapm_routes,
+		ret = snd_soc_dapm_add_routes(dapm, max_98390_dapm_routes,
 					      ARRAY_SIZE(max_98390_dapm_routes));
 		if (ret) {
 			dev_err(rtd->dev, "unable to add dapm routes, ret %d\n",
@@ -506,7 +507,7 @@ void max_98390_dai_link(struct device *dev, struct snd_soc_dai_link *link)
 	link->init = max_98390_init;
 	link->ops = &max_98390_ops;
 }
-EXPORT_SYMBOL_NS(max_98390_dai_link, SND_SOC_INTEL_SOF_MAXIM_COMMON);
+EXPORT_SYMBOL_NS(max_98390_dai_link, "SND_SOC_INTEL_SOF_MAXIM_COMMON");
 
 void max_98390_set_codec_conf(struct device *dev, struct snd_soc_card *card)
 {
@@ -529,7 +530,7 @@ void max_98390_set_codec_conf(struct device *dev, struct snd_soc_card *card)
 		break;
 	}
 }
-EXPORT_SYMBOL_NS(max_98390_set_codec_conf, SND_SOC_INTEL_SOF_MAXIM_COMMON);
+EXPORT_SYMBOL_NS(max_98390_set_codec_conf, "SND_SOC_INTEL_SOF_MAXIM_COMMON");
 
 /*
  * Maxim MAX98357A/MAX98360A
@@ -564,9 +565,10 @@ static struct snd_soc_dai_link_component max_98360a_components[] = {
 static int max_98357a_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_card_to_dapm(card);
 	int ret;
 
-	ret = snd_soc_dapm_new_controls(&card->dapm, max_98357a_dapm_widgets,
+	ret = snd_soc_dapm_new_controls(dapm, max_98357a_dapm_widgets,
 					ARRAY_SIZE(max_98357a_dapm_widgets));
 	if (ret) {
 		dev_err(rtd->dev, "unable to add dapm controls, ret %d\n", ret);
@@ -581,7 +583,7 @@ static int max_98357a_init(struct snd_soc_pcm_runtime *rtd)
 		return ret;
 	}
 
-	ret = snd_soc_dapm_add_routes(&card->dapm, max_98357a_dapm_routes,
+	ret = snd_soc_dapm_add_routes(dapm, max_98357a_dapm_routes,
 				      ARRAY_SIZE(max_98357a_dapm_routes));
 
 	if (ret)
@@ -596,7 +598,7 @@ void max_98357a_dai_link(struct snd_soc_dai_link *link)
 	link->num_codecs = ARRAY_SIZE(max_98357a_components);
 	link->init = max_98357a_init;
 }
-EXPORT_SYMBOL_NS(max_98357a_dai_link, SND_SOC_INTEL_SOF_MAXIM_COMMON);
+EXPORT_SYMBOL_NS(max_98357a_dai_link, "SND_SOC_INTEL_SOF_MAXIM_COMMON");
 
 void max_98360a_dai_link(struct snd_soc_dai_link *link)
 {
@@ -604,7 +606,7 @@ void max_98360a_dai_link(struct snd_soc_dai_link *link)
 	link->num_codecs = ARRAY_SIZE(max_98360a_components);
 	link->init = max_98357a_init;
 }
-EXPORT_SYMBOL_NS(max_98360a_dai_link, SND_SOC_INTEL_SOF_MAXIM_COMMON);
+EXPORT_SYMBOL_NS(max_98360a_dai_link, "SND_SOC_INTEL_SOF_MAXIM_COMMON");
 
 MODULE_DESCRIPTION("ASoC Intel SOF Maxim helpers");
 MODULE_LICENSE("GPL");

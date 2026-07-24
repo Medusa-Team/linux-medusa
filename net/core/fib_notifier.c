@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/rtnetlink.h>
 #include <linux/notifier.h>
 #include <linux/rcupdate.h>
@@ -43,7 +44,6 @@ static unsigned int fib_seq_sum(struct net *net)
 	struct fib_notifier_ops *ops;
 	unsigned int fib_seq = 0;
 
-	rtnl_lock();
 	rcu_read_lock();
 	list_for_each_entry_rcu(ops, &fn_net->fib_notifier_ops, list) {
 		if (!try_module_get(ops->owner))
@@ -52,7 +52,6 @@ static unsigned int fib_seq_sum(struct net *net)
 		module_put(ops->owner);
 	}
 	rcu_read_unlock();
-	rtnl_unlock();
 
 	return fib_seq;
 }

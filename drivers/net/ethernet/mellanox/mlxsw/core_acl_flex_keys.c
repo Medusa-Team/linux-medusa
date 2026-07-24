@@ -67,7 +67,7 @@ static bool mlxsw_afk_blocks_check(struct mlxsw_afk *mlxsw_afk)
 
 		for (j = 0; j < block->instances_count; j++) {
 			const struct mlxsw_afk_element_info *elinfo;
-			struct mlxsw_afk_element_inst *elinst;
+			const struct mlxsw_afk_element_inst *elinst;
 
 			elinst = &block->instances[j];
 			elinfo = &mlxsw_afk_element_infos[elinst->element];
@@ -86,7 +86,7 @@ struct mlxsw_afk *mlxsw_afk_create(unsigned int max_blocks,
 {
 	struct mlxsw_afk *mlxsw_afk;
 
-	mlxsw_afk = kzalloc(sizeof(*mlxsw_afk), GFP_KERNEL);
+	mlxsw_afk = kzalloc_obj(*mlxsw_afk);
 	if (!mlxsw_afk)
 		return NULL;
 	INIT_LIST_HEAD(&mlxsw_afk->key_info_list);
@@ -154,7 +154,7 @@ static void mlxsw_afk_picker_count_hits(struct mlxsw_afk *mlxsw_afk,
 		const struct mlxsw_afk_block *block = &mlxsw_afk->blocks[i];
 
 		for (j = 0; j < block->instances_count; j++) {
-			struct mlxsw_afk_element_inst *elinst;
+			const struct mlxsw_afk_element_inst *elinst;
 
 			elinst = &block->instances[j];
 			if (elinst->element == element) {
@@ -262,7 +262,7 @@ static int mlxsw_afk_picker(struct mlxsw_afk *mlxsw_afk,
 	enum mlxsw_afk_element element;
 	int err;
 
-	picker = kcalloc(mlxsw_afk->blocks_count, sizeof(*picker), GFP_KERNEL);
+	picker = kzalloc_objs(*picker, mlxsw_afk->blocks_count);
 	if (!picker)
 		return -ENOMEM;
 
@@ -327,8 +327,7 @@ mlxsw_afk_key_info_create(struct mlxsw_afk *mlxsw_afk,
 	struct mlxsw_afk_key_info *key_info;
 	int err;
 
-	key_info = kzalloc(struct_size(key_info, blocks, mlxsw_afk->max_blocks),
-			   GFP_KERNEL);
+	key_info = kzalloc_flex(*key_info, blocks, mlxsw_afk->max_blocks);
 	if (!key_info)
 		return ERR_PTR(-ENOMEM);
 	err = mlxsw_afk_picker(mlxsw_afk, key_info, elusage);
@@ -386,7 +385,7 @@ mlxsw_afk_block_elinst_get(const struct mlxsw_afk_block *block,
 	int i;
 
 	for (i = 0; i < block->instances_count; i++) {
-		struct mlxsw_afk_element_inst *elinst;
+		const struct mlxsw_afk_element_inst *elinst;
 
 		elinst = &block->instances[i];
 		if (elinst->element == element)

@@ -119,7 +119,7 @@ static int wil_vring_alloc(struct wil6210_priv *wil, struct wil_ring *vring)
 
 	vring->swhead = 0;
 	vring->swtail = 0;
-	vring->ctx = kcalloc(vring->size, sizeof(vring->ctx[0]), GFP_KERNEL);
+	vring->ctx = kzalloc_objs(vring->ctx[0], vring->size);
 	if (!vring->ctx) {
 		vring->va = NULL;
 		return -ENOMEM;
@@ -306,7 +306,7 @@ static void wil_rx_add_radiotap_header(struct wil6210_priv *wil,
 				       struct sk_buff *skb)
 {
 	struct wil6210_rtap {
-		struct ieee80211_radiotap_header rthdr;
+		struct ieee80211_radiotap_header_fixed rthdr;
 		/* fields should be in the order of bits in rthdr.it_present */
 		/* flags */
 		u8 flags;

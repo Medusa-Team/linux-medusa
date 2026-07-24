@@ -247,7 +247,8 @@ ipu6_pkg_dir_configure_spc(struct ipu6_device *isp,
 		dma_addr = sg_dma_address(isp->psys->fw_sgt.sgl);
 
 	pg_offset = server_fw_addr - dma_addr;
-	prog = (struct ipu6_cell_program *)((u64)isp->cpd_fw->data + pg_offset);
+	prog = (struct ipu6_cell_program *)((uintptr_t)isp->cpd_fw->data +
+					    pg_offset);
 	spc_base = base + prog->regs_addr;
 	if (spc_base != (base + hw_variant->spc_offset))
 		dev_warn(&isp->pdev->dev,
@@ -280,7 +281,7 @@ void ipu6_configure_spc(struct ipu6_device *isp,
 		ipu6_pkg_dir_configure_spc(isp, hw_variant, pkg_dir_idx, base,
 					   pkg_dir, pkg_dir_dma_addr);
 }
-EXPORT_SYMBOL_NS_GPL(ipu6_configure_spc, INTEL_IPU6);
+EXPORT_SYMBOL_NS_GPL(ipu6_configure_spc, "INTEL_IPU6");
 
 #define IPU6_ISYS_CSI2_NPORTS		4
 #define IPU6SE_ISYS_CSI2_NPORTS		4
@@ -380,7 +381,7 @@ ipu6_isys_init(struct pci_dev *pdev, struct device *parent,
 		return ERR_PTR(ret);
 	}
 
-	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
+	pdata = kzalloc_obj(*pdata);
 	if (!pdata)
 		return ERR_PTR(-ENOMEM);
 
@@ -390,20 +391,18 @@ ipu6_isys_init(struct pci_dev *pdev, struct device *parent,
 	isys_adev = ipu6_bus_initialize_device(pdev, parent, pdata, ctrl,
 					       IPU6_ISYS_NAME);
 	if (IS_ERR(isys_adev)) {
-		dev_err_probe(dev, PTR_ERR(isys_adev),
-			      "ipu6_bus_initialize_device isys failed\n");
 		kfree(pdata);
-		return ERR_CAST(isys_adev);
+		return dev_err_cast_probe(dev, isys_adev,
+				"ipu6_bus_initialize_device isys failed\n");
 	}
 
 	isys_adev->mmu = ipu6_mmu_init(dev, base, ISYS_MMID,
 				       &ipdata->hw_variant);
 	if (IS_ERR(isys_adev->mmu)) {
-		dev_err_probe(dev, PTR_ERR(isys_adev->mmu),
-			      "ipu6_mmu_init(isys_adev->mmu) failed\n");
 		put_device(&isys_adev->auxdev.dev);
 		kfree(pdata);
-		return ERR_CAST(isys_adev->mmu);
+		return dev_err_cast_probe(dev, isys_adev->mmu,
+				"ipu6_mmu_init(isys_adev->mmu) failed\n");
 	}
 
 	isys_adev->mmu->dev = &isys_adev->auxdev.dev;
@@ -426,7 +425,7 @@ ipu6_psys_init(struct pci_dev *pdev, struct device *parent,
 	struct ipu6_psys_pdata *pdata;
 	int ret;
 
-	pdata = kzalloc(sizeof(*pdata), GFP_KERNEL);
+	pdata = kzalloc_obj(*pdata);
 	if (!pdata)
 		return ERR_PTR(-ENOMEM);
 
@@ -436,20 +435,18 @@ ipu6_psys_init(struct pci_dev *pdev, struct device *parent,
 	psys_adev = ipu6_bus_initialize_device(pdev, parent, pdata, ctrl,
 					       IPU6_PSYS_NAME);
 	if (IS_ERR(psys_adev)) {
-		dev_err_probe(&pdev->dev, PTR_ERR(psys_adev),
-			      "ipu6_bus_initialize_device psys failed\n");
 		kfree(pdata);
-		return ERR_CAST(psys_adev);
+		return dev_err_cast_probe(&pdev->dev, psys_adev,
+				"ipu6_bus_initialize_device psys failed\n");
 	}
 
 	psys_adev->mmu = ipu6_mmu_init(&pdev->dev, base, PSYS_MMID,
 				       &ipdata->hw_variant);
 	if (IS_ERR(psys_adev->mmu)) {
-		dev_err_probe(&pdev->dev, PTR_ERR(psys_adev->mmu),
-			      "ipu6_mmu_init(psys_adev->mmu) failed\n");
 		put_device(&psys_adev->auxdev.dev);
 		kfree(pdata);
-		return ERR_CAST(psys_adev->mmu);
+		return dev_err_cast_probe(&pdev->dev, psys_adev->mmu,
+				"ipu6_mmu_init(psys_adev->mmu) failed\n");
 	}
 
 	psys_adev->mmu->dev = &psys_adev->auxdev.dev;
@@ -466,11 +463,6 @@ ipu6_psys_init(struct pci_dev *pdev, struct device *parent,
 static int ipu6_pci_config_setup(struct pci_dev *dev, u8 hw_ver)
 {
 	int ret;
-
-	/* disable IPU6 PCI ATS on mtl ES2 */
-	if (is_ipu6ep_mtl(hw_ver) && boot_cpu_data.x86_stepping == 0x2 &&
-	    pci_ats_supported(dev))
-		pci_disable_ats(dev);
 
 	/* No PCI msi capability for IPU6EP */
 	if (is_ipu6ep(hw_ver) || is_ipu6ep_mtl(hw_ver)) {
@@ -528,11 +520,11 @@ static int ipu6_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	phys = pci_resource_start(pdev, IPU6_PCI_BAR);
 	dev_dbg(dev, "IPU6 PCI bar[%u] = %pa\n", IPU6_PCI_BAR, &phys);
 
-	ret = pcim_iomap_regions(pdev, 1 << IPU6_PCI_BAR, pci_name(pdev));
-	if (ret)
-		return dev_err_probe(dev, ret, "Failed to I/O mem remapping\n");
+	isp->base = pcim_iomap_region(pdev, IPU6_PCI_BAR, IPU6_NAME);
+	if (IS_ERR(isp->base))
+		return dev_err_probe(dev, PTR_ERR(isp->base),
+				     "Failed to I/O mem remapping\n");
 
-	isp->base = pcim_iomap_table(pdev)[IPU6_PCI_BAR];
 	pci_set_drvdata(pdev, isp);
 	pci_set_master(pdev);
 
@@ -576,9 +568,7 @@ static int ipu6_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to set DMA mask\n");
 
-	ret = dma_set_max_seg_size(dev, UINT_MAX);
-	if (ret)
-		return dev_err_probe(dev, ret, "Failed to set max_seg_size\n");
+	dma_set_max_seg_size(dev, UINT_MAX);
 
 	ret = ipu6_pci_config_setup(pdev, isp->hw_ver);
 	if (ret)
@@ -640,21 +630,21 @@ static int ipu6_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret) {
 		dev_err_probe(&isp->pdev->dev, ret,
 			      "Failed to set MMU hardware\n");
-		goto out_ipu6_bus_del_devices;
+		goto out_ipu6_rpm_put;
 	}
 
 	ret = ipu6_buttress_map_fw_image(isp->psys, isp->cpd_fw,
 					 &isp->psys->fw_sgt);
 	if (ret) {
 		dev_err_probe(&isp->pdev->dev, ret, "failed to map fw image\n");
-		goto out_ipu6_bus_del_devices;
+		goto out_ipu6_rpm_put;
 	}
 
 	ret = ipu6_cpd_create_pkg_dir(isp->psys, isp->cpd_fw->data);
 	if (ret) {
 		dev_err_probe(&isp->pdev->dev, ret,
 			      "failed to create pkg dir\n");
-		goto out_ipu6_bus_del_devices;
+		goto out_ipu6_rpm_put;
 	}
 
 	ret = devm_request_threaded_irq(dev, pdev->irq, ipu6_buttress_isr,
@@ -662,7 +652,7 @@ static int ipu6_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 					IRQF_SHARED, IPU6_NAME, isp);
 	if (ret) {
 		dev_err_probe(dev, ret, "Requesting irq failed\n");
-		goto out_ipu6_bus_del_devices;
+		goto out_ipu6_rpm_put;
 	}
 
 	ret = ipu6_buttress_authenticate(isp);
@@ -693,8 +683,10 @@ static int ipu6_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 out_free_irq:
 	devm_free_irq(dev, pdev->irq, isp);
+out_ipu6_rpm_put:
+	pm_runtime_put_sync(&isp->psys->auxdev.dev);
 out_ipu6_bus_del_devices:
-	if (isp->psys) {
+	if (!IS_ERR_OR_NULL(isp->psys)) {
 		ipu6_cpd_free_pkg_dir(isp->psys);
 		ipu6_buttress_unmap_fw_image(isp->psys, &isp->psys->fw_sgt);
 	}
@@ -758,6 +750,9 @@ static void ipu6_pci_reset_done(struct pci_dev *pdev)
  */
 static int ipu6_suspend(struct device *dev)
 {
+	struct pci_dev *pdev = to_pci_dev(dev);
+
+	synchronize_irq(pdev->irq);
 	return 0;
 }
 
@@ -842,12 +837,12 @@ static struct pci_driver ipu6_pci_driver = {
 
 module_pci_driver(ipu6_pci_driver);
 
-MODULE_IMPORT_NS(INTEL_IPU_BRIDGE);
+MODULE_IMPORT_NS("INTEL_IPU_BRIDGE");
 MODULE_AUTHOR("Sakari Ailus <sakari.ailus@linux.intel.com>");
 MODULE_AUTHOR("Tianshu Qiu <tian.shu.qiu@intel.com>");
 MODULE_AUTHOR("Bingbu Cao <bingbu.cao@intel.com>");
 MODULE_AUTHOR("Qingwu Zhang <qingwu.zhang@intel.com>");
 MODULE_AUTHOR("Yunliang Ding <yunliang.ding@intel.com>");
-MODULE_AUTHOR("Hongju Wang <hongju.wang@intel.com>");
+MODULE_AUTHOR("Hongju Wang");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Intel IPU6 PCI driver");

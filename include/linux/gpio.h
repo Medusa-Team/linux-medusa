@@ -13,39 +13,20 @@
 #define __LINUX_GPIO_H
 
 #include <linux/types.h>
+#ifdef CONFIG_GPIOLIB
+#include <linux/gpio/consumer.h>
+#endif
+
+#ifdef CONFIG_GPIOLIB_LEGACY
 
 struct device;
 
 /* make these flag values available regardless of GPIO kconfig options */
-#define GPIOF_DIR_OUT	(0 << 0)
-#define GPIOF_DIR_IN	(1 << 0)
-
-#define GPIOF_INIT_LOW	(0 << 1)
-#define GPIOF_INIT_HIGH	(1 << 1)
-
-#define GPIOF_IN		(GPIOF_DIR_IN)
-#define GPIOF_OUT_INIT_LOW	(GPIOF_DIR_OUT | GPIOF_INIT_LOW)
-#define GPIOF_OUT_INIT_HIGH	(GPIOF_DIR_OUT | GPIOF_INIT_HIGH)
-
-/* Gpio pin is active-low */
-#define GPIOF_ACTIVE_LOW        (1 << 2)
-
-/**
- * struct gpio - a structure describing a GPIO with configuration
- * @gpio:	the GPIO number
- * @flags:	GPIO configuration as specified by GPIOF_*
- * @label:	a literal description string of this GPIO
- */
-struct gpio {
-	unsigned	gpio;
-	unsigned long	flags;
-	const char	*label;
-};
+#define GPIOF_IN		((1 << 0))
+#define GPIOF_OUT_INIT_LOW	((0 << 0) | (0 << 1))
+#define GPIOF_OUT_INIT_HIGH	((0 << 0) | (1 << 1))
 
 #ifdef CONFIG_GPIOLIB
-
-#include <linux/gpio/consumer.h>
-
 /*
  * "valid" GPIO numbers are nonnegative and may be passed to
  * setup routines like gpio_request().  Only some valid numbers
@@ -65,19 +46,6 @@ static inline bool gpio_is_valid(int number)
  * at a small performance cost for non-inlined operations and some
  * extra memory (for code and for per-GPIO table entries).
  */
-
-/*
- * At the end we want all GPIOs to be dynamically allocated from 0.
- * However, some legacy drivers still perform fixed allocation.
- * Until they are all fixed, leave 0-512 space for them.
- */
-#define GPIO_DYNAMIC_BASE	512
-/*
- * Define the maximum of the possible GPIO in the global numberspace.
- * While the GPIO base and numbers are positive, we limit it with signed
- * maximum as a lot of code is using negative values for special cases.
- */
-#define GPIO_DYNAMIC_MAX	INT_MAX
 
 /* Always use the library code for GPIO management calls,
  * or when sleeping may be involved.
@@ -100,7 +68,7 @@ static inline int gpio_get_value_cansleep(unsigned gpio)
 }
 static inline void gpio_set_value_cansleep(unsigned gpio, int value)
 {
-	return gpiod_set_raw_value_cansleep(gpio_to_desc(gpio), value);
+	gpiod_set_raw_value_cansleep(gpio_to_desc(gpio), value);
 }
 
 static inline int gpio_get_value(unsigned gpio)
@@ -109,7 +77,7 @@ static inline int gpio_get_value(unsigned gpio)
 }
 static inline void gpio_set_value(unsigned gpio, int value)
 {
-	return gpiod_set_raw_value(gpio_to_desc(gpio), value);
+	gpiod_set_raw_value(gpio_to_desc(gpio), value);
 }
 
 static inline int gpio_to_irq(unsigned gpio)
@@ -119,7 +87,6 @@ static inline int gpio_to_irq(unsigned gpio)
 
 int gpio_request_one(unsigned gpio, unsigned long flags, const char *label);
 
-int devm_gpio_request(struct device *dev, unsigned gpio, const char *label);
 int devm_gpio_request_one(struct device *dev, unsigned gpio,
 			  unsigned long flags, const char *label);
 
@@ -197,13 +164,6 @@ static inline int gpio_to_irq(unsigned gpio)
 	return -EINVAL;
 }
 
-static inline int devm_gpio_request(struct device *dev, unsigned gpio,
-				    const char *label)
-{
-	WARN_ON(1);
-	return -EINVAL;
-}
-
 static inline int devm_gpio_request_one(struct device *dev, unsigned gpio,
 					unsigned long flags, const char *label)
 {
@@ -212,5 +172,5 @@ static inline int devm_gpio_request_one(struct device *dev, unsigned gpio,
 }
 
 #endif /* ! CONFIG_GPIOLIB */
-
+#endif /* CONFIG_GPIOLIB_LEGACY */
 #endif /* __LINUX_GPIO_H */

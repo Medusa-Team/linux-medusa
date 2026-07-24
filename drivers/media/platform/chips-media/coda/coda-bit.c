@@ -397,7 +397,7 @@ void coda_fill_bitstream(struct coda_ctx *ctx, struct list_head *buffer_list)
 			 */
 			src_buf = v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
 
-			meta = kmalloc(sizeof(*meta), GFP_KERNEL);
+			meta = kmalloc_obj(*meta);
 			if (meta) {
 				meta->sequence = src_buf->sequence;
 				meta->timecode = src_buf->timecode;
@@ -585,7 +585,7 @@ static int coda_alloc_context_buffers(struct coda_ctx *ctx,
 
 	if (!ctx->slicebuf.vaddr && q_data->fourcc == V4L2_PIX_FMT_H264) {
 		/* worst case slice size */
-		size = (DIV_ROUND_UP(q_data->rect.width, 16) *
+		size = (unsigned long)(DIV_ROUND_UP(q_data->rect.width, 16) *
 			DIV_ROUND_UP(q_data->rect.height, 16)) * 3200 / 8 + 512;
 		ret = coda_alloc_context_buf(ctx, &ctx->slicebuf, size,
 					     "slicebuf");
@@ -1685,7 +1685,7 @@ static void coda_finish_encode(struct coda_ctx *ctx)
 		dst_buf->flags |= V4L2_BUF_FLAG_PFRAME;
 	dst_buf->flags |= src_buf->flags & V4L2_BUF_FLAG_LAST;
 
-	v4l2_m2m_buf_copy_metadata(src_buf, dst_buf, false);
+	v4l2_m2m_buf_copy_metadata(src_buf, dst_buf);
 
 	v4l2_m2m_buf_done(src_buf, VB2_BUF_STATE_DONE);
 

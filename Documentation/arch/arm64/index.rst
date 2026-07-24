@@ -10,16 +10,20 @@ ARM64 Architecture
     acpi_object_usage
     amu
     arm-acpi
+    arm-cca
     asymmetric-32bit
     booting
     cpu-feature-registers
     cpu-hotplug
     elf_hwcaps
+    gcs
     hugetlbpage
     kdump
     legacy_instructions
     memory
     memory-tagging-extension
+    mops
+    mpam
     perf
     pointer-authentication
     ptdump
@@ -30,10 +34,3 @@ ARM64 Architecture
     tagged-pointers
 
     features
-
-.. only::  subproject and html
-
-   Indices
-   =======
-
-   * :ref:`genindex`

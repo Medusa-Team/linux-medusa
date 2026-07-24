@@ -5,9 +5,10 @@
 #ifndef __IO_PAGETABLE_H
 #define __IO_PAGETABLE_H
 
+#include <linux/dma-buf.h>
 #include <linux/interval_tree.h>
-#include <linux/mutex.h>
 #include <linux/kref.h>
+#include <linux/mutex.h>
 #include <linux/xarray.h>
 
 #include "iommufd_private.h"
@@ -48,6 +49,7 @@ struct iopt_area {
 	int iommu_prot;
 	bool prevent_access : 1;
 	unsigned int num_accesses;
+	unsigned int num_locks;
 };
 
 struct iopt_allowed {
@@ -67,6 +69,16 @@ void iopt_area_unfill_domain(struct iopt_area *area, struct iopt_pages *pages,
 			     struct iommu_domain *domain);
 void iopt_area_unmap_domain(struct iopt_area *area,
 			    struct iommu_domain *domain);
+
+int iopt_dmabuf_track_domain(struct iopt_pages *pages, struct iopt_area *area,
+			     struct iommu_domain *domain);
+void iopt_dmabuf_untrack_domain(struct iopt_pages *pages,
+				struct iopt_area *area,
+				struct iommu_domain *domain);
+int iopt_dmabuf_track_all_domains(struct iopt_area *area,
+				  struct iopt_pages *pages);
+void iopt_dmabuf_untrack_all_domains(struct iopt_area *area,
+				     struct iopt_pages *pages);
 
 static inline unsigned long iopt_area_index(struct iopt_area *area)
 {
@@ -173,6 +185,27 @@ enum {
 	IOPT_PAGES_ACCOUNT_NONE = 0,
 	IOPT_PAGES_ACCOUNT_USER = 1,
 	IOPT_PAGES_ACCOUNT_MM = 2,
+	IOPT_PAGES_ACCOUNT_MODE_NUM = 3,
+};
+
+enum iopt_address_type {
+	IOPT_ADDRESS_USER = 0,
+	IOPT_ADDRESS_FILE,
+	IOPT_ADDRESS_DMABUF,
+};
+
+struct iopt_pages_dmabuf_track {
+	struct iommu_domain *domain;
+	struct iopt_area *area;
+	struct list_head elm;
+};
+
+struct iopt_pages_dmabuf {
+	struct dma_buf_attachment *attach;
+	struct phys_vec phys;
+	/* Always PAGE_SIZE aligned */
+	unsigned long start;
+	struct list_head tracker;
 };
 
 /*
@@ -195,7 +228,16 @@ struct iopt_pages {
 	struct task_struct *source_task;
 	struct mm_struct *source_mm;
 	struct user_struct *source_user;
-	void __user *uptr;
+	enum iopt_address_type type;
+	union {
+		void __user *uptr;		/* IOPT_ADDRESS_USER */
+		struct {			/* IOPT_ADDRESS_FILE */
+			struct file *file;
+			unsigned long start;
+		};
+		/* IOPT_ADDRESS_DMABUF */
+		struct iopt_pages_dmabuf dmabuf;
+	};
 	bool writable:1;
 	u8 account_mode;
 
@@ -206,8 +248,32 @@ struct iopt_pages {
 	struct rb_root_cached domains_itree;
 };
 
-struct iopt_pages *iopt_alloc_pages(void __user *uptr, unsigned long length,
-				    bool writable);
+static inline bool iopt_is_dmabuf(struct iopt_pages *pages)
+{
+	if (!IS_ENABLED(CONFIG_DMA_SHARED_BUFFER))
+		return false;
+	return pages->type == IOPT_ADDRESS_DMABUF;
+}
+
+static inline bool iopt_dmabuf_revoked(struct iopt_pages *pages)
+{
+	lockdep_assert_held(&pages->mutex);
+	if (iopt_is_dmabuf(pages))
+		return pages->dmabuf.phys.len == 0;
+	return false;
+}
+
+struct iopt_pages *iopt_alloc_user_pages(void __user *uptr,
+					 unsigned long length, bool writable);
+struct iopt_pages *iopt_alloc_file_pages(struct file *file,
+					 unsigned long start_byte,
+					 unsigned long start,
+					 unsigned long length, bool writable);
+struct iopt_pages *iopt_alloc_dmabuf_pages(struct iommufd_ctx *ictx,
+					   struct dma_buf *dmabuf,
+					   unsigned long start_byte,
+					   unsigned long start,
+					   unsigned long length, bool writable);
 void iopt_release_pages(struct kref *kref);
 static inline void iopt_put_pages(struct iopt_pages *pages)
 {
@@ -223,9 +289,9 @@ void iopt_pages_unfill_xarray(struct iopt_pages *pages, unsigned long start,
 
 int iopt_area_add_access(struct iopt_area *area, unsigned long start,
 			 unsigned long last, struct page **out_pages,
-			 unsigned int flags);
+			 unsigned int flags, bool lock_area);
 void iopt_area_remove_access(struct iopt_area *area, unsigned long start,
-			    unsigned long last);
+			     unsigned long last, bool unlock_area);
 int iopt_pages_rw_access(struct iopt_pages *pages, unsigned long start_byte,
 			 void *data, unsigned long length, unsigned int flags);
 
@@ -237,5 +303,10 @@ struct iopt_pages_access {
 	struct interval_tree_node node;
 	unsigned int users;
 };
+
+struct pfn_reader_user;
+
+int iopt_pages_update_pinned(struct iopt_pages *pages, unsigned long npages,
+			     bool inc, struct pfn_reader_user *user);
 
 #endif

@@ -24,7 +24,7 @@ pds_vfio_get_lm_file(const struct file_operations *fops, int flags, u64 size)
 		return NULL;
 
 	/* Alloc file structure */
-	lm_file = kzalloc(sizeof(*lm_file), GFP_KERNEL);
+	lm_file = kzalloc_obj(*lm_file);
 	if (!lm_file)
 		return NULL;
 
@@ -42,7 +42,7 @@ pds_vfio_get_lm_file(const struct file_operations *fops, int flags, u64 size)
 
 	/* Allocate memory for file pages */
 	npages = DIV_ROUND_UP_ULL(size, PAGE_SIZE);
-	pages = kmalloc_array(npages, sizeof(*pages), GFP_KERNEL);
+	pages = kmalloc_objs(*pages, npages);
 	if (!pages)
 		goto out_put_file;
 
@@ -151,8 +151,7 @@ static struct page *pds_vfio_get_file_page(struct pds_vfio_lm_file *lm_file,
 			lm_file->last_offset_sg = sg;
 			lm_file->sg_last_entry += i;
 			lm_file->last_offset = cur_offset;
-			return nth_page(sg_page(sg),
-					(offset - cur_offset) / PAGE_SIZE);
+			return sg_page(sg) + (offset - cur_offset) / PAGE_SIZE;
 		}
 		cur_offset += sg->length;
 	}
@@ -235,7 +234,6 @@ static const struct file_operations pds_vfio_save_fops = {
 	.owner = THIS_MODULE,
 	.read = pds_vfio_save_read,
 	.release = pds_vfio_release_file,
-	.llseek = no_llseek,
 };
 
 static int pds_vfio_get_save_file(struct pds_vfio_pci_device *pds_vfio)
@@ -334,7 +332,6 @@ static const struct file_operations pds_vfio_restore_fops = {
 	.owner = THIS_MODULE,
 	.write = pds_vfio_restore_write,
 	.release = pds_vfio_release_file,
-	.llseek = no_llseek,
 };
 
 static int pds_vfio_get_restore_file(struct pds_vfio_pci_device *pds_vfio)

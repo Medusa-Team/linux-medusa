@@ -107,74 +107,6 @@ static const unsigned char mlxsw_sp2_mac_mask[ETH_ALEN] = {
 	0xff, 0xff, 0xff, 0xff, 0xf0, 0x00
 };
 
-/* tx_hdr_version
- * Tx header version.
- * Must be set to 1.
- */
-MLXSW_ITEM32(tx, hdr, version, 0x00, 28, 4);
-
-/* tx_hdr_ctl
- * Packet control type.
- * 0 - Ethernet control (e.g. EMADs, LACP)
- * 1 - Ethernet data
- */
-MLXSW_ITEM32(tx, hdr, ctl, 0x00, 26, 2);
-
-/* tx_hdr_proto
- * Packet protocol type. Must be set to 1 (Ethernet).
- */
-MLXSW_ITEM32(tx, hdr, proto, 0x00, 21, 3);
-
-/* tx_hdr_rx_is_router
- * Packet is sent from the router. Valid for data packets only.
- */
-MLXSW_ITEM32(tx, hdr, rx_is_router, 0x00, 19, 1);
-
-/* tx_hdr_fid_valid
- * Indicates if the 'fid' field is valid and should be used for
- * forwarding lookup. Valid for data packets only.
- */
-MLXSW_ITEM32(tx, hdr, fid_valid, 0x00, 16, 1);
-
-/* tx_hdr_swid
- * Switch partition ID. Must be set to 0.
- */
-MLXSW_ITEM32(tx, hdr, swid, 0x00, 12, 3);
-
-/* tx_hdr_control_tclass
- * Indicates if the packet should use the control TClass and not one
- * of the data TClasses.
- */
-MLXSW_ITEM32(tx, hdr, control_tclass, 0x00, 6, 1);
-
-/* tx_hdr_etclass
- * Egress TClass to be used on the egress device on the egress port.
- */
-MLXSW_ITEM32(tx, hdr, etclass, 0x00, 0, 4);
-
-/* tx_hdr_port_mid
- * Destination local port for unicast packets.
- * Destination multicast ID for multicast packets.
- *
- * Control packets are directed to a specific egress port, while data
- * packets are transmitted through the CPU port (0) into the switch partition,
- * where forwarding rules are applied.
- */
-MLXSW_ITEM32(tx, hdr, port_mid, 0x04, 16, 16);
-
-/* tx_hdr_fid
- * Forwarding ID used for L2 forwarding lookup. Valid only if 'fid_valid' is
- * set, otherwise calculated based on the packet's VID using VID to FID mapping.
- * Valid for data packets only.
- */
-MLXSW_ITEM32(tx, hdr, fid, 0x08, 16, 16);
-
-/* tx_hdr_type
- * 0 - Data packets
- * 6 - Control packets
- */
-MLXSW_ITEM32(tx, hdr, type, 0x0C, 0, 4);
-
 int mlxsw_sp_flow_counter_get(struct mlxsw_sp *mlxsw_sp,
 			      unsigned int counter_index, bool clear,
 			      u64 *packets, u64 *bytes)
@@ -233,61 +165,6 @@ void mlxsw_sp_flow_counter_free(struct mlxsw_sp *mlxsw_sp,
 			       counter_index);
 }
 
-void mlxsw_sp_txhdr_construct(struct sk_buff *skb,
-			      const struct mlxsw_tx_info *tx_info)
-{
-	char *txhdr = skb_push(skb, MLXSW_TXHDR_LEN);
-
-	memset(txhdr, 0, MLXSW_TXHDR_LEN);
-
-	mlxsw_tx_hdr_version_set(txhdr, MLXSW_TXHDR_VERSION_1);
-	mlxsw_tx_hdr_ctl_set(txhdr, MLXSW_TXHDR_ETH_CTL);
-	mlxsw_tx_hdr_proto_set(txhdr, MLXSW_TXHDR_PROTO_ETH);
-	mlxsw_tx_hdr_swid_set(txhdr, 0);
-	mlxsw_tx_hdr_control_tclass_set(txhdr, 1);
-	mlxsw_tx_hdr_port_mid_set(txhdr, tx_info->local_port);
-	mlxsw_tx_hdr_type_set(txhdr, MLXSW_TXHDR_TYPE_CONTROL);
-}
-
-int
-mlxsw_sp_txhdr_ptp_data_construct(struct mlxsw_core *mlxsw_core,
-				  struct mlxsw_sp_port *mlxsw_sp_port,
-				  struct sk_buff *skb,
-				  const struct mlxsw_tx_info *tx_info)
-{
-	char *txhdr;
-	u16 max_fid;
-	int err;
-
-	if (skb_cow_head(skb, MLXSW_TXHDR_LEN)) {
-		err = -ENOMEM;
-		goto err_skb_cow_head;
-	}
-
-	if (!MLXSW_CORE_RES_VALID(mlxsw_core, FID)) {
-		err = -EIO;
-		goto err_res_valid;
-	}
-	max_fid = MLXSW_CORE_RES_GET(mlxsw_core, FID);
-
-	txhdr = skb_push(skb, MLXSW_TXHDR_LEN);
-	memset(txhdr, 0, MLXSW_TXHDR_LEN);
-
-	mlxsw_tx_hdr_version_set(txhdr, MLXSW_TXHDR_VERSION_1);
-	mlxsw_tx_hdr_proto_set(txhdr, MLXSW_TXHDR_PROTO_ETH);
-	mlxsw_tx_hdr_rx_is_router_set(txhdr, true);
-	mlxsw_tx_hdr_fid_valid_set(txhdr, true);
-	mlxsw_tx_hdr_fid_set(txhdr, max_fid + tx_info->local_port - 1);
-	mlxsw_tx_hdr_type_set(txhdr, MLXSW_TXHDR_TYPE_DATA);
-	return 0;
-
-err_res_valid:
-err_skb_cow_head:
-	this_cpu_inc(mlxsw_sp_port->pcpu_stats->tx_dropped);
-	dev_kfree_skb_any(skb);
-	return err;
-}
-
 static bool mlxsw_sp_skb_requires_ts(struct sk_buff *skb)
 {
 	unsigned int type;
@@ -299,30 +176,49 @@ static bool mlxsw_sp_skb_requires_ts(struct sk_buff *skb)
 	return !!ptp_parse_header(skb, type);
 }
 
-static int mlxsw_sp_txhdr_handle(struct mlxsw_core *mlxsw_core,
-				 struct mlxsw_sp_port *mlxsw_sp_port,
-				 struct sk_buff *skb,
-				 const struct mlxsw_tx_info *tx_info)
+static void mlxsw_sp_txhdr_info_data_init(struct mlxsw_core *mlxsw_core,
+					  struct sk_buff *skb,
+					  struct mlxsw_txhdr_info *txhdr_info)
 {
-	struct mlxsw_sp *mlxsw_sp = mlxsw_core_driver_priv(mlxsw_core);
+	/* Resource validation was done as part of PTP init. */
+	u16 max_fid = MLXSW_CORE_RES_GET(mlxsw_core, FID);
 
-	/* In Spectrum-2 and Spectrum-3, PTP events that require a time stamp
-	 * need special handling and cannot be transmitted as regular control
-	 * packets.
+	txhdr_info->data = true;
+	txhdr_info->max_fid = max_fid;
+}
+
+static struct sk_buff *
+mlxsw_sp_vlan_tag_push(struct mlxsw_sp *mlxsw_sp, struct sk_buff *skb)
+{
+	/* In some Spectrum ASICs, in order for PTP event packets to have their
+	 * correction field correctly set on the egress port they must be
+	 * transmitted as data packets. Such packets ingress the ASIC via the
+	 * CPU port and must have a VLAN tag, as the CPU port is not configured
+	 * with a PVID. Push the default VLAN (4095), which is configured as
+	 * egress untagged on all the ports.
 	 */
-	if (unlikely(mlxsw_sp_skb_requires_ts(skb)))
-		return mlxsw_sp->ptp_ops->txhdr_construct(mlxsw_core,
-							  mlxsw_sp_port, skb,
-							  tx_info);
+	if (skb_vlan_tagged(skb))
+		return skb;
 
-	if (skb_cow_head(skb, MLXSW_TXHDR_LEN)) {
-		this_cpu_inc(mlxsw_sp_port->pcpu_stats->tx_dropped);
-		dev_kfree_skb_any(skb);
-		return -ENOMEM;
-	}
+	return vlan_insert_tag_set_proto(skb, htons(ETH_P_8021Q),
+					 MLXSW_SP_DEFAULT_VID);
+}
 
-	mlxsw_sp_txhdr_construct(skb, tx_info);
-	return 0;
+static struct sk_buff *
+mlxsw_sp_txhdr_preparations(struct mlxsw_sp *mlxsw_sp, struct sk_buff *skb,
+			    struct mlxsw_txhdr_info *txhdr_info)
+{
+	if (likely(!mlxsw_sp_skb_requires_ts(skb)))
+		return skb;
+
+	if (!mlxsw_sp->ptp_ops->tx_as_data)
+		return skb;
+
+	/* Special handling for PTP events that require a time stamp and cannot
+	 * be transmitted as regular control packets.
+	 */
+	mlxsw_sp_txhdr_info_data_init(mlxsw_sp->core, skb, txhdr_info);
+	return mlxsw_sp_vlan_tag_push(mlxsw_sp, skb);
 }
 
 enum mlxsw_reg_spms_state mlxsw_sp_stp_spms_state(u8 state)
@@ -721,16 +617,16 @@ static netdev_tx_t mlxsw_sp_port_xmit(struct sk_buff *skb,
 	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
 	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
 	struct mlxsw_sp_port_pcpu_stats *pcpu_stats;
-	const struct mlxsw_tx_info tx_info = {
-		.local_port = mlxsw_sp_port->local_port,
-		.is_emad = false,
+	struct mlxsw_txhdr_info txhdr_info = {
+		.tx_info.local_port = mlxsw_sp_port->local_port,
+		.tx_info.is_emad = false,
 	};
 	u64 len;
 	int err;
 
 	memset(skb->cb, 0, sizeof(struct mlxsw_skb_cb));
 
-	if (mlxsw_core_skb_transmit_busy(mlxsw_sp->core, &tx_info))
+	if (mlxsw_core_skb_transmit_busy(mlxsw_sp->core, &txhdr_info.tx_info))
 		return NETDEV_TX_BUSY;
 
 	if (eth_skb_pad(skb)) {
@@ -738,10 +634,11 @@ static netdev_tx_t mlxsw_sp_port_xmit(struct sk_buff *skb,
 		return NETDEV_TX_OK;
 	}
 
-	err = mlxsw_sp_txhdr_handle(mlxsw_sp->core, mlxsw_sp_port, skb,
-				    &tx_info);
-	if (err)
+	skb = mlxsw_sp_txhdr_preparations(mlxsw_sp, skb, &txhdr_info);
+	if (!skb) {
+		this_cpu_inc(mlxsw_sp_port->pcpu_stats->tx_dropped);
 		return NETDEV_TX_OK;
+	}
 
 	/* TX header is consumed by HW on the way so we shouldn't count its
 	 * bytes as being sent.
@@ -751,7 +648,7 @@ static netdev_tx_t mlxsw_sp_port_xmit(struct sk_buff *skb,
 	/* Due to a race we might fail here because of a full queue. In that
 	 * unlikely case we simply drop the packet.
 	 */
-	err = mlxsw_core_skb_transmit(mlxsw_sp->core, skb, &tx_info);
+	err = mlxsw_core_skb_transmit(mlxsw_sp->core, skb, &txhdr_info);
 
 	if (!err) {
 		pcpu_stats = this_cpu_ptr(mlxsw_sp_port->pcpu_stats);
@@ -1075,7 +972,7 @@ mlxsw_sp_port_vlan_create(struct mlxsw_sp_port *mlxsw_sp_port, u16 vid)
 	if (err)
 		return ERR_PTR(err);
 
-	mlxsw_sp_port_vlan = kzalloc(sizeof(*mlxsw_sp_port_vlan), GFP_KERNEL);
+	mlxsw_sp_port_vlan = kzalloc_obj(*mlxsw_sp_port_vlan);
 	if (!mlxsw_sp_port_vlan) {
 		err = -ENOMEM;
 		goto err_port_vlan_alloc;
@@ -1262,63 +1159,31 @@ static int mlxsw_sp_set_features(struct net_device *dev,
 	return 0;
 }
 
-static int mlxsw_sp_port_hwtstamp_set(struct mlxsw_sp_port *mlxsw_sp_port,
-				      struct ifreq *ifr)
+static int mlxsw_sp_port_hwtstamp_set(struct net_device *dev,
+				      struct kernel_hwtstamp_config *config,
+				      struct netlink_ext_ack *extack)
 {
-	struct hwtstamp_config config;
-	int err;
+	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
 
-	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
-		return -EFAULT;
-
-	err = mlxsw_sp_port->mlxsw_sp->ptp_ops->hwtstamp_set(mlxsw_sp_port,
-							     &config);
-	if (err)
-		return err;
-
-	if (copy_to_user(ifr->ifr_data, &config, sizeof(config)))
-		return -EFAULT;
-
-	return 0;
+	return mlxsw_sp_port->mlxsw_sp->ptp_ops->hwtstamp_set(mlxsw_sp_port,
+							      config, extack);
 }
 
-static int mlxsw_sp_port_hwtstamp_get(struct mlxsw_sp_port *mlxsw_sp_port,
-				      struct ifreq *ifr)
+static int mlxsw_sp_port_hwtstamp_get(struct net_device *dev,
+				      struct kernel_hwtstamp_config *config)
 {
-	struct hwtstamp_config config;
-	int err;
+	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
 
-	err = mlxsw_sp_port->mlxsw_sp->ptp_ops->hwtstamp_get(mlxsw_sp_port,
-							     &config);
-	if (err)
-		return err;
-
-	if (copy_to_user(ifr->ifr_data, &config, sizeof(config)))
-		return -EFAULT;
-
-	return 0;
+	return mlxsw_sp_port->mlxsw_sp->ptp_ops->hwtstamp_get(mlxsw_sp_port,
+							      config);
 }
 
 static inline void mlxsw_sp_port_ptp_clear(struct mlxsw_sp_port *mlxsw_sp_port)
 {
-	struct hwtstamp_config config = {0};
+	struct kernel_hwtstamp_config config = {};
 
-	mlxsw_sp_port->mlxsw_sp->ptp_ops->hwtstamp_set(mlxsw_sp_port, &config);
-}
-
-static int
-mlxsw_sp_port_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
-{
-	struct mlxsw_sp_port *mlxsw_sp_port = netdev_priv(dev);
-
-	switch (cmd) {
-	case SIOCSHWTSTAMP:
-		return mlxsw_sp_port_hwtstamp_set(mlxsw_sp_port, ifr);
-	case SIOCGHWTSTAMP:
-		return mlxsw_sp_port_hwtstamp_get(mlxsw_sp_port, ifr);
-	default:
-		return -EOPNOTSUPP;
-	}
+	mlxsw_sp_port->mlxsw_sp->ptp_ops->hwtstamp_set(mlxsw_sp_port, &config,
+						       NULL);
 }
 
 static const struct net_device_ops mlxsw_sp_port_netdev_ops = {
@@ -1335,7 +1200,8 @@ static const struct net_device_ops mlxsw_sp_port_netdev_ops = {
 	.ndo_vlan_rx_add_vid	= mlxsw_sp_port_add_vid,
 	.ndo_vlan_rx_kill_vid	= mlxsw_sp_port_kill_vid,
 	.ndo_set_features	= mlxsw_sp_set_features,
-	.ndo_eth_ioctl		= mlxsw_sp_port_ioctl,
+	.ndo_hwtstamp_get	= mlxsw_sp_port_hwtstamp_get,
+	.ndo_hwtstamp_set	= mlxsw_sp_port_hwtstamp_set,
 };
 
 static int
@@ -1676,9 +1542,13 @@ static int mlxsw_sp_port_create(struct mlxsw_sp *mlxsw_sp, u16 local_port,
 
 	netif_carrier_off(dev);
 
-	dev->features |= NETIF_F_NETNS_LOCAL | NETIF_F_LLTX | NETIF_F_SG |
-			 NETIF_F_HW_VLAN_CTAG_FILTER | NETIF_F_HW_TC;
-	dev->hw_features |= NETIF_F_HW_TC | NETIF_F_LOOPBACK;
+	dev->features |= NETIF_F_SG | NETIF_F_HW_VLAN_CTAG_FILTER |
+			 NETIF_F_HW_TC | NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
+	dev->hw_features |= NETIF_F_HW_TC | NETIF_F_LOOPBACK |
+			    NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
+	dev->vlan_features |= NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
+	dev->lltx = true;
+	dev->netns_immutable = true;
 
 	dev->min_mtu = ETH_MIN_MTU;
 	dev->max_mtu = MLXSW_PORT_MAX_MTU - MLXSW_PORT_ETH_FRAME_HDR;
@@ -1906,7 +1776,7 @@ static int mlxsw_sp_cpu_port_create(struct mlxsw_sp *mlxsw_sp)
 	struct mlxsw_sp_port *mlxsw_sp_port;
 	int err;
 
-	mlxsw_sp_port = kzalloc(sizeof(*mlxsw_sp_port), GFP_KERNEL);
+	mlxsw_sp_port = kzalloc_obj(*mlxsw_sp_port);
 	if (!mlxsw_sp_port)
 		return -ENOMEM;
 
@@ -2028,7 +1898,7 @@ mlxsw_sp_port_mapping_listener_func(const struct mlxsw_reg_info *reg,
 		return;
 
 	events = &mlxsw_sp->port_mapping_events;
-	event = kmalloc(sizeof(*event), GFP_ATOMIC);
+	event = kmalloc_obj(*event, GFP_ATOMIC);
 	if (!event)
 		return;
 	memcpy(event->pmlp_pl, pmlp_pl, sizeof(event->pmlp_pl));
@@ -2149,9 +2019,8 @@ static int mlxsw_sp_port_module_info_init(struct mlxsw_sp *mlxsw_sp)
 	int i;
 	int err;
 
-	mlxsw_sp->port_mapping = kcalloc(max_ports,
-					 sizeof(struct mlxsw_sp_port_mapping),
-					 GFP_KERNEL);
+	mlxsw_sp->port_mapping = kzalloc_objs(struct mlxsw_sp_port_mapping,
+					      max_ports);
 	if (!mlxsw_sp->port_mapping)
 		return -ENOMEM;
 
@@ -2447,7 +2316,7 @@ void mlxsw_sp_rx_listener_no_mark_func(struct sk_buff *skb,
 	u64_stats_update_end(&pcpu_stats->syncp);
 
 	skb->protocol = eth_type_trans(skb, skb->dev);
-	netif_receive_skb(skb);
+	napi_gro_receive(mlxsw_skb_cb(skb)->rx_md_info.napi, skb);
 }
 
 static void mlxsw_sp_rx_listener_mark_func(struct sk_buff *skb, u16 local_port,
@@ -2505,11 +2374,11 @@ static const struct mlxsw_listener mlxsw_sp_listener[] = {
 			     ROUTER_EXP, false),
 	MLXSW_SP_RXL_NO_MARK(DISCARD_ING_ROUTER_DIP_LINK_LOCAL, FORWARD,
 			     ROUTER_EXP, false),
+	MLXSW_SP_RXL_NO_MARK(DISCARD_ING_ROUTER_SIP_LINK_LOCAL, FORWARD,
+			     ROUTER_EXP, false),
 	/* Multicast Router Traps */
 	MLXSW_SP_RXL_MARK(ACL1, TRAP_TO_CPU, MULTICAST, false),
 	MLXSW_SP_RXL_L3_MARK(ACL2, TRAP_TO_CPU, MULTICAST, false),
-	/* NVE traps */
-	MLXSW_SP_RXL_MARK(NVE_ENCAP_ARP, TRAP_TO_CPU, NEIGH_DISCOVERY, false),
 };
 
 static const struct mlxsw_listener mlxsw_sp1_listener[] = {
@@ -2620,8 +2489,7 @@ static int mlxsw_sp_traps_init(struct mlxsw_sp *mlxsw_sp)
 	if (!MLXSW_CORE_RES_VALID(mlxsw_sp->core, MAX_CPU_POLICERS))
 		return -EIO;
 	max_policers = MLXSW_CORE_RES_GET(mlxsw_sp->core, MAX_CPU_POLICERS);
-	trap = kzalloc(struct_size(trap, policers_usage,
-				   BITS_TO_LONGS(max_policers)), GFP_KERNEL);
+	trap = kzalloc_flex(*trap, policers_usage, BITS_TO_LONGS(max_policers));
 	if (!trap)
 		return -ENOMEM;
 	trap->max_policers = max_policers;
@@ -2754,8 +2622,7 @@ static int mlxsw_sp_lag_init(struct mlxsw_sp *mlxsw_sp)
 	if (err)
 		return err;
 
-	mlxsw_sp->lags = kcalloc(mlxsw_sp->max_lag, sizeof(struct mlxsw_sp_lag),
-				 GFP_KERNEL);
+	mlxsw_sp->lags = kzalloc_objs(struct mlxsw_sp_lag, mlxsw_sp->max_lag);
 	if (!mlxsw_sp->lags) {
 		err = -ENOMEM;
 		goto err_kcalloc;
@@ -2784,11 +2651,12 @@ static const struct mlxsw_sp_ptp_ops mlxsw_sp1_ptp_ops = {
 	.hwtstamp_get	= mlxsw_sp1_ptp_hwtstamp_get,
 	.hwtstamp_set	= mlxsw_sp1_ptp_hwtstamp_set,
 	.shaper_work	= mlxsw_sp1_ptp_shaper_work,
+#if IS_REACHABLE(CONFIG_PTP_1588_CLOCK)
 	.get_ts_info	= mlxsw_sp1_ptp_get_ts_info,
+#endif
 	.get_stats_count = mlxsw_sp1_get_stats_count,
 	.get_stats_strings = mlxsw_sp1_get_stats_strings,
 	.get_stats	= mlxsw_sp1_get_stats,
-	.txhdr_construct = mlxsw_sp_ptp_txhdr_construct,
 };
 
 static const struct mlxsw_sp_ptp_ops mlxsw_sp2_ptp_ops = {
@@ -2801,11 +2669,13 @@ static const struct mlxsw_sp_ptp_ops mlxsw_sp2_ptp_ops = {
 	.hwtstamp_get	= mlxsw_sp2_ptp_hwtstamp_get,
 	.hwtstamp_set	= mlxsw_sp2_ptp_hwtstamp_set,
 	.shaper_work	= mlxsw_sp2_ptp_shaper_work,
+#if IS_REACHABLE(CONFIG_PTP_1588_CLOCK)
 	.get_ts_info	= mlxsw_sp2_ptp_get_ts_info,
+#endif
 	.get_stats_count = mlxsw_sp2_get_stats_count,
 	.get_stats_strings = mlxsw_sp2_get_stats_strings,
 	.get_stats	= mlxsw_sp2_get_stats,
-	.txhdr_construct = mlxsw_sp2_ptp_txhdr_construct,
+	.tx_as_data     = true,
 };
 
 static const struct mlxsw_sp_ptp_ops mlxsw_sp4_ptp_ops = {
@@ -2818,11 +2688,12 @@ static const struct mlxsw_sp_ptp_ops mlxsw_sp4_ptp_ops = {
 	.hwtstamp_get	= mlxsw_sp2_ptp_hwtstamp_get,
 	.hwtstamp_set	= mlxsw_sp2_ptp_hwtstamp_set,
 	.shaper_work	= mlxsw_sp2_ptp_shaper_work,
+#if IS_REACHABLE(CONFIG_PTP_1588_CLOCK)
 	.get_ts_info	= mlxsw_sp2_ptp_get_ts_info,
+#endif
 	.get_stats_count = mlxsw_sp2_get_stats_count,
 	.get_stats_strings = mlxsw_sp2_get_stats_strings,
 	.get_stats	= mlxsw_sp2_get_stats,
-	.txhdr_construct = mlxsw_sp_ptp_txhdr_construct,
 };
 
 struct mlxsw_sp_sample_trigger_node {
@@ -2874,7 +2745,7 @@ mlxsw_sp_sample_trigger_node_init(struct mlxsw_sp *mlxsw_sp,
 	struct mlxsw_sp_sample_trigger_node *trigger_node;
 	int err;
 
-	trigger_node = kzalloc(sizeof(*trigger_node), GFP_KERNEL);
+	trigger_node = kzalloc_obj(*trigger_node);
 	if (!trigger_node)
 		return -ENOMEM;
 
@@ -3020,7 +2891,7 @@ mlxsw_sp_ipv6_addr_init(struct mlxsw_sp *mlxsw_sp, const struct in6_addr *addr6,
 	if (err)
 		goto err_rips_write;
 
-	node = kzalloc(sizeof(*node), GFP_KERNEL);
+	node = kzalloc_obj(*node);
 	if (!node) {
 		err = -ENOMEM;
 		goto err_node_alloc;
@@ -3984,11 +3855,9 @@ static struct mlxsw_driver mlxsw_sp1_driver = {
 	.trap_policer_fini		= mlxsw_sp_trap_policer_fini,
 	.trap_policer_set		= mlxsw_sp_trap_policer_set,
 	.trap_policer_counter_get	= mlxsw_sp_trap_policer_counter_get,
-	.txhdr_construct		= mlxsw_sp_txhdr_construct,
 	.resources_register		= mlxsw_sp1_resources_register,
 	.kvd_sizes_get			= mlxsw_sp_kvd_sizes_get,
 	.ptp_transmitted		= mlxsw_sp_ptp_transmitted,
-	.txhdr_len			= MLXSW_TXHDR_LEN,
 	.profile			= &mlxsw_sp1_config_profile,
 	.sdq_supports_cqe_v2		= false,
 };
@@ -4022,10 +3891,8 @@ static struct mlxsw_driver mlxsw_sp2_driver = {
 	.trap_policer_fini		= mlxsw_sp_trap_policer_fini,
 	.trap_policer_set		= mlxsw_sp_trap_policer_set,
 	.trap_policer_counter_get	= mlxsw_sp_trap_policer_counter_get,
-	.txhdr_construct		= mlxsw_sp_txhdr_construct,
 	.resources_register		= mlxsw_sp2_resources_register,
 	.ptp_transmitted		= mlxsw_sp_ptp_transmitted,
-	.txhdr_len			= MLXSW_TXHDR_LEN,
 	.profile			= &mlxsw_sp2_config_profile,
 	.sdq_supports_cqe_v2		= true,
 };
@@ -4059,10 +3926,8 @@ static struct mlxsw_driver mlxsw_sp3_driver = {
 	.trap_policer_fini		= mlxsw_sp_trap_policer_fini,
 	.trap_policer_set		= mlxsw_sp_trap_policer_set,
 	.trap_policer_counter_get	= mlxsw_sp_trap_policer_counter_get,
-	.txhdr_construct		= mlxsw_sp_txhdr_construct,
 	.resources_register		= mlxsw_sp2_resources_register,
 	.ptp_transmitted		= mlxsw_sp_ptp_transmitted,
-	.txhdr_len			= MLXSW_TXHDR_LEN,
 	.profile			= &mlxsw_sp2_config_profile,
 	.sdq_supports_cqe_v2		= true,
 };
@@ -4094,10 +3959,8 @@ static struct mlxsw_driver mlxsw_sp4_driver = {
 	.trap_policer_fini		= mlxsw_sp_trap_policer_fini,
 	.trap_policer_set		= mlxsw_sp_trap_policer_set,
 	.trap_policer_counter_get	= mlxsw_sp_trap_policer_counter_get,
-	.txhdr_construct		= mlxsw_sp_txhdr_construct,
 	.resources_register		= mlxsw_sp2_resources_register,
 	.ptp_transmitted		= mlxsw_sp_ptp_transmitted,
-	.txhdr_len			= MLXSW_TXHDR_LEN,
 	.profile			= &mlxsw_sp4_config_profile,
 	.sdq_supports_cqe_v2		= true,
 };
@@ -5335,25 +5198,13 @@ static int mlxsw_sp_netdevice_vxlan_event(struct mlxsw_sp *mlxsw_sp,
 			return 0;
 		if (!mlxsw_sp_bridge_vxlan_is_valid(upper_dev, extack))
 			return -EOPNOTSUPP;
-		if (cu_info->linking) {
-			if (!netif_running(dev))
-				return 0;
-			/* When the bridge is VLAN-aware, the VNI of the VxLAN
-			 * device needs to be mapped to a VLAN, but at this
-			 * point no VLANs are configured on the VxLAN device
-			 */
-			if (br_vlan_enabled(upper_dev))
-				return 0;
+		if (!netif_running(dev))
+			return 0;
+		if (cu_info->linking)
 			return mlxsw_sp_bridge_vxlan_join(mlxsw_sp, upper_dev,
 							  dev, 0, extack);
-		} else {
-			/* VLANs were already flushed, which triggered the
-			 * necessary cleanup
-			 */
-			if (br_vlan_enabled(upper_dev))
-				return 0;
+		else
 			mlxsw_sp_bridge_vxlan_leave(mlxsw_sp, dev);
-		}
 		break;
 	case NETDEV_PRE_UP:
 		upper_dev = netdev_master_upper_dev_get(dev);

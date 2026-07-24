@@ -40,7 +40,9 @@
 #include "mgb4_trigger.h"
 #include "mgb4_core.h"
 
-#define MGB4_USER_IRQS 16
+#define MGB4_USER_IRQS  16
+#define MGB4_MGB4_BAR_ID 0
+#define MGB4_XDMA_BAR_ID 1
 
 #define DIGITEQ_VID 0x1ed8
 #define T100_DID    0x0101
@@ -82,7 +84,8 @@ static int temp_read(struct device *dev, enum hwmon_sensor_types type, u32 attr,
 		     int channel, long *val)
 {
 	struct mgb4_dev *mgbdev = dev_get_drvdata(dev);
-	u32 val10, raw;
+	u32 raw;
+	int val10;
 
 	if (type != hwmon_temp || attr != hwmon_temp_input)
 		return -EOPNOTSUPP;
@@ -123,7 +126,7 @@ static const struct hwmon_chip_info temp_chip_info = {
 };
 #endif
 
-static int match_i2c_adap(struct device *dev, void *data)
+static int match_i2c_adap(struct device *dev, const void *data)
 {
 	return i2c_verify_adapter(dev) ? 1 : 0;
 }
@@ -139,7 +142,7 @@ static struct i2c_adapter *get_i2c_adap(struct platform_device *pdev)
 	return dev ? to_i2c_adapter(dev) : NULL;
 }
 
-static int match_spi_adap(struct device *dev, void *data)
+static int match_spi_adap(struct device *dev, const void *data)
 {
 	return to_spi_device(dev) ? 1 : 0;
 }
@@ -302,7 +305,7 @@ static int init_i2c(struct mgb4_dev *mgbdev)
 	/* create dummy clock required by the xiic-i2c adapter */
 	snprintf(clk_name, sizeof(clk_name), "xiic-i2c.%d", id);
 	mgbdev->i2c_clk = clk_hw_register_fixed_rate(NULL, clk_name, NULL,
-						     0, 125000000);
+						     0, MGB4_HW_FREQ);
 	if (IS_ERR(mgbdev->i2c_clk)) {
 		dev_err(dev, "failed to register I2C clock\n");
 		return PTR_ERR(mgbdev->i2c_clk);
@@ -379,6 +382,18 @@ static int get_serial_number(struct mgb4_dev *mgbdev)
 	return 0;
 }
 
+static const char *module_type_str(struct mgb4_dev *mgbdev)
+{
+	if (MGB4_IS_FPDL3(mgbdev))
+		return "FPDL3";
+	else if (MGB4_IS_GMSL3(mgbdev))
+		return "GMSL3";
+	else if (MGB4_IS_GMSL1(mgbdev))
+		return "GMSL1";
+	else
+		return "UNKNOWN";
+}
+
 static int get_module_version(struct mgb4_dev *mgbdev)
 {
 	struct device *dev = &mgbdev->pdev->dev;
@@ -400,18 +415,21 @@ static int get_module_version(struct mgb4_dev *mgbdev)
 	}
 
 	mgbdev->module_version = ~((u32)version) & 0xff;
-	if (!(MGB4_IS_FPDL3(mgbdev) || MGB4_IS_GMSL(mgbdev))) {
+	if (!(MGB4_IS_FPDL3(mgbdev) ||
+	      MGB4_IS_GMSL3(mgbdev) ||
+	      MGB4_IS_GMSL1(mgbdev))) {
 		dev_err(dev, "unknown module type\n");
 		return -EINVAL;
 	}
-	fw_version = mgb4_read_reg(&mgbdev->video, 0xC4);
-	if (fw_version >> 24 != mgbdev->module_version >> 4) {
+	fw_version = mgb4_read_reg(&mgbdev->video, 0xC4) >> 24;
+	if ((MGB4_IS_FPDL3(mgbdev) && fw_version != 1) ||
+	    (MGB4_IS_GMSL3(mgbdev) && fw_version != 2) ||
+	    (MGB4_IS_GMSL1(mgbdev) && fw_version != 3)) {
 		dev_err(dev, "module/firmware type mismatch\n");
 		return -EINVAL;
 	}
 
-	dev_info(dev, "%s module detected\n",
-		 MGB4_IS_FPDL3(mgbdev) ? "FPDL3" : "GMSL");
+	dev_info(dev, "%s module detected\n", module_type_str(mgbdev));
 
 	return 0;
 }
@@ -505,7 +523,7 @@ static int mgb4_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	};
 	int irqs = pci_msix_vec_count(pdev);
 
-	mgbdev = kzalloc(sizeof(*mgbdev), GFP_KERNEL);
+	mgbdev = kzalloc_obj(*mgbdev);
 	if (!mgbdev)
 		return -ENOMEM;
 
@@ -582,9 +600,7 @@ static int mgb4_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 							    NULL);
 #endif
 
-#ifdef CONFIG_DEBUG_FS
 	mgbdev->debugfs = debugfs_create_dir(dev_name(&pdev->dev), NULL);
-#endif
 
 	/* Get card serial number. On systems without MTD flash support we may
 	 * get an error thus ignore the return value. An invalid serial number
@@ -599,14 +615,18 @@ static int mgb4_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	rv = get_module_version(mgbdev);
 	if (rv < 0)
 		goto exit;
+	/* Propagate the module type(version) to the FPGA */
+	mgb4_write_reg(&mgbdev->video, 0xD4, mgbdev->module_version);
 
 	/* Video input v4l2 devices */
 	for (i = 0; i < MGB4_VIN_DEVICES; i++)
 		mgbdev->vin[i] = mgb4_vin_create(mgbdev, i);
 
 	/* Video output v4l2 devices */
-	for (i = 0; i < MGB4_VOUT_DEVICES; i++)
-		mgbdev->vout[i] = mgb4_vout_create(mgbdev, i);
+	if (MGB4_HAS_VOUT(mgbdev)) {
+		for (i = 0; i < MGB4_VOUT_DEVICES; i++)
+			mgbdev->vout[i] = mgb4_vout_create(mgbdev, i);
+	}
 
 	/* Triggers */
 	mgbdev->indio_dev = mgb4_trigger_create(mgbdev);
@@ -646,6 +666,8 @@ static void mgb4_remove(struct pci_dev *pdev)
 	hwmon_device_unregister(mgbdev->hwmon_dev);
 #endif
 
+	debugfs_remove_recursive(mgbdev->debugfs);
+
 	if (mgbdev->indio_dev)
 		mgb4_trigger_free(mgbdev->indio_dev);
 
@@ -655,10 +677,6 @@ static void mgb4_remove(struct pci_dev *pdev)
 	for (i = 0; i < MGB4_VIN_DEVICES; i++)
 		if (mgbdev->vin[i])
 			mgb4_vin_free(mgbdev->vin[i]);
-
-#ifdef CONFIG_DEBUG_FS
-	debugfs_remove_recursive(mgbdev->debugfs);
-#endif
 
 	device_remove_groups(&mgbdev->pdev->dev, mgb4_pci_groups);
 	free_spi(mgbdev);

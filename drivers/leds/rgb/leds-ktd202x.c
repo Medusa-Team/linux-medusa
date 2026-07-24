@@ -391,7 +391,7 @@ static int ktd202x_setup_led_rgb(struct ktd202x *chip, struct fwnode_handle *fwn
 	int i = 0;
 
 	num_channels = 0;
-	fwnode_for_each_available_child_node(fwnode, child)
+	fwnode_for_each_child_node(fwnode, child)
 		num_channels++;
 
 	if (!num_channels || num_channels > chip->num_leds)
@@ -401,7 +401,7 @@ static int ktd202x_setup_led_rgb(struct ktd202x *chip, struct fwnode_handle *fwn
 	if (!info)
 		return -ENOMEM;
 
-	fwnode_for_each_available_child_node(fwnode, child) {
+	fwnode_for_each_child_node(fwnode, child) {
 		u32 mono_color;
 		u32 reg;
 		int ret;
@@ -495,7 +495,6 @@ static int ktd202x_add_led(struct ktd202x *chip, struct fwnode_handle *fwnode, u
 
 static int ktd202x_probe_fw(struct ktd202x *chip)
 {
-	struct fwnode_handle *child;
 	struct device *dev = chip->dev;
 	int count;
 	int i = 0;
@@ -509,13 +508,12 @@ static int ktd202x_probe_fw(struct ktd202x *chip)
 	/* Allow the device to execute the complete reset */
 	usleep_range(200, 300);
 
-	device_for_each_child_node(dev, child) {
+	device_for_each_child_node_scoped(dev, child) {
 		int ret = ktd202x_add_led(chip, child, i);
 
-		if (ret) {
-			fwnode_handle_put(child);
+		if (ret)
 			return ret;
-		}
+
 		i++;
 	}
 

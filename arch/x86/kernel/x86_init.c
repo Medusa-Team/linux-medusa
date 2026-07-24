@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Thomas Gleixner <tglx@linutronix.de>
+ * Copyright (C) 2009 Linutronix GmbH, Thomas Gleixner <tglx@kernel.org>
  *
  *  For licencing details see kernel-base/COPYING
  */
@@ -8,6 +8,7 @@
 #include <linux/ioport.h>
 #include <linux/export.h>
 #include <linux/pci.h>
+#include <linux/acpi.h>
 
 #include <asm/acpi.h>
 #include <asm/bios_ebda.h>

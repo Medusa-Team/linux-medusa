@@ -31,7 +31,7 @@
 
 #include <asm/io.h>
 #include <asm/byteorder.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "u_rndis.h"
 
@@ -892,7 +892,7 @@ struct rndis_params *rndis_register(void (*resp_avail)(void *v), void *v)
 		return ERR_PTR(-ENODEV);
 	}
 
-	params = kzalloc(sizeof(*params), GFP_KERNEL);
+	params = kzalloc_obj(*params);
 	if (!params) {
 		rndis_put_nr(i);
 

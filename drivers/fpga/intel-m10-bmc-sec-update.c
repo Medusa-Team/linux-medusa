@@ -183,7 +183,7 @@ show_canceled_csk(struct device *dev, u32 addr, char *buf)
 
 	bitmap_from_arr32(csk_map, csk32, CSK_BIT_LEN);
 	bitmap_complement(csk_map, csk_map, CSK_BIT_LEN);
-	return bitmap_print_to_pagebuf(1, buf, csk_map, CSK_BIT_LEN);
+	return sysfs_emit(buf, "%*pbl\n", CSK_BIT_LEN, csk_map);
 }
 
 #define DEVICE_ATTR_SEC_CSK_RO(_name)						\
@@ -759,7 +759,7 @@ MODULE_DEVICE_TABLE(platform, intel_m10bmc_sec_ids);
 
 static struct platform_driver intel_m10bmc_sec_driver = {
 	.probe = m10bmc_sec_probe,
-	.remove_new = m10bmc_sec_remove,
+	.remove = m10bmc_sec_remove,
 	.driver = {
 		.name = "intel-m10bmc-sec-update",
 		.dev_groups = m10bmc_sec_attr_groups,
@@ -771,4 +771,4 @@ module_platform_driver(intel_m10bmc_sec_driver);
 MODULE_AUTHOR("Intel Corporation");
 MODULE_DESCRIPTION("Intel MAX10 BMC Secure Update");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(INTEL_M10_BMC_CORE);
+MODULE_IMPORT_NS("INTEL_M10_BMC_CORE");

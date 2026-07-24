@@ -14,6 +14,7 @@
 #include "iters_state_safety.skel.h"
 #include "iters_looping.skel.h"
 #include "iters_num.skel.h"
+#include "iters_testmod.skel.h"
 #include "iters_testmod_seq.skel.h"
 #include "iters_task_vma.skel.h"
 #include "iters_task.skel.h"
@@ -191,8 +192,8 @@ static void subtest_task_iters(void)
 	syscall(SYS_getpgid);
 	iters_task__detach(skel);
 	ASSERT_EQ(skel->bss->procs_cnt, 1, "procs_cnt");
-	ASSERT_EQ(skel->bss->threads_cnt, thread_num + 1, "threads_cnt");
-	ASSERT_EQ(skel->bss->proc_threads_cnt, thread_num + 1, "proc_threads_cnt");
+	ASSERT_EQ(skel->bss->threads_cnt, thread_num + 2, "threads_cnt");
+	ASSERT_EQ(skel->bss->proc_threads_cnt, thread_num + 2, "proc_threads_cnt");
 	ASSERT_EQ(skel->bss->invalid_cnt, 0, "invalid_cnt");
 	pthread_mutex_unlock(&do_nothing_mutex);
 	for (int i = 0; i < thread_num; i++)
@@ -252,6 +253,11 @@ static void subtest_css_iters(void)
 		{ "/cg1/cg2" },
 		{ "/cg1/cg2/cg3" },
 		{ "/cg1/cg2/cg3/cg4" },
+		{ "/cg1/cg5" },
+		{ "/cg1/cg5/cg6" },
+		{ "/cg1/cg7" },
+		{ "/cg1/cg7/cg8" },
+		{ "/cg1/cg7/cg8/cg9" },
 	};
 	int err, cg_nr = ARRAY_SIZE(cgs);
 	int i;
@@ -283,7 +289,8 @@ static void subtest_css_iters(void)
 
 	ASSERT_EQ(skel->bss->post_order_cnt, cg_nr, "post_order_cnt");
 	ASSERT_EQ(skel->bss->last_cg_id, get_cgroup_id(cgs[0].path), "last_cg_id");
-	ASSERT_EQ(skel->bss->tree_high, cg_nr - 1, "tree_high");
+	ASSERT_EQ(skel->bss->children_cnt, 3, "children_cnt");
+	ASSERT_EQ(skel->bss->tree_high, 3, "tree_high");
 	iters_css__detach(skel);
 cleanup:
 	cleanup_cgroup_environment();
@@ -297,8 +304,10 @@ void test_iters(void)
 	RUN_TESTS(iters);
 	RUN_TESTS(iters_css_task);
 
-	if (env.has_testmod)
+	if (env.has_testmod) {
+		RUN_TESTS(iters_testmod);
 		RUN_TESTS(iters_testmod_seq);
+	}
 
 	if (test__start_subtest("num"))
 		subtest_num_iters();
