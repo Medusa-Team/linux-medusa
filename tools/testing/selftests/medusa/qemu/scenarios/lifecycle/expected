@@ -2,8 +2,7 @@ MEDUSA_RESULT lifecycle startup PASS
 MEDUSA_RESULT lifecycle connected_operation PASS
 MEDUSA_RESULT lifecycle disconnect PASS
 MEDUSA_RESULT lifecycle disconnected_fail_open PASS
-# Known defect: stale-context fail-open returns before the audit callback.
-!Medusa: op=mkdir ans=ALLOW as_request=0
+Medusa: op=mkdir ans=ALLOW as_request=0
 MEDUSA_RESULT lifecycle restart PASS
 MEDUSA_RESULT lifecycle policy_reload PASS
 Medusa: op=msgsnd ans=DENY as_request=1

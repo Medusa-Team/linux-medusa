@@ -38,9 +38,8 @@ QEMU scenario coverage
 ``lifecycle``
   Covers initial registration, disconnect, fail-open operation, replacement
   registration, enforcement of a reloaded deny policy, positive audit output
-  for a server-requested IPC operation, and the known missing audit record on
-  the disconnected stale-context path.  Negative expected-result lines make
-  the missing record an explicit assertion.
+  for a server-requested IPC operation, and the disconnected ``mkdir``
+  stale-context fail-open audit path.
 
 Wired access paths
 ------------------
@@ -84,8 +83,6 @@ Known defects kept separate from expected behaviour
 * Re-associating with an existing message queue, semaphore set, or shared
   memory object returns ``EACCES`` even when ``ipc_perm`` is allowed.
   ``ipc_associate`` is not observed.
-* The disconnected stale-context validation path returns before the access
-  callback's audit block, so its fail-open decision has no Medusa audit record.
 * Multiple ``getfile`` callbacks can overwrite one another's object snapshot;
   the Constable path-tree callback and an explicit policy callback are not
   safely composable.

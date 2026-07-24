@@ -29,8 +29,8 @@ The `lifecycle` scenario verifies initial Constable registration, clean
 disconnect, the configured fail-open behavior without a server, and
 registration of a replacement server. The replacement loads a different
 policy and proves that its `ipc_msgsnd` deny rule is enforced. The scenario
-also records the known absence of an audit record when stale-context
-validation takes the disconnected fail-open path.
+also verifies that stale-context validation emits an audit record when it
+takes the disconnected fail-open path for `mkdir`.
 
 The kernel must be configured with:
 

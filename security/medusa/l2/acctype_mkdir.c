@@ -67,10 +67,13 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 	struct path ndcurrent, ndupper;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	bool validation_failed = false;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
-		return mad.ans;
+	    process_kobj_validate_task(current) <= 0) {
+		validation_failed = true;
+		goto audit;
+	}
 
 	ndcurrent = *dir;
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
@@ -78,7 +81,8 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
 	    file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
-		return mad.ans;
+		validation_failed = true;
+		goto audit;
 	}
 	if (!vs_intersects(VSS(task_security(current)),
 			   VS(inode_security(ndupper.dentry->d_inode))) ||
@@ -97,7 +101,7 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 	}
 	medusa_put_upper_and_parent(&ndupper, NULL);
 audit:
-	if (task_security(current)->audit) {
+	if (task_security(current)->audit || validation_failed) {
 		cad.type = LSM_AUDIT_DATA_NONE;
 		cad.u.tsk = current;
 		mad.function = "mkdir";
