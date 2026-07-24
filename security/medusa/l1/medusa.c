@@ -41,9 +41,6 @@ static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
 
 		med_pr_info("Exec of trigger task '%s' detected - start AS",
 			    bprm->filename);
-		start_auth_server();
-		wait_for_auth_server();
-
 		/*
 		 * PID 1 starts life as a kernel thread and is therefore initially
 		 * exempt when kernel-thread monitoring is disabled.  It is a
@@ -52,6 +49,9 @@ static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
 		 * prevent authorization-server generations from revalidating them.
 		 */
 		medusa_task_context_enable_monitoring(task_security(current));
+		start_auth_server();
+		wait_for_auth_server();
+
 		trigger_loaded = 1;
 		return 0;
 	}
