@@ -81,6 +81,13 @@ enum medusa_task_context_mode {
 };
 
 static inline void
+medusa_task_context_enable_monitoring(struct medusa_l1_task_s *context)
+{
+	init_med_object(&context->med_object);
+	init_med_subject(&context->med_subject);
+}
+
+static inline void
 medusa_task_context_init(struct medusa_l1_task_s *context,
 			 const struct medusa_l1_task_s *parent,
 			 enum medusa_task_context_mode mode)
@@ -95,9 +102,7 @@ medusa_task_context_init(struct medusa_l1_task_s *context,
 		unmonitor_med_subject(&context->med_subject);
 		break;
 	case MEDUSA_TASK_CONTEXT_MONITORED:
-		med_magic_invalidate(&context->med_object);
-		init_med_object(&context->med_object);
-		init_med_subject(&context->med_subject);
+		medusa_task_context_enable_monitoring(context);
 		break;
 	}
 

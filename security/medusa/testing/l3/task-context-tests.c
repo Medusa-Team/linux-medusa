@@ -55,6 +55,28 @@ static void task_context_unmonitored_initialization(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, 1, context.validation_depth_nesting);
 }
 
+static void userspace_trigger_reenables_monitoring(struct kunit *test)
+{
+	struct medusa_l1_task_s context = {
+		.audit = 1,
+		.decision_answer = MED_DENY,
+	};
+
+	medusa_task_context_init(&context, NULL,
+				 MEDUSA_TASK_CONTEXT_UNMONITORED);
+	KUNIT_ASSERT_EQ(test, MAGIC_NOT_MONITORED, context.med_object.magic);
+
+	medusa_task_context_enable_monitoring(&context);
+
+	KUNIT_EXPECT_EQ(test, 0, context.med_object.magic);
+	KUNIT_EXPECT_TRUE(test,
+		bitmap_full(context.med_object.act.pack, CONFIG_MEDUSA_ACT));
+	KUNIT_EXPECT_TRUE(test,
+		bitmap_full(context.med_subject.act.pack, CONFIG_MEDUSA_ACT));
+	KUNIT_EXPECT_EQ(test, 1, context.audit);
+	KUNIT_EXPECT_EQ(test, MED_DENY, context.decision_answer);
+}
+
 static void task_context_inherits_parent_state(struct kunit *test)
 {
 	struct medusa_l1_task_s parent = {};
@@ -116,6 +138,7 @@ static void task_context_inherits_parent_state(struct kunit *test)
 static struct kunit_case task_context_test_cases[] = {
 	KUNIT_CASE(task_context_monitored_initialization),
 	KUNIT_CASE(task_context_unmonitored_initialization),
+	KUNIT_CASE(userspace_trigger_reenables_monitoring),
 	KUNIT_CASE(task_context_inherits_parent_state),
 	{}
 };

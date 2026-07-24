@@ -44,6 +44,14 @@ static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
 		start_auth_server();
 		wait_for_auth_server();
 
+		/*
+		 * PID 1 starts life as a kernel thread and is therefore initially
+		 * exempt when kernel-thread monitoring is disabled.  It is a
+		 * userspace policy subject from this exec onward; retaining
+		 * MAGIC_NOT_MONITORED here would also exempt all descendants and
+		 * prevent authorization-server generations from revalidating them.
+		 */
+		medusa_task_context_enable_monitoring(task_security(current));
 		trigger_loaded = 1;
 		return 0;
 	}
