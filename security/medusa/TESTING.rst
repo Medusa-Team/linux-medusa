@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 39 tests in seven suites:
+The KUnit configuration runs 42 tests in nine suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -18,6 +18,8 @@ The KUnit configuration runs 39 tests in seven suites:
 * cached/delegated allow, deny, error/fail-open, and unsupported verdicts;
 * protocol-v3 answer lengths, verdicts, unknown IDs, and stale IDs;
 * cache allocator growth across a size-class boundary.
+* dynamic task, inode, and SysV IPC LSM blob offsets;
+* bounded audit-answer formatting and LSM return-value translation.
 
 QEMU scenario coverage
 ----------------------
@@ -46,8 +48,22 @@ QEMU scenario coverage
   requires both names in the kernel's runtime LSM list and inherits the full
   lifecycle scenario. A confined helper proves an audited AppArmor ``mkdir``
   denial while Constable remains connected and a subsequent operation
-  succeeds. The reconnected Constable then proves an audited Medusa
-  ``ipc_msgsnd`` denial while AppArmor permits the unconfined init process.
+  succeeds. A negative assertion verifies that AppArmor's short-circuited
+  denial is not attributed to Medusa. The reconnected Constable then proves an
+  audited Medusa ``ipc_msgsnd`` denial while AppArmor permits the unconfined
+  init process.
+
+Stacked hook and audit composition
+----------------------------------
+
+All active Medusa authorization hooks return the LSM default value ``0`` for
+allow/fail-open or a negative errno for denial and object-lifetime errors.
+They therefore follow the LSM core's first-nondefault short-circuit semantics:
+with the reference order, an AppArmor denial prevents the later Medusa hook
+from running. Medusa's ``common_audit_data`` is allocated per call, and its
+private pointer occupies the standard LSM-specific union; it does not reuse
+AppArmor's audit state. AppArmor and Medusa denials consequently produce
+separate, correctly attributed ``AUDIT_AVC`` records.
 
 Wired access paths
 ------------------

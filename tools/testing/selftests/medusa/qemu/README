@@ -41,8 +41,9 @@ The `stacking` scenario inherits the complete lifecycle test and additionally
 mounts securityfs and verifies that the kernel's runtime LSM list contains
 both AppArmor and Medusa. It loads a minimal AppArmor profile, proves that
 AppArmor can independently deny a directory creation while Medusa and
-Constable remain usable, and then proves that Medusa can independently deny a
-message-queue operation after Constable reconnects.
+Constable remain usable, and verifies that the short-circuited operation does
+not produce a Medusa audit record. It then proves that Medusa can independently
+deny a message-queue operation after Constable reconnects.
 
 The kernel must be configured with:
 
