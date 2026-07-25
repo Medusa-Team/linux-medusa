@@ -11,7 +11,8 @@ menuconfig SECURITY_MEDUSA_SUPPORT
 	select NETWORK_SECMARK
 	default n
 	help
-	  This selects MEDUSA LSM.
+	  This selects MEDUSA LSM. Add "medusa" to the ordered CONFIG_LSM
+	  list to initialize it.
 
 if SECURITY_MEDUSA_SUPPORT
 
