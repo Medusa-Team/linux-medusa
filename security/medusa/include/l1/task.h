@@ -43,7 +43,6 @@ extern int process_kobj_validate_task(struct task_struct *ts);
  */
 
 extern struct lsm_blob_sizes medusa_blob_sizes;
-#define task_security(task) ((struct medusa_l1_task_s *)(task->security + medusa_blob_sizes.lbs_task))
 
 struct medusa_l1_task_s {
 	kuid_t luid;
@@ -73,6 +72,12 @@ struct medusa_l1_task_s {
 	int validation_depth_nesting;
 	int audit;
 };
+
+static inline struct medusa_l1_task_s *
+task_security(const struct task_struct *task)
+{
+	return task->security + medusa_blob_sizes.lbs_task;
+}
 
 enum medusa_task_context_mode {
 	MEDUSA_TASK_CONTEXT_MONITORED,

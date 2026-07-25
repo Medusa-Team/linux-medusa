@@ -29,7 +29,6 @@
  * access to IPC Medusa security context
  */
 extern struct lsm_blob_sizes medusa_blob_sizes;
-#define ipc_security(ipc) ((struct medusa_l1_ipc_s *)(ipc->security + medusa_blob_sizes.lbs_ipc))
 
 /**
  * struct medusa_l1_ipc_s - security struct for System V IPC objects (sem, msg, shm)
@@ -42,6 +41,12 @@ struct medusa_l1_ipc_s {
 	unsigned int ipc_class;	/* type of a System V IPC object */
 	struct medusa_object_s med_object;
 };
+
+static inline struct medusa_l1_ipc_s *
+ipc_security(const struct kern_ipc_perm *ipc)
+{
+	return ipc->security + medusa_blob_sizes.lbs_ipc;
+}
 
 static inline void medusa_ipc_context_init(struct medusa_l1_ipc_s *context,
 					   unsigned int ipc_class)
