@@ -116,6 +116,7 @@ struct medusa_audit_data {
 	};
 };
 
+const char *medusa_audit_answer_name(enum medusa_answer_t answer);
 void medusa_audit_log_callback(struct common_audit_data *cad,
 			       void (*medusa_post)(struct audit_buffer *, void *));
 void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad);
