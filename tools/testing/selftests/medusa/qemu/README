@@ -45,6 +45,13 @@ Constable remain usable, and verifies that the short-circuited operation does
 not produce a Medusa audit record. It then proves that Medusa can independently
 deny a message-queue operation after Constable reconnects.
 
+The `selinux-stacking` scenario also inherits the lifecycle test and requires
+SELinux before Medusa in the runtime LSM list. It loads a generated enforcing
+policy, places only the guest helper in a restricted SELinux domain, and proves
+an audited SELinux directory denial while Medusa and Constable remain usable.
+The replacement Constable then reconnects and independently enforces Medusa's
+message-queue denial.
+
 The kernel must be configured with:
 
   CONFIG_SECURITY_MEDUSA=y
@@ -80,6 +87,18 @@ This enables AppArmor before Medusa in `CONFIG_LSM`. A successful run proves
 that both are present in the runtime LSM list, each LSM can deny independently,
 and Medusa still reconnects and enforces the replacement policy.
 
+For SELinux stacking coverage, merge `selinux-stacking.config`, verify it with
+`check-selinux-stacking-config.sh`, and generate a policy using the kernel's
+`scripts/selinux/mdp/mdp` helper:
+
+  tools/testing/selftests/medusa/qemu/make-selinux-test-policy.sh \
+    path/to/scripts/selinux/mdp/mdp \
+    path/to/medusa-selinux-test.policy
+
+Run the `selinux-stacking` scenario with `SELINUX_POLICY` naming that compiled
+policy. The runner places the policy in the initramfs and the lifecycle helper
+loads it before exercising the restricted guest.
+
 `GUEST_CC` selects the static compiler for scenario C programs. Prebuilt
 programs may instead be supplied with `INIT_TEST_BINARY` and
 `GUEST_TEST_BINARY`. `QEMU_ACCEL`, `QEMU_CPU`, and `QEMU_TIMEOUT` may also be
@@ -89,3 +108,6 @@ A scenario containing `apparmor.profile` requires `apparmor_parser` on the
 host running the harness. `APPARMOR_PARSER` selects a non-default parser.
 Alternatively, `APPARMOR_POLICY` supplies a precompiled binary policy blob;
 the runner places only that blob in the minimal initramfs.
+
+A scenario containing the `selinux-policy` marker requires `SELINUX_POLICY` to
+name a precompiled binary SELinux policy.

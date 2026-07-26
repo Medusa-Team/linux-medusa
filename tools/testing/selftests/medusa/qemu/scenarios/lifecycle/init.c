@@ -133,15 +133,74 @@ out_input:
 	return passed;
 }
 
-static bool run_apparmor_guest(void)
+static bool load_selinux_policy(void)
 {
+	struct stat status;
+	char *policy;
+	ssize_t count;
+	int enforce = -1;
+	int input = -1;
+	int load = -1;
+	bool passed = false;
+
+	mkdir("/sys/fs/selinux", 0755);
+	mount_one("selinuxfs", "/sys/fs/selinux", "selinuxfs");
+
+	input = open("/etc/selinux.policy", O_RDONLY);
+	if (input < 0 || fstat(input, &status) < 0 || status.st_size <= 0 ||
+	    status.st_size > 16 * 1024 * 1024)
+		goto out;
+
+	policy = malloc(status.st_size);
+	if (!policy)
+		goto out;
+	count = read(input, policy, status.st_size);
+	if (count != status.st_size)
+		goto out_policy;
+
+	load = open("/sys/fs/selinux/load", O_WRONLY);
+	if (load < 0 ||
+	    write(load, policy, status.st_size) != status.st_size)
+		goto out_policy;
+
+	enforce = open("/sys/fs/selinux/enforce", O_WRONLY);
+	if (enforce < 0 || write(enforce, "1", 1) != 1)
+		goto out_policy;
+	passed = true;
+
+out_policy:
+	free(policy);
+out:
+	if (enforce >= 0)
+		close(enforce);
+	if (load >= 0)
+		close(load);
+	if (input >= 0)
+		close(input);
+	return passed;
+}
+
+static bool run_stacking_guest(void)
+{
+	static const char context[] = "user_u:base_r:medusa_test_t:s0";
 	pid_t child;
 	int status;
 
 	child = fork();
 	if (child == 0) {
+		if (access("/etc/selinux.policy", F_OK) == 0) {
+			int attr = open("/proc/self/attr/exec", O_WRONLY);
+
+			if (attr < 0 ||
+			    write(attr, context, sizeof(context) - 1) !=
+			    sizeof(context) - 1) {
+				perror("set SELinux guest context");
+				_exit(126);
+			}
+			close(attr);
+		}
 		execl("/bin/medusa-guest", "medusa-guest", NULL);
-		perror("run AppArmor guest");
+		perror("run stacking guest");
 		_exit(127);
 	}
 	if (child < 0 || waitpid(child, &status, 0) != child)
@@ -254,8 +313,14 @@ int main(void)
 	if (access("/etc/apparmor.policy", F_OK) == 0) {
 		result("unlimited_audit_console", unlimited_audit_console);
 		result("apparmor_policy_load", load_apparmor_policy());
-		result("apparmor_independent_deny", run_apparmor_guest());
+		result("apparmor_independent_deny", run_stacking_guest());
 		result("constable_after_apparmor_deny",
+		       initial > 0 && kill(initial, 0) == 0);
+	}
+	if (access("/etc/selinux.policy", F_OK) == 0) {
+		result("selinux_policy_load", load_selinux_policy());
+		result("selinux_independent_deny", run_stacking_guest());
+		result("constable_after_selinux_deny",
 		       initial > 0 && kill(initial, 0) == 0);
 	}
 	result("connected_operation",

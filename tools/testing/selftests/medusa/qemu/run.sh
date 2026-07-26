@@ -99,6 +99,13 @@ if apparmor_profile="$(scenario_file apparmor.profile)"; then
 			"$apparmor_profile" >"$work_dir/input/apparmor.policy"
 	fi
 fi
+if scenario_file selinux-policy >/dev/null; then
+	if [ -z "${SELINUX_POLICY:-}" ]; then
+		echo "SELINUX_POLICY is required by scenario '$scenario'" >&2
+		exit 2
+	fi
+	cp "$(realpath "$SELINUX_POLICY")" "$work_dir/input/selinux.policy"
+fi
 
 guest_cc="${GUEST_CC:-cc}"
 init_c="$(scenario_file init.c || true)"
@@ -161,6 +168,9 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	fi
 	if [ -f "$work_dir/input/apparmor.policy" ]; then
 		echo "file /etc/apparmor.policy $work_dir/input/apparmor.policy 0600 0 0"
+	fi
+	if [ -f "$work_dir/input/selinux.policy" ]; then
+		echo "file /etc/selinux.policy $work_dir/input/selinux.policy 0600 0 0"
 	fi
 	if [ -f "$work_dir/input/medusa-guest" ]; then
 		echo "file /bin/medusa-guest $work_dir/input/medusa-guest 0755 0 0"

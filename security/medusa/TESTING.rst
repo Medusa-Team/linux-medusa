@@ -53,17 +53,26 @@ QEMU scenario coverage
   audited Medusa ``ipc_msgsnd`` denial while AppArmor permits the unconfined
   init process.
 
+``selinux-stacking.config``
+  Enables SELinux before Medusa in ``CONFIG_LSM``. The ``selinux-stacking``
+  scenario requires both names in the runtime LSM list and inherits the full
+  lifecycle scenario. It loads an enforcing policy generated from the
+  kernel's minimal dummy policy, transitions only the guest helper into a
+  restricted domain, and proves an audited SELinux directory denial while
+  Constable remains connected. The replacement Constable then proves the same
+  independent Medusa ``ipc_msgsnd`` denial used by the other lifecycle runs.
+
 Stacked hook and audit composition
 ----------------------------------
 
 All active Medusa authorization hooks return the LSM default value ``0`` for
 allow/fail-open or a negative errno for denial and object-lifetime errors.
 They therefore follow the LSM core's first-nondefault short-circuit semantics:
-with the reference order, an AppArmor denial prevents the later Medusa hook
-from running. Medusa's ``common_audit_data`` is allocated per call, and its
-private pointer occupies the standard LSM-specific union; it does not reuse
-AppArmor's audit state. AppArmor and Medusa denials consequently produce
-separate, correctly attributed ``AUDIT_AVC`` records.
+with either reference order, an earlier AppArmor or SELinux denial prevents the
+later Medusa hook from running. Medusa's ``common_audit_data`` is allocated per
+call, and its private pointer occupies the standard LSM-specific union; it does
+not reuse another LSM's audit state. Stacked-LSM and Medusa denials
+consequently produce separate, correctly attributed ``AUDIT_AVC`` records.
 
 Wired access paths
 ------------------
