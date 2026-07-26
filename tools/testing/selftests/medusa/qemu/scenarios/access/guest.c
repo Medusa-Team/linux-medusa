@@ -52,6 +52,10 @@ static void test_filesystem(void)
 	int status;
 
 	result("mkdir", mkdir("/tmp/access", 0755) == 0);
+	errno = 0;
+	result("multi_handler_deny",
+	       mkdir("/tmp/medusa-multi-deny", 0711) < 0 &&
+	       errno == EACCES);
 	result("validate_directory",
 	       prime_path("/tmp/access", O_RDONLY | O_DIRECTORY));
 	fd = open("/tmp/access/file", O_CREAT | O_RDWR, 0644);

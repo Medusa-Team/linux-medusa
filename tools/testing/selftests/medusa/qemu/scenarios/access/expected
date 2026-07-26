@@ -1,4 +1,6 @@
 MEDUSA_RESULT access mkdir PASS
+MEDUSA_RESULT access multi_handler_deny PASS
+!MEDUSA_RESULT access multi_handler_deny FAIL
 MEDUSA_RESULT access validate_directory PASS
 MEDUSA_RESULT access create_open PASS
 MEDUSA_RESULT access write PASS
@@ -68,3 +70,6 @@ MEDUSA_EVENT ipc_semop
 MEDUSA_EVENT ipc_shmat
 MEDUSA_EVENT ipc_msgsnd
 MEDUSA_EVENT ipc_msgrcv
+MEDUSA_MULTI_HANDLER 1 ALLOW
+MEDUSA_MULTI_HANDLER 2 FORCE_ALLOW
+MEDUSA_MULTI_HANDLER 3 DENY

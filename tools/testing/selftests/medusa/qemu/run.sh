@@ -246,9 +246,39 @@ check_expected()
 	done <"$1"
 }
 
+check_expected_order()
+{
+	local after=0
+	local expected
+	local found
+
+	while IFS= read -r expected || [ -n "$expected" ]; do
+		case "$expected" in
+			''|'#'*) continue ;;
+		esac
+		found="$(
+			awk -v after="$after" -v expected="$expected" \
+				'NR > after && index($0, expected) { print NR; exit }' \
+				"$work_dir/console.log"
+		)"
+		if [ -z "$found" ]; then
+			echo "scenario '$scenario' missing ordered result after line" \
+				"$after: $expected" >&2
+			exit 1
+		fi
+		after="$found"
+	done <"$1"
+}
+
 if [ -n "$base_dir" ] && [ -f "$base_dir/expected" ]; then
 	check_expected "$base_dir/expected"
 fi
 check_expected "$scenario_dir/expected"
+if [ -n "$base_dir" ] && [ -f "$base_dir/expected-order" ]; then
+	check_expected_order "$base_dir/expected-order"
+fi
+if [ -f "$scenario_dir/expected-order" ]; then
+	check_expected_order "$scenario_dir/expected-order"
+fi
 
 echo "Medusa QEMU scenario '$scenario' passed"
