@@ -95,6 +95,32 @@ static unsigned long long event_counter(const char *buffer, const char *event,
 	return strtoull(field, &end, 10);
 }
 
+static unsigned long long event_counter_total(const char *buffer,
+					      const char *counter)
+{
+	unsigned long long total = 0;
+	const char *line = buffer;
+	char key[64];
+
+	snprintf(key, sizeof(key), " %s=", counter);
+	while ((line = strstr(line, "event="))) {
+		const char *field;
+		const char *line_end = strchr(line, '\n');
+		char *value_end;
+
+		if (!line_end)
+			line_end = line + strlen(line);
+		field = strstr(line, key);
+		if (field && field < line_end) {
+			field += strlen(key);
+			errno = 0;
+			total += strtoull(field, &value_end, 10);
+		}
+		line = *line_end ? line_end + 1 : line_end;
+	}
+	return total;
+}
+
 static unsigned long long status_counter(const char *buffer,
 					 const char *counter)
 {
@@ -161,6 +187,7 @@ static bool securityfs_snapshot_is_consistent(void)
 		       status, sizeof(status)) ||
 	    !strstr(status, "kernel_release=") ||
 	    !strstr(status, "protocol_version=3\n") ||
+	    !strstr(status, "audit_schema_version=1\n") ||
 	    !strstr(status, "policy_generation=") ||
 	    !strstr(status, "protocol_malformed_messages="))
 		return false;
@@ -531,6 +558,7 @@ int main(int argc, char **argv)
 	       read_file("/sys/kernel/security/medusa/status",
 			 status, sizeof(status)) &&
 	       strstr(status, "protocol_version=3\n") &&
+	       strstr(status, "audit_schema_version=1\n") &&
 	       strstr(status, "authorization_server=connected\n") &&
 	       strstr(status, "protocol_state=ready\n") &&
 	       strstr(status, "policy_readiness=ready\n") &&
@@ -612,11 +640,10 @@ int main(int argc, char **argv)
 	result("degraded_counter",
 	       read_file("/sys/kernel/security/medusa/events",
 			 events, sizeof(events)) &&
-	       event_counter(events, "event=ipc_perm ",
-			     "degraded_decisions") >= 1 &&
-	       event_counter(events, "event=ipc_perm ", "delegated") >= 1 &&
-	       event_counter(events, "event=ipc_perm ", "baseline") >= 1 &&
-	       event_counter(events, "event=ipc_perm ", "timed_out") >= 1);
+	       event_counter_total(events, "degraded_decisions") >= 1 &&
+	       event_counter_total(events, "delegated") >= 1 &&
+	       event_counter_total(events, "baseline") >= 1 &&
+	       event_counter_total(events, "timed_out") >= 1);
 
 	started = monotonic_seconds();
 	errno = 0;

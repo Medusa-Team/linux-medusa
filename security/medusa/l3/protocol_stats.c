@@ -4,6 +4,7 @@
 #include <linux/audit.h>
 #include <linux/ratelimit.h>
 
+#include "l3/audit_schema.h"
 #include "l3/protocol_stats.h"
 #include "l4/comm.h"
 
@@ -125,7 +126,10 @@ void medusa_protocol_record_error(const struct medusa_protocol_error_context *co
 		return;
 	suppressed = ratelimit_state_reset_miss(ratelimit);
 
-	audit_log_format(ab, "Medusa: op=protocol_error protocol=%llu",
+	audit_log_format(ab,
+			 "Medusa: audit_schema=%u record=%s protocol=%llu",
+			 MEDUSA_AUDIT_SCHEMA_VERSION,
+			 MEDUSA_AUDIT_RECORD_PROTOCOL_ERROR,
 			 (unsigned long long)MEDUSA_COMM_VERSION);
 	audit_log_format(ab, " policy_generation=%llu error_kind=%s",
 			 (unsigned long long)context->policy_generation,

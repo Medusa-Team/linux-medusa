@@ -31,6 +31,7 @@ struct medusa_audit_data {
 	/** @as: 1 if authorization server was contacted */
 	char as : 1;
 	char decision_metadata : 1;
+	char request_present : 1;
 	enum medusa_decision_source decision_source;
 	enum medusa_unavailable_reason unavailable;
 	u64 request_id;

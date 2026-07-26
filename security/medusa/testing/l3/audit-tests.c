@@ -39,6 +39,7 @@ static void audit_decision_tracks_source_and_contact(struct kunit *test)
 		.unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE,
 		.request_id = 0x1234,
 		.policy_generation = 23,
+		.request_present = true,
 		.authserver_contacted = true,
 	};
 
@@ -51,6 +52,7 @@ static void audit_decision_tracks_source_and_contact(struct kunit *test)
 			mad.decision_source);
 	KUNIT_EXPECT_EQ(test, MEDUSA_AUTH_SERVER_UNREACHABLE,
 			mad.unavailable);
+	KUNIT_EXPECT_TRUE(test, (bool)mad.request_present);
 	KUNIT_EXPECT_EQ(test, (u64)0x1234, mad.request_id);
 	KUNIT_EXPECT_EQ(test, (u64)23, mad.policy_generation);
 	KUNIT_EXPECT_STREQ(test, "baseline",

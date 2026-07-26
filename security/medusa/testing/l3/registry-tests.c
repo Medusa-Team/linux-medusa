@@ -32,6 +32,8 @@ static enum medusa_answer_t fake_decide(struct medusa_event_s *event,
 					struct medusa_kobject_s *object,
 					struct medusa_authserver_decision *decision)
 {
+	decision->request_id = 1;
+	decision->request_present = true;
 	decision->contacted = true;
 	return MED_ALLOW;
 }

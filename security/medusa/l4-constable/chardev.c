@@ -374,6 +374,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	decision->policy_generation =
 		(u64)READ_ONCE(medusa_authserver_magic);
 	decision->unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
+	decision->request_present = false;
 	decision->contacted = false;
 
 	/*
@@ -438,6 +439,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	}
 	decision->request_id = pending.id;
 	decision->policy_generation = pending.policy_generation;
+	decision->request_present = true;
 
 #define decision_evtype (event->evtype_id)
 	tele_mem_decide[0].opcode = tp_PUTPtr;

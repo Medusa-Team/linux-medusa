@@ -6,6 +6,7 @@
 #include <linux/ratelimit.h>
 #include <linux/sched/signal.h>
 
+#include "l3/audit_schema.h"
 #include "l3/arch.h"
 #include "l3/registry.h"
 #include "l3/server.h"
@@ -26,7 +27,7 @@ static struct medusa_decision_result
 medusa_fallback_result(struct medusa_evtype_s *evtype,
 		       enum medusa_unavailable_reason unavailable,
 		       u64 request_id, u64 policy_generation,
-		       bool authserver_contacted)
+		       bool request_present, bool authserver_contacted)
 {
 	struct medusa_decision_result result = {
 		.answer = MED_ALLOW,
@@ -34,6 +35,7 @@ medusa_fallback_result(struct medusa_evtype_s *evtype,
 		.unavailable = unavailable,
 		.request_id = request_id,
 		.policy_generation = policy_generation,
+		.request_present = request_present,
 		.authserver_contacted = authserver_contacted,
 	};
 
@@ -203,15 +205,19 @@ static void medusa_audit_degraded_decision(
 
 	audit_log_format(
 		ab,
-		"Medusa: op=decision event=%s event_bit=%u"
-		" subject_class=%s object_class=%s protocol=%llu"
-		" policy_generation=%llu request_id=%llu ans=%s"
-		" decision_source=%s unavailable=%s as_request=%u"
+		"Medusa: audit_schema=%u record=%s protocol=%llu"
+		" policy_generation=%llu event_id=%s event_bit=%u"
+		" subject_class_id=%s object_class_id=%s"
+		" request_present=%u request_id=%llu verdict=%s"
+		" verdict_source=%s unavailable=%s"
+		" authserver_contacted=%u"
 		" degraded_sequence=%llu suppressed=%d",
-		evtype->name, evtype->bitnr & MASK_BITNR,
-		evtype->arg_kclass[0]->name, evtype->arg_kclass[1]->name,
+		MEDUSA_AUDIT_SCHEMA_VERSION, MEDUSA_AUDIT_RECORD_DECISION,
 		(unsigned long long)MEDUSA_COMM_VERSION,
 		(unsigned long long)result->policy_generation,
+		evtype->name, evtype->bitnr & MASK_BITNR,
+		evtype->arg_kclass[0]->name, evtype->arg_kclass[1]->name,
+		result->request_present,
 		(unsigned long long)result->request_id,
 		medusa_decision_answer_name(result->answer),
 		medusa_decision_source_name(result->source),
@@ -280,6 +286,7 @@ bool medusa_decision_is_authoritative(
 	return result &&
 	       result->source == MEDUSA_DECISION_AUTH_SERVER &&
 	       result->unavailable == MEDUSA_AVAILABLE &&
+	       result->request_present &&
 	       result->authserver_contacted &&
 	       is_supported_medusa_answer(result->answer);
 }
@@ -303,14 +310,16 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	if (READ_ONCE(evtype->fallback_policy) ==
 	    MEDUSA_FALLBACK_BASELINE_DENY) {
 		result = medusa_fallback_result(evtype, MEDUSA_AVAILABLE,
-						0, policy_generation, false);
+						0, policy_generation, false,
+						false);
 		return medusa_finish_decision(evtype, result);
 	}
 
 	if (ARCH_CANNOT_DECIDE(evtype)) {
 		result = medusa_fallback_result(evtype,
 						MEDUSA_NON_SLEEPABLE_CONTEXT,
-						0, policy_generation, false);
+						0, policy_generation, false,
+						false);
 		return medusa_finish_decision(evtype, result);
 	}
 
@@ -324,7 +333,8 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	if (!authserver) {
 		mutex_unlock(&registry_lock);
 		result = medusa_fallback_result(evtype, MEDUSA_NO_AUTH_SERVER,
-						0, policy_generation, false);
+						0, policy_generation, false,
+						false);
 		return medusa_finish_decision(evtype, result);
 	}
 	mutex_unlock(&registry_lock);
@@ -335,7 +345,8 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 		med_put_authserver(authserver);
 		result = medusa_fallback_result(evtype,
 						MEDUSA_AUTH_SERVER_UNHEALTHY,
-						0, policy_generation, false);
+						0, policy_generation, false,
+						false);
 		return medusa_finish_decision(evtype, result);
 	}
 
@@ -352,12 +363,14 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	result.unavailable = MEDUSA_AVAILABLE;
 	result.request_id = server_decision.request_id;
 	result.policy_generation = server_decision.policy_generation;
+	result.request_present = server_decision.request_present;
 	result.authserver_contacted = server_decision.contacted;
 	if (!is_authserver_reached(result.answer)) {
 		result = medusa_fallback_result(evtype,
 					       server_decision.unavailable,
 					       server_decision.request_id,
 					       server_decision.policy_generation,
+					       server_decision.request_present,
 					       server_decision.contacted);
 	} else if (!is_supported_medusa_answer(result.answer)) {
 		char *err_str = "ERROR: authserver returned not supported answer";

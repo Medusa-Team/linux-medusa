@@ -109,11 +109,12 @@ Read-only securityfs observability
 When Medusa is enabled it creates three root-readable files:
 
 ``/sys/kernel/security/medusa/status``
-  Reports the running kernel and protocol versions; disconnected, handshaking,
-  and READY state; policy readiness; server health and precise circuit-breaker
-  reason; active and last READY generations; live pending count and limit;
-  configured decision lease; and cumulative reply, renewal, malformed-frame,
-  invalid-answer, unknown-command, unknown-request, and stale-request counts.
+  Reports the running kernel, protocol, and audit schema versions;
+  disconnected, handshaking, and READY state; policy readiness; server health
+  and precise circuit-breaker reason; active and last READY generations; live
+  pending count and limit; configured decision lease; and cumulative reply,
+  renewal, malformed-frame, invalid-answer, unknown-command, unknown-request,
+  and stale-request counts.
 
 ``/sys/kernel/security/medusa/events``
   Reports every announced event, whether an installed hook or required
@@ -145,10 +146,10 @@ classes are active, socket policy remains announcement-only, and an unmonitored
 Protocol-error audit
 --------------------
 
-Rejected authorization answers and progress messages now use one structured
-audit schema:
+``AUDIT.rst`` defines the versioned, machine-readable decision and protocol
+audit ABI. Rejected authorization answers and progress messages use:
 
-``Medusa: op=protocol_error protocol=... policy_generation=... error_kind=... command_present=... command=... request_present=... request_id=... error=... error_sequence=... suppressed=...``
+``Medusa: audit_schema=1 record=protocol_error protocol=... policy_generation=... error_kind=... command_present=... command=... request_present=... request_id=... error=... error_sequence=... suppressed=...``
 
 ``error_kind`` is one of ``malformed_message``, ``invalid_answer``,
 ``unknown_command``, ``unknown_request``, or ``stale_request``.  Presence bits
@@ -176,6 +177,12 @@ target.  Fixed-width, architecture-independent framing remains protocol-v4
 work.  The progress command is an optional extension to protocol v3;
 automatic feature negotiation remains protocol-v4 work, so old kernels must
 not be sent progress frames.
+
+Degraded decisions use ``record=decision`` and carry registry-stable event and
+class string identifiers, policy and protocol generation, an explicit request
+presence bit, verdict and source, unavailability reason, Constable-contact
+state, and rate-limit accounting. A result without an allocated request can no
+longer validate a kernel object merely because it claims Constable contact.
 
 Sleeping and SysV IPC
 ---------------------

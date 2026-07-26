@@ -41,6 +41,7 @@ struct medusa_authserver_decision {
 	u64 request_id;
 	u64 policy_generation;
 	enum medusa_unavailable_reason unavailable;
+	bool request_present;
 	bool contacted;
 };
 
@@ -50,6 +51,7 @@ struct medusa_decision_result {
 	enum medusa_unavailable_reason unavailable;
 	u64 request_id;
 	u64 policy_generation;
+	bool request_present;
 	bool authserver_contacted;
 };
 
