@@ -67,6 +67,16 @@ int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 	return 0;
 }
 
+bool medusa_decision_is_authoritative(
+	const struct medusa_decision_result *result)
+{
+	return result &&
+	       result->source == MEDUSA_DECISION_AUTH_SERVER &&
+	       result->unavailable == MEDUSA_AVAILABLE &&
+	       result->authserver_contacted &&
+	       is_supported_medusa_answer(result->answer);
+}
+
 struct medusa_decision_result
 med_decide_result(struct medusa_evtype_s *evtype, void *event,
 		  void *o1, void *o2)

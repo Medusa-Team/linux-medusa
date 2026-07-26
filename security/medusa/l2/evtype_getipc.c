@@ -38,7 +38,7 @@ static int __init ipc_evtype_init(void)
  */
 int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp)
 {
-	enum medusa_answer_t retval;
+	struct medusa_decision_result decision;
 	struct ipc_event event;
 	struct ipc_kobject sender;
 
@@ -51,8 +51,9 @@ int ipc_kobj_validate_ipcp(struct kern_ipc_perm *ipcp)
 	ipc_kern2kobj(&sender, ipcp, true);
 	event.ipc_class = ipc_security(ipcp)->ipc_class;
 	event.pid = current->pid;
-	retval = MED_DECIDE(ipc_event, &event, &sender, &sender);
-	if (retval != MED_ERR)
+	decision = MED_DECIDE_RESULT(ipc_event, &event, &sender, &sender);
+	if (medusa_decision_is_authoritative(&decision) &&
+	    is_med_magic_valid(&ipc_security(ipcp)->med_object))
 		return 1;
 	return MED_ERR;
 }

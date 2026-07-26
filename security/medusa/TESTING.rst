@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 60 tests in eleven suites:
+The KUnit configuration runs 63 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -17,6 +17,8 @@ The KUnit configuration runs 60 tests in eleven suites:
 * authorization-server registration, removal, and generation changes;
 * delegated allow and deny, installed baseline fallback, online-required
   fallback, and unsupported verdicts;
+* authoritative object validation accepts only a supported Constable reply,
+  never an unavailable-policy fallback or incomplete server result;
 * protocol-v3 answer lengths, verdicts, unknown IDs, and stale IDs;
 * cache allocator growth across a size-class boundary;
 * dynamic task, inode, and SysV IPC LSM blob offsets;
@@ -73,6 +75,12 @@ and ``ipc_msgsnd`` audit paths expose these fields as ``decision_source`` and
 ``unavailable`` while retaining the compatible ``as_request`` field.  Moving
 the remaining audit-producing hooks to this richer result is tracked as
 follow-up work.
+
+Process, file, SysV IPC, and socket context validation requires a supported,
+authoritative Constable reply and verifies that userspace installed a valid
+context.  A lease timeout, open circuit, disconnected server, or installed
+fallback verdict therefore cannot be mistaken for a successful context
+refresh.
 
 Protocol v3 carries the complete request ID on the supported x86-64 migration
 target.  Fixed-width, architecture-independent framing remains protocol-v4

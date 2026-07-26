@@ -41,6 +41,8 @@ struct medusa_decision_result {
 
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 			       enum medusa_fallback_policy policy);
+bool medusa_decision_is_authoritative(
+	const struct medusa_decision_result *result);
 struct medusa_decision_result
 med_decide_result(struct medusa_evtype_s *evtype, void *event,
 		  void *o1, void *o2);

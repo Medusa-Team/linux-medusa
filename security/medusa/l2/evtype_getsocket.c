@@ -24,6 +24,7 @@ static int __init socket_evtype_init(void)
 
 enum medusa_answer_t socket_kobj_validate(struct socket *sock)
 {
+	struct medusa_decision_result decision;
 	struct socket_event event;
 	struct socket_kobject sock_kobj;
 	struct medusa_l1_socket_s *sk_sec;
@@ -39,7 +40,10 @@ enum medusa_answer_t socket_kobj_validate(struct socket *sock)
 	init_med_object(&sk_sec->med_object);
 	socket_kern2kobj(&sock_kobj, sock);
 
-	if (MED_DECIDE(socket_event, &event, &sock_kobj, &sock_kobj) == MED_ERR)
+	decision = MED_DECIDE_RESULT(socket_event, &event, &sock_kobj,
+				     &sock_kobj);
+	if (!medusa_decision_is_authoritative(&decision) ||
+	    !is_med_magic_valid(&sk_sec->med_object))
 		return MED_ERR;
 
 	return MED_ALLOW;

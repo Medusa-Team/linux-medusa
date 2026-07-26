@@ -255,6 +255,74 @@ static void decide_denies_unsupported_server_answer(struct kunit *test)
 				MEDUSA_AVAILABLE);
 }
 
+static void authoritative_server_results_can_validate(struct kunit *test)
+{
+	struct medusa_decision_result result = {
+		.answer = MED_ALLOW,
+		.source = MEDUSA_DECISION_AUTH_SERVER,
+		.unavailable = MEDUSA_AVAILABLE,
+		.authserver_contacted = true,
+	};
+
+	KUNIT_EXPECT_TRUE(test, medusa_decision_is_authoritative(&result));
+	result.answer = MED_DENY;
+	KUNIT_EXPECT_TRUE(test, medusa_decision_is_authoritative(&result));
+}
+
+static void fallback_results_cannot_validate(struct kunit *test)
+{
+	struct medusa_decision_result result = {
+		.answer = MED_ALLOW,
+		.source = MEDUSA_DECISION_BASELINE,
+		.unavailable = MEDUSA_NO_AUTH_SERVER,
+		.authserver_contacted = false,
+	};
+
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(NULL));
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+
+	result.answer = MED_DENY;
+	result.unavailable = MEDUSA_AVAILABLE;
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+
+	result.source = MEDUSA_DECISION_ONLINE_REQUIRED;
+	result.unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
+	result.authserver_contacted = true;
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+
+	result.source = MEDUSA_DECISION_BASELINE;
+	result.unavailable = MEDUSA_AUTH_SERVER_UNHEALTHY;
+	result.authserver_contacted = false;
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+}
+
+static void incomplete_server_results_cannot_validate(struct kunit *test)
+{
+	struct medusa_decision_result result = {
+		.answer = MED_ALLOW,
+		.source = MEDUSA_DECISION_AUTH_SERVER,
+		.unavailable = MEDUSA_AVAILABLE,
+		.authserver_contacted = false,
+	};
+
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+
+	result.authserver_contacted = true;
+	result.unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+
+	result.unavailable = MEDUSA_AVAILABLE;
+	result.source = MEDUSA_DECISION_INVALID_REPLY;
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+
+	result.source = MEDUSA_DECISION_AUTH_SERVER;
+	result.answer = MED_ERR;
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+
+	result.answer = (enum medusa_answer_t)2;
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+}
+
 static void fallback_policy_rejects_invalid_values(struct kunit *test)
 {
 	KUNIT_EXPECT_EQ(test, -EINVAL,
@@ -337,6 +405,9 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(online_required_denies_when_server_is_unreachable),
 	KUNIT_CASE(unhealthy_server_uses_baseline_without_contact),
 	KUNIT_CASE(decide_denies_unsupported_server_answer),
+	KUNIT_CASE(authoritative_server_results_can_validate),
+	KUNIT_CASE(fallback_results_cannot_validate),
+	KUNIT_CASE(incomplete_server_results_cannot_validate),
 	KUNIT_CASE(fallback_policy_rejects_invalid_values),
 	KUNIT_CASE(protocol_accepts_supported_answers),
 	KUNIT_CASE(protocol_rejects_malformed_answer_lengths),

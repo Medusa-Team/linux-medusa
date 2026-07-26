@@ -125,9 +125,9 @@ static struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
 	return &p->mnt;
 }
 
-static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
-							 struct path *ndupper,
-							 struct path *ndparent);
+static bool do_file_kobj_validate_dentry(struct path *ndcurrent,
+					 struct path *ndupper,
+					 struct path *ndparent);
 
 static void medusa_clean_inode(struct inode *inode)
 {
@@ -346,8 +346,7 @@ int file_kobj_validate_dentry_dir(const struct vfsmount *mnt, struct dentry *den
 
 	/* we're global root, or cannot inherit from our parent */
 
-	if (do_file_kobj_validate_dentry(&ndcurrent, &ndupper, &ndparent)
-			!= MED_ERR) {
+	if (do_file_kobj_validate_dentry(&ndcurrent, &ndupper, &ndparent)) {
 		path_put(&ndupper);
 		return is_med_magic_valid(&inode_security(ndcurrent.dentry->d_inode)->med_object);
 	}
@@ -432,8 +431,7 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 
 	/* we're global root, or cannot inherit from our parent */
 
-	if (do_file_kobj_validate_dentry(&ndcurrent, &ndupper, &ndparent)
-			!= MED_ERR) {
+	if (do_file_kobj_validate_dentry(&ndcurrent, &ndupper, &ndparent)) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return is_med_magic_valid(&(inode_security(ndcurrent.dentry->d_inode)->med_object));
 	}
@@ -441,14 +439,14 @@ int file_kobj_validate_dentry(struct dentry *dentry, struct vfsmount *mnt, struc
 	return -1;
 }
 
-static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
-							 struct path *ndupper,
-							 struct path *ndparent)
+static bool do_file_kobj_validate_dentry(struct path *ndcurrent,
+					 struct path *ndupper,
+					 struct path *ndparent)
 {
 	struct getfile_event event;
 	struct file_kobject file;
 	struct file_kobject directory;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result decision;
 	/* med_pr_info("do_validate_dentry: current=%pd4 parent=%pd4\n", ndcurrent->dentry, ndparent->dentry); */
 	/* med_pr_info("nducurrent: %pd4", ndcurrent->dentry); */
 	/* med_pr_info("ndparent: %pd4\n", ndparent->dentry); */
@@ -458,10 +456,10 @@ static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,
 	file_kobj_live_add(ndcurrent->dentry->d_inode);
 	file_kobj_live_add(ndparent->dentry->d_inode);
 	event.pid = current->pid;
-	retval = MED_DECIDE(getfile_event, &event, &file, &directory);
+	decision = MED_DECIDE_RESULT(getfile_event, &event, &file, &directory);
 	file_kobj_live_remove(ndparent->dentry->d_inode);
 	file_kobj_live_remove(ndcurrent->dentry->d_inode);
-	return retval;
+	return medusa_decision_is_authoritative(&decision);
 }
 
 static int __init getfile_evtype_init(void)
