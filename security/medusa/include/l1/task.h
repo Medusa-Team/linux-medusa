@@ -84,6 +84,13 @@ enum medusa_task_context_mode {
 	MEDUSA_TASK_CONTEXT_INHERIT,
 };
 
+static inline bool
+medusa_task_context_should_inherit(bool child_was_monitored,
+				   bool parent_triggers_getprocess)
+{
+	return !child_was_monitored && !parent_triggers_getprocess;
+}
+
 static inline void
 medusa_task_context_enable_monitoring(struct medusa_l1_task_s *context)
 {

@@ -175,7 +175,9 @@ static bool securityfs_snapshot_is_consistent(void)
 	if (!read_file("/sys/kernel/security/medusa/events",
 		       events, sizeof(events)) ||
 	    !line_has(events, "event=ipc_msgsnd ", "decisions=") ||
-	    !line_has(events, "event=ipc_msgsnd ", "fallback="))
+	    !line_has(events, "event=ipc_msgsnd ", "fallback=") ||
+	    !line_has(events, "event=ipc_msgsnd ",
+		      "delegation=conditional"))
 		return false;
 	length = strlen(events);
 	if (!length || events[length - 1] != '\n')

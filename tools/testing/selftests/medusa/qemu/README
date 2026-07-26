@@ -25,10 +25,16 @@ caches the second decision in the kernel.
 
 The `access` scenario covers filesystem operations, process creation,
 execution, credentials, signals, and all three supported SysV IPC classes.
-Its expected results deliberately record the current `EACCES` behavior when
-re-associating with an existing SysV IPC object. Filesystem and process
-operations are behavior checks; the console event assertions identify the
-SysV operations that demonstrably reached Constable.
+It requires a Constable marker for every active access type exercised, so an
+operation-level success without a delegated decision is not sufficient.
+The scenario also prints the securityfs event inventory for direct comparison
+of evaluations, cached checks, delegated decisions, fallbacks, and delegation
+context.
+
+The `lockdep` scenario inherits `access` and adds negative assertions for
+atomic sleeping, scheduling while atomic, recursive/circular locking,
+inconsistent lock state, unlock imbalance, and spinlock failures. Build its
+kernel with `lockdep.config` merged into the Medusa test configuration.
 
 The `lifecycle` scenario verifies initial Constable registration, clean
 disconnect, the configured fail-open behavior without a server, and
@@ -102,7 +108,11 @@ loads it before exercising the restricted guest.
 `GUEST_CC` selects the static compiler for scenario C programs. Prebuilt
 programs may instead be supplied with `INIT_TEST_BINARY` and
 `GUEST_TEST_BINARY`. `QEMU_ACCEL`, `QEMU_CPU`, and `QEMU_TIMEOUT` may also be
-overridden in the environment.
+overridden in the environment. The runner uses `qemu-system-x86_64` and
+rejects non-x86-64 Constable, BusyBox, init, or guest executables. This avoids
+silently building ARM64 guest programs when the runner itself is used from an
+ARM64 container; use an x86-64 cross compiler or prebuilt x86-64 binaries in
+that environment.
 
 A scenario containing `apparmor.profile` requires `apparmor_parser` on the
 host running the harness. `APPARMOR_PARSER` selects a non-default parser.

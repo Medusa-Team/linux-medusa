@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 76 tests in eleven suites:
+The KUnit configuration runs 78 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -65,6 +65,11 @@ immediately use their own installed fallback without filling the pending
 table.  A new Constable registration closes the breaker.  Lease duration is
 configured by ``CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS`` and defaults to
 5,000 milliseconds.
+
+Long waits remain subject to the hook-specific locking contract in
+``LOCKING.rst``.  In particular, a progress message proves Constable liveness;
+it does not make a VFS-lock-bound or conditional IPC hook safe for an
+arbitrarily slow human interaction.
 
 Unavailable decision fallback
 -----------------------------
@@ -161,9 +166,10 @@ of its optional policy ``_init()`` handler, so ``policy_readiness=ready`` has a
 defined meaning.  A device open that has not sent READY remains
 ``protocol_state=handshaking`` with no active generation; disconnect retains
 the last generation that successfully became ready.  Kernel-cached fast-path
-accesses do not enter ``med_decide_result()`` and are deliberately not included
-in the central-engine event counters.  Cached accounting requires separate
-hook-level instrumentation rather than a misleading zero-valued counter.
+accesses do not enter ``med_decide_result()``.  The hook-level monitoring
+check nevertheless increments ``evaluations`` and attributes a cleared
+monitoring bit to ``cached``; ``decisions`` counts only paths which reached
+the central decision engine.
 
 Protocol v3 carries the complete request ID on the supported x86-64 migration
 target.  Fixed-width, architecture-independent framing remains protocol-v4
@@ -177,6 +183,10 @@ Sleeping and SysV IPC
 The character-device slow path can block and therefore accepts decisions only
 from task context with interrupts enabled and no active atomic section.  It
 returns ``MED_ERR`` before allocating or queueing a request otherwise.
+
+The complete active-event matrix and lock-order contract are in
+``LOCKING.rst``.  The same worst-case classification is exposed as the
+machine-readable ``delegation`` field in the securityfs event inventory.
 
 Several SysV IPC hooks arrive with ``kern_ipc_perm.lock`` held.  On SMP with
 ``CONFIG_DEBUG_SPINLOCK``, Medusa checks that the current task owns the lock,
@@ -197,10 +207,18 @@ QEMU scenario coverage
   Exercises create/open/write/fcntl/chmod/chown/truncate, symlink/link/rename/
   unlink, mknod, mkdir/rmdir, chroot, exec, fork, signals, setresuid, and the
   message-queue, semaphore, and shared-memory operations exposed by the active
-  LSM hooks.  The scenario requires Constable markers for ``ipc_perm``,
-  ``ipc_ctl``, ``ipc_semop``, ``ipc_shmat``, ``ipc_msgsnd``, and
-  ``ipc_msgrcv``.  Other successful operations are behaviour
-  characterizations, not proof of delegation.
+  LSM hooks.  It requires a Constable marker for every active access type
+  exercised; an operation-level success without its event marker is not
+  delegation proof.  Validation dependencies have central-engine counter and
+  dedicated lifecycle coverage because nested logging from a protocol-v3
+  validation callback can overwrite its legacy shared callback snapshot.
+
+``lockdep``
+  Inherits the complete ``access`` scenario and rejects atomic-sleep,
+  scheduling-while-atomic, circular/recursive-lock, inconsistent-state,
+  unlock-balance, and spinlock diagnostics.  Build the tested kernel by
+  merging ``tools/testing/selftests/medusa/qemu/lockdep.config`` into the
+  Medusa test configuration.
 
 ``lifecycle``
   Covers initial registration, disconnect, baseline-permitted operation,

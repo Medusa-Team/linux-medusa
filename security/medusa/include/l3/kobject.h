@@ -176,6 +176,20 @@ struct medusa_kobject_s {
  * CONFIG_MEDUSA_ACT constraints.
  */
 #define MED_EVTYPEOF(structname) (structname##_evtype)
+
+/*
+ * Worst-case context in which an actively wired event can reach the
+ * userspace decision path.  This is observability metadata, not permission
+ * to sleep: the transport still rejects atomic and non-task contexts at
+ * runtime.
+ */
+enum medusa_delegation_context {
+	MEDUSA_DELEGATION_NONE,
+	MEDUSA_DELEGATION_SLEEPABLE,
+	MEDUSA_DELEGATION_LOCK_BOUND,
+	MEDUSA_DELEGATION_CONDITIONAL,
+};
+
 struct medusa_evtype_s {
 	/* l3-defined data */
 	struct medusa_evtype_s *next;
@@ -184,6 +198,7 @@ struct medusa_evtype_s {
 				 * OR'd with these flags:
 				 */
 	bool enforced;
+	enum medusa_delegation_context delegation_context;
 	enum medusa_fallback_policy fallback_policy;
 	struct medusa_decision_counters decision_counters;
 	atomic64_t degraded_decisions;
@@ -261,6 +276,7 @@ struct medusa_evtype_s {
 	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
 	false, \
+	MEDUSA_DELEGATION_NONE, \
 	MEDUSA_FALLBACK_BASELINE_ALLOW, \
 	{}, \
 	ATOMIC64_INIT(0), \
@@ -272,6 +288,7 @@ struct medusa_evtype_s {
 	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
 	false, \
+	MEDUSA_DELEGATION_NONE, \
 	MEDUSA_FALLBACK_BASELINE_ALLOW, \
 	{}, \
 	ATOMIC64_INIT(0), \

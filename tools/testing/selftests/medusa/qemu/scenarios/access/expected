@@ -29,24 +29,41 @@ MEDUSA_RESULT access exec PASS
 MEDUSA_RESULT access signal PASS
 MEDUSA_RESULT access credentials PASS
 MEDUSA_RESULT access msg_create PASS
-MEDUSA_RESULT access msg_associate_expected_deny PASS
+MEDUSA_RESULT access msg_associate PASS
 MEDUSA_RESULT access msg_send PASS
 MEDUSA_RESULT access msg_receive PASS
 MEDUSA_RESULT access msg_stat PASS
 MEDUSA_RESULT access msg_remove PASS
 MEDUSA_RESULT access sem_create PASS
-MEDUSA_RESULT access sem_associate_expected_deny PASS
+MEDUSA_RESULT access sem_associate PASS
 MEDUSA_RESULT access sem_op PASS
 MEDUSA_RESULT access sem_remove PASS
 MEDUSA_RESULT access shm_create PASS
-MEDUSA_RESULT access shm_associate_expected_deny PASS
+MEDUSA_RESULT access shm_associate PASS
 MEDUSA_RESULT access shm_attach PASS
 MEDUSA_RESULT access shm_detach PASS
 MEDUSA_RESULT access shm_stat PASS
 MEDUSA_RESULT access shm_remove PASS
 MEDUSA_RESULT access complete PASS
+MEDUSA_EVENT pexec
+MEDUSA_EVENT fexec
+MEDUSA_EVENT setresuid
+MEDUSA_EVENT mkdir
+MEDUSA_EVENT mknod
+MEDUSA_EVENT open
+MEDUSA_EVENT chmod
+MEDUSA_EVENT chown
+MEDUSA_EVENT fcntl
+MEDUSA_EVENT truncate
+MEDUSA_EVENT symlink
+MEDUSA_EVENT link
+MEDUSA_EVENT rename
+MEDUSA_EVENT unlink
+MEDUSA_EVENT rmdir
+MEDUSA_EVENT chroot
 MEDUSA_EVENT ipc_perm
 MEDUSA_EVENT ipc_ctl
+MEDUSA_EVENT ipc_associate
 MEDUSA_EVENT ipc_semop
 MEDUSA_EVENT ipc_shmat
 MEDUSA_EVENT ipc_msgsnd

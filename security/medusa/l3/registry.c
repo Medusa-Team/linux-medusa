@@ -496,10 +496,31 @@ inline bool med_is_authserver_present(void)
 	return !!authserver;
 }
 
-void medusa_event_set_enforced(struct medusa_evtype_s *evtype)
+const char *medusa_delegation_context_name(
+	enum medusa_delegation_context delegation_context)
 {
-	if (evtype)
+	switch (delegation_context) {
+	case MEDUSA_DELEGATION_NONE:
+		return "none";
+	case MEDUSA_DELEGATION_SLEEPABLE:
+		return "sleepable";
+	case MEDUSA_DELEGATION_LOCK_BOUND:
+		return "lock_bound";
+	case MEDUSA_DELEGATION_CONDITIONAL:
+		return "conditional";
+	default:
+		return "invalid";
+	}
+}
+
+void medusa_event_set_enforced(
+	struct medusa_evtype_s *evtype,
+	enum medusa_delegation_context delegation_context)
+{
+	if (evtype) {
+		WRITE_ONCE(evtype->delegation_context, delegation_context);
 		WRITE_ONCE(evtype->enforced, true);
+	}
 }
 
 /**
@@ -593,6 +614,9 @@ int medusa_registry_events_seq_show(struct seq_file *m)
 		seq_printf(m, " enforcement=%s trigger=%s trigger_bitmap=%s",
 			   READ_ONCE(event->enforced) ? "active" : "announced",
 			   trigger, trigger_bitmap);
+		seq_printf(m, " delegation=%s",
+			   medusa_delegation_context_name(
+				   READ_ONCE(event->delegation_context)));
 		seq_printf(m, " fallback=%s evaluations=%llu cached=%llu",
 			   fallback,
 			   (unsigned long long)counters.evaluations,

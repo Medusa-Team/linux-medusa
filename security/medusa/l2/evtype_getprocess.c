@@ -37,6 +37,8 @@ int process_kobj_validate_task(struct task_struct *ts)
 	struct process_kobject proc;
 	struct process_kobject parent;
 	struct task_struct *ts_parent;
+	bool child_was_monitored;
+	bool parent_triggers_getprocess;
 	int ret = -1;
 
 	/* nothing to do if there is no running authserver */
@@ -49,6 +51,8 @@ int process_kobj_validate_task(struct task_struct *ts)
 		task_security(current)->validation_depth_nesting++;
 	}
 
+	child_was_monitored =
+		is_med_magic_monitored(&task_security(ts)->med_object);
 	init_med_object(&(task_security(ts)->med_object));
 	init_med_subject(&(task_security(ts)->med_subject));
 #ifdef CONFIG_MEDUSA_FORCE
@@ -98,8 +102,11 @@ int process_kobj_validate_task(struct task_struct *ts)
 	 *
 	 * Attention: Credentials (capabilities, IDs, GIDs) are not inherited!
 	 */
-	if (!MEDUSA_MONITORED_ACCESS_S(getprocess_event,
-				       task_security(ts_parent))) {
+	parent_triggers_getprocess =
+		MEDUSA_MONITORED_ACCESS_S(getprocess_event,
+					  task_security(ts_parent));
+	if (medusa_task_context_should_inherit(child_was_monitored,
+					      parent_triggers_getprocess)) {
 		task_security(ts)->med_subject = task_security(ts_parent)->med_subject;
 		task_security(ts)->med_object = task_security(ts_parent)->med_object;
 		task_security(ts)->audit = task_security(ts_parent)->audit;

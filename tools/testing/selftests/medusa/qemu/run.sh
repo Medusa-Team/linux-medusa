@@ -57,7 +57,7 @@ scenario_file()
 	fi
 }
 
-for command in cc gzip qemu-system-x86_64 realpath timeout; do
+for command in cc gzip qemu-system-x86_64 readelf realpath timeout; do
 	if ! command -v "$command" >/dev/null; then
 		echo "missing required command: $command" >&2
 		exit 2
@@ -121,6 +121,21 @@ if [ -n "$init_c" ] || [ -n "$guest_c" ]; then
 	fi
 fi
 
+require_x86_64_elf()
+{
+	local binary="$1"
+	local label="$2"
+	local machine
+
+	machine="$(readelf -h "$binary" 2>/dev/null |
+		sed -n 's/^[[:space:]]*Machine:[[:space:]]*//p')"
+	if [ "$machine" != "Advanced Micro Devices X86-64" ]; then
+		echo "$label must be an x86-64 ELF executable; found:" \
+			"${machine:-unrecognized format}" >&2
+		exit 2
+	fi
+}
+
 if [ -n "$init_c" ]; then
 	if [ -n "${INIT_TEST_BINARY:-}" ]; then
 		cp "$(realpath "$INIT_TEST_BINARY")" "$work_dir/input/init"
@@ -139,6 +154,13 @@ if [ -n "$guest_c" ]; then
 		"$guest_cc" -static -O2 -Wall -Wextra \
 			-o "$work_dir/input/medusa-guest" "$guest_c"
 	fi
+fi
+
+require_x86_64_elf "$work_dir/input/constable" "Constable"
+require_x86_64_elf "$work_dir/input/busybox" "BusyBox"
+require_x86_64_elf "$work_dir/input/init" "scenario init"
+if [ -f "$work_dir/input/medusa-guest" ]; then
+	require_x86_64_elf "$work_dir/input/medusa-guest" "scenario guest"
 fi
 
 cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
