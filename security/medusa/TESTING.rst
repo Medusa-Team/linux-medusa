@@ -217,10 +217,13 @@ QEMU scenario coverage
   LSM hooks.  It requires a Constable marker for every active access type
   exercised; an operation-level success without its event marker is not
   delegation proof.  A sentinel ``mkdir`` executes three source-ordered
-  callbacks with logging updates and ``ALLOW``, ``FORCE_ALLOW``, then ``DENY``
-  results.  Ordered markers and the syscall's ``EACCES`` prove that side
-  effects do not erase the accumulated result and that denial remains
-  authoritative.  Validation dependencies have central-engine counter and
+  global callbacks, then its subject and object path-tree callbacks.  The
+  first global callback updates ``file.user`` and the second fetches and
+  verifies that value before the callbacks return ``ALLOW``, ``FORCE_ALLOW``,
+  ``DENY``, ``ALLOW``, and ``ALLOW``.  Ordered markers and the syscall's
+  ``EACCES`` prove the global-to-path-tree order, update/fetch visibility,
+  continued evaluation after denial, and preservation of the accumulated
+  result.  Validation dependencies have central-engine counter and
   dedicated lifecycle coverage because nested logging from a protocol-v3
   validation callback can overwrite its legacy shared callback snapshot.
 

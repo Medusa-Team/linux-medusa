@@ -31,10 +31,12 @@ The `access` scenario covers filesystem operations, process creation,
 execution, credentials, signals, and all three supported SysV IPC classes.
 It requires a Constable marker for every active access type exercised, so an
 operation-level success without a delegated decision is not sufficient.
-Three callbacks handle one sentinel `mkdir` in source order, perform logging
-updates, and return `ALLOW`, `FORCE_ALLOW`, and `DENY`. Ordered markers plus an
-`EACCES` assertion prove callback order, continued evaluation after allow, and
-deny precedence without letting the logging side effects erase the verdict.
+Three global callbacks handle one sentinel `mkdir` in source order, followed
+by its subject and object path-tree callbacks. The first updates `file.user`;
+the second fetches the object and verifies the value. Ordered markers plus an
+`EACCES` assertion prove global-to-path-tree order, update/fetch visibility,
+continued evaluation after denial, and deny precedence despite later `ALLOW`
+results and logging side effects.
 The scenario also prints the securityfs event inventory for direct comparison
 of evaluations, cached checks, delegated decisions, fallbacks, and delegation
 context.
