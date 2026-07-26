@@ -20,14 +20,72 @@ inline int is_supported_medusa_answer(enum medusa_answer_t answer)
 	return (answer == MED_ALLOW || answer == MED_DENY);
 }
 
-enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
-				void *o1, void *o2)
+static struct medusa_decision_result
+medusa_fallback_result(struct medusa_evtype_s *evtype,
+		       enum medusa_unavailable_reason unavailable,
+		       bool authserver_contacted)
 {
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result = {
+		.answer = MED_ALLOW,
+		.source = MEDUSA_DECISION_BASELINE,
+		.unavailable = unavailable,
+		.authserver_contacted = authserver_contacted,
+	};
+
+	switch (READ_ONCE(evtype->fallback_policy)) {
+	case MEDUSA_FALLBACK_BASELINE_ALLOW:
+		break;
+	case MEDUSA_FALLBACK_BASELINE_DENY:
+		result.answer = MED_DENY;
+		break;
+	case MEDUSA_FALLBACK_ONLINE_REQUIRED:
+		result.answer = MED_DENY;
+		result.source = MEDUSA_DECISION_ONLINE_REQUIRED;
+		break;
+	default:
+		/*
+		 * A corrupted policy must not become an allow. Setter validation
+		 * prevents this during normal operation.
+		 */
+		result.answer = MED_DENY;
+		result.source = MEDUSA_DECISION_INVALID_REPLY;
+		break;
+	}
+	return result;
+}
+
+int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
+			       enum medusa_fallback_policy policy)
+{
+	if (!evtype)
+		return -EINVAL;
+	if (policy < MEDUSA_FALLBACK_BASELINE_ALLOW ||
+	    policy > MEDUSA_FALLBACK_ONLINE_REQUIRED)
+		return -EINVAL;
+
+	WRITE_ONCE(evtype->fallback_policy, policy);
+	return 0;
+}
+
+struct medusa_decision_result
+med_decide_result(struct medusa_evtype_s *evtype, void *event,
+		  void *o1, void *o2)
+{
+	struct medusa_decision_result result;
 	struct medusa_authserver_s *authserver;
 
+	/*
+	 * An installed denial is authoritative and is never weakened by the
+	 * availability or answer of a userspace server.
+	 */
+	if (READ_ONCE(evtype->fallback_policy) ==
+	    MEDUSA_FALLBACK_BASELINE_DENY)
+		return medusa_fallback_result(evtype, MEDUSA_AVAILABLE, false);
+
 	if (ARCH_CANNOT_DECIDE(evtype))
-		return MED_ALLOW;
+		return medusa_fallback_result(evtype,
+					      MEDUSA_AUTH_SERVER_UNREACHABLE,
+					      false);
 
 	mutex_lock(&registry_lock);
 #ifdef CONFIG_MEDUSA_PROFILING
@@ -37,12 +95,9 @@ enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
 #endif
 	authserver = med_get_authserver();
 	if (!authserver) {
-		if (evtype->arg_kclass[0]->unmonitor)
-			evtype->arg_kclass[0]->unmonitor((struct medusa_kobject_s *) o1);
-		if (evtype->arg_kclass[1]->unmonitor)
-			evtype->arg_kclass[1]->unmonitor((struct medusa_kobject_s *) o2);
 		mutex_unlock(&registry_lock);
-		return MED_ALLOW;
+		return medusa_fallback_result(evtype, MEDUSA_NO_AUTH_SERVER,
+					      false);
 	}
 	mutex_unlock(&registry_lock);
 
@@ -53,16 +108,15 @@ enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
 			   evtype->arg_name[0], evtype->arg_kclass[0]->name,
 			   evtype->arg_name[1], evtype->arg_kclass[1]->name);
 	}
-	retval = authserver->decide(event, o1, o2);
-	if (!is_authserver_reached(retval)) {
-		/* if L4 returned MED_ERR, it means that authserver could not
-		 * respond. We can convert this code into MED_ALLOW, because
-		 * the virtual spaces have to intersect otherwise med_decide
-		 * would not be called from L2 and therefore we know that
-		 * the operation was earlier allowed
-		 */
-		retval = MED_ALLOW;
-	} else if (!is_supported_medusa_answer(retval)) {
+	result.answer = authserver->decide(event, o1, o2);
+	result.source = MEDUSA_DECISION_AUTH_SERVER;
+	result.unavailable = MEDUSA_AVAILABLE;
+	result.authserver_contacted = true;
+	if (!is_authserver_reached(result.answer)) {
+		result = medusa_fallback_result(evtype,
+					       MEDUSA_AUTH_SERVER_UNREACHABLE,
+					       true);
+	} else if (!is_supported_medusa_answer(result.answer)) {
 		char *err_str = "ERROR: authserver returned not supported answer";
 
 		/* if we received code which is not known or not supported, we
@@ -71,10 +125,11 @@ enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
 		 * and if it did not, this is suspicious
 		 */
 		med_pr_err("%s %d for event %s(%s:%s->%s:%s)\n",
-			   err_str, retval, evtype->name,
+			   err_str, result.answer, evtype->name,
 			   evtype->arg_name[0], evtype->arg_kclass[0]->name,
 			   evtype->arg_name[1], evtype->arg_kclass[1]->name);
-		retval = MED_DENY;
+		result.answer = MED_DENY;
+		result.source = MEDUSA_DECISION_INVALID_REPLY;
 	}
 #ifdef CONFIG_MEDUSA_PROFILING
 	else {
@@ -84,5 +139,11 @@ enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
 	}
 #endif
 	med_put_authserver(authserver);
-	return retval;
+	return result;
+}
+
+enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,
+				void *o1, void *o2)
+{
+	return med_decide_result(evtype, event, o1, o2).answer;
 }

@@ -22,6 +22,46 @@ const char *medusa_audit_answer_name(enum medusa_answer_t answer)
 	return audit_answer[index];
 }
 
+const char *medusa_audit_decision_source_name(enum medusa_decision_source source)
+{
+	switch (source) {
+	case MEDUSA_DECISION_AUTH_SERVER:
+		return "auth_server";
+	case MEDUSA_DECISION_BASELINE:
+		return "baseline";
+	case MEDUSA_DECISION_ONLINE_REQUIRED:
+		return "online_required";
+	case MEDUSA_DECISION_INVALID_REPLY:
+		return "invalid_reply";
+	default:
+		return "invalid";
+	}
+}
+
+const char *medusa_audit_unavailable_name(enum medusa_unavailable_reason reason)
+{
+	switch (reason) {
+	case MEDUSA_AVAILABLE:
+		return "none";
+	case MEDUSA_NO_AUTH_SERVER:
+		return "no_auth_server";
+	case MEDUSA_AUTH_SERVER_UNREACHABLE:
+		return "auth_server_unreachable";
+	default:
+		return "invalid";
+	}
+}
+
+void medusa_audit_apply_decision(struct medusa_audit_data *mad,
+				 struct medusa_decision_result result)
+{
+	mad->ans = result.answer;
+	mad->as = result.authserver_contacted ? AS_REQUEST : AS_NO_REQUEST;
+	mad->decision_metadata = 1;
+	mad->decision_source = result.source;
+	mad->unavailable = result.unavailable;
+}
+
 /*
  * medusa_pre - pre audit callback function to format audit record
  * @ab: audit buffer for formatting audit record
@@ -49,6 +89,14 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 		audit_log_format(ab, " as_request=1");
 	else
 		audit_log_format(ab, " as_request=0");
+	if (mad->decision_metadata) {
+		audit_log_format(ab, " decision_source=%s",
+				 medusa_audit_decision_source_name(
+					 mad->decision_source));
+		audit_log_format(ab, " unavailable=%s",
+				 medusa_audit_unavailable_name(
+					 mad->unavailable));
+	}
 }
 
 /*

@@ -25,6 +25,7 @@
 #include <linux/types.h>
 #include "l3/arch.h"
 #include "l3/constants.h"
+#include "l3/decision.h"
 #include "l3/med_model.h"
 
 struct medusa_attribute_s;
@@ -180,6 +181,7 @@ struct medusa_evtype_s {
 				 * monitoring of this evtype. The value is
 				 * OR'd with these flags:
 				 */
+	enum medusa_fallback_policy fallback_policy;
 	/* if you change/swap them, check the usage anywhere (l3/registry.c) */
 #define MASK_BITNR				0x3fff
 #define MEDUSA_EVTYPE_NOTTRIGGERED		MASK_BITNR
@@ -249,12 +251,14 @@ struct medusa_evtype_s {
 #define MEDUSA_DEFAULT_EVTYPE_HEADER \
 	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
+	MEDUSA_FALLBACK_BASELINE_ALLOW, \
 	0 /* cinfo */, \
 	0, 0
 #else
 #define MEDUSA_DEFAULT_EVTYPE_HEADER \
 	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
+	MEDUSA_FALLBACK_BASELINE_ALLOW, \
 	0 /* cinfo */
 #endif
 #define MEDUSA_DEFAULT_ACCTYPE_HEADER MEDUSA_DEFAULT_EVTYPE_HEADER

@@ -8,18 +8,21 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 47 tests in ten suites:
+The KUnit configuration runs 53 tests in ten suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
 * policy-generation rollover and forced stale-context invalidation;
 * task initialization and inheritance plus inode and all SysV IPC contexts;
 * authorization-server registration, removal, and generation changes;
-* cached/delegated allow, deny, error/fail-open, and unsupported verdicts;
+* delegated allow and deny, installed baseline fallback, online-required
+  fallback, and unsupported verdicts;
 * protocol-v3 answer lengths, verdicts, unknown IDs, and stale IDs;
 * cache allocator growth across a size-class boundary;
 * dynamic task, inode, and SysV IPC LSM blob offsets;
 * bounded audit-answer formatting and LSM return-value translation;
+* decision-source, authorization-server contact, and unavailability audit
+  metadata;
 * independent pending-request IDs, out-of-order replies, policy generations,
   duplicate and unknown replies, bounded capacity, and disconnect cleanup.
 
@@ -33,6 +36,23 @@ bounded global table permits 1,024 concurrent requests.  Completion removes
 the request before waking its waiter, so unknown, duplicate, and stale-
 generation replies cannot complete a different request.  Disconnect removes
 and completes every remaining request with ``MED_ERR``.
+
+Unavailable decision fallback
+-----------------------------
+
+Every event type has one atomically replaceable fallback policy.  Baseline
+allow preserves the legacy default while still consulting a healthy
+authorization server.  Baseline deny is authoritative and cannot be weakened
+by a userspace allow.  Online-required denies only its event when no answer is
+available.  Absence of Constable and transport failure no longer unmonitor
+kernel objects, so an outage does not discard the installed monitoring state.
+
+The decision result separately records its answer, source, unavailability
+reason, and whether Constable was actually contacted.  The migrated ``mkdir``
+and ``ipc_msgsnd`` audit paths expose these fields as ``decision_source`` and
+``unavailable`` while retaining the compatible ``as_request`` field.  Moving
+the remaining audit-producing hooks to this richer result is tracked as
+follow-up work.
 
 Protocol v3 carries the complete request ID on the supported x86-64 migration
 target.  Fixed-width, architecture-independent framing remains protocol-v4
@@ -70,10 +90,11 @@ QEMU scenario coverage
   characterizations, not proof of delegation.
 
 ``lifecycle``
-  Covers initial registration, disconnect, fail-open operation, replacement
+  Covers initial registration, disconnect, baseline-permitted operation,
+  replacement
   registration, enforcement of a reloaded deny policy, positive audit output
-  for a server-requested IPC operation, and the disconnected ``mkdir``
-  stale-context fail-open audit path.
+  for a server-requested IPC operation, and preserved kernel monitoring state
+  across the disconnect.
 
 ``stacking.config``
   Enables AppArmor before Medusa in ``CONFIG_LSM``.  The ``stacking`` scenario
