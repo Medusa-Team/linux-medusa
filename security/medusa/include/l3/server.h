@@ -55,7 +55,7 @@ struct medusa_authserver_s {
 	enum medusa_answer_t (*decide)(struct medusa_event_s *req,
 		struct medusa_kobject_s *o1,
 		struct medusa_kobject_s *o2,
-		bool *authserver_contacted);
+		struct medusa_authserver_decision *decision);
 	bool (*is_healthy)(void);
 };
 

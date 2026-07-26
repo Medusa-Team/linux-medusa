@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <linux/ratelimit.h>
+
 #include "l3/arch.h"
 #include "l3/registry.h"
 #include "l3/med_cache.h"
@@ -214,6 +216,10 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 {
 	struct medusa_evtype_s *p;
 
+	atomic64_set(&med_evtype->degraded_decisions, 0);
+	ratelimit_default_init(&med_evtype->degraded_audit_ratelimit);
+	ratelimit_set_flags(&med_evtype->degraded_audit_ratelimit,
+			    RATELIMIT_MSG_ON_RELEASE);
 	med_evtype->name[MEDUSA_EVNAME_MAX-1] = '\0';
 	med_evtype->arg_name[0][MEDUSA_ATTRNAME_MAX-1] = '\0';
 	med_evtype->arg_name[1][MEDUSA_ATTRNAME_MAX-1] = '\0';

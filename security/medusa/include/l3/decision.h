@@ -30,17 +30,34 @@ enum medusa_unavailable_reason {
 	MEDUSA_NO_AUTH_SERVER,
 	MEDUSA_AUTH_SERVER_UNREACHABLE,
 	MEDUSA_AUTH_SERVER_UNHEALTHY,
+	MEDUSA_DECISION_TIMED_OUT,
+	MEDUSA_AUTH_SERVER_OVERLOADED,
+	MEDUSA_NON_SLEEPABLE_CONTEXT,
+};
+
+struct medusa_authserver_decision {
+	u64 request_id;
+	u64 policy_generation;
+	enum medusa_unavailable_reason unavailable;
+	bool contacted;
 };
 
 struct medusa_decision_result {
 	enum medusa_answer_t answer;
 	enum medusa_decision_source source;
 	enum medusa_unavailable_reason unavailable;
+	u64 request_id;
+	u64 policy_generation;
 	bool authserver_contacted;
 };
 
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 			       enum medusa_fallback_policy policy);
+u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype);
+const char *medusa_decision_answer_name(enum medusa_answer_t answer);
+const char *medusa_decision_source_name(enum medusa_decision_source source);
+const char *medusa_unavailable_reason_name(
+	enum medusa_unavailable_reason reason);
 bool medusa_decision_is_authoritative(
 	const struct medusa_decision_result *result);
 struct medusa_decision_result

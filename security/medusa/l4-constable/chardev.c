@@ -120,7 +120,8 @@ static pid_t gdb_pid = -1;
 
 static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		struct medusa_kobject_s *o1,
-		struct medusa_kobject_s *o2, bool *authserver_contacted);
+		struct medusa_kobject_s *o2,
+		struct medusa_authserver_decision *decision);
 static int l4_add_kclass(struct medusa_kclass_s *cl);
 static int l4_add_evtype(struct medusa_evtype_s *at);
 static void l4_close_wake(void);
@@ -316,7 +317,7 @@ static int l4_add_evtype(struct medusa_evtype_s *at)
  */
 static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		struct medusa_kobject_s *o1, struct medusa_kobject_s *o2,
-		bool *authserver_contacted)
+		struct medusa_authserver_decision *decision)
 {
 	enum medusa_answer_t retval;
 	struct medusa_pending_request pending;
@@ -326,7 +327,11 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	u64 policy_generation;
 	int error;
 
-	*authserver_contacted = false;
+	decision->request_id = 0;
+	decision->policy_generation =
+		(u64)READ_ONCE(medusa_authserver_magic);
+	decision->unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
+	decision->contacted = false;
 
 	/*
 	 * A userspace decision blocks.  Some legacy hooks can reach this layer
@@ -337,6 +342,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	 * installed kernel baseline policy.
 	 */
 	if (l4_cannot_wait()) {
+		decision->unavailable = MEDUSA_NON_SLEEPABLE_CONTEXT;
 		med_pr_warn_ratelimited("%s: cannot delegate '%s' from non-sleepable context\n",
 				       __func__, event->evtype_id->name);
 		return MED_ERR;
@@ -383,8 +389,12 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		med_pr_err("%s: pending request error: %d\n", __func__, error);
 		if (error == -ENOSPC)
 			l4_mark_unhealthy(MEDUSA_HEALTH_OVERLOADED);
+		if (error == -ENOSPC)
+			decision->unavailable = MEDUSA_AUTH_SERVER_OVERLOADED;
 		return MED_ERR;
 	}
+	decision->request_id = pending.id;
+	decision->policy_generation = pending.policy_generation;
 
 #define decision_evtype (event->evtype_id)
 	tele_mem_decide[0].opcode = tp_PUTPtr;
@@ -441,13 +451,15 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 
 	up_read(&lightswitch);
 	wake_up(&userspace_chardev);
-	*authserver_contacted = true;
+	decision->contacted = true;
 	error = medusa_pending_request_wait_timeout(
 		&pending,
 		msecs_to_jiffies(CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS),
 		&retval);
-	if (error == -ETIMEDOUT)
+	if (error == -ETIMEDOUT) {
+		decision->unavailable = MEDUSA_DECISION_TIMED_OUT;
 		l4_mark_unhealthy(MEDUSA_HEALTH_DECISION_TIMEOUT);
+	}
 
 	/*
 	 * We might be called with the IPC ids->rwsem held (from IPC security

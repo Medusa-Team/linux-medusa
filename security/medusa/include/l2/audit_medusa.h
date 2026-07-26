@@ -33,6 +33,8 @@ struct medusa_audit_data {
 	char decision_metadata : 1;
 	enum medusa_decision_source decision_source;
 	enum medusa_unavailable_reason unavailable;
+	u64 request_id;
+	u64 policy_generation;
 
 	/**
 	 * union of virtual spaces used in access

@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 63 tests in eleven suites:
+The KUnit configuration runs 64 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -24,7 +24,7 @@ The KUnit configuration runs 63 tests in eleven suites:
 * dynamic task, inode, and SysV IPC LSM blob offsets;
 * bounded audit-answer formatting and LSM return-value translation;
 * decision-source, authorization-server contact, and unavailability audit
-  metadata;
+  metadata, including request ID and policy generation;
 * independent pending-request IDs, out-of-order replies, policy generations,
   duplicate and unknown replies, bounded capacity, disconnect cleanup,
   timeout races, and renewable liveness leases;
@@ -70,11 +70,20 @@ available.  Absence of Constable and transport failure no longer unmonitor
 kernel objects, so an outage does not discard the installed monitoring state.
 
 The decision result separately records its answer, source, unavailability
-reason, and whether Constable was actually contacted.  The migrated ``mkdir``
-and ``ipc_msgsnd`` audit paths expose these fields as ``decision_source`` and
-``unavailable`` while retaining the compatible ``as_request`` field.  Moving
-the remaining audit-producing hooks to this richer result is tracked as
-follow-up work.
+reason, whether Constable was actually contacted, request ID, and policy
+generation.  Every unavailable-policy fallback increments an event-local
+counter and emits a structured audit record containing the event and object
+class names, active protocol, runtime trigger bit, verdict provenance, request
+metadata, and precise failure reason.  Repeated records are limited
+independently for each event to ten per five seconds; the next emitted record
+reports how many were suppressed while the counter continues accounting for
+every decision.  Stable numeric class and event IDs remain protocol-v4 work.
+
+Lease expiry, queue overload, a non-sleepable call site, an unhealthy server,
+transport failure, and absence of Constable have distinct audit reason names.
+The migrated ``mkdir`` and ``ipc_msgsnd`` operation-specific audit paths also
+carry request ID and policy generation while retaining the compatible
+``as_request`` field.
 
 Process, file, SysV IPC, and socket context validation requires a supported,
 authoritative Constable reply and verifies that userspace installed a valid
@@ -130,7 +139,8 @@ QEMU scenario coverage
   Freezes Constable after proving a delegated denial, verifies that one
   request waits for a full lease and uses baseline allow, verifies that the
   open circuit immediately applies the same installed baseline to the next
-  request, and checks the decision-source and unavailability audit metadata.
+  request, and checks the decision-source, precise timeout reason, request,
+  policy-generation, event, and class audit metadata.
   It then terminates the frozen server, registers a replacement, and proves
   that delegated denial is restored.
 
