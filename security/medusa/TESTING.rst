@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 74 tests in eleven suites:
+The KUnit configuration runs 75 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -33,7 +33,8 @@ The KUnit configuration runs 74 tests in eleven suites:
   aborted-handshake transitions, optional health callbacks, and stable
   observability names;
 * per-event final-verdict attribution, unsigned counter wrap, and cumulative
-  protocol-counter snapshots.
+  protocol-counter snapshots;
+* stable protocol-error audit kind names.
 
 Pending decision engine
 -----------------------
@@ -123,6 +124,25 @@ path exempts these two diagnostic files so an outage cannot hide its state;
 normal VFS permissions and other stacked LSMs still apply.  Protocol-v3 event
 names and runtime trigger bits are descriptive rather than stable numeric
 identities.
+
+Protocol-error audit
+--------------------
+
+Rejected authorization answers and progress messages now use one structured
+audit schema:
+
+``Medusa: op=protocol_error protocol=... policy_generation=... error_kind=... command_present=... command=... request_present=... request_id=... error=... error_sequence=... suppressed=...``
+
+``error_kind`` is one of ``malformed_message``, ``invalid_answer``,
+``unknown_command``, ``unknown_request``, or ``stale_request``.  Presence bits
+distinguish an unavailable command or request ID from a real zero value.
+``error`` is the negative kernel errno, and ``error_sequence`` is the wrapping
+boot-lifetime count for that kind.
+
+Each kind has an independent three-record-per-five-second limiter.  The first
+occurrence of one kind is therefore visible even while another kind is being
+suppressed.  The next emitted record reports the accumulated ``suppressed``
+count; securityfs counters continue to include every rejected frame.
 
 Constable's protocol-v3 READY answer follows schema processing and completion
 of its optional policy ``_init()`` handler, so ``policy_readiness=ready`` has a

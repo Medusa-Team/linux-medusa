@@ -26,6 +26,8 @@ struct test_message {
 
 #define FREEZER_CONTROL_KEY ((key_t)0x4d445343)
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
+#define SECURITYFS_READERS 4
+#define SECURITYFS_READ_ITERATIONS 700
 
 static int failures;
 
@@ -145,6 +147,77 @@ static bool securityfs_is_root_only(void)
 	if (waitpid(child, &child_status, 0) != child)
 		return false;
 	return WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0;
+}
+
+static bool securityfs_snapshot_is_consistent(void)
+{
+	char events[65536];
+	char status[4096];
+	size_t length;
+
+	if (!read_file("/sys/kernel/security/medusa/status",
+		       status, sizeof(status)) ||
+	    !strstr(status, "kernel_release=") ||
+	    !strstr(status, "protocol_version=3\n") ||
+	    !strstr(status, "policy_generation=") ||
+	    !strstr(status, "protocol_malformed_messages="))
+		return false;
+	length = strlen(status);
+	if (!length || status[length - 1] != '\n')
+		return false;
+	if (!strstr(status, "protocol_state=disconnected\n") &&
+	    !strstr(status, "protocol_state=handshaking\n") &&
+	    !strstr(status, "protocol_state=ready\n"))
+		return false;
+
+	if (!read_file("/sys/kernel/security/medusa/events",
+		       events, sizeof(events)) ||
+	    !line_has(events, "event=ipc_msgsnd ", "decisions=") ||
+	    !line_has(events, "event=ipc_msgsnd ", "fallback="))
+		return false;
+	length = strlen(events);
+	return length && events[length - 1] == '\n';
+}
+
+static size_t start_securityfs_readers(pid_t *readers)
+{
+	size_t reader;
+
+	for (reader = 0; reader < SECURITYFS_READERS; reader++) {
+		pid_t child = fork();
+
+		if (child < 0)
+			break;
+		if (child == 0) {
+			int iteration;
+
+			for (iteration = 0;
+			     iteration < SECURITYFS_READ_ITERATIONS;
+			     iteration++) {
+				if (!securityfs_snapshot_is_consistent())
+					_exit(EXIT_FAILURE);
+				usleep(20000);
+			}
+			_exit(EXIT_SUCCESS);
+		}
+		readers[reader] = child;
+	}
+	return reader;
+}
+
+static bool wait_for_securityfs_readers(pid_t *readers, size_t count)
+{
+	bool passed = count == SECURITYFS_READERS;
+	size_t reader;
+
+	for (reader = 0; reader < count; reader++) {
+		int status;
+
+		if (waitpid(readers[reader], &status, 0) != readers[reader] ||
+		    !WIFEXITED(status) || WEXITSTATUS(status) != EXIT_SUCCESS)
+			passed = false;
+	}
+	return passed;
 }
 
 static void result(const char *name, bool passed)
@@ -300,6 +373,7 @@ static pid_t start_handshake_holder(int *release_fd)
 	uint64_t command;
 	uint64_t request_id;
 	int16_t answer;
+	int attempt;
 	int ready_pipe[2];
 	int stop_pipe[2];
 	char ready;
@@ -330,12 +404,33 @@ static pid_t start_handshake_holder(int *release_fd)
 		if (fd < 0)
 			passed = false;
 
+		for (attempt = 0; passed && attempt < 12; attempt++) {
+			errno = 0;
+			if (write(fd, "x", 1) != -1 || errno != EMSGSIZE)
+				passed = false;
+		}
+		sleep(6);
 		errno = 0;
-		if (passed && (write(fd, "x", 1) != -1 ||
-			       errno != EMSGSIZE))
+		if (passed &&
+		    (write(fd, "x", 1) != -1 || errno != EMSGSIZE))
 			passed = false;
+		usleep(200000);
 
 		command = 0x81;
+		request_id = UINT64_MAX - 1;
+		answer = 2;
+		memcpy(answer_packet, &command, sizeof(command));
+		memcpy(answer_packet + sizeof(command), &request_id,
+		       sizeof(request_id));
+		memcpy(answer_packet + sizeof(command) + sizeof(request_id),
+		       &answer, sizeof(answer));
+		errno = 0;
+		if (passed &&
+		    (write(fd, answer_packet, sizeof(answer_packet)) != -1 ||
+		     errno != EINVAL))
+			passed = false;
+		usleep(200000);
+
 		request_id = UINT64_MAX;
 		answer = 3;
 		memcpy(answer_packet, &command, sizeof(command));
@@ -348,6 +443,7 @@ static pid_t start_handshake_holder(int *release_fd)
 		    (write(fd, answer_packet, sizeof(answer_packet)) != -1 ||
 		     errno != ENOENT))
 			passed = false;
+		usleep(200000);
 
 		command = UINT64_C(0xdeadbeef);
 		errno = 0;
@@ -394,6 +490,9 @@ int main(int argc, char **argv)
 	int handshake_status;
 	bool handshake_released;
 	unsigned long long initial_generation;
+	pid_t securityfs_readers[SECURITYFS_READERS];
+	size_t securityfs_reader_count = 0;
+	bool securityfs_readers_waited = false;
 
 	if (argc == 2 && !strcmp(argv[1], "--freezer-controller"))
 		return freezer_controller();
@@ -438,6 +537,8 @@ int main(int argc, char **argv)
 	       line_has(events, "event=ipc_msgsnd ",
 			"object_class=ipc"));
 	result("status_root_only", securityfs_is_root_only());
+	securityfs_reader_count =
+		start_securityfs_readers(securityfs_readers);
 
 	id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
 	if (id < 0) {
@@ -498,7 +599,8 @@ int main(int argc, char **argv)
 		       initial_generation);
 	result("protocol_error_counters",
 	       handshake > 0 &&
-	       status_counter(status, "protocol_malformed_messages=") >= 1 &&
+	       status_counter(status, "protocol_malformed_messages=") >= 13 &&
+	       status_counter(status, "protocol_invalid_answers=") >= 1 &&
 	       status_counter(status, "protocol_unknown_commands=") >= 1 &&
 	       status_counter(status, "protocol_unknown_requests=") >= 1);
 	if (handshake > 0) {
@@ -542,9 +644,17 @@ int main(int argc, char **argv)
 		       initial_generation &&
 	       status_counter(status, "last_ready_policy_generation=") ==
 		       status_counter(status, "active_policy_generation="));
+	result("securityfs_concurrent_reads",
+	       wait_for_securityfs_readers(securityfs_readers,
+					   securityfs_reader_count));
+	securityfs_readers_waited = true;
 	msgctl(id, IPC_RMID, NULL);
 
 out:
+	if (!securityfs_readers_waited)
+		result("securityfs_concurrent_reads",
+		       wait_for_securityfs_readers(securityfs_readers,
+						   securityfs_reader_count));
 	sleep(1);
 	sync();
 	reboot(RB_POWER_OFF);

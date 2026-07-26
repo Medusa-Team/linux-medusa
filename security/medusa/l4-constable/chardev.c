@@ -199,17 +199,39 @@ static void l4_mark_unhealthy(enum medusa_health_reason reason)
 	wake_up_all(&userspace_chardev);
 }
 
-static void l4_record_request_error(int error)
+static void l4_record_protocol_error(enum medusa_protocol_counter counter,
+				     bool command_present, u64 command,
+				     bool request_present, u64 request_id,
+				     int error)
 {
-	if (error == -ENOENT)
-		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_UNKNOWN_REQUESTS);
-	else if (error == -ESTALE)
-		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_STALE_REQUESTS);
+	struct medusa_protocol_error_context context = {
+		.counter = counter,
+		.policy_generation =
+			(u64)READ_ONCE(medusa_authserver_magic),
+		.command = command,
+		.request_id = request_id,
+		.error = error,
+		.command_present = command_present,
+		.request_present = request_present,
+	};
+
+	medusa_protocol_record_error(&context);
 }
 
-static void l4_record_malformed_message(void)
+static void l4_record_request_error(u64 command, u64 request_id, int error)
 {
-	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_MALFORMED_MESSAGES);
+	if (error == -ENOENT)
+		l4_record_protocol_error(MEDUSA_PROTOCOL_UNKNOWN_REQUESTS,
+					 true, command, true, request_id, error);
+	else if (error == -ESTALE)
+		l4_record_protocol_error(MEDUSA_PROTOCOL_STALE_REQUESTS,
+					 true, command, true, request_id, error);
+}
+
+static void l4_record_malformed_message(bool command_present, u64 command)
+{
+	l4_record_protocol_error(MEDUSA_PROTOCOL_MALFORMED_MESSAGES,
+				 command_present, command, false, 0, -EMSGSIZE);
 }
 
 static void l4_close_wake(void)
@@ -809,7 +831,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		return -EFAULT;
 	}
 	if (count < sizeof(MCPptr_t)) {
-		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_MALFORMED_MESSAGES);
+		l4_record_malformed_message(false, 0);
 		up_read(&lightswitch);
 		return -EMSGSIZE;
 	}
@@ -826,7 +848,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	// Type of the message is received
 	if (recv_type == MEDUSA_COMM_AUTHANSWER) {
 		if (count != MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE) {
-			l4_record_malformed_message();
+			l4_record_malformed_message(true, recv_type);
 			up_read(&lightswitch);
 			return -EMSGSIZE;
 		}
@@ -844,14 +866,16 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE,
 			answer, true);
 		if (answ_result == -EINVAL)
-			medusa_protocol_counter_inc(MEDUSA_PROTOCOL_INVALID_ANSWERS);
+			l4_record_protocol_error(MEDUSA_PROTOCOL_INVALID_ANSWERS,
+						 true, recv_type, true, id,
+						 answ_result);
 		if (!answ_result)
 			gen =
 				(u64)READ_ONCE(medusa_authserver_magic);
 		if (!answ_result)
 			answ_result = medusa_pending_request_complete(id, gen, answer);
 		if (answ_result) {
-			l4_record_request_error(answ_result);
+			l4_record_request_error(recv_type, id, answ_result);
 			up_read(&lightswitch);
 			med_pr_err("decision_answer: invalid answer for request %llx: %d\n",
 				   id, answ_result);
@@ -863,7 +887,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 
 	} else if (recv_type == MEDUSA_COMM_AUTHREQUEST_PROGRESS) {
 		if (count != MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE) {
-			l4_record_malformed_message();
+			l4_record_malformed_message(true, recv_type);
 			up_read(&lightswitch);
 			return -EMSGSIZE;
 		}
@@ -876,7 +900,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		gen = (u64)READ_ONCE(medusa_authserver_magic);
 		answ_result = medusa_pending_request_renew(id, gen);
 		if (answ_result) {
-			l4_record_request_error(answ_result);
+			l4_record_request_error(recv_type, id, answ_result);
 			up_read(&lightswitch);
 			med_pr_err("decision_progress: invalid request %llx: %d\n",
 				   id, answ_result);
@@ -1028,7 +1052,9 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		med_pr_info("authorization server circuit breaker closed\n");
 		set_auth_server_ready();
 		} else {
-			medusa_protocol_counter_inc(MEDUSA_PROTOCOL_UNKNOWN_COMMANDS);
+			l4_record_protocol_error(MEDUSA_PROTOCOL_UNKNOWN_COMMANDS,
+						 true, recv_type, false, 0,
+						 -EOPNOTSUPP);
 			med_pr_err("Protocol error at write(): unknown command %llx!\n",
 				   recv_type);
 #ifdef ERRORS_CAUSE_SEGFAULT

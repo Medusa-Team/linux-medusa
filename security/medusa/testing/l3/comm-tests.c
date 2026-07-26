@@ -539,6 +539,22 @@ static void protocol_counters_are_cumulative(struct kunit *test)
 			after.stale_requests);
 }
 
+static void protocol_error_names_are_stable(struct kunit *test)
+{
+	KUNIT_EXPECT_STREQ(test, "malformed_message",
+			   medusa_protocol_error_name(MEDUSA_PROTOCOL_MALFORMED_MESSAGES));
+	KUNIT_EXPECT_STREQ(test, "invalid_answer",
+			   medusa_protocol_error_name(MEDUSA_PROTOCOL_INVALID_ANSWERS));
+	KUNIT_EXPECT_STREQ(test, "unknown_command",
+			   medusa_protocol_error_name(MEDUSA_PROTOCOL_UNKNOWN_COMMANDS));
+	KUNIT_EXPECT_STREQ(test, "unknown_request",
+			   medusa_protocol_error_name(MEDUSA_PROTOCOL_UNKNOWN_REQUESTS));
+	KUNIT_EXPECT_STREQ(test, "stale_request",
+			   medusa_protocol_error_name(MEDUSA_PROTOCOL_STALE_REQUESTS));
+	KUNIT_EXPECT_STREQ(test, "invalid",
+			   medusa_protocol_error_name(MEDUSA_PROTOCOL_REPLIES));
+}
+
 static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(decide_without_server_uses_baseline_and_preserves_monitoring),
 	KUNIT_CASE(baseline_deny_is_enforced_without_server),
@@ -565,6 +581,7 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(decision_counters_attribute_final_verdicts),
 	KUNIT_CASE(decision_counter_wrap_is_well_defined),
 	KUNIT_CASE(protocol_counters_are_cumulative),
+	KUNIT_CASE(protocol_error_names_are_stable),
 	{}
 };
 

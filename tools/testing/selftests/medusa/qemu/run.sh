@@ -198,7 +198,7 @@ timeout "${QEMU_TIMEOUT:-90}" qemu-system-x86_64 \
 	-m 1024 \
 	-kernel "$kernel_image" \
 	-initrd "$work_dir/initramfs.cpio.gz" \
-	-append "console=ttyS0 rdinit=/sbin/init panic=-1 audit=1" \
+	-append "console=ttyS0 rdinit=/sbin/init panic=-1 audit=1 audit_backlog_limit=8192" \
 	-nographic \
 	-no-reboot 2>&1 | tee "$work_dir/console.log"
 

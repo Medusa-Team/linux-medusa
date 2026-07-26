@@ -25,8 +25,20 @@ struct medusa_protocol_counter_snapshot {
 	u64 stale_requests;
 };
 
+struct medusa_protocol_error_context {
+	enum medusa_protocol_counter counter;
+	u64 policy_generation;
+	u64 command;
+	u64 request_id;
+	int error;
+	bool command_present;
+	bool request_present;
+};
+
 void medusa_protocol_counter_inc(enum medusa_protocol_counter counter);
 void medusa_protocol_counters_snapshot(
 	struct medusa_protocol_counter_snapshot *snapshot);
+const char *medusa_protocol_error_name(enum medusa_protocol_counter counter);
+void medusa_protocol_record_error(const struct medusa_protocol_error_context *context);
 
 #endif /* _MEDUSA_PROTOCOL_STATS_H */

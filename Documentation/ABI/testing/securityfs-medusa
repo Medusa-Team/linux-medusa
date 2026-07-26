@@ -60,7 +60,14 @@ Description:
 			Replies or renewals rejected for a stale generation.
 
 		Protocol counters are cumulative from boot and use wrapping
-		unsigned 64-bit arithmetic.
+		unsigned 64-bit arithmetic. Each rejected protocol frame also
+		emits a rate-limited ``Medusa: op=protocol_error`` audit record.
+		The record identifies the protocol and policy generation, stable
+		error-kind name, command and request ID when available, negative
+		errno, per-kind sequence, and number suppressed since the
+		previous emitted record. Error kinds are limited independently
+		to three records per five seconds, so one class of malformed input
+		cannot hide the first occurrence of another class.
 
 		The file mode is 0400. It does not expose policy mutation.
 		Medusa's own delegated file-open policy is bypassed so the file
