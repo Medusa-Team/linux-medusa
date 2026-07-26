@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include <linux/ratelimit.h>
+#include <linux/seq_file.h>
+#include <linux/string.h>
 
 #include "l3/arch.h"
 #include "l3/registry.h"
@@ -432,4 +434,95 @@ void med_put_authserver(struct medusa_authserver_s *med_authserver)
 inline bool med_is_authserver_present(void)
 {
 	return !!authserver;
+}
+
+/**
+ * medusa_registry_status_snapshot - copy authorization-server state safely
+ * @status: caller-provided snapshot
+ *
+ * The server reference is acquired while the registry pointer is protected.
+ * Health callbacks are deliberately invoked after dropping registry_lock:
+ * an authorization-server callback is external to the registry and may sleep.
+ */
+void medusa_registry_status_snapshot(struct medusa_registry_status *status)
+{
+	struct medusa_authserver_s *server = NULL;
+
+	memset(status, 0, sizeof(*status));
+	status->health_reason = MEDUSA_HEALTH_DISCONNECTED;
+
+	mutex_lock(&registry_lock);
+	status->policy_generation = (u64)medusa_authserver_magic;
+	if (authserver) {
+		server = med_get_authserver();
+		status->connected = true;
+		strscpy(status->server_name, server->name,
+			sizeof(status->server_name));
+	}
+	mutex_unlock(&registry_lock);
+
+	if (!server)
+		return;
+
+	if (server->is_healthy) {
+		status->health_known = true;
+		status->healthy = server->is_healthy();
+		status->health_reason = status->healthy ?
+			MEDUSA_HEALTHY : MEDUSA_HEALTH_DISCONNECTED;
+	}
+	if (server->health_reason) {
+		status->health_known = true;
+		status->health_reason = server->health_reason();
+		status->healthy = status->health_reason == MEDUSA_HEALTHY;
+	}
+
+	med_put_authserver(server);
+}
+
+/**
+ * medusa_registry_events_seq_show - emit a consistent event registry snapshot
+ * @m: destination seq_file
+ *
+ * Event definitions are registry-owned while linked. Keep the registry locked
+ * so no event pointer can disappear midway through a line.
+ */
+int medusa_registry_events_seq_show(struct seq_file *m)
+{
+	struct medusa_evtype_s *event;
+	enum medusa_fallback_policy policy;
+	const char *fallback;
+	const char *trigger;
+	const char *trigger_bitmap;
+
+	mutex_lock(&registry_lock);
+	for (event = evtypes; event; event = event->next) {
+		if ((event->bitnr & MASK_BITNR) ==
+		    MEDUSA_EVTYPE_NOTTRIGGERED) {
+			trigger = "always";
+			trigger_bitmap = "none";
+		} else {
+			trigger = event->bitnr &
+				MEDUSA_EVTYPE_TRIGGEREDATOBJECT ?
+				"object" : "subject";
+			trigger_bitmap = event->bitnr &
+				MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT ?
+				"object" : "subject";
+		}
+
+		policy = READ_ONCE(event->fallback_policy);
+		fallback = medusa_fallback_policy_name(policy);
+		seq_printf(m,
+			   "event=%s subject_class=%s object_class=%s event_bit=%u",
+			   event->name, event->arg_kclass[0]->name,
+			   event->arg_kclass[1]->name,
+			   event->bitnr & MASK_BITNR);
+		seq_printf(m, " trigger=%s trigger_bitmap=%s fallback=%s",
+			   trigger, trigger_bitmap, fallback);
+		seq_printf(m, " degraded_decisions=%llu\n",
+			   (unsigned long long)
+				medusa_degraded_decision_count(event));
+	}
+	mutex_unlock(&registry_lock);
+
+	return 0;
 }

@@ -25,3 +25,19 @@ medusa_server_health_reason(const struct medusa_server_health *health)
 {
 	return atomic_read(&health->reason);
 }
+
+const char *medusa_health_reason_name(enum medusa_health_reason reason)
+{
+	switch (reason) {
+	case MEDUSA_HEALTHY:
+		return "healthy";
+	case MEDUSA_HEALTH_DISCONNECTED:
+		return "disconnected";
+	case MEDUSA_HEALTH_DECISION_TIMEOUT:
+		return "decision_timeout";
+	case MEDUSA_HEALTH_OVERLOADED:
+		return "overloaded";
+	default:
+		return "invalid";
+	}
+}

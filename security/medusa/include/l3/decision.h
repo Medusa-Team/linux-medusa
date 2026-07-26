@@ -54,6 +54,7 @@ struct medusa_decision_result {
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 			       enum medusa_fallback_policy policy);
 u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype);
+const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy);
 const char *medusa_decision_answer_name(enum medusa_answer_t answer);
 const char *medusa_decision_source_name(enum medusa_decision_source source);
 const char *medusa_unavailable_reason_name(

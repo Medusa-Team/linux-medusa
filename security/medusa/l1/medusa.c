@@ -10,6 +10,7 @@
 #include "l4/auth_server.h"
 #include "l4/comm.h"
 #include "l3/registry.h"
+#include "l3/securityfs.h"
 #include "l3/arch.h"
 #include "l1/inode.h"
 #include "l1/task.h"
@@ -221,6 +222,12 @@ static int medusa_l1_file_fcntl(struct file *file, unsigned int cmd,
 
 static int medusa_l1_file_open(struct file *file)
 {
+	/*
+	 * Degraded-state diagnostics must not depend on a userspace decision.
+	 * securityfs mode checks and every other active LSM still apply.
+	 */
+	if (medusa_securityfs_file(file))
+		return 0;
 	if (medusa_open(file) == MED_DENY)
 		return -EACCES;
 	//return validate_fuck(&file->f_path);
@@ -792,6 +799,7 @@ DEFINE_LSM(medusa) = {
 	.order = LSM_ORDER_MUTABLE,
 	.enabled = &medusa_enabled,
 	.init = medusa_l1_init,
+	.initcall_late = medusa_securityfs_init,
 	.blobs = &medusa_blob_sizes,
 };
 

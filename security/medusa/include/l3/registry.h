@@ -13,10 +13,20 @@
 #define _MEDUSA_REGISTRY_H
 
 #include "l3/arch.h"
+#include "l3/health.h"
 #include "l3/kobject.h"
 #include "l3/server.h"
 
-extern int authserver_magic; /* to be checked against magic in objects */
+struct seq_file;
+
+struct medusa_registry_status {
+	u64 policy_generation;
+	char server_name[MEDUSA_SERVERNAME_MAX];
+	enum medusa_health_reason health_reason;
+	bool connected;
+	bool health_known;
+	bool healthy;
+};
 
 /* interface to L2 */
 extern int med_register_kclass(struct medusa_kclass_s *med_kclass);
@@ -58,6 +68,8 @@ extern struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s 
 extern struct medusa_authserver_s *med_get_authserver(void);
 extern void med_put_authserver(struct medusa_authserver_s *med_authserver);
 extern inline bool med_is_authserver_present(void);
+void medusa_registry_status_snapshot(struct medusa_registry_status *status);
+int medusa_registry_events_seq_show(struct seq_file *m);
 
 /* interface to L4 */
 extern int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver);

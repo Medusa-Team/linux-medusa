@@ -14,6 +14,7 @@
 #include <sys/reboot.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -23,8 +24,112 @@ struct test_message {
 };
 
 #define FREEZER_CONTROL_KEY ((key_t)0x4d445343)
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 
 static int failures;
+
+static bool read_file(const char *path, char *buffer, size_t size)
+{
+	ssize_t count;
+	size_t used = 0;
+	int fd;
+
+	if (!size)
+		return false;
+	fd = open(path, O_RDONLY);
+	if (fd < 0) {
+		perror(path);
+		return false;
+	}
+	while (used < size - 1) {
+		count = read(fd, buffer + used, size - 1 - used);
+		if (count < 0) {
+			perror(path);
+			close(fd);
+			return false;
+		}
+		if (!count)
+			break;
+		used += (size_t)count;
+	}
+	close(fd);
+	buffer[used] = '\0';
+	return true;
+}
+
+static bool line_has(const char *buffer, const char *line_key,
+		     const char *field)
+{
+	const char *line = strstr(buffer, line_key);
+	const char *match;
+	const char *end;
+
+	if (!line)
+		return false;
+	end = strchr(line, '\n');
+	if (!end)
+		end = line + strlen(line);
+	match = strstr(line, field);
+	return match && match < end;
+}
+
+static unsigned long long event_degraded_count(const char *buffer,
+					       const char *event)
+{
+	const char *line = strstr(buffer, event);
+	const char *field;
+	char *end;
+
+	if (!line)
+		return 0;
+	field = strstr(line, " degraded_decisions=");
+	if (!field)
+		return 0;
+	field += strlen(" degraded_decisions=");
+	errno = 0;
+	return strtoull(field, &end, 10);
+}
+
+static bool securityfs_is_root_only(void)
+{
+	static const char *const paths[] = {
+		"/sys/kernel/security/medusa/status",
+		"/sys/kernel/security/medusa/events",
+	};
+	struct stat status;
+	pid_t child;
+	int child_status;
+	size_t index;
+
+	for (index = 0; index < ARRAY_SIZE(paths); index++)
+		if (stat(paths[index], &status) < 0 ||
+		    (status.st_mode & 0777) != 0400)
+			return false;
+
+	child = fork();
+	if (child < 0)
+		return false;
+	if (child == 0) {
+		if (setgid(65534) < 0 || setuid(65534) < 0)
+			_exit(2);
+		for (index = 0; index < ARRAY_SIZE(paths); index++) {
+			int fd;
+
+			errno = 0;
+			fd = open(paths[index], O_RDONLY);
+			if (fd >= 0) {
+				close(fd);
+				_exit(1);
+			}
+			if (errno != EACCES)
+				_exit(3);
+		}
+		_exit(0);
+	}
+	if (waitpid(child, &child_status, 0) != child)
+		return false;
+	return WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0;
+}
 
 static void result(const char *name, bool passed)
 {
@@ -180,6 +285,8 @@ int main(int argc, char **argv)
 	pid_t replacement;
 	double started;
 	double elapsed;
+	char events[65536];
+	char status[4096];
 	int id;
 	int send_result;
 
@@ -190,12 +297,34 @@ int main(int argc, char **argv)
 	mount("proc", "/proc", "proc", 0, NULL);
 	mount("sysfs", "/sys", "sysfs", 0, NULL);
 	mount("devtmpfs", "/dev", "devtmpfs", 0, NULL);
+	mkdir("/sys/kernel/security", 0755);
+	mount("securityfs", "/sys/kernel/security", "securityfs", 0, NULL);
 
 	sleep(1);
 	initial = find_constable_pid();
 	if (initial <= 0)
 		initial = read_constable_pid();
 	result("startup", initial > 0 && kill(initial, 0) == 0);
+	result("status_connected",
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       strstr(status, "protocol_version=3\n") &&
+	       strstr(status, "authorization_server=connected\n") &&
+	       strstr(status, "authorization_server_health=healthy\n") &&
+	       strstr(status, "circuit_breaker=closed\n") &&
+	       strstr(status, "pending_requests=0\n") &&
+	       strstr(status, "pending_limit=1024\n") &&
+	       strstr(status, "decision_lease_ms=5000\n"));
+	result("events_visible",
+	       read_file("/sys/kernel/security/medusa/events",
+			 events, sizeof(events)) &&
+	       line_has(events, "event=ipc_msgsnd ",
+			"fallback=baseline_allow") &&
+	       line_has(events, "event=ipc_msgsnd ",
+			"subject_class=process") &&
+	       line_has(events, "event=ipc_msgsnd ",
+			"object_class=ipc"));
+	result("status_root_only", securityfs_is_root_only());
 
 	id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
 	if (id < 0) {
@@ -213,6 +342,18 @@ int main(int argc, char **argv)
 	elapsed = monotonic_seconds() - started;
 	result("timeout_fallback",
 	       send_result == 0 && elapsed >= 4.0 && elapsed <= 10.0);
+	result("status_degraded",
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       strstr(status, "authorization_server=connected\n") &&
+	       strstr(status, "authorization_server_health=unhealthy\n") &&
+	       strstr(status, "circuit_breaker=open\n") &&
+	       strstr(status, "health_reason=decision_timeout\n") &&
+	       strstr(status, "pending_requests=0\n"));
+	result("degraded_counter",
+	       read_file("/sys/kernel/security/medusa/events",
+			 events, sizeof(events)) &&
+	       event_degraded_count(events, "event=ipc_perm ") >= 1);
 
 	started = monotonic_seconds();
 	errno = 0;
@@ -231,6 +372,14 @@ int main(int argc, char **argv)
 	result("reconnect", replacement > 0);
 	result("delegation_recovered",
 	       replacement > 0 && wait_for_denial(id));
+	result("status_recovered",
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       strstr(status, "authorization_server=connected\n") &&
+	       strstr(status, "authorization_server_health=healthy\n") &&
+	       strstr(status, "circuit_breaker=closed\n") &&
+	       strstr(status, "health_reason=healthy\n") &&
+	       strstr(status, "pending_requests=0\n"));
 	msgctl(id, IPC_RMID, NULL);
 
 out:

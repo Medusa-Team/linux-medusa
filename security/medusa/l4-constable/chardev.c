@@ -126,6 +126,7 @@ static int l4_add_kclass(struct medusa_kclass_s *cl);
 static int l4_add_evtype(struct medusa_evtype_s *at);
 static void l4_close_wake(void);
 static bool l4_is_healthy(void);
+static enum medusa_health_reason l4_health_reason(void);
 
 static struct medusa_authserver_s chardev_medusa = {
 	.name = MODULENAME,
@@ -134,6 +135,7 @@ static struct medusa_authserver_s chardev_medusa = {
 	.add_evtype = l4_add_evtype,
 	.decide = l4_decide,
 	.is_healthy = l4_is_healthy,
+	.health_reason = l4_health_reason,
 };
 
 /*
@@ -175,6 +177,11 @@ static bool l4_cannot_wait(void)
 static bool l4_is_healthy(void)
 {
 	return medusa_server_health_is_healthy(&constable_health);
+}
+
+static enum medusa_health_reason l4_health_reason(void)
+{
+	return medusa_server_health_reason(&constable_health);
 }
 
 static void l4_mark_unhealthy(enum medusa_health_reason reason)

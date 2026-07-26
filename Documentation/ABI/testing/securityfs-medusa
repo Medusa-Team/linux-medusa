@@ -1,0 +1,56 @@
+What:		/sys/kernel/security/medusa/status
+Date:		July 2026
+Contact:	Jano Kacer <jano.kacer@gmail.com>
+Description:
+		Root-readable, read-only snapshot of Medusa decision-engine
+		liveness. One key=value record is emitted per line:
+
+		kernel_release
+			The running kernel release.
+		protocol_version
+			The active Medusa userspace protocol version.
+		authorization_server
+			"connected" after the READY exchange has completed and
+			the server is registered; otherwise "disconnected".
+		authorization_server_name
+			The registered kernel transport name, or "none".
+		authorization_server_health
+			"healthy", "unhealthy", "unknown", or "unavailable".
+		circuit_breaker
+			"closed", "open", "unknown", or "not_connected".
+		health_reason
+			"healthy", "disconnected", "decision_timeout",
+			"overloaded", "unknown", or "invalid".
+		policy_generation
+			The current kernel authorization-server generation.
+		pending_requests
+			Number of requests currently awaiting userspace.
+		pending_limit
+			Maximum number of simultaneous pending requests.
+		decision_lease_ms
+			Initial and renewal liveness lease for each request.
+
+		The file mode is 0400. It does not expose policy mutation.
+		Medusa's own delegated file-open policy is bypassed so the file
+		remains available during an authorization-server outage; normal
+		VFS permissions and other active LSMs still apply.
+
+What:		/sys/kernel/security/medusa/events
+Date:		July 2026
+Contact:	Jano Kacer <jano.kacer@gmail.com>
+Description:
+		Root-readable, read-only snapshot of registered Medusa events.
+		Each line contains the event and subject/object class names,
+		runtime trigger bit and bitmap owner, installed fallback policy,
+		and cumulative degraded-decision count.
+
+		Event and class names are the protocol-v3 names announced to
+		Constable. "event_bit" is a runtime trigger position, not a stable
+		numeric event identifier. "degraded_decisions" accounts every
+		unavailable-policy fallback even when its corresponding audit record
+		was rate limited.
+
+		The file mode is 0400. It does not expose policy mutation.
+		Medusa's own delegated file-open policy is bypassed so the file
+		remains available during an authorization-server outage; normal
+		VFS permissions and other active LSMs still apply.

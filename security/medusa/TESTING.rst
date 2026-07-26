@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 64 tests in eleven suites:
+The KUnit configuration runs 68 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -28,7 +28,9 @@ The KUnit configuration runs 64 tests in eleven suites:
 * independent pending-request IDs, out-of-order replies, policy generations,
   duplicate and unknown replies, bounded capacity, disconnect cleanup,
   timeout races, and renewable liveness leases;
-* authorization-server health and circuit-breaker transitions.
+* authorization-server health and circuit-breaker transitions;
+* teardown-safe authorization-server status snapshots, optional health
+  callbacks, and stable observability names.
 
 Pending decision engine
 -----------------------
@@ -91,6 +93,32 @@ context.  A lease timeout, open circuit, disconnected server, or installed
 fallback verdict therefore cannot be mistaken for a successful context
 refresh.
 
+Read-only securityfs observability
+----------------------------------
+
+When Medusa is enabled it creates two root-readable files:
+
+``/sys/kernel/security/medusa/status``
+  Reports the running kernel and protocol versions, completed authorization-
+  server connection state, server health and precise circuit-breaker reason,
+  policy generation, live pending count and limit, and configured decision
+  lease.
+
+``/sys/kernel/security/medusa/events``
+  Reports every announced event with its subject and object classes, runtime
+  trigger bit and bitmap owner, installed fallback policy, and cumulative
+  degraded-decision count.
+
+Both files have mode ``0400`` and no write operation.  The status snapshot
+takes an authorization-server reference while holding the registry lock, then
+queries optional health callbacks only after releasing that lock.  Event
+records are generated while the registry is locked so unregister cannot leave
+a dangling definition in a partial line.  Medusa's own delegated ``file_open``
+path exempts these two diagnostic files so an outage cannot hide its state;
+normal VFS permissions and other stacked LSMs still apply.  Protocol-v3 event
+names and runtime trigger bits are descriptive rather than stable numeric
+identities.
+
 Protocol v3 carries the complete request ID on the supported x86-64 migration
 target.  Fixed-width, architecture-independent framing remains protocol-v4
 work.  The progress command is an optional extension to protocol v3;
@@ -141,6 +169,9 @@ QEMU scenario coverage
   open circuit immediately applies the same installed baseline to the next
   request, and checks the decision-source, precise timeout reason, request,
   policy-generation, event, and class audit metadata.
+  The scenario also mounts securityfs, checks healthy, degraded, and recovered
+  status snapshots, verifies per-event degraded accounting, and proves that
+  the status file cannot be opened after dropping to uid 65534.
   It then terminates the frozen server, registers a replacement, and proves
   that delegated denial is restored.
 

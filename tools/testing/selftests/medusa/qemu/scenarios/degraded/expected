@@ -1,15 +1,20 @@
 MEDUSA_RESULT degraded startup PASS
+MEDUSA_RESULT degraded status_connected PASS
+MEDUSA_RESULT degraded events_visible PASS
+MEDUSA_RESULT degraded status_root_only PASS
 MEDUSA_RESULT degraded connected_delegation PASS
 MEDUSA_RESULT degraded constable_frozen PASS
 MEDUSA_RESULT degraded timeout_fallback PASS
+MEDUSA_RESULT degraded status_degraded PASS
+MEDUSA_RESULT degraded degraded_counter PASS
 MEDUSA_RESULT degraded breaker_fast_fallback PASS
 MEDUSA_RESULT degraded reconnect PASS
 MEDUSA_RESULT degraded delegation_recovered PASS
+MEDUSA_RESULT degraded status_recovered PASS
 authorization server circuit breaker opened, reason=2
 Medusa: op=decision event=ipc_perm
 subject_class=process object_class=ipc protocol=3 policy_generation=
 decision_source=baseline unavailable=decision_timed_out as_request=1
 degraded_sequence=
-Medusa: op=msgsnd ans=ALLOW as_request=1 decision_source=baseline unavailable=auth_server_unreachable
 Medusa: op=msgsnd ans=ALLOW as_request=0 decision_source=baseline unavailable=auth_server_unhealthy
 !MEDUSA_QEMU_FAIL degraded

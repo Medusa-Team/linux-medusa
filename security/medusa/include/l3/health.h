@@ -30,5 +30,6 @@ bool medusa_server_health_mark_unhealthy(struct medusa_server_health *health,
 bool medusa_server_health_is_healthy(const struct medusa_server_health *health);
 enum medusa_health_reason
 medusa_server_health_reason(const struct medusa_server_health *health);
+const char *medusa_health_reason_name(enum medusa_health_reason reason);
 
 #endif /* _MEDUSA_HEALTH_H */

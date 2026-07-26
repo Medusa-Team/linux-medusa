@@ -119,6 +119,20 @@ u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype)
 	return atomic64_read(&evtype->degraded_decisions);
 }
 
+const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy)
+{
+	switch (policy) {
+	case MEDUSA_FALLBACK_BASELINE_ALLOW:
+		return "baseline_allow";
+	case MEDUSA_FALLBACK_BASELINE_DENY:
+		return "baseline_deny";
+	case MEDUSA_FALLBACK_ONLINE_REQUIRED:
+		return "online_required";
+	default:
+		return "invalid";
+	}
+}
+
 static void medusa_audit_degraded_decision(
 	struct medusa_evtype_s *evtype,
 	const struct medusa_decision_result *result)

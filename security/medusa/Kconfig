@@ -9,6 +9,7 @@ menuconfig SECURITY_MEDUSA_SUPPORT
 	bool "MEDUSA support"
 	depends on SECURITY && AUDIT
 	select NETWORK_SECMARK
+	select SECURITYFS
 	default n
 	help
 	  This selects MEDUSA LSM. Add "medusa" to the ordered CONFIG_LSM

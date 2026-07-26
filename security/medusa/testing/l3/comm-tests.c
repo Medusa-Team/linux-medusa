@@ -378,6 +378,20 @@ static void fallback_policy_rejects_invalid_values(struct kunit *test)
 				(enum medusa_fallback_policy)3));
 }
 
+static void fallback_policy_names_are_stable(struct kunit *test)
+{
+	const char *name;
+
+	name = medusa_fallback_policy_name(MEDUSA_FALLBACK_BASELINE_ALLOW);
+	KUNIT_EXPECT_STREQ(test, "baseline_allow", name);
+	name = medusa_fallback_policy_name(MEDUSA_FALLBACK_BASELINE_DENY);
+	KUNIT_EXPECT_STREQ(test, "baseline_deny", name);
+	name = medusa_fallback_policy_name(MEDUSA_FALLBACK_ONLINE_REQUIRED);
+	KUNIT_EXPECT_STREQ(test, "online_required", name);
+	name = medusa_fallback_policy_name((enum medusa_fallback_policy)-1);
+	KUNIT_EXPECT_STREQ(test, "invalid", name);
+}
+
 static void protocol_accepts_supported_answers(struct kunit *test)
 {
 	KUNIT_EXPECT_EQ(test, 0, medusa_comm_validate_authanswer(
@@ -450,6 +464,7 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(incomplete_server_results_cannot_validate),
 	KUNIT_CASE(decision_metadata_names_are_stable),
 	KUNIT_CASE(fallback_policy_rejects_invalid_values),
+	KUNIT_CASE(fallback_policy_names_are_stable),
 	KUNIT_CASE(protocol_accepts_supported_answers),
 	KUNIT_CASE(protocol_rejects_malformed_answer_lengths),
 	KUNIT_CASE(protocol_rejects_unknown_answer_code),
