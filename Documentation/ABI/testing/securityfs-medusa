@@ -80,8 +80,21 @@ Contact:	Jano Kacer <jano.kacer@gmail.com>
 Description:
 		Root-readable, read-only snapshot of registered Medusa events.
 		Each line contains the event and subject/object class names,
-		runtime trigger bit and bitmap owner, installed fallback policy,
-		and cumulative decision counters:
+		whether the event is actively reachable from an installed LSM
+		hook, runtime trigger bit and bitmap owner, installed fallback
+		policy, and cumulative decision counters:
+
+		enforcement
+			"active" when an installed LSM hook or its required
+			context-validation path can reach the event; otherwise
+			"announced". This is code reachability, not a claim that
+			the event's monitoring bit is set by current policy.
+		evaluations
+			Policy evaluations that reached the event's kernel
+			monitoring-bit check.
+		cached
+			Evaluations allowed by an unset monitoring bit without
+			entering the central decision engine.
 
 		decisions
 			Calls entering the central decision engine.
@@ -104,10 +117,36 @@ Description:
 		Constable. "event_bit" is a runtime trigger position, not a stable
 		numeric event identifier. Counters use wrapping unsigned 64-bit
 		arithmetic. Kernel-cached fast-path accesses do not enter the central
-		decision engine and are therefore not included; hook-level cached
-		accounting is a separate future ABI.
+		decision engine and are therefore not included in its counters;
+		hook-level cached
+		accounting is reported separately as ``evaluations`` and
+		``cached``. Local virtual-space denials that occur before the
+		monitoring-bit check are not included in either value.
 
 		The file mode is 0400. It does not expose policy mutation.
 		Medusa's own delegated file-open policy is bypassed so the file
 		remains available during an authorization-server outage; normal
 		VFS permissions and other active LSMs still apply.
+
+What:		/sys/kernel/security/medusa/classes
+Date:		July 2026
+Contact:	Jano Kacer <jano.kacer@gmail.com>
+Description:
+		Root-readable, read-only snapshot of registered Medusa object
+		classes. Each line contains:
+
+		class
+			The protocol-v3 class name announced to Constable.
+		enforcement
+			"active" when at least one active event consumes the class
+			as subject or object; otherwise "announced".
+		announced_events
+			Registered events consuming the class.
+		enforced_events
+			Actively reachable events consuming the class.
+
+		An event using the same class for both arguments is counted once.
+		The file mode is 0400 and it has no write operation. Medusa's own
+		delegated file-open policy is bypassed so this diagnostic remains
+		available during an authorization-server outage; normal VFS
+		permissions and other active LSMs still apply.

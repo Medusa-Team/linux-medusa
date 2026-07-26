@@ -2,7 +2,9 @@ MEDUSA_RESULT degraded startup PASS
 MEDUSA_RESULT degraded status_connected PASS
 MEDUSA_RESULT degraded generation_ready PASS
 MEDUSA_RESULT degraded events_visible PASS
+MEDUSA_RESULT degraded enforcement_inventory PASS
 MEDUSA_RESULT degraded status_root_only PASS
+MEDUSA_RESULT degraded cache_accounting PASS
 MEDUSA_RESULT degraded connected_delegation PASS
 MEDUSA_RESULT degraded constable_frozen PASS
 MEDUSA_RESULT degraded timeout_fallback PASS

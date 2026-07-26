@@ -85,6 +85,7 @@ static int comm_test_init(struct kunit *test)
 	delegated_unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
 	atomic64_set(&test_event_type.degraded_decisions, 0);
 	medusa_decision_counters_init(&test_event_type);
+	WRITE_ONCE(test_event_type.enforced, false);
 	ratelimit_state_init(&test_event_type.degraded_audit_ratelimit, HZ, 0);
 	KUNIT_ASSERT_EQ(test, 0,
 			medusa_set_fallback_policy(
@@ -509,6 +510,25 @@ static void decision_counter_wrap_is_well_defined(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, (u64)0, counters.total);
 }
 
+static void monitoring_cache_accounting_is_explicit(struct kunit *test)
+{
+	struct medusa_decision_counter_snapshot counters;
+
+	KUNIT_EXPECT_FALSE(test,
+			   medusa_event_monitoring_check(&test_event_type, false));
+	KUNIT_EXPECT_TRUE(test,
+			  medusa_event_monitoring_check(&test_event_type, true));
+	KUNIT_EXPECT_FALSE(test,
+			   medusa_event_monitoring_check(&test_event_type, false));
+	medusa_event_set_enforced(&test_event_type);
+	medusa_decision_counters_snapshot(&test_event_type, &counters);
+
+	KUNIT_EXPECT_TRUE(test, READ_ONCE(test_event_type.enforced));
+	KUNIT_EXPECT_EQ(test, (u64)3, counters.evaluations);
+	KUNIT_EXPECT_EQ(test, (u64)2, counters.cached);
+	KUNIT_EXPECT_EQ(test, (u64)0, counters.total);
+}
+
 static void protocol_counters_are_cumulative(struct kunit *test)
 {
 	struct medusa_protocol_counter_snapshot before;
@@ -580,6 +600,7 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(protocol_validates_decision_progress),
 	KUNIT_CASE(decision_counters_attribute_final_verdicts),
 	KUNIT_CASE(decision_counter_wrap_is_well_defined),
+	KUNIT_CASE(monitoring_cache_accounting_is_explicit),
 	KUNIT_CASE(protocol_counters_are_cumulative),
 	KUNIT_CASE(protocol_error_names_are_stable),
 	{}

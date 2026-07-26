@@ -126,10 +126,28 @@ static const struct file_operations medusa_events_fops = {
 	.release = single_release,
 };
 
+static int medusa_classes_show(struct seq_file *m, void *unused)
+{
+	return medusa_registry_classes_seq_show(m);
+}
+
+static int medusa_classes_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, medusa_classes_show, NULL);
+}
+
+static const struct file_operations medusa_classes_fops = {
+	.open = medusa_classes_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 bool medusa_securityfs_file(const struct file *file)
 {
 	return file->f_op == &medusa_status_fops ||
-	       file->f_op == &medusa_events_fops;
+	       file->f_op == &medusa_events_fops ||
+	       file->f_op == &medusa_classes_fops;
 }
 
 int __init medusa_securityfs_init(void)
@@ -147,6 +165,11 @@ int __init medusa_securityfs_init(void)
 
 	entry = securityfs_create_file("events", 0400, medusa_securityfs_dir,
 				       NULL, &medusa_events_fops);
+	if (IS_ERR(entry))
+		goto err;
+
+	entry = securityfs_create_file("classes", 0400, medusa_securityfs_dir,
+				       NULL, &medusa_classes_fops);
 	if (IS_ERR(entry))
 		goto err;
 

@@ -54,6 +54,8 @@ struct medusa_decision_result {
 };
 
 struct medusa_decision_counters {
+	atomic64_t evaluations;
+	atomic64_t cached;
 	atomic64_t total;
 	atomic64_t delegated;
 	atomic64_t baseline;
@@ -65,6 +67,8 @@ struct medusa_decision_counters {
 };
 
 struct medusa_decision_counter_snapshot {
+	u64 evaluations;
+	u64 cached;
 	u64 total;
 	u64 delegated;
 	u64 baseline;
@@ -81,6 +85,8 @@ u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype);
 void medusa_decision_counters_init(struct medusa_evtype_s *evtype);
 void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
 				       struct medusa_decision_counter_snapshot *snapshot);
+bool medusa_event_monitoring_check(struct medusa_evtype_s *evtype,
+				   bool monitored);
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy);
 const char *medusa_decision_answer_name(enum medusa_answer_t answer);
 const char *medusa_decision_source_name(enum medusa_decision_source source);

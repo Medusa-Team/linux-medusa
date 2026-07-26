@@ -79,6 +79,8 @@ extern void med_put_authserver(struct medusa_authserver_s *med_authserver);
 extern inline bool med_is_authserver_present(void);
 void medusa_registry_status_snapshot(struct medusa_registry_status *status);
 int medusa_registry_events_seq_show(struct seq_file *m);
+int medusa_registry_classes_seq_show(struct seq_file *m);
+void medusa_event_set_enforced(struct medusa_evtype_s *evtype);
 
 /* interface to L4 */
 extern int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver);

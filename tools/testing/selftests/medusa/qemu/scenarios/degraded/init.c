@@ -113,6 +113,7 @@ static bool securityfs_is_root_only(void)
 	static const char *const paths[] = {
 		"/sys/kernel/security/medusa/status",
 		"/sys/kernel/security/medusa/events",
+		"/sys/kernel/security/medusa/classes",
 	};
 	struct stat status;
 	pid_t child;
@@ -151,6 +152,7 @@ static bool securityfs_is_root_only(void)
 
 static bool securityfs_snapshot_is_consistent(void)
 {
+	char classes[16384];
 	char events[65536];
 	char status[4096];
 	size_t length;
@@ -176,7 +178,16 @@ static bool securityfs_snapshot_is_consistent(void)
 	    !line_has(events, "event=ipc_msgsnd ", "fallback="))
 		return false;
 	length = strlen(events);
-	return length && events[length - 1] == '\n';
+	if (!length || events[length - 1] != '\n')
+		return false;
+
+	if (!read_file("/sys/kernel/security/medusa/classes",
+		       classes, sizeof(classes)) ||
+	    !line_has(classes, "class=process ", "enforcement=active") ||
+	    !line_has(classes, "class=socket ", "enforcement=announced"))
+		return false;
+	length = strlen(classes);
+	return length && classes[length - 1] == '\n';
 }
 
 static size_t start_securityfs_readers(pid_t *readers)
@@ -478,16 +489,19 @@ int main(int argc, char **argv)
 {
 	struct test_message message = { 1, "lease" };
 	pid_t initial;
+	pid_t cache_probe;
 	pid_t handshake;
 	pid_t replacement;
 	double started;
 	double elapsed;
+	char classes[16384];
 	char events[65536];
 	char status[4096] = {};
 	int id;
 	int release_fd;
 	int send_result;
 	int handshake_status;
+	int cache_probe_status;
 	bool handshake_released;
 	unsigned long long initial_generation;
 	pid_t securityfs_readers[SECURITYFS_READERS];
@@ -496,6 +510,8 @@ int main(int argc, char **argv)
 
 	if (argc == 2 && !strcmp(argv[1], "--freezer-controller"))
 		return freezer_controller();
+	if (argc == 2 && !strcmp(argv[1], "--cache-probe"))
+		return EXIT_SUCCESS;
 
 	setvbuf(stdout, NULL, _IONBF, 0);
 	mount("proc", "/proc", "proc", 0, NULL);
@@ -533,10 +549,37 @@ int main(int argc, char **argv)
 	       line_has(events, "event=ipc_msgsnd ",
 			"fallback=baseline_allow") &&
 	       line_has(events, "event=ipc_msgsnd ",
+			"enforcement=active") &&
+	       line_has(events, "event=ipc_msgsnd ",
 			"subject_class=process") &&
 	       line_has(events, "event=ipc_msgsnd ",
 			"object_class=ipc"));
+	result("enforcement_inventory",
+	       line_has(events, "event=socket_connect_access ",
+			"enforcement=announced") &&
+	       read_file("/sys/kernel/security/medusa/classes",
+			 classes, sizeof(classes)) &&
+	       line_has(classes, "class=process ", "enforcement=active") &&
+	       line_has(classes, "class=ipc ", "enforcement=active") &&
+	       line_has(classes, "class=socket ",
+			"enforcement=announced"));
 	result("status_root_only", securityfs_is_root_only());
+	cache_probe = fork();
+	if (cache_probe == 0) {
+		execl("/sbin/medusa-test-helper", "medusa-test-helper",
+		      "--cache-probe", NULL);
+		_exit(127);
+	}
+	cache_probe_status = -1;
+	if (cache_probe > 0)
+		waitpid(cache_probe, &cache_probe_status, 0);
+	result("cache_accounting",
+	       cache_probe > 0 && WIFEXITED(cache_probe_status) &&
+	       WEXITSTATUS(cache_probe_status) == EXIT_SUCCESS &&
+	       read_file("/sys/kernel/security/medusa/events",
+			 events, sizeof(events)) &&
+	       event_counter(events, "event=pexec ", "evaluations") >= 1 &&
+	       event_counter(events, "event=pexec ", "cached") >= 1);
 	securityfs_reader_count =
 		start_securityfs_readers(securityfs_readers);
 

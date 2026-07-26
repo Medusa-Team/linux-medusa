@@ -496,6 +496,12 @@ inline bool med_is_authserver_present(void)
 	return !!authserver;
 }
 
+void medusa_event_set_enforced(struct medusa_evtype_s *evtype)
+{
+	if (evtype)
+		WRITE_ONCE(evtype->enforced, true);
+}
+
 /**
  * medusa_registry_status_snapshot - copy authorization-server state safely
  * @status: caller-provided snapshot
@@ -584,8 +590,13 @@ int medusa_registry_events_seq_show(struct seq_file *m)
 			   event->name, event->arg_kclass[0]->name,
 			   event->arg_kclass[1]->name,
 			   event->bitnr & MASK_BITNR);
-		seq_printf(m, " trigger=%s trigger_bitmap=%s fallback=%s",
-			   trigger, trigger_bitmap, fallback);
+		seq_printf(m, " enforcement=%s trigger=%s trigger_bitmap=%s",
+			   READ_ONCE(event->enforced) ? "active" : "announced",
+			   trigger, trigger_bitmap);
+		seq_printf(m, " fallback=%s evaluations=%llu cached=%llu",
+			   fallback,
+			   (unsigned long long)counters.evaluations,
+			   (unsigned long long)counters.cached);
 		seq_printf(m, " decisions=%llu delegated=%llu baseline=%llu",
 			   (unsigned long long)counters.total,
 			   (unsigned long long)counters.delegated,
@@ -600,6 +611,44 @@ int medusa_registry_events_seq_show(struct seq_file *m)
 		seq_printf(m, " degraded_decisions=%llu\n",
 			   (unsigned long long)
 				medusa_degraded_decision_count(event));
+	}
+	mutex_unlock(&registry_lock);
+
+	return 0;
+}
+
+/**
+ * medusa_registry_classes_seq_show - emit announced and enforced class state
+ * @m: destination seq_file
+ *
+ * A class is active when at least one active event consumes it as either its
+ * subject or object. Count each event once even when both arguments use the
+ * same class.
+ */
+int medusa_registry_classes_seq_show(struct seq_file *m)
+{
+	struct medusa_kclass_s *class;
+	struct medusa_evtype_s *event;
+
+	mutex_lock(&registry_lock);
+	for (class = kclasses; class; class = class->next) {
+		unsigned int announced_events = 0;
+		unsigned int enforced_events = 0;
+
+		for (event = evtypes; event; event = event->next) {
+			if (event->arg_kclass[0] != class &&
+			    event->arg_kclass[1] != class)
+				continue;
+			announced_events++;
+			if (READ_ONCE(event->enforced))
+				enforced_events++;
+		}
+
+		seq_printf(m,
+			   "class=%s enforcement=%s announced_events=%u enforced_events=%u\n",
+			   class->name,
+			   enforced_events ? "active" : "announced",
+			   announced_events, enforced_events);
 	}
 	mutex_unlock(&registry_lock);
 

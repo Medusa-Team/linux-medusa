@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 75 tests in eleven suites:
+The KUnit configuration runs 76 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -34,6 +34,7 @@ The KUnit configuration runs 75 tests in eleven suites:
   observability names;
 * per-event final-verdict attribution, unsigned counter wrap, and cumulative
   protocol-counter snapshots;
+* monitoring-bit evaluation, kernel-cache hit, and enforced-event accounting;
 * stable protocol-error audit kind names.
 
 Pending decision engine
@@ -100,7 +101,7 @@ refresh.
 Read-only securityfs observability
 ----------------------------------
 
-When Medusa is enabled it creates two root-readable files:
+When Medusa is enabled it creates three root-readable files:
 
 ``/sys/kernel/security/medusa/status``
   Reports the running kernel and protocol versions; disconnected, handshaking,
@@ -110,20 +111,31 @@ When Medusa is enabled it creates two root-readable files:
   invalid-answer, unknown-command, unknown-request, and stale-request counts.
 
 ``/sys/kernel/security/medusa/events``
-  Reports every announced event with its subject and object classes, runtime
-  trigger bit and bitmap owner, installed fallback policy, and cumulative
-  central-engine totals for delegation, baseline and online-required verdicts,
-  allow, deny, lease timeout, invalid reply, and degraded fallback.
+  Reports every announced event, whether an installed hook or required
+  validation path actively reaches it, its subject and object classes, runtime
+  trigger bit and bitmap owner, installed fallback policy, monitoring-bit
+  evaluations and cache hits, and cumulative central-engine totals for
+  delegation, baseline and online-required verdicts, allow, deny, lease
+  timeout, invalid reply, and degraded fallback.
 
-Both files have mode ``0400`` and no write operation.  The status snapshot
+``/sys/kernel/security/medusa/classes``
+  Reports every announced object class, whether an active event consumes it,
+  and its announced and actively reachable event counts.
+
+All three files have mode ``0400`` and no write operation.  The status snapshot
 takes an authorization-server reference while holding the registry lock, then
 queries optional health callbacks only after releasing that lock.  Event
 records are generated while the registry is locked so unregister cannot leave
 a dangling definition in a partial line.  Medusa's own delegated ``file_open``
-path exempts these two diagnostic files so an outage cannot hide its state;
+path exempts these three diagnostic files so an outage cannot hide its state;
 normal VFS permissions and other stacked LSMs still apply.  Protocol-v3 event
 names and runtime trigger bits are descriptive rather than stable numeric
-identities.
+identities.  Event ``cached`` counts are the exact monitoring-bit cache hits
+that bypass the central engine.  Virtual-space denials and validation failures
+that return before that check are deliberately not mislabelled as cache hits.
+The QEMU lifecycle scenario proves that ``ipc_msgsnd`` and the process and IPC
+classes are active, socket policy remains announcement-only, and an unmonitored
+``pexec`` is counted as a cached evaluation.
 
 Protocol-error audit
 --------------------

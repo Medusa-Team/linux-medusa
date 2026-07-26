@@ -183,6 +183,7 @@ struct medusa_evtype_s {
 				 * monitoring of this evtype. The value is
 				 * OR'd with these flags:
 				 */
+	bool enforced;
 	enum medusa_fallback_policy fallback_policy;
 	struct medusa_decision_counters decision_counters;
 	atomic64_t degraded_decisions;
@@ -208,10 +209,13 @@ struct medusa_evtype_s {
 
 /* is the event monitored (at object) ? */
 #define MEDUSA_MONITORED_EVENT_O(evname, kobjptr) \
-	___MEDUSA_EVENTOP(evname, kobjptr, act_testbit, bitnr & MASK_BITNR, object)
+	medusa_event_monitoring_check(&MED_EVTYPEOF(evname), \
+		___MEDUSA_EVENTOP(evname, kobjptr, act_testbit, \
+				 bitnr & MASK_BITNR, object))
 /* is the event monitored (at subject) ? */
 #define MEDUSA_MONITORED_EVENT_S(evname, kobjptr) \
-	___MEDUSA_EVENTOP(evname, kobjptr, act_testbit, bitnr, subject)
+	medusa_event_monitoring_check(&MED_EVTYPEOF(evname), \
+		___MEDUSA_EVENTOP(evname, kobjptr, act_testbit, bitnr, subject))
 /* set the event monitoring at object */
 #define MEDUSA_MONITOR_EVENT_O(evname, kobjptr) \
 	___MEDUSA_EVENTOP(evname, kobjptr, act_setbit, bitnr & MASK_BITNR, object)
@@ -256,6 +260,7 @@ struct medusa_evtype_s {
 #define MEDUSA_DEFAULT_EVTYPE_HEADER \
 	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
+	false, \
 	MEDUSA_FALLBACK_BASELINE_ALLOW, \
 	{}, \
 	ATOMIC64_INIT(0), \
@@ -266,6 +271,7 @@ struct medusa_evtype_s {
 #define MEDUSA_DEFAULT_EVTYPE_HEADER \
 	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
+	false, \
 	MEDUSA_FALLBACK_BASELINE_ALLOW, \
 	{}, \
 	ATOMIC64_INIT(0), \

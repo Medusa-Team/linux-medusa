@@ -22,6 +22,73 @@
 /* Used by `medusa_l1_creds_for_exec` */
 bool trigger_loaded;
 
+#define MEDUSA_DECLARE_EVENT(name) \
+	extern struct medusa_evtype_s MED_EVTYPEOF(name)
+
+MEDUSA_DECLARE_EVENT(exec_faccess);
+MEDUSA_DECLARE_EVENT(exec_paccess);
+MEDUSA_DECLARE_EVENT(getprocess_event);
+MEDUSA_DECLARE_EVENT(getfile_event);
+MEDUSA_DECLARE_EVENT(ipc_event);
+MEDUSA_DECLARE_EVENT(truncate_access);
+MEDUSA_DECLARE_EVENT(fcntl_access);
+MEDUSA_DECLARE_EVENT(open_access);
+MEDUSA_DECLARE_EVENT(setresuid);
+MEDUSA_DECLARE_EVENT(ipc_perm_access);
+MEDUSA_DECLARE_EVENT(ipc_associate_access);
+MEDUSA_DECLARE_EVENT(ipc_ctl_access);
+MEDUSA_DECLARE_EVENT(ipc_msgsnd_access);
+MEDUSA_DECLARE_EVENT(ipc_msgrcv_access);
+MEDUSA_DECLARE_EVENT(ipc_shmat_access);
+MEDUSA_DECLARE_EVENT(ipc_semop_access);
+#ifdef CONFIG_SECURITY_PATH
+MEDUSA_DECLARE_EVENT(mknod_access);
+MEDUSA_DECLARE_EVENT(mkdir_access);
+MEDUSA_DECLARE_EVENT(rmdir_access);
+MEDUSA_DECLARE_EVENT(unlink_access);
+MEDUSA_DECLARE_EVENT(symlink_access);
+MEDUSA_DECLARE_EVENT(link_access);
+MEDUSA_DECLARE_EVENT(rename_access);
+MEDUSA_DECLARE_EVENT(chmod_access);
+MEDUSA_DECLARE_EVENT(chown_access);
+MEDUSA_DECLARE_EVENT(chroot_access);
+#endif
+
+#define MEDUSA_MARK_EVENT_ENFORCED(name) \
+	medusa_event_set_enforced(&MED_EVTYPEOF(name))
+
+static void __init medusa_mark_enforced_events(void)
+{
+	MEDUSA_MARK_EVENT_ENFORCED(exec_faccess);
+	MEDUSA_MARK_EVENT_ENFORCED(exec_paccess);
+	MEDUSA_MARK_EVENT_ENFORCED(getprocess_event);
+	MEDUSA_MARK_EVENT_ENFORCED(getfile_event);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_event);
+	MEDUSA_MARK_EVENT_ENFORCED(truncate_access);
+	MEDUSA_MARK_EVENT_ENFORCED(fcntl_access);
+	MEDUSA_MARK_EVENT_ENFORCED(open_access);
+	MEDUSA_MARK_EVENT_ENFORCED(setresuid);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_perm_access);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_associate_access);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_ctl_access);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_msgsnd_access);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_msgrcv_access);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_shmat_access);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_semop_access);
+#ifdef CONFIG_SECURITY_PATH
+	MEDUSA_MARK_EVENT_ENFORCED(mknod_access);
+	MEDUSA_MARK_EVENT_ENFORCED(mkdir_access);
+	MEDUSA_MARK_EVENT_ENFORCED(rmdir_access);
+	MEDUSA_MARK_EVENT_ENFORCED(unlink_access);
+	MEDUSA_MARK_EVENT_ENFORCED(symlink_access);
+	MEDUSA_MARK_EVENT_ENFORCED(link_access);
+	MEDUSA_MARK_EVENT_ENFORCED(rename_access);
+	MEDUSA_MARK_EVENT_ENFORCED(chmod_access);
+	MEDUSA_MARK_EVENT_ENFORCED(chown_access);
+	MEDUSA_MARK_EVENT_ENFORCED(chroot_access);
+#endif
+}
+
 // TODO remove unused l2 events?
 //medusa_create(dentry, mode)
 //medusa_readlink(dentry)
@@ -769,6 +836,7 @@ static int __init medusa_l1_init(void)
 {
 	/* set the security info for the task pid 0 on boot cpu (swapper) */
 	medusa_l1_task_alloc(current, 0);
+	medusa_mark_enforced_events();
 
 	/* register the hooks */
 	security_add_hooks(medusa_l1_hooks,

@@ -121,6 +121,8 @@ u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype)
 
 void medusa_decision_counters_init(struct medusa_evtype_s *evtype)
 {
+	atomic64_set(&evtype->decision_counters.evaluations, 0);
+	atomic64_set(&evtype->decision_counters.cached, 0);
 	atomic64_set(&evtype->decision_counters.total, 0);
 	atomic64_set(&evtype->decision_counters.delegated, 0);
 	atomic64_set(&evtype->decision_counters.baseline, 0);
@@ -134,6 +136,10 @@ void medusa_decision_counters_init(struct medusa_evtype_s *evtype)
 void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
 				       struct medusa_decision_counter_snapshot *snapshot)
 {
+	snapshot->evaluations =
+		atomic64_read(&evtype->decision_counters.evaluations);
+	snapshot->cached =
+		atomic64_read(&evtype->decision_counters.cached);
 	snapshot->total = atomic64_read(&evtype->decision_counters.total);
 	snapshot->delegated =
 		atomic64_read(&evtype->decision_counters.delegated);
@@ -148,6 +154,15 @@ void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
 		atomic64_read(&evtype->decision_counters.timed_out);
 	snapshot->invalid_replies =
 		atomic64_read(&evtype->decision_counters.invalid_replies);
+}
+
+bool medusa_event_monitoring_check(struct medusa_evtype_s *evtype,
+				   bool monitored)
+{
+	atomic64_inc(&evtype->decision_counters.evaluations);
+	if (!monitored)
+		atomic64_inc(&evtype->decision_counters.cached);
+	return monitored;
 }
 
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy)
