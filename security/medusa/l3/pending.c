@@ -32,9 +32,11 @@ int medusa_pending_request_register(struct medusa_pending_request *request,
 	int error = 0;
 
 	init_completion(&request->done);
+	init_waitqueue_head(&request->state_changed);
 	INIT_HLIST_NODE(&request->table_node);
 	request->answer = MED_ERR;
 	request->policy_generation = policy_generation;
+	request->lease_sequence = 0;
 	request->registered = false;
 
 	spin_lock(&pending_requests_lock);
@@ -89,6 +91,30 @@ int medusa_pending_request_complete(u64 id, u64 policy_generation,
 	pending_request_count--;
 	request->answer = answer;
 	complete(&request->done);
+	wake_up_all(&request->state_changed);
+out:
+	spin_unlock(&pending_requests_lock);
+	return error;
+}
+
+int medusa_pending_request_renew(u64 id, u64 policy_generation)
+{
+	struct medusa_pending_request *request;
+	int error = 0;
+
+	spin_lock(&pending_requests_lock);
+	request = find_pending_request(id);
+	if (!request) {
+		error = -ENOENT;
+		goto out;
+	}
+	if (request->policy_generation != policy_generation) {
+		error = -ESTALE;
+		goto out;
+	}
+
+	request->lease_sequence++;
+	wake_up_all(&request->state_changed);
 out:
 	spin_unlock(&pending_requests_lock);
 	return error;
@@ -99,6 +125,43 @@ medusa_pending_request_wait(struct medusa_pending_request *request)
 {
 	wait_for_completion(&request->done);
 	return request->answer;
+}
+
+int medusa_pending_request_wait_timeout(
+	struct medusa_pending_request *request, unsigned long timeout,
+	enum medusa_answer_t *answer)
+{
+	u64 lease_sequence;
+
+	for (;;) {
+		spin_lock(&pending_requests_lock);
+		if (!request->registered) {
+			*answer = request->answer;
+			spin_unlock(&pending_requests_lock);
+			return 0;
+		}
+		lease_sequence = request->lease_sequence;
+		spin_unlock(&pending_requests_lock);
+
+		if (wait_event_timeout(
+			    request->state_changed,
+			    !READ_ONCE(request->registered) ||
+			    READ_ONCE(request->lease_sequence) != lease_sequence,
+			    timeout))
+			continue;
+
+		spin_lock(&pending_requests_lock);
+		if (request->registered &&
+		    request->lease_sequence == lease_sequence) {
+			hlist_del_init(&request->table_node);
+			request->registered = false;
+			pending_request_count--;
+			spin_unlock(&pending_requests_lock);
+			*answer = MED_ERR;
+			return -ETIMEDOUT;
+		}
+		spin_unlock(&pending_requests_lock);
+	}
 }
 
 void medusa_pending_request_cancel_all(enum medusa_answer_t answer)
@@ -115,6 +178,7 @@ void medusa_pending_request_cancel_all(enum medusa_answer_t answer)
 		pending_request_count--;
 		request->answer = answer;
 		complete(&request->done);
+		wake_up_all(&request->state_changed);
 	}
 	spin_unlock(&pending_requests_lock);
 }

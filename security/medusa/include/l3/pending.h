@@ -13,9 +13,11 @@
 
 struct medusa_pending_request {
 	struct completion done;
+	wait_queue_head_t state_changed;
 	struct hlist_node table_node;
 	u64 id;
 	u64 policy_generation;
+	u64 lease_sequence;
 	enum medusa_answer_t answer;
 	bool registered;
 };
@@ -25,8 +27,12 @@ int medusa_pending_request_register(struct medusa_pending_request *request,
 void medusa_pending_request_unregister(struct medusa_pending_request *request);
 int medusa_pending_request_complete(u64 id, u64 policy_generation,
 				    enum medusa_answer_t answer);
+int medusa_pending_request_renew(u64 id, u64 policy_generation);
 enum medusa_answer_t
 medusa_pending_request_wait(struct medusa_pending_request *request);
+int medusa_pending_request_wait_timeout(
+	struct medusa_pending_request *request, unsigned long timeout,
+	enum medusa_answer_t *answer);
 void medusa_pending_request_cancel_all(enum medusa_answer_t answer);
 unsigned int medusa_pending_request_count(void);
 

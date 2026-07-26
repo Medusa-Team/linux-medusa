@@ -41,6 +41,7 @@
 
 #include "l1/task.h"
 #include "l3/arch.h"
+#include "l3/health.h"
 #include "l3/registry.h"
 #include "l3/server.h"
 #include "l3/med_cache.h"
@@ -61,6 +62,8 @@ static struct teleport_s teleport = {
 
 /* constable, our brave userspace daemon */
 static atomic_t constable_present = ATOMIC_INIT(0);
+static struct medusa_server_health constable_health =
+	MEDUSA_SERVER_HEALTH_INIT;
 static struct task_struct *constable;
 static struct task_struct *gdb;
 static DEFINE_SEMAPHORE(constable_openclose, 1);
@@ -117,21 +120,19 @@ static pid_t gdb_pid = -1;
 
 static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		struct medusa_kobject_s *o1,
-		struct medusa_kobject_s *o2);
+		struct medusa_kobject_s *o2, bool *authserver_contacted);
 static int l4_add_kclass(struct medusa_kclass_s *cl);
 static int l4_add_evtype(struct medusa_evtype_s *at);
 static void l4_close_wake(void);
+static bool l4_is_healthy(void);
 
 static struct medusa_authserver_s chardev_medusa = {
-	MODULENAME,
-	0,	/* use-count */
-	NULL,	/* struct pid *tgid */
-	l4_close_wake,		/* close */
-	l4_add_kclass,		/* add_kclass */
-	NULL,			/* del_kclass */
-	l4_add_evtype,		/* add_evtype */
-	NULL,			/* del_evtype */
-	l4_decide		/* decide */
+	.name = MODULENAME,
+	.close = l4_close_wake,
+	.add_kclass = l4_add_kclass,
+	.add_evtype = l4_add_evtype,
+	.decide = l4_decide,
+	.is_healthy = l4_is_healthy,
 };
 
 /*
@@ -168,6 +169,25 @@ static bool l4_cannot_wait(void)
 		return true;
 #endif
 	return false;
+}
+
+static bool l4_is_healthy(void)
+{
+	return medusa_server_health_is_healthy(&constable_health);
+}
+
+static void l4_mark_unhealthy(enum medusa_health_reason reason)
+{
+	if (medusa_server_health_mark_unhealthy(&constable_health, reason))
+		med_pr_warn("authorization server circuit breaker opened, reason=%d\n",
+			    reason);
+
+	/*
+	 * Wake every slow-path caller so each event can apply its own installed
+	 * fallback. New calls are rejected by is_healthy().
+	 */
+	medusa_pending_request_cancel_all(MED_ERR);
+	wake_up_all(&userspace_chardev);
 }
 
 static void l4_close_wake(void)
@@ -295,7 +315,8 @@ static int l4_add_evtype(struct medusa_evtype_s *at)
  * the performance improvement, and buy one more CPU in advance :)
  */
 static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
-		struct medusa_kobject_s *o1, struct medusa_kobject_s *o2)
+		struct medusa_kobject_s *o1, struct medusa_kobject_s *o2,
+		bool *authserver_contacted)
 {
 	enum medusa_answer_t retval;
 	struct medusa_pending_request pending;
@@ -304,6 +325,8 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	char debug_cmdline[1024];
 	u64 policy_generation;
 	int error;
+
+	*authserver_contacted = false;
 
 	/*
 	 * A userspace decision blocks.  Some legacy hooks can reach this layer
@@ -358,6 +381,8 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		med_cache_free(local_tele_item);
 		up_read(&lightswitch);
 		med_pr_err("%s: pending request error: %d\n", __func__, error);
+		if (error == -ENOSPC)
+			l4_mark_unhealthy(MEDUSA_HEALTH_OVERLOADED);
 		return MED_ERR;
 	}
 
@@ -416,7 +441,13 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 
 	up_read(&lightswitch);
 	wake_up(&userspace_chardev);
-	retval = medusa_pending_request_wait(&pending);
+	*authserver_contacted = true;
+	error = medusa_pending_request_wait_timeout(
+		&pending,
+		msecs_to_jiffies(CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS),
+		&retval);
+	if (error == -ETIMEDOUT)
+		l4_mark_unhealthy(MEDUSA_HEALTH_DECISION_TIMEOUT);
 
 	/*
 	 * We might be called with the IPC ids->rwsem held (from IPC security
@@ -426,7 +457,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	 *            lightswitch)!.
 	 */
 	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
-	if (atomic_read(&constable_present) &&
+	if (retval != MED_ERR && atomic_read(&constable_present) &&
 	    policy_generation == (u64)READ_ONCE(medusa_authserver_magic))
 		atomic_dec(&questions_waiting);
 	if (retval != MED_ERR) {
@@ -791,6 +822,27 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		med_pr_debug("answer received for %llx\n",
 			     id);
 
+	} else if (recv_type == MEDUSA_COMM_AUTHREQUEST_PROGRESS) {
+		if (count != MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE) {
+			up_read(&lightswitch);
+			return -EMSGSIZE;
+		}
+		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t))) {
+			up_read(&lightswitch);
+			return -EFAULT;
+		}
+
+		id = get_unaligned((u64 *)recv_buf);
+		gen = (u64)READ_ONCE(medusa_authserver_magic);
+		answ_result = medusa_pending_request_renew(id, gen);
+		if (answ_result) {
+			up_read(&lightswitch);
+			med_pr_err("decision_progress: invalid request %llx: %d\n",
+				   id, answ_result);
+			return answ_result;
+		}
+		med_pr_debug("decision lease renewed for %llx\n", id);
+
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t)*2)) {
@@ -922,12 +974,16 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		wake_up(&userspace_chardev);
 	} else if (recv_type == MEDUSA_COMM_READY_ANSWER) {
 		/* register auth server */
+		medusa_server_health_mark_healthy(&constable_health);
 		if (med_register_authserver(&chardev_medusa) < 0) {
+			medusa_server_health_mark_unhealthy(
+				&constable_health, MEDUSA_HEALTH_DISCONNECTED);
 			med_pr_warn("Failed to register auth server: "
 				    "no decision request will be send to it!");
 			up_read(&lightswitch);
 			return -EPERM;
 		}
+		med_pr_info("authorization server circuit breaker closed\n");
 		set_auth_server_ready();
 	} else {
 		med_pr_err("Protocol error at write(): unknown command %llx!\n",
@@ -980,6 +1036,8 @@ static int user_open(struct inode *inode, struct file *file)
 	down(&constable_openclose);
 	if (atomic_read(&constable_present))
 		goto out;
+	medusa_server_health_mark_unhealthy(
+		&constable_health, MEDUSA_HEALTH_DISCONNECTED);
 
 	retval = -ENOMEM;
 	if (med_cache_register(sizeof(struct tele_item)))
@@ -1124,6 +1182,8 @@ static int user_release(struct inode *inode, struct file *file)
 	// All threads waiting for an answer will get an error, order of these
 	// functions is important!
 	atomic_set(&constable_present, 0);
+	medusa_server_health_mark_unhealthy(
+		&constable_health, MEDUSA_HEALTH_DISCONNECTED);
 	put_pid(chardev_medusa.tgid);
 	chardev_medusa.tgid = NULL;
 	constable = NULL;

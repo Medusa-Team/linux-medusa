@@ -29,6 +29,7 @@ enum medusa_unavailable_reason {
 	MEDUSA_AVAILABLE,
 	MEDUSA_NO_AUTH_SERVER,
 	MEDUSA_AUTH_SERVER_UNREACHABLE,
+	MEDUSA_AUTH_SERVER_UNHEALTHY,
 };
 
 struct medusa_decision_result {

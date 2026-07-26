@@ -27,8 +27,10 @@ static int fake_add_evtype(struct medusa_evtype_s *evtype)
 
 static enum medusa_answer_t fake_decide(struct medusa_event_s *event,
 					struct medusa_kobject_s *subject,
-					struct medusa_kobject_s *object)
+					struct medusa_kobject_s *object,
+					bool *authserver_contacted)
 {
+	*authserver_contacted = true;
 	return MED_ALLOW;
 }
 

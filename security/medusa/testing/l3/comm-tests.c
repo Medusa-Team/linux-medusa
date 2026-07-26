@@ -10,6 +10,7 @@ static int decide_calls;
 static int close_calls;
 static int subject_unmonitor_calls;
 static int object_unmonitor_calls;
+static bool server_healthy;
 
 static void fake_close(void)
 {
@@ -18,10 +19,17 @@ static void fake_close(void)
 
 static enum medusa_answer_t fake_decide(struct medusa_event_s *event,
 					struct medusa_kobject_s *subject,
-					struct medusa_kobject_s *object)
+					struct medusa_kobject_s *object,
+					bool *authserver_contacted)
 {
+	*authserver_contacted = true;
 	decide_calls++;
 	return delegated_answer;
+}
+
+static bool fake_is_healthy(void)
+{
+	return server_healthy;
 }
 
 static void fake_subject_unmonitor(struct medusa_kobject_s *object)
@@ -57,6 +65,7 @@ static struct medusa_authserver_s fake_server = {
 	.name = "kunit-comm",
 	.close = fake_close,
 	.decide = fake_decide,
+	.is_healthy = fake_is_healthy,
 };
 
 static int comm_test_init(struct kunit *test)
@@ -65,6 +74,7 @@ static int comm_test_init(struct kunit *test)
 	object_unmonitor_calls = 0;
 	decide_calls = 0;
 	delegated_answer = MED_ALLOW;
+	server_healthy = true;
 	KUNIT_ASSERT_EQ(test, 0,
 			medusa_set_fallback_policy(
 				&test_event_type,
@@ -215,6 +225,29 @@ static void online_required_denies_when_server_is_unreachable(struct kunit *test
 				MEDUSA_AUTH_SERVER_UNREACHABLE);
 }
 
+static void unhealthy_server_uses_baseline_without_contact(struct kunit *test)
+{
+	struct medusa_event_s event = {};
+	struct medusa_kobject_s subject;
+	struct medusa_kobject_s object;
+	struct medusa_decision_result result;
+	int register_result;
+
+	server_healthy = false;
+	register_result = med_register_authserver(&fake_server);
+	KUNIT_ASSERT_EQ(test, 0, register_result);
+
+	result = med_decide_result(&test_event_type, &event, &subject, &object);
+	med_unregister_authserver(&fake_server);
+
+	KUNIT_EXPECT_EQ(test, MED_ALLOW, result.answer);
+	KUNIT_EXPECT_EQ(test, MEDUSA_DECISION_BASELINE, result.source);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTH_SERVER_UNHEALTHY,
+			result.unavailable);
+	KUNIT_EXPECT_FALSE(test, result.authserver_contacted);
+	KUNIT_EXPECT_EQ(test, 0, decide_calls);
+}
+
 static void decide_denies_unsupported_server_answer(struct kunit *test)
 {
 	expect_delegated_answer(test, (enum medusa_answer_t)2, MED_DENY,
@@ -277,6 +310,22 @@ static void protocol_rejects_stale_request_id(struct kunit *test)
 		request_pending));
 }
 
+static void protocol_validates_decision_progress(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test, 0,
+			medusa_comm_validate_authrequest_progress(
+				MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE,
+				true));
+	KUNIT_EXPECT_EQ(test, -EMSGSIZE,
+			medusa_comm_validate_authrequest_progress(
+				MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE - 1,
+				true));
+	KUNIT_EXPECT_EQ(test, -ENOENT,
+			medusa_comm_validate_authrequest_progress(
+				MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE,
+				false));
+}
+
 static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(decide_without_server_uses_baseline_and_preserves_monitoring),
 	KUNIT_CASE(baseline_deny_is_enforced_without_server),
@@ -286,6 +335,7 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(decide_propagates_deny),
 	KUNIT_CASE(decide_uses_baseline_when_server_is_unreachable),
 	KUNIT_CASE(online_required_denies_when_server_is_unreachable),
+	KUNIT_CASE(unhealthy_server_uses_baseline_without_contact),
 	KUNIT_CASE(decide_denies_unsupported_server_answer),
 	KUNIT_CASE(fallback_policy_rejects_invalid_values),
 	KUNIT_CASE(protocol_accepts_supported_answers),
@@ -293,6 +343,7 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(protocol_rejects_unknown_answer_code),
 	KUNIT_CASE(protocol_rejects_unknown_request_id),
 	KUNIT_CASE(protocol_rejects_stale_request_id),
+	KUNIT_CASE(protocol_validates_decision_progress),
 	{}
 };
 

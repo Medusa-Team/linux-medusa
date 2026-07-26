@@ -47,6 +47,8 @@ const char *medusa_audit_unavailable_name(enum medusa_unavailable_reason reason)
 		return "no_auth_server";
 	case MEDUSA_AUTH_SERVER_UNREACHABLE:
 		return "auth_server_unreachable";
+	case MEDUSA_AUTH_SERVER_UNHEALTHY:
+		return "auth_server_unhealthy";
 	default:
 		return "invalid";
 	}

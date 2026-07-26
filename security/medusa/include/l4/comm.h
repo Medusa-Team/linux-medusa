@@ -29,6 +29,7 @@ typedef uint64_t MCPptr_t; // medusa common protocol pointer type this is here b
 
 #define MEDUSA_COMM_AUTHREQUEST		0x01	/* k->c */
 #define MEDUSA_COMM_AUTHANSWER		0x81	/* c->k */
+#define MEDUSA_COMM_AUTHREQUEST_PROGRESS 0x82	/* c->k */
 
 #define MEDUSA_COMM_KCLASSDEF		0x02	/* k->c */
 #define MEDUSA_COMM_KCLASSUNDEF		0x03	/* k->c */

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include <kunit/test.h>
+#include <linux/workqueue.h>
 
 #include "l3/pending.h"
 
@@ -128,12 +129,126 @@ static void pending_request_table_is_bounded(struct kunit *test)
 				medusa_pending_request_wait(request_list[index]));
 }
 
+static void pending_request_timeout_removes_request(struct kunit *test)
+{
+	struct medusa_pending_request request;
+	enum medusa_answer_t answer = MED_ALLOW;
+
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_register(&request, 23));
+	KUNIT_EXPECT_EQ(test, -ETIMEDOUT,
+			medusa_pending_request_wait_timeout(&request, 1,
+							    &answer));
+	KUNIT_EXPECT_EQ(test, MED_ERR, answer);
+	KUNIT_EXPECT_EQ(test, 0U, medusa_pending_request_count());
+	KUNIT_EXPECT_EQ(test, -ENOENT,
+			medusa_pending_request_complete(request.id, 23,
+							MED_ALLOW));
+}
+
+static void pending_request_lease_can_be_renewed(struct kunit *test)
+{
+	struct medusa_pending_request request;
+
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_register(&request, 31));
+	KUNIT_EXPECT_EQ(test, 0ULL, request.lease_sequence);
+	KUNIT_EXPECT_EQ(test, 0,
+			medusa_pending_request_renew(request.id, 31));
+	KUNIT_EXPECT_EQ(test, 1ULL, request.lease_sequence);
+	KUNIT_EXPECT_EQ(test, -ESTALE,
+			medusa_pending_request_renew(request.id, 30));
+	KUNIT_EXPECT_EQ(test, 1ULL, request.lease_sequence);
+	KUNIT_EXPECT_EQ(test, -ENOENT,
+			medusa_pending_request_renew(0xdeadbeefULL, 31));
+
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_complete(request.id, 31,
+							MED_ALLOW));
+	KUNIT_EXPECT_EQ(test, MED_ALLOW,
+			medusa_pending_request_wait(&request));
+}
+
+struct pending_lease_test_work {
+	struct delayed_work renew;
+	struct delayed_work complete;
+	struct medusa_pending_request *request;
+	u64 policy_generation;
+};
+
+static void pending_lease_renew_work(struct work_struct *work)
+{
+	struct pending_lease_test_work *test_work =
+		container_of(to_delayed_work(work),
+			     struct pending_lease_test_work, renew);
+
+	medusa_pending_request_renew(test_work->request->id,
+				     test_work->policy_generation);
+}
+
+static void pending_lease_complete_work(struct work_struct *work)
+{
+	struct pending_lease_test_work *test_work =
+		container_of(to_delayed_work(work),
+			     struct pending_lease_test_work, complete);
+
+	medusa_pending_request_complete(test_work->request->id,
+					test_work->policy_generation,
+					MED_ALLOW);
+}
+
+static void pending_request_renewal_extends_wait(struct kunit *test)
+{
+	struct medusa_pending_request request;
+	struct pending_lease_test_work test_work = {
+		.request = &request,
+		.policy_generation = 37,
+	};
+	enum medusa_answer_t answer = MED_ERR;
+	unsigned long lease = msecs_to_jiffies(200);
+
+	INIT_DELAYED_WORK(&test_work.renew, pending_lease_renew_work);
+	INIT_DELAYED_WORK(&test_work.complete, pending_lease_complete_work);
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_register(
+				&request, test_work.policy_generation));
+
+	schedule_delayed_work(&test_work.renew, msecs_to_jiffies(150));
+	schedule_delayed_work(&test_work.complete, msecs_to_jiffies(300));
+	KUNIT_EXPECT_EQ(test, 0,
+			medusa_pending_request_wait_timeout(&request, lease,
+							    &answer));
+	KUNIT_EXPECT_EQ(test, MED_ALLOW, answer);
+	cancel_delayed_work_sync(&test_work.renew);
+	cancel_delayed_work_sync(&test_work.complete);
+}
+
+static void pending_completed_request_beats_timeout(struct kunit *test)
+{
+	struct medusa_pending_request request;
+	enum medusa_answer_t answer = MED_ERR;
+
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_register(&request, 29));
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_complete(request.id, 29,
+							MED_DENY));
+	KUNIT_EXPECT_EQ(test, 0,
+			medusa_pending_request_wait_timeout(&request, 1,
+							    &answer));
+	KUNIT_EXPECT_EQ(test, MED_DENY, answer);
+}
+
 static struct kunit_case pending_test_cases[] = {
 	KUNIT_CASE(pending_requests_have_independent_ids_and_answers),
 	KUNIT_CASE(pending_request_rejects_wrong_generation),
 	KUNIT_CASE(pending_request_rejects_unknown_and_duplicate_replies),
 	KUNIT_CASE(pending_disconnect_completes_all_requests),
 	KUNIT_CASE(pending_request_table_is_bounded),
+	KUNIT_CASE(pending_request_timeout_removes_request),
+	KUNIT_CASE(pending_request_lease_can_be_renewed),
+	KUNIT_CASE(pending_request_renewal_extends_wait),
+	KUNIT_CASE(pending_completed_request_beats_timeout),
 	{}
 };
 

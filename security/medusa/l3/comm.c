@@ -101,6 +101,15 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	}
 	mutex_unlock(&registry_lock);
 
+	if (authserver->is_healthy && !authserver->is_healthy()) {
+		med_pr_warn_ratelimited("authorization server unhealthy, using fallback for event '%s'\n",
+				       evtype->name);
+		med_put_authserver(authserver);
+		return medusa_fallback_result(evtype,
+					      MEDUSA_AUTH_SERVER_UNHEALTHY,
+					      false);
+	}
+
 	((struct medusa_event_s *)event)->evtype_id = evtype;
 	if (task_tgid(current) == authserver->tgid) {
 		med_pr_info("med_decide for Constable for event %s(%s:%s->%s:%s)\n",
@@ -108,10 +117,11 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 			   evtype->arg_name[0], evtype->arg_kclass[0]->name,
 			   evtype->arg_name[1], evtype->arg_kclass[1]->name);
 	}
-	result.answer = authserver->decide(event, o1, o2);
+	result.authserver_contacted = false;
+	result.answer = authserver->decide(event, o1, o2,
+					   &result.authserver_contacted);
 	result.source = MEDUSA_DECISION_AUTH_SERVER;
 	result.unavailable = MEDUSA_AVAILABLE;
-	result.authserver_contacted = true;
 	if (!is_authserver_reached(result.answer)) {
 		result = medusa_fallback_result(evtype,
 					       MEDUSA_AUTH_SERVER_UNREACHABLE,

@@ -1,0 +1,11 @@
+MEDUSA_RESULT degraded startup PASS
+MEDUSA_RESULT degraded connected_delegation PASS
+MEDUSA_RESULT degraded constable_frozen PASS
+MEDUSA_RESULT degraded timeout_fallback PASS
+MEDUSA_RESULT degraded breaker_fast_fallback PASS
+MEDUSA_RESULT degraded reconnect PASS
+MEDUSA_RESULT degraded delegation_recovered PASS
+authorization server circuit breaker opened, reason=2
+Medusa: op=msgsnd ans=ALLOW as_request=1 decision_source=baseline unavailable=auth_server_unreachable
+Medusa: op=msgsnd ans=ALLOW as_request=0 decision_source=baseline unavailable=auth_server_unhealthy
+!MEDUSA_QEMU_FAIL degraded

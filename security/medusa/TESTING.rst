@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 53 tests in ten suites:
+The KUnit configuration runs 60 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -24,7 +24,9 @@ The KUnit configuration runs 53 tests in ten suites:
 * decision-source, authorization-server contact, and unavailability audit
   metadata;
 * independent pending-request IDs, out-of-order replies, policy generations,
-  duplicate and unknown replies, bounded capacity, and disconnect cleanup.
+  duplicate and unknown replies, bounded capacity, disconnect cleanup,
+  timeout races, and renewable liveness leases;
+* authorization-server health and circuit-breaker transitions.
 
 Pending decision engine
 -----------------------
@@ -36,6 +38,24 @@ bounded global table permits 1,024 concurrent requests.  Completion removes
 the request before waking its waiter, so unknown, duplicate, and stale-
 generation replies cannot complete a different request.  Disconnect removes
 and completes every remaining request with ``MED_ERR``.
+
+Renewable decision leases
+-------------------------
+
+The five-second decision interval is a liveness lease, not a maximum decision
+duration.  Protocol command ``MEDUSA_COMM_AUTHREQUEST_PROGRESS`` renews the
+lease of one pending request by its 64-bit request ID.  Constable exposes
+``mcp_renew_authrequest()`` so an interactive handler can renew before each
+lease expires while it waits for a human decision.  Renewal carries no
+verdict and cannot alter installed policy.
+
+If a request is silent for a complete lease, the pending request is removed
+and the authorization server's circuit breaker opens.  Existing waiters wake
+and apply their event-specific installed fallback; unrelated new operations
+immediately use their own installed fallback without filling the pending
+table.  A new Constable registration closes the breaker.  Lease duration is
+configured by ``CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS`` and defaults to
+5,000 milliseconds.
 
 Unavailable decision fallback
 -----------------------------
@@ -56,7 +76,9 @@ follow-up work.
 
 Protocol v3 carries the complete request ID on the supported x86-64 migration
 target.  Fixed-width, architecture-independent framing remains protocol-v4
-work.
+work.  The progress command is an optional extension to protocol v3;
+automatic feature negotiation remains protocol-v4 work, so old kernels must
+not be sent progress frames.
 
 Sleeping and SysV IPC
 ---------------------
@@ -77,8 +99,8 @@ QEMU scenario coverage
 ----------------------
 
 ``cache``
-  Demonstrates one delegated ``mkdir`` followed by a kernel-cached decision
-  after Constable clears the directory monitoring bit.
+  Demonstrates one delegated ``ipc_msgsnd`` followed by a kernel-cached
+  decision after Constable clears the message queue's monitoring bit.
 
 ``access``
   Exercises create/open/write/fcntl/chmod/chown/truncate, symlink/link/rename/
@@ -95,6 +117,14 @@ QEMU scenario coverage
   registration, enforcement of a reloaded deny policy, positive audit output
   for a server-requested IPC operation, and preserved kernel monitoring state
   across the disconnect.
+
+``degraded``
+  Freezes Constable after proving a delegated denial, verifies that one
+  request waits for a full lease and uses baseline allow, verifies that the
+  open circuit immediately applies the same installed baseline to the next
+  request, and checks the decision-source and unavailability audit metadata.
+  It then terminates the frozen server, registers a replacement, and proves
+  that delegated denial is restored.
 
 ``stacking.config``
   Enables AppArmor before Medusa in ``CONFIG_LSM``.  The ``stacking`` scenario
@@ -163,9 +193,6 @@ not prove a delegated ``fork`` decision.
 Known defects kept separate from expected behaviour
 ---------------------------------------------------
 
-* If an object or process is validated while no authorization server exists,
-  the current fail-open path marks it permanently unmonitored.  A later server
-  generation does not automatically re-monitor it.
 * Re-associating with an existing message queue, semaphore set, or shared
   memory object returns ``EACCES`` even when ``ipc_perm`` is allowed.
   ``ipc_associate`` is not observed.

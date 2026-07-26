@@ -11,6 +11,7 @@
 
 #define MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE \
 	(sizeof(MCPptr_t) + sizeof(s16))
+#define MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE sizeof(MCPptr_t)
 
 static inline int medusa_comm_validate_authanswer(size_t payload_size,
 						   s16 answer,
@@ -20,6 +21,16 @@ static inline int medusa_comm_validate_authanswer(size_t payload_size,
 		return -EMSGSIZE;
 	if (answer != MED_ALLOW && answer != MED_DENY && answer != MED_ERR)
 		return -EINVAL;
+	if (!request_pending)
+		return -ENOENT;
+	return 0;
+}
+
+static inline int medusa_comm_validate_authrequest_progress(size_t payload_size,
+							     bool request_pending)
+{
+	if (payload_size != MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE)
+		return -EMSGSIZE;
 	if (!request_pending)
 		return -ENOENT;
 	return 0;
