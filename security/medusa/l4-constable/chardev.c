@@ -34,7 +34,9 @@
 #include <linux/sched/signal.h>
 #include <linux/device.h>
 #include <linux/poll.h>
+#include <linux/preempt.h>
 #include <linux/rwsem.h>
+#include <linux/unaligned.h>
 #include <linux/mm.h>
 
 #include "l1/task.h"
@@ -42,6 +44,7 @@
 #include "l3/registry.h"
 #include "l3/server.h"
 #include "l3/med_cache.h"
+#include "l3/pending.h"
 #include "l4/auth_server.h"
 #include "l4/comm.h"
 #include "l4/protocol.h"
@@ -79,9 +82,6 @@ static atomic_t announce_ready = ATOMIC_INIT(0);
 /* a question from kernel to constable */
 static atomic_t questions = ATOMIC_INIT(0);
 static atomic_t questions_waiting = ATOMIC_INIT(0);
-/* idr for storing answer ids */
-static DEFINE_SPINLOCK(answer_ids_idr_lock);
-static DEFINE_IDR(answer_ids_idr);
 
 static DECLARE_WAIT_QUEUE_HEAD(close_wait);
 
@@ -157,6 +157,17 @@ static int am_i_constable(void)
 	rcu_read_unlock();
 
 	return 0;
+}
+
+static bool l4_cannot_wait(void)
+{
+	if (!in_task() || preempt_count() || irqs_disabled())
+		return true;
+#ifdef CONFIG_DEBUG_ATOMIC_SLEEP
+	if (current->non_block_count)
+		return true;
+#endif
+	return false;
 }
 
 static void l4_close_wake(void)
@@ -287,14 +298,24 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 		struct medusa_kobject_s *o1, struct medusa_kobject_s *o2)
 {
 	enum medusa_answer_t retval;
+	struct medusa_pending_request pending;
 	struct teleport_insn_s *tele_mem_decide;
 	struct tele_item *local_tele_item;
-	int answer_id;
 	char debug_cmdline[1024];
+	u64 policy_generation;
+	int error;
 
-	if (!in_task()) {
-		/* houston, we have a problem! */
-		med_pr_err("%s called from interrupt context :(\n", __func__);
+	/*
+	 * A userspace decision blocks.  Some legacy hooks can reach this layer
+	 * while preemption or interrupts are disabled, especially SysV IPC on
+	 * UP kernels where a non-debug spinlock has no inspectable owner.
+	 * Refuse the slow path here rather than scheduling from atomic context.
+	 * The decision engine will eventually resolve MED_ERR through the
+	 * installed kernel baseline policy.
+	 */
+	if (l4_cannot_wait()) {
+		med_pr_warn_ratelimited("%s: cannot delegate '%s' from non-sleepable context\n",
+				       __func__, event->evtype_id->name);
 		return MED_ERR;
 	}
 	if (am_i_constable() || current == gdb)
@@ -313,8 +334,10 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 
 	local_tele_item = (struct tele_item *)
 		med_cache_alloc_size(sizeof(struct tele_item));
-	if (!local_tele_item)
+	if (!local_tele_item) {
+		med_cache_free(tele_mem_decide);
 		return MED_ERR;
+	}
 	local_tele_item->tele = tele_mem_decide;
 	local_tele_item->size = 0;
 	local_tele_item->post = med_cache_free;
@@ -328,14 +351,13 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	 */
 	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
 
-	spin_lock(&answer_ids_idr_lock);
-	answer_id = idr_alloc_cyclic(&answer_ids_idr, current, 0, 0, GFP_ATOMIC);
-	spin_unlock(&answer_ids_idr_lock);
-	if (answer_id == -ENOMEM || answer_id == -ENOSPC) {
+	policy_generation = (u64)READ_ONCE(medusa_authserver_magic);
+	error = medusa_pending_request_register(&pending, policy_generation);
+	if (error) {
 		med_cache_free(tele_mem_decide);
 		med_cache_free(local_tele_item);
 		up_read(&lightswitch);
-		med_pr_err("%s: idr alloc error: %d\n", __func__, answer_id);
+		med_pr_err("%s: pending request error: %d\n", __func__, error);
 		return MED_ERR;
 	}
 
@@ -344,8 +366,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	tele_mem_decide[0].args.putPtr.what = (MCPptr_t)decision_evtype; // possibility to encryption JK march 2015
 	local_tele_item->size += sizeof(MCPptr_t);
 	tele_mem_decide[1].opcode = tp_PUTPtr;
-	// idr uses only 32 lower bits from 64 bits of decision_request_id
-	tele_mem_decide[1].args.putPtr.what = (MCPptr_t) answer_id;
+	tele_mem_decide[1].args.putPtr.what = (MCPptr_t)pending.id;
 	local_tele_item->size += sizeof(MCPptr_t);
 	tele_mem_decide[2].opcode = tp_CUTNPASTE;
 	tele_mem_decide[2].args.cutnpaste.from = (unsigned char *)event;
@@ -372,9 +393,7 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	if (!atomic_read(&constable_present)) {
 		med_cache_free(local_tele_item);
 		med_cache_free(tele_mem_decide);
-		spin_lock(&answer_ids_idr_lock);
-		idr_remove(&answer_ids_idr, answer_id);
-		spin_unlock(&answer_ids_idr_lock);
+		medusa_pending_request_unregister(&pending);
 		up_read(&lightswitch);
 		return MED_ERR;
 	}
@@ -383,13 +402,11 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	/* get_cmdline() is too expensive; uncomment it manually while debugging */
 	//get_cmdline(current, debug_cmdline, 1023);
 	//debug_cmdline[1023] = '\0';
-	med_pr_debug("task pid %d ('%s'), new question 0x%x for '%s'",
-		    current->pid, debug_cmdline, answer_id, decision_evtype->name);
+	med_pr_debug("task pid %d ('%s'), new question 0x%llx for '%s'",
+		     current->pid, debug_cmdline, pending.id,
+		     decision_evtype->name);
 
 #undef decision_evtype
-	// prepare for next decision
-	task_security(current)->decision_answer = MED_ERR;
-
 	// insert teleport structure to the queue
 	down(&queue_lock);
 	list_add_tail(&local_tele_item->list, &tele_queue);
@@ -397,16 +414,9 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	up(&queue_items);
 	atomic_inc(&questions);
 
-	// wait until answer is ready
-	get_task_struct(current);
 	up_read(&lightswitch);
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	// Auth server shouldn't be notified earlier, so that it doesn't
-	// answer the request before the task goes to sleep.
 	wake_up(&userspace_chardev);
-	schedule();
-	put_task_struct(current);
-
+	retval = medusa_pending_request_wait(&pending);
 
 	/*
 	 * We might be called with the IPC ids->rwsem held (from IPC security
@@ -416,18 +426,15 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	 *            lightswitch)!.
 	 */
 	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
-	if (atomic_read(&constable_present)) {
-		spin_lock(&answer_ids_idr_lock);
-		idr_remove(&answer_ids_idr, answer_id);
-		spin_unlock(&answer_ids_idr_lock);
+	if (atomic_read(&constable_present) &&
+	    policy_generation == (u64)READ_ONCE(medusa_authserver_magic))
 		atomic_dec(&questions_waiting);
-		retval = task_security(current)->decision_answer;
-		med_pr_debug("task pid %d, question 0x%x answer %d",
-			    current->pid, answer_id, retval);
+	if (retval != MED_ERR) {
+		med_pr_debug("task pid %d, question 0x%llx answer %d",
+			     current->pid, pending.id, retval);
 	} else {
-		retval = MED_ERR;
-		med_pr_err("task pid %d, question 0x%x for '%s' not answered, authorization server disconnected",
-			current->pid, answer_id, event->evtype_id->name);
+		med_pr_err("task pid %d, question 0x%llx for '%s' not answered, authorization server disconnected",
+			   current->pid, pending.id, event->evtype_id->name);
 	}
 	up_read(&lightswitch);
 	return retval;
@@ -708,8 +715,9 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	MCPptr_t answ_seq = 0;
 	char recv_buf[sizeof(MCPptr_t)*2];
 	char *kclass_buf;
-	int answered_task_id;
-	struct task_struct *answered_task;
+	u64 id;
+	u64 gen;
+	s16 answer;
 
 	// Lightswitch
 	// has to be there so close can't occur during write
@@ -764,27 +772,24 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		buf += sizeof(int16_t) + sizeof(MCPptr_t);
 		count -= sizeof(int16_t) + sizeof(MCPptr_t);
 
-		// space for decision_request_id is 64 bit, but idr uses only 32 bit
-		answered_task_id = *(int *)(recv_buf);
-		rcu_read_lock();
-		answered_task = (struct task_struct *) idr_find(&answer_ids_idr, answered_task_id);
-		rcu_read_unlock();
+		id = get_unaligned((u64 *)recv_buf);
+		answer = get_unaligned((s16 *)(recv_buf + sizeof(MCPptr_t)));
 		answ_result = medusa_comm_validate_authanswer(
 			MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE,
-			*(int16_t *)(recv_buf + sizeof(MCPptr_t)),
-			answered_task != NULL);
+			answer, true);
+		if (!answ_result)
+			gen =
+				(u64)READ_ONCE(medusa_authserver_magic);
+		if (!answ_result)
+			answ_result = medusa_pending_request_complete(id, gen, answer);
 		if (answ_result) {
 			up_read(&lightswitch);
 			med_pr_err("decision_answer: invalid answer for request %llx: %d\n",
-				   *(uint64_t *)(recv_buf), answ_result);
+				   id, answ_result);
 			return answ_result;
 		}
-		task_security(answered_task)->decision_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
-		med_pr_debug("answer received for %llx pid %d\n", *(uint64_t *)(recv_buf), answered_task->pid);
-		// wake up correct process
-		while (!wake_up_process(answered_task))
-			// wait for `answered_task` to sleep if it's not sleeping yet
-			schedule();
+		med_pr_debug("answer received for %llx\n",
+			     id);
 
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
@@ -1055,8 +1060,6 @@ out_free:
  */
 static int user_release(struct inode *inode, struct file *file)
 {
-	int answer_id;
-	struct task_struct *task;
 	DECLARE_WAITQUEUE(waitqueue, current);
 
 	// Operation close has to wait for read and write system calls to
@@ -1133,10 +1136,7 @@ static int user_release(struct inode *inode, struct file *file)
 	// Clear the teleport queue
 	teleport_clear();
 
-	// locking not needed because lightswitch is locked by one thread running close()
-	idr_for_each_entry(&answer_ids_idr, task, answer_id)
-		wake_up_process(task);
-	idr_destroy(&answer_ids_idr);
+	medusa_pending_request_cancel_all(MED_ERR);
 
 	up(&constable_openclose);
 	// wake up waiting processes, this has to be outside of constable_openclose

@@ -98,8 +98,9 @@ int medusa_ipc_permission(struct kern_ipc_perm *ipcp, short flag)
 	 * running) part(s) of IPC subsystem, and this is indistinguishable without
 	 * CONFIG_DEBUG_SPINLOCK turned on.
 	 *
-	 * Note: On UP spins doesn't exist, lucky us ;)
-	 *       Medusa on UP always can make a decision without a carry on spinlocks...
+	 * UP spinlocks still disable preemption even when they have no
+	 * inter-CPU exclusion to perform.  The L4 slow-path guard rejects those
+	 * lock-bound decisions instead of sleeping in atomic context.
 	 */
 	if (IS_ENABLED(CONFIG_SMP) && spin_is_locked(&ipcp->lock)) {
 #ifdef CONFIG_DEBUG_SPINLOCK

@@ -59,7 +59,6 @@ static void userspace_trigger_reenables_monitoring(struct kunit *test)
 {
 	struct medusa_l1_task_s context = {
 		.audit = 1,
-		.decision_answer = MED_DENY,
 	};
 
 	medusa_task_context_init(&context, NULL,
@@ -74,7 +73,6 @@ static void userspace_trigger_reenables_monitoring(struct kunit *test)
 	KUNIT_EXPECT_TRUE(test,
 		bitmap_full(context.med_subject.act.pack, CONFIG_MEDUSA_ACT));
 	KUNIT_EXPECT_EQ(test, 1, context.audit);
-	KUNIT_EXPECT_EQ(test, MED_DENY, context.decision_answer);
 }
 
 static void task_context_inherits_parent_state(struct kunit *test)
@@ -93,7 +91,6 @@ static void task_context_inherits_parent_state(struct kunit *test)
 	parent.med_object.magic = 77;
 	parent.med_object.cinfo.data[0] = 101;
 	parent.med_subject.cinfo.data[0] = 202;
-	parent.decision_answer = MED_DENY;
 	parent.audit = 1;
 	parent.luid = KUIDT_INIT(123);
 	strscpy(parent.cmdline, "inherited command", sizeof(parent.cmdline));
@@ -124,7 +121,6 @@ static void task_context_inherits_parent_state(struct kunit *test)
 			child.med_object.cinfo.data[0]);
 	KUNIT_EXPECT_EQ(test, parent.med_subject.cinfo.data[0],
 			child.med_subject.cinfo.data[0]);
-	KUNIT_EXPECT_EQ(test, parent.decision_answer, child.decision_answer);
 	KUNIT_EXPECT_EQ(test, parent.audit, child.audit);
 	KUNIT_EXPECT_TRUE(test, uid_eq(parent.luid, child.luid));
 	KUNIT_EXPECT_STREQ(test, parent.cmdline, child.cmdline);

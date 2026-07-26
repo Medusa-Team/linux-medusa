@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 42 tests in nine suites:
+The KUnit configuration runs 47 tests in ten suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -17,9 +17,41 @@ The KUnit configuration runs 42 tests in nine suites:
 * authorization-server registration, removal, and generation changes;
 * cached/delegated allow, deny, error/fail-open, and unsupported verdicts;
 * protocol-v3 answer lengths, verdicts, unknown IDs, and stale IDs;
-* cache allocator growth across a size-class boundary.
+* cache allocator growth across a size-class boundary;
 * dynamic task, inode, and SysV IPC LSM blob offsets;
-* bounded audit-answer formatting and LSM return-value translation.
+* bounded audit-answer formatting and LSM return-value translation;
+* independent pending-request IDs, out-of-order replies, policy generations,
+  duplicate and unknown replies, bounded capacity, and disconnect cleanup.
+
+Pending decision engine
+-----------------------
+
+Delegated decisions no longer store their answer in the calling task's
+security blob.  Each slow-path call owns a pending request with an independent
+completion, monotonically allocated 64-bit ID, and policy generation.  A
+bounded global table permits 1,024 concurrent requests.  Completion removes
+the request before waking its waiter, so unknown, duplicate, and stale-
+generation replies cannot complete a different request.  Disconnect removes
+and completes every remaining request with ``MED_ERR``.
+
+Protocol v3 carries the complete request ID on the supported x86-64 migration
+target.  Fixed-width, architecture-independent framing remains protocol-v4
+work.
+
+Sleeping and SysV IPC
+---------------------
+
+The character-device slow path can block and therefore accepts decisions only
+from task context with interrupts enabled and no active atomic section.  It
+returns ``MED_ERR`` before allocating or queueing a request otherwise.
+
+Several SysV IPC hooks arrive with ``kern_ipc_perm.lock`` held.  On SMP with
+``CONFIG_DEBUG_SPINLOCK``, Medusa checks that the current task owns the lock,
+takes an object reference, releases the lock and RCU read section before
+delegating, then reacquires the lock and revalidates the object afterward.
+Without inspectable ownership, a lock-bound request must remain on the kernel
+path; the slow-path guard prevents sleeping while a UP spinlock preemption
+count or another atomic constraint is active.
 
 QEMU scenario coverage
 ----------------------
