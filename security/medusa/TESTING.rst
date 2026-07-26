@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 68 tests in eleven suites:
+The KUnit configuration runs 74 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -29,8 +29,11 @@ The KUnit configuration runs 68 tests in eleven suites:
   duplicate and unknown replies, bounded capacity, disconnect cleanup,
   timeout races, and renewable liveness leases;
 * authorization-server health and circuit-breaker transitions;
-* teardown-safe authorization-server status snapshots, optional health
-  callbacks, and stable observability names.
+* teardown-safe authorization-server status snapshots, handshake, READY and
+  aborted-handshake transitions, optional health callbacks, and stable
+  observability names;
+* per-event final-verdict attribution, unsigned counter wrap, and cumulative
+  protocol-counter snapshots.
 
 Pending decision engine
 -----------------------
@@ -99,15 +102,17 @@ Read-only securityfs observability
 When Medusa is enabled it creates two root-readable files:
 
 ``/sys/kernel/security/medusa/status``
-  Reports the running kernel and protocol versions, completed authorization-
-  server connection state, server health and precise circuit-breaker reason,
-  policy generation, live pending count and limit, and configured decision
-  lease.
+  Reports the running kernel and protocol versions; disconnected, handshaking,
+  and READY state; policy readiness; server health and precise circuit-breaker
+  reason; active and last READY generations; live pending count and limit;
+  configured decision lease; and cumulative reply, renewal, malformed-frame,
+  invalid-answer, unknown-command, unknown-request, and stale-request counts.
 
 ``/sys/kernel/security/medusa/events``
   Reports every announced event with its subject and object classes, runtime
   trigger bit and bitmap owner, installed fallback policy, and cumulative
-  degraded-decision count.
+  central-engine totals for delegation, baseline and online-required verdicts,
+  allow, deny, lease timeout, invalid reply, and degraded fallback.
 
 Both files have mode ``0400`` and no write operation.  The status snapshot
 takes an authorization-server reference while holding the registry lock, then
@@ -118,6 +123,15 @@ path exempts these two diagnostic files so an outage cannot hide its state;
 normal VFS permissions and other stacked LSMs still apply.  Protocol-v3 event
 names and runtime trigger bits are descriptive rather than stable numeric
 identities.
+
+Constable's protocol-v3 READY answer follows schema processing and completion
+of its optional policy ``_init()`` handler, so ``policy_readiness=ready`` has a
+defined meaning.  A device open that has not sent READY remains
+``protocol_state=handshaking`` with no active generation; disconnect retains
+the last generation that successfully became ready.  Kernel-cached fast-path
+accesses do not enter ``med_decide_result()`` and are deliberately not included
+in the central-engine event counters.  Cached accounting requires separate
+hook-level instrumentation rather than a misleading zero-valued counter.
 
 Protocol v3 carries the complete request ID on the supported x86-64 migration
 target.  Fixed-width, architecture-independent framing remains protocol-v4
@@ -170,8 +184,11 @@ QEMU scenario coverage
   request, and checks the decision-source, precise timeout reason, request,
   policy-generation, event, and class audit metadata.
   The scenario also mounts securityfs, checks healthy, degraded, and recovered
-  status snapshots, verifies per-event degraded accounting, and proves that
-  the status file cannot be opened after dropping to uid 65534.
+  status snapshots, inserts an incomplete raw-device handshake between
+  disconnect and reconnect, verifies generation retention plus malformed,
+  unknown-command, and unknown-request protocol counts, checks per-event
+  delegation, baseline, timeout, and degraded attribution, and proves that the
+  status file cannot be opened after dropping to uid 65534.
   It then terminates the frozen server, registers a replacement, and proves
   that delegated denial is restored.
 

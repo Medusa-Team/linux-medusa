@@ -119,6 +119,37 @@ u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype)
 	return atomic64_read(&evtype->degraded_decisions);
 }
 
+void medusa_decision_counters_init(struct medusa_evtype_s *evtype)
+{
+	atomic64_set(&evtype->decision_counters.total, 0);
+	atomic64_set(&evtype->decision_counters.delegated, 0);
+	atomic64_set(&evtype->decision_counters.baseline, 0);
+	atomic64_set(&evtype->decision_counters.online_required, 0);
+	atomic64_set(&evtype->decision_counters.allowed, 0);
+	atomic64_set(&evtype->decision_counters.denied, 0);
+	atomic64_set(&evtype->decision_counters.timed_out, 0);
+	atomic64_set(&evtype->decision_counters.invalid_replies, 0);
+}
+
+void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
+				       struct medusa_decision_counter_snapshot *snapshot)
+{
+	snapshot->total = atomic64_read(&evtype->decision_counters.total);
+	snapshot->delegated =
+		atomic64_read(&evtype->decision_counters.delegated);
+	snapshot->baseline =
+		atomic64_read(&evtype->decision_counters.baseline);
+	snapshot->online_required =
+		atomic64_read(&evtype->decision_counters.online_required);
+	snapshot->allowed =
+		atomic64_read(&evtype->decision_counters.allowed);
+	snapshot->denied = atomic64_read(&evtype->decision_counters.denied);
+	snapshot->timed_out =
+		atomic64_read(&evtype->decision_counters.timed_out);
+	snapshot->invalid_replies =
+		atomic64_read(&evtype->decision_counters.invalid_replies);
+}
+
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy)
 {
 	switch (policy) {
@@ -175,6 +206,46 @@ static void medusa_audit_degraded_decision(
 	audit_log_end(ab);
 }
 
+static void
+medusa_account_decision(struct medusa_evtype_s *evtype,
+			const struct medusa_decision_result *result)
+{
+	atomic64_inc(&evtype->decision_counters.total);
+	if (result->authserver_contacted)
+		atomic64_inc(&evtype->decision_counters.delegated);
+
+	switch (result->source) {
+	case MEDUSA_DECISION_BASELINE:
+		atomic64_inc(&evtype->decision_counters.baseline);
+		break;
+	case MEDUSA_DECISION_ONLINE_REQUIRED:
+		atomic64_inc(&evtype->decision_counters.online_required);
+		break;
+	case MEDUSA_DECISION_INVALID_REPLY:
+		atomic64_inc(&evtype->decision_counters.invalid_replies);
+		break;
+	default:
+		break;
+	}
+
+	if (result->answer == MED_ALLOW)
+		atomic64_inc(&evtype->decision_counters.allowed);
+	else if (result->answer == MED_DENY)
+		atomic64_inc(&evtype->decision_counters.denied);
+
+	if (result->unavailable == MEDUSA_DECISION_TIMED_OUT)
+		atomic64_inc(&evtype->decision_counters.timed_out);
+}
+
+static struct medusa_decision_result
+medusa_finish_decision(struct medusa_evtype_s *evtype,
+		       struct medusa_decision_result result)
+{
+	medusa_account_decision(evtype, &result);
+	medusa_audit_degraded_decision(evtype, &result);
+	return result;
+}
+
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 			       enum medusa_fallback_policy policy)
 {
@@ -215,16 +286,17 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	 * availability or answer of a userspace server.
 	 */
 	if (READ_ONCE(evtype->fallback_policy) ==
-	    MEDUSA_FALLBACK_BASELINE_DENY)
-		return medusa_fallback_result(evtype, MEDUSA_AVAILABLE, 0,
-					      policy_generation, false);
+	    MEDUSA_FALLBACK_BASELINE_DENY) {
+		result = medusa_fallback_result(evtype, MEDUSA_AVAILABLE,
+						0, policy_generation, false);
+		return medusa_finish_decision(evtype, result);
+	}
 
 	if (ARCH_CANNOT_DECIDE(evtype)) {
 		result = medusa_fallback_result(evtype,
 						MEDUSA_NON_SLEEPABLE_CONTEXT,
 						0, policy_generation, false);
-		medusa_audit_degraded_decision(evtype, &result);
-		return result;
+		return medusa_finish_decision(evtype, result);
 	}
 
 	mutex_lock(&registry_lock);
@@ -238,8 +310,7 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 		mutex_unlock(&registry_lock);
 		result = medusa_fallback_result(evtype, MEDUSA_NO_AUTH_SERVER,
 						0, policy_generation, false);
-		medusa_audit_degraded_decision(evtype, &result);
-		return result;
+		return medusa_finish_decision(evtype, result);
 	}
 	mutex_unlock(&registry_lock);
 
@@ -250,8 +321,7 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 		result = medusa_fallback_result(evtype,
 						MEDUSA_AUTH_SERVER_UNHEALTHY,
 						0, policy_generation, false);
-		medusa_audit_degraded_decision(evtype, &result);
-		return result;
+		return medusa_finish_decision(evtype, result);
 	}
 
 	((struct medusa_event_s *)event)->evtype_id = evtype;
@@ -297,8 +367,7 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	}
 #endif
 	med_put_authserver(authserver);
-	medusa_audit_degraded_decision(evtype, &result);
-	return result;
+	return medusa_finish_decision(evtype, result);
 }
 
 enum medusa_answer_t med_decide(struct medusa_evtype_s *evtype, void *event,

@@ -19,10 +19,19 @@
 
 struct seq_file;
 
+enum medusa_authserver_state {
+	MEDUSA_AUTHSERVER_DISCONNECTED,
+	MEDUSA_AUTHSERVER_HANDSHAKING,
+	MEDUSA_AUTHSERVER_READY,
+};
+
 struct medusa_registry_status {
 	u64 policy_generation;
+	u64 active_policy_generation;
+	u64 last_ready_policy_generation;
 	char server_name[MEDUSA_SERVERNAME_MAX];
 	enum medusa_health_reason health_reason;
+	enum medusa_authserver_state server_state;
 	bool connected;
 	bool health_known;
 	bool healthy;
@@ -73,7 +82,9 @@ int medusa_registry_events_seq_show(struct seq_file *m);
 
 /* interface to L4 */
 extern int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver);
+int med_authserver_handshake_begin(struct medusa_authserver_s *med_authserver);
 extern int med_register_authserver(struct medusa_authserver_s *med_authserver);
 extern void med_unregister_authserver(struct medusa_authserver_s *med_authserver);
+const char *medusa_authserver_state_name(enum medusa_authserver_state state);
 
 #endif

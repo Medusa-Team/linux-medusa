@@ -46,6 +46,7 @@
 #include "l3/server.h"
 #include "l3/med_cache.h"
 #include "l3/pending.h"
+#include "l3/protocol_stats.h"
 #include "l4/auth_server.h"
 #include "l4/comm.h"
 #include "l4/protocol.h"
@@ -196,6 +197,19 @@ static void l4_mark_unhealthy(enum medusa_health_reason reason)
 	 */
 	medusa_pending_request_cancel_all(MED_ERR);
 	wake_up_all(&userspace_chardev);
+}
+
+static void l4_record_request_error(int error)
+{
+	if (error == -ENOENT)
+		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_UNKNOWN_REQUESTS);
+	else if (error == -ESTALE)
+		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_STALE_REQUESTS);
+}
+
+static void l4_record_malformed_message(void)
+{
+	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_MALFORMED_MESSAGES);
 }
 
 static void l4_close_wake(void)
@@ -795,6 +809,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		return -EFAULT;
 	}
 	if (count < sizeof(MCPptr_t)) {
+		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_MALFORMED_MESSAGES);
 		up_read(&lightswitch);
 		return -EMSGSIZE;
 	}
@@ -811,6 +826,7 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	// Type of the message is received
 	if (recv_type == MEDUSA_COMM_AUTHANSWER) {
 		if (count != MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE) {
+			l4_record_malformed_message();
 			up_read(&lightswitch);
 			return -EMSGSIZE;
 		}
@@ -827,22 +843,27 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		answ_result = medusa_comm_validate_authanswer(
 			MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE,
 			answer, true);
+		if (answ_result == -EINVAL)
+			medusa_protocol_counter_inc(MEDUSA_PROTOCOL_INVALID_ANSWERS);
 		if (!answ_result)
 			gen =
 				(u64)READ_ONCE(medusa_authserver_magic);
 		if (!answ_result)
 			answ_result = medusa_pending_request_complete(id, gen, answer);
 		if (answ_result) {
+			l4_record_request_error(answ_result);
 			up_read(&lightswitch);
 			med_pr_err("decision_answer: invalid answer for request %llx: %d\n",
 				   id, answ_result);
 			return answ_result;
 		}
+		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_REPLIES);
 		med_pr_debug("answer received for %llx\n",
 			     id);
 
 	} else if (recv_type == MEDUSA_COMM_AUTHREQUEST_PROGRESS) {
 		if (count != MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE) {
+			l4_record_malformed_message();
 			up_read(&lightswitch);
 			return -EMSGSIZE;
 		}
@@ -855,11 +876,13 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		gen = (u64)READ_ONCE(medusa_authserver_magic);
 		answ_result = medusa_pending_request_renew(id, gen);
 		if (answ_result) {
+			l4_record_request_error(answ_result);
 			up_read(&lightswitch);
 			med_pr_err("decision_progress: invalid request %llx: %d\n",
 				   id, answ_result);
 			return answ_result;
 		}
+		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_LEASE_RENEWALS);
 		med_pr_debug("decision lease renewed for %llx\n", id);
 
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
@@ -1004,9 +1027,10 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		}
 		med_pr_info("authorization server circuit breaker closed\n");
 		set_auth_server_ready();
-	} else {
-		med_pr_err("Protocol error at write(): unknown command %llx!\n",
-			(MCPptr_t)recv_type);
+		} else {
+			medusa_protocol_counter_inc(MEDUSA_PROTOCOL_UNKNOWN_COMMANDS);
+			med_pr_err("Protocol error at write(): unknown command %llx!\n",
+				   recv_type);
 #ifdef ERRORS_CAUSE_SEGFAULT
 		up_read(&lightswitch);
 		return -EFAULT;
@@ -1118,6 +1142,15 @@ static int user_open(struct inode *inode, struct file *file)
 		med_pr_warn("%s: send_medusa_is_ready() failed with %d",
 			    __func__, retval);
 		teleport_clear();
+		goto out;
+	}
+
+	retval = med_authserver_handshake_begin(&chardev_medusa);
+	if (retval < 0) {
+		med_pr_warn("%s: authorization-server handshake already active\n",
+			    __func__);
+		teleport_clear();
+		goto out;
 	}
 
 	/* this must be the last thing done */

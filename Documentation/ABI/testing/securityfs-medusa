@@ -10,25 +10,57 @@ Description:
 		protocol_version
 			The active Medusa userspace protocol version.
 		authorization_server
-			"connected" after the READY exchange has completed and
-			the server is registered; otherwise "disconnected".
+			"handshaking" while a userspace transport is processing
+			the announced schema, "connected" after the READY exchange
+			has completed, or "disconnected".
 		authorization_server_name
-			The registered kernel transport name, or "none".
+			The active or handshaking kernel transport name, or "none".
+		protocol_state
+			"disconnected", "handshaking", or "ready".
+		policy_readiness
+			"unavailable", "initializing", or "ready". Protocol v3
+			READY is emitted by Constable only after its policy _init()
+			handler completes.
 		authorization_server_health
 			"healthy", "unhealthy", "unknown", or "unavailable".
 		circuit_breaker
-			"closed", "open", "unknown", or "not_connected".
+			"closed", "open", "unknown", "not_ready", or
+			"not_connected".
 		health_reason
 			"healthy", "disconnected", "decision_timeout",
-			"overloaded", "unknown", or "invalid".
+			"overloaded", "initializing", "unknown", or "invalid".
 		policy_generation
-			The current kernel authorization-server generation.
+			The current kernel context-invalidation generation. It
+			advances when a ready server registers or disconnects.
+		active_policy_generation
+			The generation eligible to answer decisions, or zero while
+			disconnected or handshaking.
+		last_ready_policy_generation
+			The most recent generation that completed READY. It remains
+			available across a disconnect and incomplete handshake.
 		pending_requests
 			Number of requests currently awaiting userspace.
 		pending_limit
 			Maximum number of simultaneous pending requests.
 		decision_lease_ms
 			Initial and renewal liveness lease for each request.
+		protocol_replies
+			Successfully matched decision replies.
+		protocol_lease_renewals
+			Successfully matched decision-progress messages.
+		protocol_malformed_messages
+			Frames rejected for an invalid length.
+		protocol_invalid_answers
+			Decision replies rejected for an unsupported verdict.
+		protocol_unknown_commands
+			Frames rejected for an unknown command.
+		protocol_unknown_requests
+			Replies or renewals naming no pending request.
+		protocol_stale_requests
+			Replies or renewals rejected for a stale generation.
+
+		Protocol counters are cumulative from boot and use wrapping
+		unsigned 64-bit arithmetic.
 
 		The file mode is 0400. It does not expose policy mutation.
 		Medusa's own delegated file-open policy is bypassed so the file
@@ -42,13 +74,31 @@ Description:
 		Root-readable, read-only snapshot of registered Medusa events.
 		Each line contains the event and subject/object class names,
 		runtime trigger bit and bitmap owner, installed fallback policy,
-		and cumulative degraded-decision count.
+		and cumulative decision counters:
+
+		decisions
+			Calls entering the central decision engine.
+		delegated
+			Calls for which a userspace request was issued.
+		baseline
+			Final verdicts selected by the installed baseline.
+		online_required
+			Final denials selected because the event requires userspace.
+		allowed, denied
+			Final central-engine verdicts.
+		timed_out
+			Final fallbacks caused by an expired decision lease.
+		invalid_replies
+			Final denials caused by an unsupported server verdict.
+		degraded_decisions
+			Final fallbacks caused by any unavailability reason.
 
 		Event and class names are the protocol-v3 names announced to
 		Constable. "event_bit" is a runtime trigger position, not a stable
-		numeric event identifier. "degraded_decisions" accounts every
-		unavailable-policy fallback even when its corresponding audit record
-		was rate limited.
+		numeric event identifier. Counters use wrapping unsigned 64-bit
+		arithmetic. Kernel-cached fast-path accesses do not enter the central
+		decision engine and are therefore not included; hook-level cached
+		accounting is a separate future ABI.
 
 		The file mode is 0400. It does not expose policy mutation.
 		Medusa's own delegated file-open policy is bypassed so the file

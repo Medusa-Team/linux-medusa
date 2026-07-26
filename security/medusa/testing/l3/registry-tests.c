@@ -123,11 +123,14 @@ static void registry_status_snapshots_lifecycle_and_health(struct kunit *test)
 
 	medusa_registry_status_snapshot(&status);
 	KUNIT_ASSERT_FALSE(test, status.connected);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTHSERVER_DISCONNECTED,
+			status.server_state);
 	KUNIT_EXPECT_FALSE(test, status.health_known);
 	KUNIT_EXPECT_FALSE(test, status.healthy);
 	KUNIT_EXPECT_EQ(test, MEDUSA_HEALTH_DISCONNECTED,
 			status.health_reason);
 	KUNIT_EXPECT_EQ(test, initial_generation, status.policy_generation);
+	KUNIT_EXPECT_EQ(test, (u64)0, status.active_policy_generation);
 	KUNIT_EXPECT_STREQ(test, "", status.server_name);
 
 	close_calls = 0;
@@ -138,12 +141,18 @@ static void registry_status_snapshots_lifecycle_and_health(struct kunit *test)
 
 	medusa_registry_status_snapshot(&status);
 	KUNIT_EXPECT_TRUE(test, status.connected);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTHSERVER_READY,
+			status.server_state);
 	KUNIT_EXPECT_TRUE(test, status.health_known);
 	KUNIT_EXPECT_FALSE(test, status.healthy);
 	KUNIT_EXPECT_EQ(test, MEDUSA_HEALTH_DECISION_TIMEOUT,
 			status.health_reason);
 	KUNIT_EXPECT_EQ(test, initial_generation + 1,
 			status.policy_generation);
+	KUNIT_EXPECT_EQ(test, initial_generation + 1,
+			status.active_policy_generation);
+	KUNIT_EXPECT_EQ(test, initial_generation + 1,
+			status.last_ready_policy_generation);
 	KUNIT_EXPECT_STREQ(test, "kunit-fake", status.server_name);
 	KUNIT_EXPECT_EQ(test, 1, fake_server.use_count);
 
@@ -156,9 +165,78 @@ static void registry_status_snapshots_lifecycle_and_health(struct kunit *test)
 	med_unregister_authserver(&fake_server);
 	medusa_registry_status_snapshot(&status);
 	KUNIT_EXPECT_FALSE(test, status.connected);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTHSERVER_DISCONNECTED,
+			status.server_state);
 	KUNIT_EXPECT_EQ(test, initial_generation + 2,
 			status.policy_generation);
+	KUNIT_EXPECT_EQ(test, (u64)0, status.active_policy_generation);
+	KUNIT_EXPECT_EQ(test, initial_generation + 1,
+			status.last_ready_policy_generation);
 	KUNIT_EXPECT_EQ(test, 1, close_calls);
+}
+
+static void registry_reports_handshake_before_policy_ready(struct kunit *test)
+{
+	struct medusa_registry_status status;
+	u64 initial_generation = (u64)medusa_authserver_magic;
+
+	fake_server.use_count = 0;
+	close_calls = 0;
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_handshake_begin(&fake_server));
+	KUNIT_EXPECT_EQ(test, -EBUSY,
+			med_authserver_handshake_begin(&other_server));
+
+	medusa_registry_status_snapshot(&status);
+	KUNIT_EXPECT_FALSE(test, status.connected);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTHSERVER_HANDSHAKING,
+			status.server_state);
+	KUNIT_EXPECT_STREQ(test, "kunit-fake", status.server_name);
+	KUNIT_EXPECT_EQ(test, (u64)0, status.active_policy_generation);
+
+	KUNIT_ASSERT_EQ(test, 0, med_register_authserver(&fake_server));
+	medusa_registry_status_snapshot(&status);
+	KUNIT_EXPECT_TRUE(test, status.connected);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTHSERVER_READY,
+			status.server_state);
+	KUNIT_EXPECT_EQ(test, initial_generation + 1,
+			status.active_policy_generation);
+
+	med_unregister_authserver(&fake_server);
+	KUNIT_EXPECT_EQ(test, 1, close_calls);
+}
+
+static void registry_can_abort_incomplete_handshake(struct kunit *test)
+{
+	struct medusa_registry_status status;
+	u64 initial_generation = (u64)medusa_authserver_magic;
+
+	close_calls = 0;
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_handshake_begin(&fake_server));
+	med_unregister_authserver(&fake_server);
+	medusa_registry_status_snapshot(&status);
+
+	KUNIT_EXPECT_FALSE(test, status.connected);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTHSERVER_DISCONNECTED,
+			status.server_state);
+	KUNIT_EXPECT_EQ(test, initial_generation, status.policy_generation);
+	KUNIT_EXPECT_EQ(test, (u64)0, status.active_policy_generation);
+	KUNIT_EXPECT_EQ(test, 0, close_calls);
+}
+
+static void registry_state_names_are_stable(struct kunit *test)
+{
+	const char *name;
+
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_DISCONNECTED);
+	KUNIT_EXPECT_STREQ(test, "disconnected", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_HANDSHAKING);
+	KUNIT_EXPECT_STREQ(test, "handshaking", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_READY);
+	KUNIT_EXPECT_STREQ(test, "ready", name);
+	name = medusa_authserver_state_name(99);
+	KUNIT_EXPECT_STREQ(test, "invalid", name);
 }
 
 static void registry_status_reports_unknown_optional_health(struct kunit *test)
@@ -181,7 +259,10 @@ static struct kunit_case registry_test_cases[] = {
 	KUNIT_CASE(registry_prepare_replays_definitions),
 	KUNIT_CASE(registry_authserver_lifecycle),
 	KUNIT_CASE(registry_status_snapshots_lifecycle_and_health),
+	KUNIT_CASE(registry_reports_handshake_before_policy_ready),
+	KUNIT_CASE(registry_can_abort_incomplete_handshake),
 	KUNIT_CASE(registry_status_reports_unknown_optional_health),
+	KUNIT_CASE(registry_state_names_are_stable),
 	{}
 };
 

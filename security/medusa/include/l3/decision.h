@@ -3,6 +3,8 @@
 #ifndef _MEDUSA_DECISION_H
 #define _MEDUSA_DECISION_H
 
+#include <linux/atomic.h>
+
 #include "l3/constants.h"
 
 struct medusa_event_s;
@@ -51,9 +53,34 @@ struct medusa_decision_result {
 	bool authserver_contacted;
 };
 
+struct medusa_decision_counters {
+	atomic64_t total;
+	atomic64_t delegated;
+	atomic64_t baseline;
+	atomic64_t online_required;
+	atomic64_t allowed;
+	atomic64_t denied;
+	atomic64_t timed_out;
+	atomic64_t invalid_replies;
+};
+
+struct medusa_decision_counter_snapshot {
+	u64 total;
+	u64 delegated;
+	u64 baseline;
+	u64 online_required;
+	u64 allowed;
+	u64 denied;
+	u64 timed_out;
+	u64 invalid_replies;
+};
+
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 			       enum medusa_fallback_policy policy);
 u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype);
+void medusa_decision_counters_init(struct medusa_evtype_s *evtype);
+void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
+				       struct medusa_decision_counter_snapshot *snapshot);
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy);
 const char *medusa_decision_answer_name(enum medusa_answer_t answer);
 const char *medusa_decision_source_name(enum medusa_decision_source source);

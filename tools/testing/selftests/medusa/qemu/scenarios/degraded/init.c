@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,19 +74,34 @@ static bool line_has(const char *buffer, const char *line_key,
 	return match && match < end;
 }
 
-static unsigned long long event_degraded_count(const char *buffer,
-					       const char *event)
+static unsigned long long event_counter(const char *buffer, const char *event,
+					const char *counter)
 {
 	const char *line = strstr(buffer, event);
 	const char *field;
 	char *end;
+	char key[64];
 
 	if (!line)
 		return 0;
-	field = strstr(line, " degraded_decisions=");
+	snprintf(key, sizeof(key), " %s=", counter);
+	field = strstr(line, key);
 	if (!field)
 		return 0;
-	field += strlen(" degraded_decisions=");
+	field += strlen(key);
+	errno = 0;
+	return strtoull(field, &end, 10);
+}
+
+static unsigned long long status_counter(const char *buffer,
+					 const char *counter)
+{
+	const char *field = strstr(buffer, counter);
+	char *end;
+
+	if (!field)
+		return 0;
+	field += strlen(counter);
 	errno = 0;
 	return strtoull(field, &end, 10);
 }
@@ -278,17 +294,106 @@ static bool freeze_constable(pid_t pid)
 	return true;
 }
 
+static pid_t start_handshake_holder(int *release_fd)
+{
+	char answer_packet[sizeof(uint64_t) * 2 + sizeof(int16_t)];
+	uint64_t command;
+	uint64_t request_id;
+	int16_t answer;
+	int ready_pipe[2];
+	int stop_pipe[2];
+	char ready;
+	pid_t child;
+
+	if (pipe(ready_pipe) < 0)
+		return -1;
+	if (pipe(stop_pipe) < 0) {
+		close(ready_pipe[0]);
+		close(ready_pipe[1]);
+		return -1;
+	}
+	child = fork();
+	if (child < 0) {
+		close(ready_pipe[0]);
+		close(ready_pipe[1]);
+		close(stop_pipe[0]);
+		close(stop_pipe[1]);
+		return -1;
+	}
+	if (child == 0) {
+		int fd;
+		bool passed = true;
+
+		close(ready_pipe[0]);
+		close(stop_pipe[1]);
+		fd = open("/dev/medusa", O_RDWR);
+		if (fd < 0)
+			passed = false;
+
+		errno = 0;
+		if (passed && (write(fd, "x", 1) != -1 ||
+			       errno != EMSGSIZE))
+			passed = false;
+
+		command = 0x81;
+		request_id = UINT64_MAX;
+		answer = 3;
+		memcpy(answer_packet, &command, sizeof(command));
+		memcpy(answer_packet + sizeof(command), &request_id,
+		       sizeof(request_id));
+		memcpy(answer_packet + sizeof(command) + sizeof(request_id),
+		       &answer, sizeof(answer));
+		errno = 0;
+		if (passed &&
+		    (write(fd, answer_packet, sizeof(answer_packet)) != -1 ||
+		     errno != ENOENT))
+			passed = false;
+
+		command = UINT64_C(0xdeadbeef);
+		errno = 0;
+		if (passed && (write(fd, &command, sizeof(command)) != -1 ||
+			       errno != EFAULT))
+			passed = false;
+
+		ready = passed ? 1 : 0;
+		if (write(ready_pipe[1], &ready, 1) != 1)
+			passed = false;
+		if (passed && read(stop_pipe[0], &ready, 1) != 1)
+			passed = false;
+		if (fd >= 0)
+			close(fd);
+		_exit(passed ? EXIT_SUCCESS : EXIT_FAILURE);
+	}
+
+	close(ready_pipe[1]);
+	close(stop_pipe[0]);
+	if (read(ready_pipe[0], &ready, 1) != 1 || !ready) {
+		close(ready_pipe[0]);
+		close(stop_pipe[1]);
+		waitpid(child, NULL, 0);
+		return -1;
+	}
+	close(ready_pipe[0]);
+	*release_fd = stop_pipe[1];
+	return child;
+}
+
 int main(int argc, char **argv)
 {
 	struct test_message message = { 1, "lease" };
 	pid_t initial;
+	pid_t handshake;
 	pid_t replacement;
 	double started;
 	double elapsed;
 	char events[65536];
-	char status[4096];
+	char status[4096] = {};
 	int id;
+	int release_fd;
 	int send_result;
+	int handshake_status;
+	bool handshake_released;
+	unsigned long long initial_generation;
 
 	if (argc == 2 && !strcmp(argv[1], "--freezer-controller"))
 		return freezer_controller();
@@ -310,11 +415,19 @@ int main(int argc, char **argv)
 			 status, sizeof(status)) &&
 	       strstr(status, "protocol_version=3\n") &&
 	       strstr(status, "authorization_server=connected\n") &&
+	       strstr(status, "protocol_state=ready\n") &&
+	       strstr(status, "policy_readiness=ready\n") &&
 	       strstr(status, "authorization_server_health=healthy\n") &&
 	       strstr(status, "circuit_breaker=closed\n") &&
 	       strstr(status, "pending_requests=0\n") &&
 	       strstr(status, "pending_limit=1024\n") &&
 	       strstr(status, "decision_lease_ms=5000\n"));
+	initial_generation =
+		status_counter(status, "active_policy_generation=");
+	result("generation_ready",
+	       initial_generation > 0 &&
+	       status_counter(status, "last_ready_policy_generation=") ==
+		       initial_generation);
 	result("events_visible",
 	       read_file("/sys/kernel/security/medusa/events",
 			 events, sizeof(events)) &&
@@ -353,7 +466,11 @@ int main(int argc, char **argv)
 	result("degraded_counter",
 	       read_file("/sys/kernel/security/medusa/events",
 			 events, sizeof(events)) &&
-	       event_degraded_count(events, "event=ipc_perm ") >= 1);
+	       event_counter(events, "event=ipc_perm ",
+			     "degraded_decisions") >= 1 &&
+	       event_counter(events, "event=ipc_perm ", "delegated") >= 1 &&
+	       event_counter(events, "event=ipc_perm ", "baseline") >= 1 &&
+	       event_counter(events, "event=ipc_perm ", "timed_out") >= 1);
 
 	started = monotonic_seconds();
 	errno = 0;
@@ -363,6 +480,45 @@ int main(int argc, char **argv)
 
 	send_control("kill");
 	sleep(1);
+	release_fd = -1;
+	handshake = start_handshake_holder(&release_fd);
+	result("handshake_started", handshake > 0);
+	result("status_handshaking",
+	       handshake > 0 &&
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       strstr(status, "authorization_server=handshaking\n") &&
+	       strstr(status, "protocol_state=handshaking\n") &&
+	       strstr(status, "policy_readiness=initializing\n") &&
+	       strstr(status, "authorization_server_health=unavailable\n") &&
+	       strstr(status, "circuit_breaker=not_ready\n") &&
+	       strstr(status, "health_reason=initializing\n") &&
+	       strstr(status, "active_policy_generation=0\n") &&
+	       status_counter(status, "last_ready_policy_generation=") ==
+		       initial_generation);
+	result("protocol_error_counters",
+	       handshake > 0 &&
+	       status_counter(status, "protocol_malformed_messages=") >= 1 &&
+	       status_counter(status, "protocol_unknown_commands=") >= 1 &&
+	       status_counter(status, "protocol_unknown_requests=") >= 1);
+	if (handshake > 0) {
+		handshake_released = write(release_fd, "x", 1) == 1;
+		close(release_fd);
+		waitpid(handshake, &handshake_status, 0);
+		result("handshake_closed",
+		       handshake_released && WIFEXITED(handshake_status) &&
+		       WEXITSTATUS(handshake_status) == 0);
+	}
+	result("status_disconnected",
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       strstr(status, "authorization_server=disconnected\n") &&
+	       strstr(status, "protocol_state=disconnected\n") &&
+	       strstr(status, "policy_readiness=unavailable\n") &&
+	       strstr(status, "active_policy_generation=0\n") &&
+	       status_counter(status, "last_ready_policy_generation=") ==
+		       initial_generation);
+
 	replacement = fork();
 	if (replacement == 0) {
 		execl("/sbin/constable", "constable", "-c",
@@ -376,10 +532,16 @@ int main(int argc, char **argv)
 	       read_file("/sys/kernel/security/medusa/status",
 			 status, sizeof(status)) &&
 	       strstr(status, "authorization_server=connected\n") &&
+	       strstr(status, "protocol_state=ready\n") &&
+	       strstr(status, "policy_readiness=ready\n") &&
 	       strstr(status, "authorization_server_health=healthy\n") &&
 	       strstr(status, "circuit_breaker=closed\n") &&
 	       strstr(status, "health_reason=healthy\n") &&
-	       strstr(status, "pending_requests=0\n"));
+	       strstr(status, "pending_requests=0\n") &&
+	       status_counter(status, "active_policy_generation=") >
+		       initial_generation &&
+	       status_counter(status, "last_ready_policy_generation=") ==
+		       status_counter(status, "active_policy_generation="));
 	msgctl(id, IPC_RMID, NULL);
 
 out:

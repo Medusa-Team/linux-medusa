@@ -7,4 +7,5 @@ endif
 
 O_TARGET := l3.o
 
-obj-y := comm.o registry.o health.o med_cache.o pending.o securityfs.o
+obj-y := comm.o registry.o health.o med_cache.o pending.o protocol_stats.o \
+	 securityfs.o

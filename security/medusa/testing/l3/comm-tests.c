@@ -4,6 +4,7 @@
 #include <linux/ratelimit.h>
 
 #include "l3/registry.h"
+#include "l3/protocol_stats.h"
 #include "l4/protocol.h"
 
 static enum medusa_answer_t delegated_answer;
@@ -12,6 +13,7 @@ static int close_calls;
 static int subject_unmonitor_calls;
 static int object_unmonitor_calls;
 static bool server_healthy;
+static enum medusa_unavailable_reason delegated_unavailable;
 
 static void fake_close(void)
 {
@@ -26,7 +28,7 @@ static enum medusa_answer_t fake_decide(struct medusa_event_s *event,
 	decision->request_id = 0x1234;
 	decision->policy_generation =
 		(u64)READ_ONCE(medusa_authserver_magic);
-	decision->unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
+	decision->unavailable = delegated_unavailable;
 	decision->contacted = true;
 	decide_calls++;
 	return delegated_answer;
@@ -80,7 +82,9 @@ static int comm_test_init(struct kunit *test)
 	decide_calls = 0;
 	delegated_answer = MED_ALLOW;
 	server_healthy = true;
+	delegated_unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
 	atomic64_set(&test_event_type.degraded_decisions, 0);
+	medusa_decision_counters_init(&test_event_type);
 	ratelimit_state_init(&test_event_type.degraded_audit_ratelimit, HZ, 0);
 	KUNIT_ASSERT_EQ(test, 0,
 			medusa_set_fallback_policy(
@@ -164,11 +168,12 @@ static void online_required_denies_without_server(struct kunit *test)
 	struct medusa_kobject_s subject;
 	struct medusa_kobject_s object;
 	struct medusa_decision_result result;
+	enum medusa_fallback_policy policy;
+	int error;
 
-	KUNIT_ASSERT_EQ(test, 0,
-			medusa_set_fallback_policy(
-				&test_event_type,
-				MEDUSA_FALLBACK_ONLINE_REQUIRED));
+	policy = MEDUSA_FALLBACK_ONLINE_REQUIRED;
+	error = medusa_set_fallback_policy(&test_event_type, policy);
+	KUNIT_ASSERT_EQ(test, 0, error);
 	result = med_decide_result(&test_event_type, &event, &subject, &object);
 
 	KUNIT_EXPECT_EQ(test, MED_DENY, result.answer);
@@ -448,6 +453,92 @@ static void protocol_validates_decision_progress(struct kunit *test)
 				false));
 }
 
+static void decision_counters_attribute_final_verdicts(struct kunit *test)
+{
+	struct medusa_decision_counter_snapshot counters;
+	struct medusa_event_s event = {};
+	struct medusa_kobject_s subject;
+	struct medusa_kobject_s object;
+	enum medusa_fallback_policy policy;
+	int error;
+
+	med_decide_result(&test_event_type, &event, &subject, &object);
+
+	policy = MEDUSA_FALLBACK_ONLINE_REQUIRED;
+	error = medusa_set_fallback_policy(&test_event_type, policy);
+	KUNIT_ASSERT_EQ(test, 0, error);
+	med_decide_result(&test_event_type, &event, &subject, &object);
+
+	policy = MEDUSA_FALLBACK_BASELINE_ALLOW;
+	error = medusa_set_fallback_policy(&test_event_type, policy);
+	KUNIT_ASSERT_EQ(test, 0, error);
+	KUNIT_ASSERT_EQ(test, 0, med_register_authserver(&fake_server));
+	delegated_answer = MED_ALLOW;
+	med_decide_result(&test_event_type, &event, &subject, &object);
+	delegated_answer = MED_DENY;
+	med_decide_result(&test_event_type, &event, &subject, &object);
+	delegated_answer = MED_ERR;
+	delegated_unavailable = MEDUSA_DECISION_TIMED_OUT;
+	med_decide_result(&test_event_type, &event, &subject, &object);
+	delegated_answer = (enum medusa_answer_t)2;
+	med_decide_result(&test_event_type, &event, &subject, &object);
+	med_unregister_authserver(&fake_server);
+
+	medusa_decision_counters_snapshot(&test_event_type, &counters);
+	KUNIT_EXPECT_EQ(test, (u64)6, counters.total);
+	KUNIT_EXPECT_EQ(test, (u64)4, counters.delegated);
+	KUNIT_EXPECT_EQ(test, (u64)2, counters.baseline);
+	KUNIT_EXPECT_EQ(test, (u64)1, counters.online_required);
+	KUNIT_EXPECT_EQ(test, (u64)3, counters.allowed);
+	KUNIT_EXPECT_EQ(test, (u64)3, counters.denied);
+	KUNIT_EXPECT_EQ(test, (u64)1, counters.timed_out);
+	KUNIT_EXPECT_EQ(test, (u64)1, counters.invalid_replies);
+}
+
+static void decision_counter_wrap_is_well_defined(struct kunit *test)
+{
+	struct medusa_decision_counter_snapshot counters;
+	struct medusa_event_s event = {};
+	struct medusa_kobject_s subject;
+	struct medusa_kobject_s object;
+
+	atomic64_set(&test_event_type.decision_counters.total, ~0ULL);
+	med_decide_result(&test_event_type, &event, &subject, &object);
+	medusa_decision_counters_snapshot(&test_event_type, &counters);
+
+	KUNIT_EXPECT_EQ(test, (u64)0, counters.total);
+}
+
+static void protocol_counters_are_cumulative(struct kunit *test)
+{
+	struct medusa_protocol_counter_snapshot before;
+	struct medusa_protocol_counter_snapshot after;
+
+	medusa_protocol_counters_snapshot(&before);
+	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_REPLIES);
+	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_LEASE_RENEWALS);
+	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_MALFORMED_MESSAGES);
+	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_INVALID_ANSWERS);
+	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_UNKNOWN_COMMANDS);
+	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_UNKNOWN_REQUESTS);
+	medusa_protocol_counter_inc(MEDUSA_PROTOCOL_STALE_REQUESTS);
+	medusa_protocol_counters_snapshot(&after);
+
+	KUNIT_EXPECT_EQ(test, before.replies + 1, after.replies);
+	KUNIT_EXPECT_EQ(test, before.lease_renewals + 1,
+			after.lease_renewals);
+	KUNIT_EXPECT_EQ(test, before.malformed_messages + 1,
+			after.malformed_messages);
+	KUNIT_EXPECT_EQ(test, before.invalid_answers + 1,
+			after.invalid_answers);
+	KUNIT_EXPECT_EQ(test, before.unknown_commands + 1,
+			after.unknown_commands);
+	KUNIT_EXPECT_EQ(test, before.unknown_requests + 1,
+			after.unknown_requests);
+	KUNIT_EXPECT_EQ(test, before.stale_requests + 1,
+			after.stale_requests);
+}
+
 static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(decide_without_server_uses_baseline_and_preserves_monitoring),
 	KUNIT_CASE(baseline_deny_is_enforced_without_server),
@@ -471,6 +562,9 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(protocol_rejects_unknown_request_id),
 	KUNIT_CASE(protocol_rejects_stale_request_id),
 	KUNIT_CASE(protocol_validates_decision_progress),
+	KUNIT_CASE(decision_counters_attribute_final_verdicts),
+	KUNIT_CASE(decision_counter_wrap_is_well_defined),
+	KUNIT_CASE(protocol_counters_are_cumulative),
 	{}
 };
 

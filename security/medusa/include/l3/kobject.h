@@ -184,6 +184,7 @@ struct medusa_evtype_s {
 				 * OR'd with these flags:
 				 */
 	enum medusa_fallback_policy fallback_policy;
+	struct medusa_decision_counters decision_counters;
 	atomic64_t degraded_decisions;
 	struct ratelimit_state degraded_audit_ratelimit;
 	/* if you change/swap them, check the usage anywhere (l3/registry.c) */
@@ -256,6 +257,7 @@ struct medusa_evtype_s {
 	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
 	MEDUSA_FALLBACK_BASELINE_ALLOW, \
+	{}, \
 	ATOMIC64_INIT(0), \
 	{}, \
 	0 /* cinfo */, \
@@ -265,6 +267,7 @@ struct medusa_evtype_s {
 	NULL,	/* register_evtype */ \
 	0 /* bitnr */, \
 	MEDUSA_FALLBACK_BASELINE_ALLOW, \
+	{}, \
 	ATOMIC64_INIT(0), \
 	{}, \
 	0 /* cinfo */
