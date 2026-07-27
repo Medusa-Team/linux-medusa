@@ -53,6 +53,15 @@ policy and proves that its `ipc_msgsnd` deny rule is enforced. The scenario
 also verifies that stale-context validation emits an audit record when it
 takes the disconnected fail-open path for `mkdir`.
 
+The `degraded` scenario verifies the renewable lease, circuit breaker,
+structured fallback audit records, protocol error accounting, securityfs
+privilege and snapshot consistency, and recovery through newer policy
+generations. Its restart-stress phase stops Constable with 32 independent
+message-queue operations in flight, proves that at least eight requests are
+pending concurrently, kills the server, and requires every waiter to apply its
+installed baseline within three seconds. The pending table must return to zero
+before another Constable reconnects and restores the delegated denial.
+
 The `stacking` scenario inherits the complete lifecycle test and additionally
 mounts securityfs and verifies that the kernel's runtime LSM list contains
 both AppArmor and Medusa. It loads a minimal AppArmor profile, proves that

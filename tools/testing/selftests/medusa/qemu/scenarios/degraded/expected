@@ -19,6 +19,13 @@ MEDUSA_RESULT degraded status_disconnected PASS
 MEDUSA_RESULT degraded reconnect PASS
 MEDUSA_RESULT degraded delegation_recovered PASS
 MEDUSA_RESULT degraded status_recovered PASS
+MEDUSA_RESULT degraded restart_stopped PASS
+MEDUSA_RESULT degraded flood_pending PASS
+MEDUSA_RESULT degraded flood_disconnect PASS
+MEDUSA_RESULT degraded flood_baseline_allow PASS
+MEDUSA_RESULT degraded flood_status_disconnected PASS
+MEDUSA_RESULT degraded restart_reconnect PASS
+MEDUSA_RESULT degraded restart_policy_recovered PASS
 MEDUSA_RESULT degraded securityfs_concurrent_reads PASS
 authorization server circuit breaker opened, reason=2
 Medusa: audit_schema=1 record=decision protocol=3
@@ -35,4 +42,5 @@ error_sequence=13 suppressed=9
 error_kind=invalid_answer
 error_kind=unknown_request
 error_kind=unknown_command
+!MEDUSA_SECURITYFS_READER_FAIL
 !MEDUSA_QEMU_FAIL degraded

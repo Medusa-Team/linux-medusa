@@ -26,6 +26,8 @@ struct test_message {
 
 #define FREEZER_CONTROL_KEY ((key_t)0x4d445343)
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
+#define DECISION_FLOOD_WORKERS 32
+#define DECISION_FLOOD_MIN_PENDING 8
 #define SECURITYFS_READERS 4
 #define SECURITYFS_READ_ITERATIONS 700
 
@@ -176,7 +178,7 @@ static bool securityfs_is_root_only(void)
 	return WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0;
 }
 
-static bool securityfs_snapshot_is_consistent(void)
+static int securityfs_snapshot_error(void)
 {
 	char classes[16384];
 	char events[65536];
@@ -190,14 +192,14 @@ static bool securityfs_snapshot_is_consistent(void)
 	    !strstr(status, "audit_schema_version=1\n") ||
 	    !strstr(status, "policy_generation=") ||
 	    !strstr(status, "protocol_malformed_messages="))
-		return false;
+		return 1;
 	length = strlen(status);
 	if (!length || status[length - 1] != '\n')
-		return false;
+		return 2;
 	if (!strstr(status, "protocol_state=disconnected\n") &&
 	    !strstr(status, "protocol_state=handshaking\n") &&
 	    !strstr(status, "protocol_state=ready\n"))
-		return false;
+		return 3;
 
 	if (!read_file("/sys/kernel/security/medusa/events",
 		       events, sizeof(events)) ||
@@ -205,18 +207,20 @@ static bool securityfs_snapshot_is_consistent(void)
 	    !line_has(events, "event=ipc_msgsnd ", "fallback=") ||
 	    !line_has(events, "event=ipc_msgsnd ",
 		      "delegation=conditional"))
-		return false;
+		return 4;
 	length = strlen(events);
 	if (!length || events[length - 1] != '\n')
-		return false;
+		return 5;
 
 	if (!read_file("/sys/kernel/security/medusa/classes",
 		       classes, sizeof(classes)) ||
 	    !line_has(classes, "class=process ", "enforcement=active") ||
 	    !line_has(classes, "class=socket ", "enforcement=announced"))
-		return false;
+		return 6;
 	length = strlen(classes);
-	return length && classes[length - 1] == '\n';
+	if (!length || classes[length - 1] != '\n')
+		return 7;
+	return 0;
 }
 
 static size_t start_securityfs_readers(pid_t *readers)
@@ -234,8 +238,16 @@ static size_t start_securityfs_readers(pid_t *readers)
 			for (iteration = 0;
 			     iteration < SECURITYFS_READ_ITERATIONS;
 			     iteration++) {
-				if (!securityfs_snapshot_is_consistent())
+				int snapshot_error =
+					securityfs_snapshot_error();
+
+				if (snapshot_error) {
+					printf("MEDUSA_SECURITYFS_READER_FAIL"
+					       " reader=%zu iteration=%d error=%d\n",
+					       reader, iteration,
+					       snapshot_error);
 					_exit(EXIT_FAILURE);
+				}
 				usleep(20000);
 			}
 			_exit(EXIT_SUCCESS);
@@ -407,6 +419,113 @@ static bool freeze_constable(pid_t pid)
 	return true;
 }
 
+static bool stop_child(pid_t pid)
+{
+	int status;
+
+	if (pid <= 0 || kill(pid, SIGSTOP) < 0)
+		return false;
+	if (waitpid(pid, &status, WUNTRACED) != pid)
+		return false;
+	return WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP;
+}
+
+static bool kill_child(pid_t pid)
+{
+	int status;
+
+	if (pid <= 0 || kill(pid, SIGKILL) < 0)
+		return false;
+	if (waitpid(pid, &status, 0) != pid)
+		return false;
+	return WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL;
+}
+
+static size_t create_flood_queues(int *ids, size_t count)
+{
+	size_t index;
+
+	for (index = 0; index < count; index++) {
+		ids[index] = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
+		if (ids[index] < 0)
+			break;
+	}
+	return index;
+}
+
+static size_t start_decision_flood(const int *ids, pid_t *workers,
+				   size_t count)
+{
+	size_t index;
+
+	for (index = 0; index < count; index++) {
+		pid_t child = fork();
+
+		if (child < 0)
+			break;
+		if (child == 0) {
+			struct test_message message = { 1, "flood" };
+
+			_exit(msgsnd(ids[index], &message,
+				     sizeof(message.text), IPC_NOWAIT) == 0 ?
+				      EXIT_SUCCESS : EXIT_FAILURE);
+		}
+		workers[index] = child;
+	}
+	return index;
+}
+
+static bool wait_for_pending_requests(unsigned long long minimum)
+{
+	char status[4096];
+	int attempt;
+
+	for (attempt = 0; attempt < 40; attempt++) {
+		if (read_file("/sys/kernel/security/medusa/status",
+			      status, sizeof(status)) &&
+		    status_counter(status, "pending_requests=") >= minimum)
+			return true;
+		usleep(50000);
+	}
+	return false;
+}
+
+static bool wait_for_flood_workers(pid_t *workers, size_t count)
+{
+	bool passed = count == DECISION_FLOOD_WORKERS;
+	size_t index;
+
+	for (index = 0; index < count; index++) {
+		int status;
+
+		if (waitpid(workers[index], &status, 0) != workers[index] ||
+		    !WIFEXITED(status) || WEXITSTATUS(status) != EXIT_SUCCESS)
+			passed = false;
+	}
+	return passed;
+}
+
+static void remove_flood_queues(int *ids, size_t count)
+{
+	size_t index;
+
+	for (index = 0; index < count; index++)
+		if (ids[index] >= 0)
+			msgctl(ids[index], IPC_RMID, NULL);
+}
+
+static pid_t start_constable(void)
+{
+	pid_t child = fork();
+
+	if (child == 0) {
+		execl("/sbin/constable", "constable", "-c",
+		      "/etc/medusa.conf", "/etc/constable.conf", NULL);
+		_exit(127);
+	}
+	return child;
+}
+
 static pid_t start_handshake_holder(int *release_fd)
 {
 	char answer_packet[sizeof(uint64_t) * 2 + sizeof(int16_t)];
@@ -521,21 +640,29 @@ int main(int argc, char **argv)
 	pid_t cache_probe;
 	pid_t handshake;
 	pid_t replacement;
+	pid_t final_replacement;
+	pid_t flood_workers[DECISION_FLOOD_WORKERS];
 	double started;
 	double elapsed;
 	char classes[16384];
 	char events[65536];
 	char status[4096] = {};
 	int id;
+	int flood_ids[DECISION_FLOOD_WORKERS];
 	int release_fd;
 	int send_result;
 	int handshake_status;
 	int cache_probe_status;
 	bool handshake_released;
+	bool flood_workers_passed;
 	unsigned long long initial_generation;
 	pid_t securityfs_readers[SECURITYFS_READERS];
 	size_t securityfs_reader_count = 0;
 	bool securityfs_readers_waited = false;
+	size_t flood_queue_count;
+	size_t flood_worker_count;
+	unsigned long long replacement_generation;
+	bool initial_status_ok;
 
 	if (argc == 2 && !strcmp(argv[1], "--freezer-controller"))
 		return freezer_controller();
@@ -554,19 +681,23 @@ int main(int argc, char **argv)
 	if (initial <= 0)
 		initial = read_constable_pid();
 	result("startup", initial > 0 && kill(initial, 0) == 0);
-	result("status_connected",
-	       read_file("/sys/kernel/security/medusa/status",
-			 status, sizeof(status)) &&
-	       strstr(status, "protocol_version=3\n") &&
-	       strstr(status, "audit_schema_version=1\n") &&
-	       strstr(status, "authorization_server=connected\n") &&
-	       strstr(status, "protocol_state=ready\n") &&
-	       strstr(status, "policy_readiness=ready\n") &&
-	       strstr(status, "authorization_server_health=healthy\n") &&
-	       strstr(status, "circuit_breaker=closed\n") &&
-	       strstr(status, "pending_requests=0\n") &&
-	       strstr(status, "pending_limit=1024\n") &&
-	       strstr(status, "decision_lease_ms=5000\n"));
+	initial_status_ok =
+		read_file("/sys/kernel/security/medusa/status",
+			  status, sizeof(status)) &&
+		strstr(status, "protocol_version=3\n") &&
+		strstr(status, "audit_schema_version=1\n") &&
+		strstr(status, "authorization_server=connected\n") &&
+		strstr(status, "protocol_state=ready\n") &&
+		strstr(status, "policy_readiness=ready\n") &&
+		strstr(status, "authorization_server_health=healthy\n") &&
+		strstr(status, "circuit_breaker=closed\n") &&
+		strstr(status, "pending_requests=0\n") &&
+		strstr(status, "pending_limit=1024\n") &&
+		strstr(status, "decision_lease_ms=5000\n");
+	if (!initial_status_ok)
+		printf("MEDUSA_INITIAL_STATUS_BEGIN\n%s"
+		       "MEDUSA_INITIAL_STATUS_END\n", status);
+	result("status_connected", initial_status_ok);
 	initial_generation =
 		status_counter(status, "active_policy_generation=");
 	result("generation_ready",
@@ -693,12 +824,7 @@ int main(int argc, char **argv)
 	       status_counter(status, "last_ready_policy_generation=") ==
 		       initial_generation);
 
-	replacement = fork();
-	if (replacement == 0) {
-		execl("/sbin/constable", "constable", "-c",
-		      "/etc/medusa.conf", "/etc/constable.conf", NULL);
-		_exit(127);
-	}
+	replacement = start_constable();
 	result("reconnect", replacement > 0);
 	result("delegation_recovered",
 	       replacement > 0 && wait_for_denial(id));
@@ -716,6 +842,48 @@ int main(int argc, char **argv)
 		       initial_generation &&
 	       status_counter(status, "last_ready_policy_generation=") ==
 		       status_counter(status, "active_policy_generation="));
+	replacement_generation =
+		status_counter(status, "active_policy_generation=");
+
+	memset(flood_ids, -1, sizeof(flood_ids));
+	flood_queue_count =
+		create_flood_queues(flood_ids, ARRAY_SIZE(flood_ids));
+	result("restart_stopped",
+	       flood_queue_count == ARRAY_SIZE(flood_ids) &&
+	       stop_child(replacement));
+	flood_worker_count =
+		start_decision_flood(flood_ids, flood_workers,
+				     flood_queue_count);
+	result("flood_pending",
+	       flood_worker_count == DECISION_FLOOD_WORKERS &&
+	       wait_for_pending_requests(DECISION_FLOOD_MIN_PENDING));
+	started = monotonic_seconds();
+	result("flood_disconnect", kill_child(replacement));
+	flood_workers_passed =
+		wait_for_flood_workers(flood_workers, flood_worker_count);
+	elapsed = monotonic_seconds() - started;
+	result("flood_baseline_allow",
+	       flood_workers_passed && elapsed < 3.0);
+	result("flood_status_disconnected",
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       strstr(status, "authorization_server=disconnected\n") &&
+	       strstr(status, "protocol_state=disconnected\n") &&
+	       strstr(status, "pending_requests=0\n"));
+	remove_flood_queues(flood_ids, flood_queue_count);
+
+	final_replacement = start_constable();
+	result("restart_reconnect", final_replacement > 0);
+	result("restart_policy_recovered",
+	       final_replacement > 0 && wait_for_denial(id) &&
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       strstr(status, "authorization_server=connected\n") &&
+	       strstr(status, "protocol_state=ready\n") &&
+	       strstr(status, "authorization_server_health=healthy\n") &&
+	       strstr(status, "pending_requests=0\n") &&
+	       status_counter(status, "active_policy_generation=") >
+		       replacement_generation);
 	result("securityfs_concurrent_reads",
 	       wait_for_securityfs_readers(securityfs_readers,
 					   securityfs_reader_count));

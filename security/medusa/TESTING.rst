@@ -254,7 +254,16 @@ QEMU scenario coverage
   delegation, baseline, timeout, and degraded attribution, and proves that the
   status file cannot be opened after dropping to uid 65534.
   It then terminates the frozen server, registers a replacement, and proves
-  that delegated denial is restored.
+  that delegated denial is restored.  Finally, it creates 32 independent
+  message queues, stops the replacement server, and requires at least eight
+  simultaneous pending requests before killing it.  All blocked operations
+  must wake through their installed baseline allow within three seconds, the
+  pending table must return to zero, concurrent securityfs readers must retain
+  complete snapshots, and a second replacement must restore the delegated
+  denial under a newer policy generation.  Together with the KUnit
+  ``baseline_deny`` tests, this covers both sides of degraded policy: failure
+  cannot relax an installed baseline denial or turn an unrelated
+  baseline-permitted operation into a blanket denial.
 
 ``stacking.config``
   Enables AppArmor before Medusa in ``CONFIG_LSM``.  The ``stacking`` scenario
