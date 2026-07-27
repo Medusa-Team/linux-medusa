@@ -51,11 +51,13 @@ enum medusa_answer_t medusa_chroot(const struct path *path)
 	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(chroot_access))
 		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(path->dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
+	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(chroot_access))
 		return mad.ans;
 	if (!vs_intersects(VSS(task_security(current)),
 			   VS(inode_security(path->dentry->d_inode))) ||

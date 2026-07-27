@@ -90,13 +90,15 @@ int medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
 		return err;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0) {
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ipc_msgsnd_access)) {
 		medusa_audit_apply_local(&mad, MED_ALLOW,
 					 MEDUSA_DECISION_VALIDATION);
 		goto out;
 	}
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
-	    ipc_kobj_validate_ipcp(ipcp) <= 0) {
+	    ipc_kobj_validate_ipcp(ipcp) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ipc_msgsnd_access)) {
 		medusa_audit_apply_local(&mad, MED_ALLOW,
 					 MEDUSA_DECISION_VALIDATION);
 		goto out;

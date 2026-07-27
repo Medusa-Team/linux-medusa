@@ -69,7 +69,8 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	unsigned int requested = MEDUSA_VS_SEE;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(permission_access))
 		return mad.ans;
 
 	dentry = d_find_alias(inode);
@@ -77,10 +78,12 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	if (!dentry || IS_ERR(dentry))
 		return mad.ans;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(permission_access))
 		return mad.ans;
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
-	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
+	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(permission_access))
 		goto out_dput;
 	if (mask & (S_IRUGO | S_IXUGO))
 		requested |= MEDUSA_VS_READ;

@@ -9,6 +9,7 @@ static int kclass_calls;
 static int evtype_calls;
 static bool server_healthy;
 static enum medusa_health_reason server_health_reason;
+static struct medusa_evtype_s *announced_event;
 
 static void fake_close(void)
 {
@@ -24,6 +25,8 @@ static int fake_add_kclass(struct medusa_kclass_s *kclass)
 static int fake_add_evtype(struct medusa_evtype_s *evtype)
 {
 	evtype_calls++;
+	if (!announced_event)
+		announced_event = evtype;
 	return 0;
 }
 
@@ -69,12 +72,85 @@ static void registry_prepare_replays_definitions(struct kunit *test)
 
 	kclass_calls = 0;
 	evtype_calls = 0;
+	announced_event = NULL;
 	result = med_register_authserver_prepare(&fake_server);
 
 	KUNIT_EXPECT_EQ(test, 0, result);
 	KUNIT_EXPECT_GT(test, kclass_calls, 0);
 	KUNIT_EXPECT_GT(test, evtype_calls, 0);
 	KUNIT_EXPECT_FALSE(test, med_is_authserver_present());
+}
+
+static void registry_commits_staged_fallback_only_at_ready(struct kunit *test)
+{
+	enum medusa_fallback_policy original;
+
+	announced_event = NULL;
+	KUNIT_ASSERT_EQ(test, 0,
+			med_register_authserver_prepare(&fake_server));
+	KUNIT_ASSERT_NOT_NULL(test, announced_event);
+	original = medusa_get_fallback_policy(announced_event);
+
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_handshake_begin(&fake_server));
+	KUNIT_EXPECT_EQ(test, -EPERM,
+			med_authserver_stage_fallback_policy(
+				&other_server, (MCPptr_t)announced_event,
+				MEDUSA_FALLBACK_BASELINE_DENY));
+	KUNIT_EXPECT_EQ(test, -ENOENT,
+			med_authserver_stage_fallback_policy(
+				&fake_server, (MCPptr_t)&fake_server,
+				MEDUSA_FALLBACK_BASELINE_DENY));
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_stage_fallback_policy(
+				&fake_server, (MCPptr_t)announced_event,
+				MEDUSA_FALLBACK_BASELINE_DENY));
+	KUNIT_EXPECT_EQ(test, original,
+			medusa_get_fallback_policy(announced_event));
+
+	KUNIT_ASSERT_EQ(test, 0, med_register_authserver(&fake_server));
+	KUNIT_EXPECT_EQ(test, MEDUSA_FALLBACK_BASELINE_DENY,
+			medusa_get_fallback_policy(announced_event));
+	med_unregister_authserver(&fake_server);
+
+	/* A later handshake safely reuses the preceding generation's old slot. */
+	KUNIT_ASSERT_EQ(test, 0,
+			med_register_authserver_prepare(&fake_server));
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_handshake_begin(&fake_server));
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_stage_fallback_policy(
+				&fake_server, (MCPptr_t)announced_event,
+				MEDUSA_FALLBACK_ONLINE_REQUIRED));
+	KUNIT_EXPECT_EQ(test, MEDUSA_FALLBACK_BASELINE_DENY,
+			medusa_get_fallback_policy(announced_event));
+	KUNIT_ASSERT_EQ(test, 0, med_register_authserver(&fake_server));
+	KUNIT_EXPECT_EQ(test, MEDUSA_FALLBACK_ONLINE_REQUIRED,
+			medusa_get_fallback_policy(announced_event));
+	med_unregister_authserver(&fake_server);
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_set_fallback_policy(announced_event, original));
+}
+
+static void registry_aborts_staged_fallback_with_handshake(struct kunit *test)
+{
+	enum medusa_fallback_policy original;
+
+	announced_event = NULL;
+	KUNIT_ASSERT_EQ(test, 0,
+			med_register_authserver_prepare(&fake_server));
+	KUNIT_ASSERT_NOT_NULL(test, announced_event);
+	original = medusa_get_fallback_policy(announced_event);
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_handshake_begin(&fake_server));
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_stage_fallback_policy(
+				&fake_server, (MCPptr_t)announced_event,
+				MEDUSA_FALLBACK_ONLINE_REQUIRED));
+
+	med_unregister_authserver(&fake_server);
+	KUNIT_EXPECT_EQ(test, original,
+			medusa_get_fallback_policy(announced_event));
 }
 
 static void registry_authserver_lifecycle(struct kunit *test)
@@ -259,6 +335,8 @@ static void registry_status_reports_unknown_optional_health(struct kunit *test)
 
 static struct kunit_case registry_test_cases[] = {
 	KUNIT_CASE(registry_prepare_replays_definitions),
+	KUNIT_CASE(registry_commits_staged_fallback_only_at_ready),
+	KUNIT_CASE(registry_aborts_staged_fallback_with_handshake),
 	KUNIT_CASE(registry_authserver_lifecycle),
 	KUNIT_CASE(registry_status_snapshots_lifecycle_and_health),
 	KUNIT_CASE(registry_reports_handshake_before_policy_ready),

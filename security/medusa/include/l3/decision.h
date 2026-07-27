@@ -89,12 +89,16 @@ struct medusa_decision_counter_snapshot {
 
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 			       enum medusa_fallback_policy policy);
+enum medusa_fallback_policy
+medusa_get_fallback_policy(const struct medusa_evtype_s *evtype);
 u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype);
 void medusa_decision_counters_init(struct medusa_evtype_s *evtype);
 void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
 				       struct medusa_decision_counter_snapshot *snapshot);
 bool medusa_event_monitoring_check(struct medusa_evtype_s *evtype,
 				   bool monitored);
+bool medusa_event_fallback_requires_decision(
+	const struct medusa_evtype_s *evtype);
 u64 medusa_current_policy_generation(void);
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy);
 const char *medusa_decision_answer_name(enum medusa_answer_t answer);

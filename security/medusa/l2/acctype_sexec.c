@@ -74,11 +74,13 @@ enum medusa_answer_t medusa_sexec(struct linux_binprm *bprm)
 	enum medusa_answer_t retval = MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(sexec_access))
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(inode_security(DENTRY->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry(DENTRY, bprm->file->f_path.mnt, NULL) <= 0)
+	    file_kobj_validate_dentry(DENTRY, bprm->file->f_path.mnt, NULL) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(sexec_access))
 		return MED_ALLOW;
 	/* no sense in checking VS here */
 	if (MEDUSA_MONITORED_ACCESS_S(sexec_access, task_security(current)))

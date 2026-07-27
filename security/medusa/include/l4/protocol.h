@@ -12,12 +12,15 @@
 #define MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE \
 	(sizeof(MCPptr_t) + sizeof(s16))
 #define MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE sizeof(MCPptr_t)
+#define MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE \
+	sizeof(struct medusa_comm_fallback_policy_s)
 
 static inline bool medusa_comm_command_is_supported(u64 command)
 {
 	switch (command) {
 	case MEDUSA_COMM_AUTHANSWER:
 	case MEDUSA_COMM_AUTHREQUEST_PROGRESS:
+	case MEDUSA_COMM_FALLBACK_POLICY:
 	case MEDUSA_COMM_FETCH_REQUEST:
 	case MEDUSA_COMM_UPDATE_REQUEST:
 	case MEDUSA_COMM_READY_ANSWER:
@@ -25,6 +28,16 @@ static inline bool medusa_comm_command_is_supported(u64 command)
 	default:
 		return false;
 	}
+}
+
+static inline int medusa_comm_validate_fallback_policy(size_t payload_size,
+						       u8 policy)
+{
+	if (payload_size != MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE)
+		return -EMSGSIZE;
+	if (policy > MEDUSA_COMM_FALLBACK_ONLINE_REQUIRED)
+		return -EINVAL;
+	return 0;
 }
 
 static inline int medusa_comm_validate_authanswer(size_t payload_size,

@@ -90,12 +90,14 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	}
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(link_access))
 		return mad.ans;
 
 	// new_dir->mnt and old_dentry because it is a hardlink, mnt will be the same
 	if (!is_med_magic_valid(&(inode_security(old_dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry_dir(new_dir->mnt, old_dentry) <= 0) {
+	    file_kobj_validate_dentry_dir(new_dir->mnt, old_dentry) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(link_access)) {
 		return mad.ans;
 	}
 
@@ -103,7 +105,8 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
+	    file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(link_access)) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
 		return mad.ans;
 	}

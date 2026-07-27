@@ -35,7 +35,8 @@ enum medusa_answer_t medusa_afterexec(char *filename, char **argv, char **envp)
 	enum medusa_answer_t retval;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(afterexec_access))
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(afterexec_access, task_security(current))) {

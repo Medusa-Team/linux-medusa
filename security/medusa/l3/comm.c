@@ -25,6 +25,7 @@ inline int is_supported_medusa_answer(enum medusa_answer_t answer)
 
 static struct medusa_decision_result
 medusa_fallback_result(struct medusa_evtype_s *evtype,
+		       enum medusa_fallback_policy policy,
 		       enum medusa_unavailable_reason unavailable,
 		       u64 request_id, u64 policy_generation,
 		       bool request_present, bool authserver_contacted)
@@ -39,7 +40,7 @@ medusa_fallback_result(struct medusa_evtype_s *evtype,
 		.authserver_contacted = authserver_contacted,
 	};
 
-	switch (READ_ONCE(evtype->fallback_policy)) {
+	switch (policy) {
 	case MEDUSA_FALLBACK_BASELINE_ALLOW:
 		break;
 	case MEDUSA_FALLBACK_BASELINE_DENY:
@@ -172,6 +173,9 @@ void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
 bool medusa_event_monitoring_check(struct medusa_evtype_s *evtype,
 				   bool monitored)
 {
+	if (medusa_event_fallback_requires_decision(evtype))
+		monitored = true;
+
 	atomic64_inc(&evtype->decision_counters.evaluations);
 	if (!monitored) {
 		atomic64_inc(&evtype->decision_counters.cached);
@@ -179,6 +183,13 @@ bool medusa_event_monitoring_check(struct medusa_evtype_s *evtype,
 		atomic64_inc(&evtype->decision_counters.allowed);
 	}
 	return monitored;
+}
+
+bool medusa_event_fallback_requires_decision(
+	const struct medusa_evtype_s *evtype)
+{
+	return medusa_get_fallback_policy(evtype) !=
+	       MEDUSA_FALLBACK_BASELINE_ALLOW;
 }
 
 u64 medusa_current_policy_generation(void)
@@ -298,7 +309,8 @@ int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 	    policy > MEDUSA_FALLBACK_ONLINE_REQUIRED)
 		return -EINVAL;
 
-	WRITE_ONCE(evtype->fallback_policy, policy);
+	WRITE_ONCE(evtype->fallback_policy[0], policy);
+	WRITE_ONCE(evtype->fallback_policy[1], policy);
 	return 0;
 }
 
@@ -322,6 +334,8 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 		.unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE,
 	};
 	struct medusa_authserver_s *authserver;
+	enum medusa_fallback_policy fallback_policy =
+		medusa_get_fallback_policy(evtype);
 	u64 policy_generation =
 		(u64)READ_ONCE(medusa_authserver_magic);
 
@@ -329,16 +343,16 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	 * An installed denial is authoritative and is never weakened by the
 	 * availability or answer of a userspace server.
 	 */
-	if (READ_ONCE(evtype->fallback_policy) ==
-	    MEDUSA_FALLBACK_BASELINE_DENY) {
-		result = medusa_fallback_result(evtype, MEDUSA_AVAILABLE,
+	if (fallback_policy == MEDUSA_FALLBACK_BASELINE_DENY) {
+		result = medusa_fallback_result(evtype, fallback_policy,
+						MEDUSA_AVAILABLE,
 						0, policy_generation, false,
 						false);
 		return medusa_finish_decision(evtype, result);
 	}
 
 	if (ARCH_CANNOT_DECIDE(evtype)) {
-		result = medusa_fallback_result(evtype,
+		result = medusa_fallback_result(evtype, fallback_policy,
 						MEDUSA_NON_SLEEPABLE_CONTEXT,
 						0, policy_generation, false,
 						false);
@@ -354,7 +368,8 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	authserver = med_get_authserver();
 	if (!authserver) {
 		mutex_unlock(&registry_lock);
-		result = medusa_fallback_result(evtype, MEDUSA_NO_AUTH_SERVER,
+		result = medusa_fallback_result(evtype, fallback_policy,
+						MEDUSA_NO_AUTH_SERVER,
 						0, policy_generation, false,
 						false);
 		return medusa_finish_decision(evtype, result);
@@ -365,7 +380,7 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 		med_pr_warn_ratelimited("authorization server unhealthy, using fallback for event '%s'\n",
 				       evtype->name);
 		med_put_authserver(authserver);
-		result = medusa_fallback_result(evtype,
+		result = medusa_fallback_result(evtype, fallback_policy,
 						MEDUSA_AUTH_SERVER_UNHEALTHY,
 						0, policy_generation, false,
 						false);
@@ -388,7 +403,7 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	result.request_present = server_decision.request_present;
 	result.authserver_contacted = server_decision.contacted;
 	if (!is_authserver_reached(result.answer)) {
-		result = medusa_fallback_result(evtype,
+		result = medusa_fallback_result(evtype, fallback_policy,
 					       server_decision.unavailable,
 					       server_decision.request_id,
 					       server_decision.policy_generation,

@@ -897,6 +897,33 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_LEASE_RENEWALS);
 		med_pr_debug("decision lease renewed for %llx\n", id);
 
+	} else if (recv_type == MEDUSA_COMM_FALLBACK_POLICY) {
+		u8 fallback_policy;
+
+		if (count != MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE) {
+			l4_record_malformed_message(true, recv_type);
+			up_read(&lightswitch);
+			return -EMSGSIZE;
+		}
+		if (__copy_from_user(recv_buf, buf, count)) {
+			up_read(&lightswitch);
+			return -EFAULT;
+		}
+		id = get_unaligned((u64 *)recv_buf);
+		fallback_policy = recv_buf[sizeof(MCPptr_t)];
+		answ_result = medusa_comm_validate_fallback_policy(
+			count, fallback_policy);
+		if (!answ_result)
+			answ_result = med_authserver_stage_fallback_policy(
+				&chardev_medusa, id, fallback_policy);
+		if (answ_result) {
+			l4_record_protocol_error(
+				MEDUSA_PROTOCOL_MALFORMED_MESSAGES, true,
+				recv_type, true, id, answ_result);
+			up_read(&lightswitch);
+			return answ_result;
+		}
+
 	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
 			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
 		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t)*2)) {
@@ -1023,6 +1050,11 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 			atomic_inc(&update_requests);
 		wake_up(&userspace_chardev);
 	} else if (recv_type == MEDUSA_COMM_READY_ANSWER) {
+		if (count) {
+			l4_record_malformed_message(true, recv_type);
+			up_read(&lightswitch);
+			return -EMSGSIZE;
+		}
 		/* register auth server */
 		medusa_server_health_mark_healthy(&constable_health);
 		if (med_register_authserver(&chardev_medusa) < 0) {

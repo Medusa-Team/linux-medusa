@@ -199,7 +199,7 @@ struct medusa_evtype_s {
 				 */
 	bool enforced;
 	enum medusa_delegation_context delegation_context;
-	enum medusa_fallback_policy fallback_policy;
+	enum medusa_fallback_policy fallback_policy[2];
 	struct medusa_decision_counters decision_counters;
 	atomic64_t degraded_decisions;
 	struct ratelimit_state degraded_audit_ratelimit;
@@ -248,6 +248,8 @@ struct medusa_evtype_s {
 		MEDUSA_MONITORED_EVENT_O(evname, kobjptr)
 #define MEDUSA_MONITORED_ACCESS_S(evname, kobjptr) \
 		MEDUSA_MONITORED_EVENT_S(evname, kobjptr)
+#define MEDUSA_FALLBACK_REQUIRES_DECISION(evname) \
+	medusa_event_fallback_requires_decision(&MED_EVTYPEOF(evname))
 #define MEDUSA_MONITOR_ACCESS_O(evname, kobjptr) \
 		MEDUSA_MONITOR_EVENT_O(evname, kobjptr)
 #define MEDUSA_MONITOR_ACCESS_S(evname, kobjptr) \
@@ -277,7 +279,8 @@ struct medusa_evtype_s {
 	0 /* bitnr */, \
 	false, \
 	MEDUSA_DELEGATION_NONE, \
-	MEDUSA_FALLBACK_BASELINE_ALLOW, \
+	{ MEDUSA_FALLBACK_BASELINE_ALLOW, \
+	  MEDUSA_FALLBACK_BASELINE_ALLOW }, \
 	{}, \
 	ATOMIC64_INIT(0), \
 	{}, \
@@ -289,7 +292,8 @@ struct medusa_evtype_s {
 	0 /* bitnr */, \
 	false, \
 	MEDUSA_DELEGATION_NONE, \
-	MEDUSA_FALLBACK_BASELINE_ALLOW, \
+	{ MEDUSA_FALLBACK_BASELINE_ALLOW, \
+	  MEDUSA_FALLBACK_BASELINE_ALLOW }, \
 	{}, \
 	ATOMIC64_INIT(0), \
 	{}, \

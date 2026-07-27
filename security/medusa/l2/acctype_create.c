@@ -63,7 +63,8 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(create_access))
 		return mad.ans;
 
 	ndcurrent.dentry = dentry;
@@ -71,7 +72,8 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
 
 	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, NULL) <= 0) {
+	    file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, NULL) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(create_access)) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return mad.ans;
 	}

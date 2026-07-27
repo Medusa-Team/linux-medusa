@@ -33,11 +33,13 @@ enum medusa_answer_t medusa_ptrace(struct task_struct *tracer, struct task_struc
 	enum medusa_answer_t retval;
 
 	if (!is_med_magic_valid(&(task_security(tracer)->med_object)) &&
-	    process_kobj_validate_task(tracer) <= 0)
+	    process_kobj_validate_task(tracer) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ptrace_access))
 		return MED_ALLOW;
 
 	if (!is_med_magic_valid(&(task_security(tracee)->med_object)) &&
-	    process_kobj_validate_task(tracee) <= 0)
+	    process_kobj_validate_task(tracee) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ptrace_access))
 		return MED_ALLOW;
 
 	if (!vs_intersects(VSS(task_security(tracer)), VS(task_security(tracee))) ||

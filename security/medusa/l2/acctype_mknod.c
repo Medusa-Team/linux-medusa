@@ -76,14 +76,16 @@ enum medusa_answer_t medusa_mknod(const struct path *dir,
 	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(mknod_access))
 		return mad.ans;
 
 	ndcurrent = *dir;
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry(ndupper.dentry, ndupper.mnt, NULL) <= 0) {
+	    file_kobj_validate_dentry(ndupper.dentry, ndupper.mnt, NULL) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(mknod_access)) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
 		return mad.ans;
 	}

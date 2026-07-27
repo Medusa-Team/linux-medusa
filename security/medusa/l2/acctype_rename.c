@@ -82,11 +82,13 @@ enum medusa_answer_t medusa_rename(const struct path *old_path,
 	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(rename_access))
 		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(old_dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry_dir(old_path->mnt, old_dentry) <= 0)
+	    file_kobj_validate_dentry_dir(old_path->mnt, old_dentry) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(rename_access))
 		return mad.ans;
 	/* check S and W access to old_dentry */
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(old_dentry->d_inode))) ||
@@ -101,7 +103,8 @@ enum medusa_answer_t medusa_rename(const struct path *old_path,
 
 	medusa_get_upper_and_parent(new_path, &target_upper, NULL);
 	if (!is_med_magic_valid(&(inode_security(target_upper.dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry_dir(target_upper.mnt, target_upper.dentry) <= 0) {
+	    file_kobj_validate_dentry_dir(target_upper.mnt, target_upper.dentry) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(rename_access)) {
 		medusa_put_upper_and_parent(&target_upper, NULL);
 		medusa_audit_apply_local(&mad, MED_ALLOW,
 					 MEDUSA_DECISION_VALIDATION);

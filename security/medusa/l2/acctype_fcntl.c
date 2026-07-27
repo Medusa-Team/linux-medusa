@@ -81,11 +81,13 @@ enum medusa_answer_t medusa_fcntl(struct file *file, unsigned int cmd,
 		return mad.ans;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(fcntl_access))
 		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
-	    file_kobj_validate_dentry_dir(file->f_path.mnt, file_dentry(file)) <= 0)
+	    file_kobj_validate_dentry_dir(file->f_path.mnt, file_dentry(file)) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(fcntl_access))
 		return mad.ans;
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
 	    !vs_intersects(VSW(task_security(current)), VS(inode_security(inode)))) {
