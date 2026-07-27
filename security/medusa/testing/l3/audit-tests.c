@@ -62,10 +62,33 @@ static void audit_decision_tracks_source_and_contact(struct kunit *test)
 			  medusa_audit_unavailable_name(mad.unavailable));
 }
 
+static void audit_local_decisions_have_explicit_sources(struct kunit *test)
+{
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
+	const char *source_name;
+
+	KUNIT_EXPECT_TRUE(test, (bool)mad.decision_metadata);
+	KUNIT_EXPECT_EQ(test, MEDUSA_DECISION_CACHE, mad.decision_source);
+	source_name = medusa_audit_decision_source_name(mad.decision_source);
+	KUNIT_EXPECT_STREQ(test, "cache", source_name);
+
+	medusa_audit_apply_local(&mad, MED_DENY,
+				 MEDUSA_DECISION_VIRTUAL_SPACE);
+	KUNIT_EXPECT_EQ(test, MED_DENY, mad.ans);
+	KUNIT_EXPECT_EQ(test, AS_NO_REQUEST, (int)mad.as);
+	KUNIT_EXPECT_EQ(test, MEDUSA_DECISION_VIRTUAL_SPACE,
+			mad.decision_source);
+	source_name = medusa_audit_decision_source_name(mad.decision_source);
+	KUNIT_EXPECT_STREQ(test, "virtual_space", source_name);
+	KUNIT_EXPECT_FALSE(test, (bool)mad.request_present);
+	KUNIT_EXPECT_EQ(test, (u64)0, mad.request_id);
+}
+
 static struct kunit_case audit_test_cases[] = {
 	KUNIT_CASE(audit_answer_names_are_bounded),
 	KUNIT_CASE(lsm_returns_preserve_stacked_denials),
 	KUNIT_CASE(audit_decision_tracks_source_and_contact),
+	KUNIT_CASE(audit_local_decisions_have_explicit_sources),
 	{}
 };
 

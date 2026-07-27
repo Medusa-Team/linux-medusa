@@ -138,8 +138,8 @@ When Medusa is enabled it creates three root-readable files:
   validation path actively reaches it, its subject and object classes, runtime
   trigger bit and bitmap owner, installed fallback policy, monitoring-bit
   evaluations and cache hits, and cumulative central-engine totals for
-  delegation, baseline and online-required verdicts, allow, deny, lease
-  timeout, invalid reply, and degraded fallback.
+  authorization-server, delegation, baseline and online-required verdicts,
+  allow, deny, lease timeout, invalid reply, and degraded fallback.
 
 ``/sys/kernel/security/medusa/classes``
   Reports every announced object class, whether an active event consumes it,
@@ -154,8 +154,13 @@ path exempts these three diagnostic files so an outage cannot hide its state;
 normal VFS permissions and other stacked LSMs still apply.  Protocol-v3 event
 names and runtime trigger bits are descriptive rather than stable numeric
 identities.  Event ``cached`` counts are the exact monitoring-bit cache hits
-that bypass the central engine.  Virtual-space denials and validation failures
-that return before that check are deliberately not mislabelled as cache hits.
+that bypass the central engine.  They are included in ``decisions`` and
+``allowed``, while virtual-space denials and validation failures that return
+before that check are deliberately not mislabelled as cache hits.  The
+disjoint source counters satisfy
+``decisions = cached + auth_server + baseline + online_required +
+invalid_replies``; ``delegated`` independently records
+actual transport contact and can therefore overlap a timed-out baseline.
 The QEMU lifecycle scenario proves that ``ipc_msgsnd`` and the process and IPC
 classes are active, socket policy remains announcement-only, and an unmonitored
 ``pexec`` is counted as a cached evaluation.
@@ -186,8 +191,7 @@ defined meaning.  A device open that has not sent READY remains
 the last generation that successfully became ready.  Kernel-cached fast-path
 accesses do not enter ``med_decide_result()``.  The hook-level monitoring
 check nevertheless increments ``evaluations`` and attributes a cleared
-monitoring bit to ``cached``; ``decisions`` counts only paths which reached
-the central decision engine.
+monitoring bit to ``cached``, ``decisions``, and ``allowed``.
 
 Protocol v3 carries the complete request ID on the supported x86-64 migration
 target.  Fixed-width, architecture-independent framing remains protocol-v4

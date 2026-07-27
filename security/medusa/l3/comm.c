@@ -86,6 +86,14 @@ const char *medusa_decision_source_name(enum medusa_decision_source source)
 		return "online_required";
 	case MEDUSA_DECISION_INVALID_REPLY:
 		return "invalid_reply";
+	case MEDUSA_DECISION_CACHE:
+		return "cache";
+	case MEDUSA_DECISION_VIRTUAL_SPACE:
+		return "virtual_space";
+	case MEDUSA_DECISION_PATH_GUARD:
+		return "path_guard";
+	case MEDUSA_DECISION_VALIDATION:
+		return "validation";
 	default:
 		return "invalid";
 	}
@@ -127,6 +135,7 @@ void medusa_decision_counters_init(struct medusa_evtype_s *evtype)
 	atomic64_set(&evtype->decision_counters.cached, 0);
 	atomic64_set(&evtype->decision_counters.total, 0);
 	atomic64_set(&evtype->decision_counters.delegated, 0);
+	atomic64_set(&evtype->decision_counters.auth_server, 0);
 	atomic64_set(&evtype->decision_counters.baseline, 0);
 	atomic64_set(&evtype->decision_counters.online_required, 0);
 	atomic64_set(&evtype->decision_counters.allowed, 0);
@@ -145,6 +154,8 @@ void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
 	snapshot->total = atomic64_read(&evtype->decision_counters.total);
 	snapshot->delegated =
 		atomic64_read(&evtype->decision_counters.delegated);
+	snapshot->auth_server =
+		atomic64_read(&evtype->decision_counters.auth_server);
 	snapshot->baseline =
 		atomic64_read(&evtype->decision_counters.baseline);
 	snapshot->online_required =
@@ -162,9 +173,17 @@ bool medusa_event_monitoring_check(struct medusa_evtype_s *evtype,
 				   bool monitored)
 {
 	atomic64_inc(&evtype->decision_counters.evaluations);
-	if (!monitored)
+	if (!monitored) {
 		atomic64_inc(&evtype->decision_counters.cached);
+		atomic64_inc(&evtype->decision_counters.total);
+		atomic64_inc(&evtype->decision_counters.allowed);
+	}
 	return monitored;
+}
+
+u64 medusa_current_policy_generation(void)
+{
+	return (u64)READ_ONCE(medusa_authserver_magic);
 }
 
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy)
@@ -236,6 +255,9 @@ medusa_account_decision(struct medusa_evtype_s *evtype,
 		atomic64_inc(&evtype->decision_counters.delegated);
 
 	switch (result->source) {
+	case MEDUSA_DECISION_AUTH_SERVER:
+		atomic64_inc(&evtype->decision_counters.auth_server);
+		break;
 	case MEDUSA_DECISION_BASELINE:
 		atomic64_inc(&evtype->decision_counters.baseline);
 		break;

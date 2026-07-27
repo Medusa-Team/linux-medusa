@@ -621,9 +621,12 @@ int medusa_registry_events_seq_show(struct seq_file *m)
 			   fallback,
 			   (unsigned long long)counters.evaluations,
 			   (unsigned long long)counters.cached);
-		seq_printf(m, " decisions=%llu delegated=%llu baseline=%llu",
+		seq_printf(m,
+			   " decisions=%llu delegated=%llu auth_server=%llu",
 			   (unsigned long long)counters.total,
 			   (unsigned long long)counters.delegated,
+			   (unsigned long long)counters.auth_server);
+		seq_printf(m, " baseline=%llu",
 			   (unsigned long long)counters.baseline);
 		seq_printf(m, " online_required=%llu allowed=%llu denied=%llu",
 			   (unsigned long long)counters.online_required,

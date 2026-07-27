@@ -49,12 +49,13 @@ static void medusa_rename_pacb(struct audit_buffer *ab, void *pcad)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_rename(struct dentry *old_dentry, const char *newname)
+static struct medusa_decision_result
+medusa_do_rename(struct dentry *old_dentry, const char *newname)
 {
 	struct rename_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result;
 	int newnamelen;
 
 	dentry2string(old_dentry, access.filename);
@@ -66,9 +67,9 @@ static enum medusa_answer_t medusa_do_rename(struct dentry *old_dentry, const ch
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, old_dentry->d_inode);
 	file_kobj_live_add(old_dentry->d_inode);
-	retval = MED_DECIDE(rename_access, &access, &process, &file);
+	result = MED_DECIDE_RESULT(rename_access, &access, &process, &file);
 	file_kobj_live_remove(old_dentry->d_inode);
-	return retval;
+	return result;
 }
 
 enum medusa_answer_t medusa_rename(const struct path *old_path,
@@ -78,7 +79,7 @@ enum medusa_answer_t medusa_rename(const struct path *old_path,
 {
 	struct path target_upper;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
@@ -93,7 +94,8 @@ enum medusa_answer_t medusa_rename(const struct path *old_path,
 		mad.vs.sw.vst = VS(inode_security(old_dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto audit;
 	}
 
@@ -101,6 +103,8 @@ enum medusa_answer_t medusa_rename(const struct path *old_path,
 	if (!is_med_magic_valid(&(inode_security(target_upper.dentry->d_inode)->med_object)) &&
 	    file_kobj_validate_dentry_dir(target_upper.mnt, target_upper.dentry) <= 0) {
 		medusa_put_upper_and_parent(&target_upper, NULL);
+		medusa_audit_apply_local(&mad, MED_ALLOW,
+					 MEDUSA_DECISION_VALIDATION);
 		/* TODO: this goto statement is subjective */
 		goto audit;
 	}
@@ -113,13 +117,15 @@ enum medusa_answer_t medusa_rename(const struct path *old_path,
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		medusa_put_upper_and_parent(&target_upper, NULL);
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto audit;
 	}
 
 	if (MEDUSA_MONITORED_ACCESS_O(rename_access, inode_security(old_dentry->d_inode))) {
-		mad.ans = medusa_do_rename(old_dentry, new_dentry->d_name.name);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    medusa_do_rename(old_dentry,
+							     new_dentry->d_name.name));
 	}
 	med_magic_invalidate(&(inode_security(old_dentry->d_inode)->med_object));
 audit:

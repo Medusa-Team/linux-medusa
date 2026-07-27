@@ -25,6 +25,10 @@ enum medusa_decision_source {
 	MEDUSA_DECISION_BASELINE,
 	MEDUSA_DECISION_ONLINE_REQUIRED,
 	MEDUSA_DECISION_INVALID_REPLY,
+	MEDUSA_DECISION_CACHE,
+	MEDUSA_DECISION_VIRTUAL_SPACE,
+	MEDUSA_DECISION_PATH_GUARD,
+	MEDUSA_DECISION_VALIDATION,
 };
 
 enum medusa_unavailable_reason {
@@ -60,6 +64,7 @@ struct medusa_decision_counters {
 	atomic64_t cached;
 	atomic64_t total;
 	atomic64_t delegated;
+	atomic64_t auth_server;
 	atomic64_t baseline;
 	atomic64_t online_required;
 	atomic64_t allowed;
@@ -73,6 +78,7 @@ struct medusa_decision_counter_snapshot {
 	u64 cached;
 	u64 total;
 	u64 delegated;
+	u64 auth_server;
 	u64 baseline;
 	u64 online_required;
 	u64 allowed;
@@ -89,6 +95,7 @@ void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
 				       struct medusa_decision_counter_snapshot *snapshot);
 bool medusa_event_monitoring_check(struct medusa_evtype_s *evtype,
 				   bool monitored);
+u64 medusa_current_policy_generation(void);
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy);
 const char *medusa_decision_answer_name(enum medusa_answer_t answer);
 const char *medusa_decision_source_name(enum medusa_decision_source source);

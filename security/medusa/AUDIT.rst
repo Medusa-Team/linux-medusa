@@ -67,6 +67,33 @@ They are independently rate limited per event.  ``degraded_sequence`` counts
 all degraded decisions for that event, including suppressed records, and
 ``suppressed`` reports records omitted since the previous emitted record.
 
+Hook-specific records
+=====================
+
+The older hook records beginning with ``Medusa: op=`` remain diagnostic rather
+than a stable ABI, but every emitted record carries ``decision_source`` and
+the same request, generation, availability, and authorization-server contact
+metadata.  Delegated and fallback sources use the values above.  Local
+decisions additionally use:
+
+``cache``
+  The event's monitoring bit was clear, so the installed kernel context
+  allowed the operation without entering the central decision engine.
+
+``virtual_space``
+  The kernel virtual-space relationship directly denied the operation.
+
+``path_guard``
+  The path-guard table directly resolved a hard-link operation.
+
+``validation``
+  Kernel object or subject context validation failed before event delegation.
+
+These values distinguish local allow and deny paths from a baseline selected
+by the central decision engine.  ``as_request`` remains for compatibility and
+is derived from actual transport contact rather than merely attempting a
+decision.
+
 Protocol-error records
 ======================
 

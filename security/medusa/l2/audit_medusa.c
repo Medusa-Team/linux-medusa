@@ -45,6 +45,20 @@ void medusa_audit_apply_decision(struct medusa_audit_data *mad,
 	mad->policy_generation = result.policy_generation;
 }
 
+void medusa_audit_apply_local(struct medusa_audit_data *mad,
+			      enum medusa_answer_t answer,
+			      enum medusa_decision_source source)
+{
+	mad->ans = answer;
+	mad->as = AS_NO_REQUEST;
+	mad->decision_metadata = 1;
+	mad->decision_source = source;
+	mad->unavailable = MEDUSA_AVAILABLE;
+	mad->request_present = 0;
+	mad->request_id = 0;
+	mad->policy_generation = medusa_current_policy_generation();
+}
+
 /*
  * medusa_pre - pre audit callback function to format audit record
  * @ab: audit buffer for formatting audit record

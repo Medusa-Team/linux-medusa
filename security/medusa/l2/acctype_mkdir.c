@@ -66,15 +66,14 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 	struct path ndcurrent, ndupper;
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
-		.ans = MED_ALLOW,
-		.as = AS_NO_REQUEST,
-		.decision_source = MEDUSA_DECISION_BASELINE,
-		.unavailable = MEDUSA_AVAILABLE,
+		MEDUSA_AUDIT_DATA_INIT,
 	};
 	bool validation_failed = false;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0) {
+		medusa_audit_apply_local(&mad, MED_ALLOW,
+					 MEDUSA_DECISION_VALIDATION);
 		validation_failed = true;
 		goto audit;
 	}
@@ -85,6 +84,8 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
 	    file_kobj_validate_dentry_dir(ndupper.mnt, ndupper.dentry) <= 0) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
+		medusa_audit_apply_local(&mad, MED_ALLOW,
+					 MEDUSA_DECISION_VALIDATION);
 		validation_failed = true;
 		goto audit;
 	}
@@ -96,7 +97,8 @@ enum medusa_answer_t medusa_mkdir(const struct path *dir, struct dentry *dentry,
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		medusa_put_upper_and_parent(&ndupper, NULL);
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto audit;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(mkdir_access, inode_security(ndupper.dentry->d_inode))) {

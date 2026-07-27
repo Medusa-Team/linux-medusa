@@ -42,13 +42,14 @@ static void medusa_fcntl_pacb(struct audit_buffer *ab, void *pcad)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_fcntl(struct file *file, unsigned int cmd,
-					    unsigned long arg, struct inode *inode)
+static struct medusa_decision_result
+medusa_do_fcntl(struct file *file, unsigned int cmd,
+		unsigned long arg, struct inode *inode)
 {
 	struct fcntl_access access;
 	struct process_kobject process;
 	struct file_kobject kfile;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result;
 
 	access.cmd = cmd;
 	access.arg = arg;
@@ -56,16 +57,16 @@ static enum medusa_answer_t medusa_do_fcntl(struct file *file, unsigned int cmd,
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&kfile, inode);
 	file_kobj_live_add(inode);
-	retval = MED_DECIDE(fcntl_access, &access, &process, &kfile);
+	result = MED_DECIDE_RESULT(fcntl_access, &access, &process, &kfile);
 	file_kobj_live_remove(inode);
-	return retval;
+	return result;
 }
 
 enum medusa_answer_t medusa_fcntl(struct file *file, unsigned int cmd,
 				  unsigned long arg)
 {
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	struct inode *inode = file_inode(file);
 
@@ -91,12 +92,13 @@ enum medusa_answer_t medusa_fcntl(struct file *file, unsigned int cmd,
 		mad.vs.sw.vst = VS(inode_security(inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto audit;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(fcntl_access, inode_security(inode))) {
-		mad.ans = medusa_do_fcntl(file, cmd, arg, inode);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    medusa_do_fcntl(file, cmd, arg, inode));
 	}
 audit:
 	if (task_security(current)->audit) {

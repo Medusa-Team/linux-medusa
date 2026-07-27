@@ -363,6 +363,8 @@ static void incomplete_server_results_cannot_validate(struct kunit *test)
 
 static void decision_metadata_names_are_stable(struct kunit *test)
 {
+	const char *source_name;
+
 	KUNIT_EXPECT_STREQ(test, "ALLOW",
 			  medusa_decision_answer_name(MED_ALLOW));
 	KUNIT_EXPECT_STREQ(test, "DENY",
@@ -376,6 +378,16 @@ static void decision_metadata_names_are_stable(struct kunit *test)
 	KUNIT_EXPECT_STREQ(test, "non_sleepable_context",
 			  medusa_unavailable_reason_name(
 				  MEDUSA_NON_SLEEPABLE_CONTEXT));
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_AUTH_SERVER);
+	KUNIT_EXPECT_STREQ(test, "auth_server", source_name);
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_CACHE);
+	KUNIT_EXPECT_STREQ(test, "cache", source_name);
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_VIRTUAL_SPACE);
+	KUNIT_EXPECT_STREQ(test, "virtual_space", source_name);
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_PATH_GUARD);
+	KUNIT_EXPECT_STREQ(test, "path_guard", source_name);
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_VALIDATION);
+	KUNIT_EXPECT_STREQ(test, "validation", source_name);
 	KUNIT_EXPECT_EQ(test, (u64)0,
 			medusa_degraded_decision_count(NULL));
 }
@@ -529,12 +541,17 @@ static void decision_counters_attribute_final_verdicts(struct kunit *test)
 	medusa_decision_counters_snapshot(&test_event_type, &counters);
 	KUNIT_EXPECT_EQ(test, (u64)6, counters.total);
 	KUNIT_EXPECT_EQ(test, (u64)4, counters.delegated);
+	KUNIT_EXPECT_EQ(test, (u64)2, counters.auth_server);
 	KUNIT_EXPECT_EQ(test, (u64)2, counters.baseline);
 	KUNIT_EXPECT_EQ(test, (u64)1, counters.online_required);
 	KUNIT_EXPECT_EQ(test, (u64)3, counters.allowed);
 	KUNIT_EXPECT_EQ(test, (u64)3, counters.denied);
 	KUNIT_EXPECT_EQ(test, (u64)1, counters.timed_out);
 	KUNIT_EXPECT_EQ(test, (u64)1, counters.invalid_replies);
+	KUNIT_EXPECT_EQ(test, counters.total,
+			counters.cached + counters.auth_server +
+			counters.baseline + counters.online_required +
+			counters.invalid_replies);
 }
 
 static void decision_counter_wrap_is_well_defined(struct kunit *test)
@@ -570,7 +587,14 @@ static void monitoring_cache_accounting_is_explicit(struct kunit *test)
 			READ_ONCE(test_event_type.delegation_context));
 	KUNIT_EXPECT_EQ(test, (u64)3, counters.evaluations);
 	KUNIT_EXPECT_EQ(test, (u64)2, counters.cached);
-	KUNIT_EXPECT_EQ(test, (u64)0, counters.total);
+	KUNIT_EXPECT_EQ(test, (u64)2, counters.total);
+	KUNIT_EXPECT_EQ(test, (u64)0, counters.auth_server);
+	KUNIT_EXPECT_EQ(test, (u64)2, counters.allowed);
+	KUNIT_EXPECT_EQ(test, (u64)0, counters.denied);
+	KUNIT_EXPECT_EQ(test, counters.total,
+			counters.cached + counters.auth_server +
+			counters.baseline + counters.online_required +
+			counters.invalid_replies);
 }
 
 static void delegation_context_names_are_stable(struct kunit *test)

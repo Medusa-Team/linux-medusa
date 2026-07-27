@@ -11,6 +11,14 @@
 #define AS_NO_REQUEST 0
 #define AS_REQUEST 1
 
+#define MEDUSA_AUDIT_DATA_INIT						\
+	.ans = MED_ALLOW,						\
+	.as = AS_NO_REQUEST,						\
+	.decision_metadata = 1,					\
+	.decision_source = MEDUSA_DECISION_CACHE,			\
+	.unavailable = MEDUSA_AVAILABLE,				\
+	.policy_generation = medusa_current_policy_generation()
+
 struct swvs {
 	struct vs_t vst;
 	struct vs_t vss;
@@ -128,6 +136,9 @@ const char *medusa_audit_decision_source_name(enum medusa_decision_source source
 const char *medusa_audit_unavailable_name(enum medusa_unavailable_reason reason);
 void medusa_audit_apply_decision(struct medusa_audit_data *mad,
 				 struct medusa_decision_result result);
+void medusa_audit_apply_local(struct medusa_audit_data *mad,
+			      enum medusa_answer_t answer,
+			      enum medusa_decision_source source);
 void medusa_audit_log_callback(struct common_audit_data *cad,
 			       void (*medusa_post)(struct audit_buffer *, void *));
 void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad);
