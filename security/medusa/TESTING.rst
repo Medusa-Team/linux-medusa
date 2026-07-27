@@ -8,12 +8,14 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 78 tests in eleven suites:
+The KUnit configuration runs 81 tests in twelve suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
 * policy-generation rollover and forced stale-context invalidation;
 * task initialization and inheritance plus inode and all SysV IPC contexts;
+* path-guard initialization, invalid inputs, add/lookup/remove behavior,
+  duplicate suppression, independent entries, and teardown;
 * authorization-server registration, removal, and generation changes;
 * delegated allow and deny, installed baseline fallback, online-required
   fallback, and unsupported verdicts;

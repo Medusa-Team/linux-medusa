@@ -3,7 +3,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_file.h"
-#include "l2/kobject_fuck.h"
+#include "l2/kobject_path_guard.h"
 #include "l2/audit_medusa.h"
 
 /* let's define the 'link' access type, with subj=task and obj=inode */
@@ -76,8 +76,8 @@ enum medusa_answer_t medusa_link(struct dentry *old_dentry,
 	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 	int err;
 
-	/* TODO: Implement fuck entry for audit */
-	err = allow_fuck(old_dentry, new_dir, new_dentry);
+	/* TODO: Add a path_guard-specific field to the link audit record. */
+	err = path_guard_check(old_dentry, new_dir, new_dentry);
 	if (err < 0) {
 		mad.ans = MED_ERR;
 		goto audit;

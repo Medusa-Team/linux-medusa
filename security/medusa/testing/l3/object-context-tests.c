@@ -20,14 +20,14 @@ static void inode_context_initialization(struct kunit *test)
 {
 	struct medusa_l1_inode_s context;
 
-	hash_init(context.fuck);
-	context.fuck[0].first = (struct hlist_node *)&context;
-	KUNIT_ASSERT_FALSE(test, hash_empty(context.fuck));
+	hash_init(context.path_guard);
+	context.path_guard[0].first = (struct hlist_node *)&context;
+	KUNIT_ASSERT_FALSE(test, hash_empty(context.path_guard));
 
 	medusa_inode_context_init(&context);
 
 	expect_default_object_context(test, &context.med_object);
-	KUNIT_EXPECT_TRUE(test, hash_empty(context.fuck));
+	KUNIT_EXPECT_TRUE(test, hash_empty(context.path_guard));
 }
 
 static void ipc_context_initialization(struct kunit *test)

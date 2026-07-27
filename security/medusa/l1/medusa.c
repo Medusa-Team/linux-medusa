@@ -16,7 +16,7 @@
 #include "l1/task.h"
 #include "l1/ipc.h"
 #include "l1/socket.h"
-#include "l1/fuck.h"
+#include "l1/path_guard.h"
 #include "../../../../fs/mount.h" /* real_mount(), struct mount */
 
 /* Used by `medusa_l1_creds_for_exec` */
@@ -152,8 +152,8 @@ static void medusa_l1_inode_free_security(struct inode *inode)
 {
 	struct medusa_l1_inode_s *med = inode_security(inode);
 
-	if (unlikely(med && !hash_empty(med->fuck)))
-		fuck_free(med);
+	if (unlikely(med && path_guard_has_entries(med)))
+		path_guard_free(med);
 }
 
 /*
@@ -259,7 +259,6 @@ static int medusa_l1_path_chmod(const struct path *path, umode_t mode)
 {
 	if (medusa_chmod(path, mode) == MED_DENY)
 		return -EACCES;
-	//return validate_fuck(path);
 	return 0;
 }
 
@@ -267,7 +266,6 @@ static int medusa_l1_path_chown(const struct path *path, kuid_t uid, kgid_t gid)
 {
 	if (medusa_chown(path, uid, gid) == MED_DENY)
 		return -EACCES;
-	//return validate_fuck(path);
 	return 0;
 }
 
@@ -298,7 +296,6 @@ static int medusa_l1_file_open(struct file *file)
 		return 0;
 	if (medusa_open(file) == MED_DENY)
 		return -EACCES;
-	//return validate_fuck(&file->f_path);
 	return 0;
 }
 

@@ -105,7 +105,7 @@ endif
 
 config SECURITY_MEDUSA_AUTH_SERVER_LOADER
 	string "Filepath to the auth server loader"
-	default $(shell,grep -E "#define CONFIG_MEDUSA_AUTH_SERVER_LOADER \"[a-zA-Z0-9]+\"" ./security/medusa/include/l3/config.h | grep -o -E "\"[a-zA-Z0-9]+\"" || echo "/sbin/init-constable.sh")
+	default $(shell,grep -E "#define CONFIG_MEDUSA_AUTH_SERVER_LOADER \"[a-zA-Z0-9]+\"" $(srctree)/security/medusa/include/l3/config.h | grep -o -E "\"[a-zA-Z0-9]+\"" || echo "/sbin/init-constable.sh")
 	help
 	  Any executable that starts a Medusa auth server.
 
@@ -114,22 +114,22 @@ endif # SECURITY_MEDUSA_START_AUTH_SERVER_BEFORE_INIT
 config SECURITY_MEDUSA_VS
 	int "Number of bits representing Virtual Spaces (VS)"
 	# read default value from Medusa's config.h, if any; otherwise set default to 96
-	default $(shell,grep -E "#define CONFIG_MEDUSA_VS [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 96)
-        range 32 512
-        help
+	default $(shell,grep -E "#define CONFIG_MEDUSA_VS [0-9]+" $(srctree)/security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 96)
+	range 32 512
+	help
 	  Medusa Communication Protocol transfers size of attributes in Bytes.
-	  To prevent a mistake and errornous interpretation of bits out of
-	  bitarray, the array size SEURITY_MEDUSA_VS must be a multiple of 8.
+	  To prevent mistakes and erroneous interpretation of bits in the
+	  bit array, SECURITY_MEDUSA_VS must be a multiple of 8.
 
 config SECURITY_MEDUSA_ACT
 	int "Number of bits representing triggered security hooks"
 	# read default value from Medusa's config.h, if any; otherwise set default to 128
-	default $(shell,grep -E "#define CONFIG_MEDUSA_ACT [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 128)
-        range 32 512
-        help
+	default $(shell,grep -E "#define CONFIG_MEDUSA_ACT [0-9]+" $(srctree)/security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 128)
+	range 32 512
+	help
 	  Medusa Communication Protocol transfers size of attributes in Bytes.
-	  To prevent a mistake and errornous interpretation of bits out of
-	  bitarray, the array size SEURITY_MEDUSA_ACT must be a multiple of 8.
+	  To prevent mistakes and erroneous interpretation of bits in the
+	  bit array, SECURITY_MEDUSA_ACT must be a multiple of 8.
 
 config SECURITY_MEDUSA_DECISION_LEASE_MS
 	int "Authorization decision liveness lease (milliseconds)"
@@ -172,28 +172,28 @@ config SECURITY_MEDUSA_KILL_RESCHEDULING
 
 	  If unsure, say N.
 
-config SECURITY_MEDUSA_FUCK_HASH_TABLE_SIZE
-	int "FUCK Number of hash table buckets (exponent)"
+config SECURITY_MEDUSA_PATH_GUARD_HASH_TABLE_SIZE
+	int "Path guard hash table buckets (exponent)"
 	# read default value from Medusa's config.h, if any; otherwise set default to 3
-	default $(shell,grep -E "#define CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE [0-9]+" ./security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 3)
-        range 0 8
+	default $(shell,grep -E "#define CONFIG_MEDUSA_PATH_GUARD_HASH_TABLE_SIZE [0-9]+" $(srctree)/security/medusa/include/l3/config.h | grep -o -E "[0-9]+" || echo 3)
+	range 0 8
 	help
-	  Determines the number of hash table buckets (exponent) the FUCK hash
-	  table stored in inode_security has.
+	  Determines the number of hash table buckets (as a power of two) used
+	  to store allowed paths in each protected inode security context.
 	  Increasing the size should help in cases where there are many files
-	  being protected against FUCK attack.
+	  with many permitted hard-link paths.
 
 # All of the options must have a matching elif branch in file
-# include/l2/kobject_fuck_hash.h
+# include/l2/kobject_path_guard_hash.h
 choice
-	prompt "FUCK Hashing function"
+	prompt "Path guard hashing function"
 	help
-	  Select a hashing function to be used within the FUCK module.
+	  Select the hashing function used for protected path names. Path guard
+	  keeps only digests in each inode's security context and compares a
+	  requested hard-link destination with those digests. The selected
+	  function must be built into the kernel.
 
-	  The selected hashing function must be marked as builtin in the
-	  Cryptographic API section, otherwise the build will fail.
-
-config SECURITY_MEDUSA_FUCK_BLAKE2B_256
+config SECURITY_MEDUSA_PATH_GUARD_BLAKE2B_256
 	bool "Blake2b-256"
 	depends on CRYPTO_BLAKE2B=y
 	help
@@ -202,7 +202,7 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_256
 	  latest standard SHA-3.
 	  Optimized for 64-bit platforms. Produces 32 bytes long digests.
 
-config SECURITY_MEDUSA_FUCK_BLAKE2B_512
+config SECURITY_MEDUSA_PATH_GUARD_BLAKE2B_512
 	bool "Blake2b-512"
 	depends on CRYPTO_BLAKE2B=y
 	help
@@ -211,31 +211,41 @@ config SECURITY_MEDUSA_FUCK_BLAKE2B_512
 	  latest standard SHA-3.
 	  Optimized for 64-bit platforms. Produces 64 bytes long digests.
 
-config SECURITY_MEDUSA_FUCK_SHA2_256
+config SECURITY_MEDUSA_PATH_GUARD_SHA2_256
 	bool "SHA2-256"
 	depends on CRYPTO_SHA256=y
 	help
-	  Cryptograhpically secure
+	  Use SHA-256 to digest path-guard entries. This produces 32-byte
+	  digests and is widely available on supported architectures. Select
+	  this when SHA-256 is already built into the kernel and BLAKE2b is
+	  unavailable or unsuitable for the target.
 
-config SECURITY_MEDUSA_FUCK_SHA2_512
+config SECURITY_MEDUSA_PATH_GUARD_SHA2_512
 	bool "SHA2-512"
 	depends on CRYPTO_SHA512=y
 	help
-	  Cryptographically secure. Usually faster than SHA256 on 64 bit machines
+	  Use SHA-512 to digest path-guard entries. This produces 64-byte
+	  digests and can be faster than SHA-256 on 64-bit machines. Select
+	  this when SHA-512 is already built into the kernel and its larger
+	  per-entry storage is acceptable.
 
-config SECURITY_MEDUSA_FUCK_SHA3_256
+config SECURITY_MEDUSA_PATH_GUARD_SHA3_256
 	bool "SHA3-256"
 	depends on CRYPTO_SHA3=y
 	help
-	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
-	  protection than SHA-2 offers.
+	  Use SHA3-256 to digest path-guard entries. This produces 32-byte
+	  digests using the SHA-3 construction. Select this when SHA-3 is
+	  already built into the kernel and policy requires this algorithm
+	  rather than the default BLAKE2b choice.
 
-config SECURITY_MEDUSA_FUCK_SHA3_512
+config SECURITY_MEDUSA_PATH_GUARD_SHA3_512
 	bool "SHA3-512"
 	depends on CRYPTO_SHA3=y
 	help
-	  Slower than SHA-2 algorithms, but more secure. Choose if you want more
-	  protection than SHA-2 offers.
+	  Use SHA3-512 to digest path-guard entries. This produces 64-byte
+	  digests using the SHA-3 construction. Select this when SHA-3 is
+	  already built into the kernel and its larger per-entry storage is
+	  acceptable.
 
 endchoice
 
