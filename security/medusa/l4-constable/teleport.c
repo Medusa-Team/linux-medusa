@@ -16,11 +16,7 @@
 #error "L3 and L4 constants don't match. We don't convert them. Go well, go hell."
 #endif
 
-#define DEBUG	/* define this to get extra debugging output */
-
 #include "l4/teleport.h"
-
-#undef PARANOIA_CHECKS	/* define this to enable extra checking */
 
 /* much of this code is platform independent */
 /* assumption: we're completely serialized (!!!) */
@@ -92,7 +88,7 @@ ssize_t teleport_cycle(struct teleport_s *teleport, size_t userlimit)
 					(unsigned char *)&teleport->u.putkclass.cl;
 				teleport->remaining =
 					sizeof(struct medusa_comm_kclass_s);
-#ifdef DEBUG
+#ifdef CONFIG_SECURITY_MEDUSA_DEBUG_TRANSPORT
 				med_pr_debug("-> class %s [%p]\n", teleport->u.putkclass.cl.name,
 						(void *)teleport->u.putkclass.cl.kclassid);
 #endif
@@ -110,7 +106,7 @@ ssize_t teleport_cycle(struct teleport_s *teleport, size_t userlimit)
 				teleport->u.putevtype.ev.ev_kclass[1] =
 					(MCPptr_t)teleport->ip->args.putevtype.evtypedef->arg_kclass[1]; // possibility for encryption ... JK note March 2015
 
-#ifdef DEBUG
+#ifdef CONFIG_SECURITY_MEDUSA_DEBUG_TRANSPORT
 				med_pr_debug("-> evtype %s [%p] with [%p] and [%p]\n", teleport->u.putevtype.ev.name,
 					(void *)teleport->u.putevtype.ev.evid,
 					(void *)teleport->u.putevtype.ev.ev_kclass[0],
@@ -191,12 +187,10 @@ static inline ssize_t place_to_user(struct teleport_s *teleport,
 
 	if (!len)
 		return 0;
-#ifdef PARANOIA_CHECKS
 	if (!_to_user) {
 		med_pr_warn("teleport wrongly initialized!\n");
-		return 0;
+		return -EIO;
 	}
-#endif
 	len = _to_user(teleport->data_to_user, len);
 	if (len < 0)
 		return len;
@@ -204,4 +198,3 @@ static inline ssize_t place_to_user(struct teleport_s *teleport,
 	*userlimit -= len;
 	return len;
 }
-

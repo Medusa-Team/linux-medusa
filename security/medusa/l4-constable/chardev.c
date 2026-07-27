@@ -15,19 +15,6 @@
  *	  /dev/medusa c 90 0		on NetBSD
  */
 
-/* define this if you want fatal protocol errors to cause segfault of
- * auth. daemon. Note that issuing strange read(), write(), or trying
- * to access the character device multiple times at once is not considered
- * a protocol error. This triggers only if we REALLY get some junk from the
- * user-space.
- */
-#define ERRORS_CAUSE_SEGFAULT
-
-/* define this to support workaround of decisions for named process. This
- * is especially useful when using GDB on constable.
- */
-#define GDB_HACK
-
 /* TODO: Check the calls to l3; they can't be called from a lock. */
 #include <linux/module.h>
 #include <linux/semaphore.h>
@@ -66,7 +53,6 @@ static atomic_t constable_present = ATOMIC_INIT(0);
 static struct medusa_server_health constable_health =
 	MEDUSA_SERVER_HEALTH_INIT;
 static struct task_struct *constable;
-static struct task_struct *gdb;
 static DEFINE_SEMAPHORE(constable_openclose, 1);
 
 
@@ -108,12 +94,6 @@ static struct tele_item *local_list_item;
 static struct teleport_insn_s *processed_teleport;
 
 static DECLARE_RWSEM(lightswitch);
-
-#ifdef GDB_HACK
-static pid_t gdb_pid = -1;
-//MODULE_PARM(gdb_pid, "i");
-//MODULE_PARM_DESC(gdb_pid, "PID to exclude from monitoring");
-#endif
 
 /*******************************************************************************
  * kernel-space interface
@@ -391,15 +371,11 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 				       __func__, event->evtype_id->name);
 		return MED_ERR;
 	}
-	if (am_i_constable() || current == gdb)
+	if (am_i_constable())
 		return MED_ALLOW;
 
 	if (current->pid < 1)
 		return MED_ERR;
-#ifdef GDB_HACK
-	if (gdb_pid == current->pid)
-		return MED_ALLOW;
-#endif
 	tele_mem_decide = (struct teleport_insn_s *)
 		med_cache_alloc_size(sizeof(struct teleport_insn_s)*6);
 	if (!tele_mem_decide)
@@ -847,6 +823,16 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 	buf += sizeof(MCPptr_t);
 	count -= sizeof(MCPptr_t);
 
+	if (!medusa_comm_command_is_supported(recv_type)) {
+		l4_record_protocol_error(MEDUSA_PROTOCOL_UNKNOWN_COMMANDS,
+					 true, recv_type, false, 0,
+					 -EOPNOTSUPP);
+		up_read(&lightswitch);
+		med_pr_err("Protocol error at write(): unknown command %llx!\n",
+			   recv_type);
+		return -EOPNOTSUPP;
+	}
+
 	// Type of the message is received
 	if (recv_type == MEDUSA_COMM_AUTHANSWER) {
 		if (count != MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE) {
@@ -927,12 +913,8 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		if (!cl) {
 			med_pr_err("Protocol error at write(): unknown kclass 0x%p!\n",
 				(void *)(*(MCPptr_t *)(recv_buf)));
-#ifdef ERRORS_CAUSE_SEGFAULT
 			up_read(&lightswitch);
-			return -EFAULT;
-#else
-			break;
-#endif
+			return -ENOENT;
 		}
 		kclass_buf = (char *) med_cache_alloc_size(cl->kobject_size);
 		if (!kclass_buf) {
@@ -1053,16 +1035,6 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		}
 		med_pr_info("authorization server circuit breaker closed\n");
 		set_auth_server_ready();
-		} else {
-			l4_record_protocol_error(MEDUSA_PROTOCOL_UNKNOWN_COMMANDS,
-						 true, recv_type, false, 0,
-						 -EOPNOTSUPP);
-			med_pr_err("Protocol error at write(): unknown command %llx!\n",
-				   recv_type);
-#ifdef ERRORS_CAUSE_SEGFAULT
-		up_read(&lightswitch);
-		return -EFAULT;
-#endif
 	}
 	up_read(&lightswitch);
 	return orig_count;
@@ -1100,7 +1072,6 @@ static int user_open(struct inode *inode, struct file *file)
 	int retval = -EPERM;
 	struct teleport_insn_s *tele_mem_open = NULL;
 	struct tele_item *local_tele_item;
-	struct task_struct *parent;
 
 	//MOD_INC_USE_COUNT; Not needed anymore JK
 
@@ -1127,13 +1098,6 @@ static int user_open(struct inode *inode, struct file *file)
 		goto out_free;
 
 	constable = current;
-	rcu_read_lock();
-	parent = rcu_dereference(current->parent);
-	task_lock(parent);
-	if (strstr(current->parent->comm, "gdb"))
-		gdb = current->parent;
-	task_unlock(parent);
-	rcu_read_unlock();
 
 	teleport.cycle = tpc_HALT;
 	// Reset semaphores
@@ -1267,7 +1231,6 @@ static int user_release(struct inode *inode, struct file *file)
 	put_pid(chardev_medusa.tgid);
 	chardev_medusa.tgid = NULL;
 	constable = NULL;
-	gdb = NULL;
 
 	atomic_set(&questions, 0);
 	atomic_set(&questions_waiting, 0);

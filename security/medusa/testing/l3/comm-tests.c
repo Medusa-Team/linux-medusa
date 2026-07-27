@@ -419,6 +419,36 @@ static void protocol_accepts_supported_answers(struct kunit *test)
 		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_ERR, true));
 }
 
+static void protocol_accepts_supported_userspace_commands(struct kunit *test)
+{
+	bool supported;
+	u64 command;
+
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_AUTHANSWER);
+	KUNIT_EXPECT_TRUE(test, supported);
+	command = MEDUSA_COMM_AUTHREQUEST_PROGRESS;
+	supported = medusa_comm_command_is_supported(command);
+	KUNIT_EXPECT_TRUE(test, supported);
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_FETCH_REQUEST);
+	KUNIT_EXPECT_TRUE(test, supported);
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_UPDATE_REQUEST);
+	KUNIT_EXPECT_TRUE(test, supported);
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_READY_ANSWER);
+	KUNIT_EXPECT_TRUE(test, supported);
+}
+
+static void protocol_rejects_unknown_userspace_commands(struct kunit *test)
+{
+	bool supported;
+
+	supported = medusa_comm_command_is_supported(0);
+	KUNIT_EXPECT_FALSE(test, supported);
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_AUTHREQUEST);
+	KUNIT_EXPECT_FALSE(test, supported);
+	supported = medusa_comm_command_is_supported(U64_MAX);
+	KUNIT_EXPECT_FALSE(test, supported);
+}
+
 static void protocol_rejects_malformed_answer_lengths(struct kunit *test)
 {
 	KUNIT_EXPECT_EQ(test, -EMSGSIZE, medusa_comm_validate_authanswer(
@@ -626,6 +656,8 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(fallback_policy_rejects_invalid_values),
 	KUNIT_CASE(fallback_policy_names_are_stable),
 	KUNIT_CASE(protocol_accepts_supported_answers),
+	KUNIT_CASE(protocol_accepts_supported_userspace_commands),
+	KUNIT_CASE(protocol_rejects_unknown_userspace_commands),
 	KUNIT_CASE(protocol_rejects_malformed_answer_lengths),
 	KUNIT_CASE(protocol_rejects_unknown_answer_code),
 	KUNIT_CASE(protocol_rejects_unknown_request_id),

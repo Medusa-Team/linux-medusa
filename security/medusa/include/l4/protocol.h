@@ -13,6 +13,20 @@
 	(sizeof(MCPptr_t) + sizeof(s16))
 #define MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE sizeof(MCPptr_t)
 
+static inline bool medusa_comm_command_is_supported(u64 command)
+{
+	switch (command) {
+	case MEDUSA_COMM_AUTHANSWER:
+	case MEDUSA_COMM_AUTHREQUEST_PROGRESS:
+	case MEDUSA_COMM_FETCH_REQUEST:
+	case MEDUSA_COMM_UPDATE_REQUEST:
+	case MEDUSA_COMM_READY_ANSWER:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static inline int medusa_comm_validate_authanswer(size_t payload_size,
 						   s16 answer,
 						   bool request_pending)

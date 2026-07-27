@@ -150,6 +150,17 @@ config SECURITY_MEDUSA_MONITOR_KTHREADS
 	  If set, kernel threads are monitored by Medusa LSM.
 	  By default, this functionality is turned off.
 
+config SECURITY_MEDUSA_DEBUG_TRANSPORT
+	bool "Trace authorization transport definitions"
+	depends on DEBUG_KERNEL
+	default n
+	help
+	  Log each kernel class and event type announced to the userspace
+	  authorization server. The messages use pr_debug() and are intended
+	  only for diagnosing the Medusa transport handshake.
+
+	  If unsure, say N.
+
 config SECURITY_MEDUSA_HOOKS_TASK_KILL
 	bool "Enable LSM hook task_kill"
 	default y
