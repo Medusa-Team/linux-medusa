@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 81 tests in twelve suites:
+The KUnit configuration runs 84 tests in twelve suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -26,7 +26,8 @@ The KUnit configuration runs 81 tests in twelve suites:
 * dynamic task, inode, and SysV IPC LSM blob offsets;
 * bounded audit-answer formatting and LSM return-value translation;
 * decision-source, authorization-server contact, and unavailability audit
-  metadata, including request ID and policy generation;
+  metadata, including request ID, policy generation, cache, virtual-space,
+  path-guard, and validation attribution;
 * independent pending-request IDs, out-of-order replies, policy generations,
   duplicate and unknown replies, bounded capacity, disconnect cleanup,
   timeout races, and renewable liveness leases;
