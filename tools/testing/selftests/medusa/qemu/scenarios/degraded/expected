@@ -11,6 +11,10 @@ MEDUSA_RESULT degraded timeout_fallback PASS
 MEDUSA_RESULT degraded status_degraded PASS
 MEDUSA_RESULT degraded degraded_counter PASS
 MEDUSA_RESULT degraded breaker_fast_fallback PASS
+MEDUSA_RESULT degraded lease_server_ready PASS
+MEDUSA_RESULT degraded lease_wait_extended PASS
+MEDUSA_RESULT degraded lease_reply_matched PASS
+MEDUSA_RESULT degraded lease_accounting PASS
 MEDUSA_RESULT degraded handshake_started PASS
 MEDUSA_RESULT degraded status_handshaking PASS
 MEDUSA_RESULT degraded protocol_error_counters PASS

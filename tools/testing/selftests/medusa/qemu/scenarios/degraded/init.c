@@ -30,6 +30,46 @@ struct test_message {
 #define DECISION_FLOOD_MIN_PENDING 8
 #define SECURITYFS_READERS 4
 #define SECURITYFS_READ_ITERATIONS 700
+#define MEDUSA_COMM_GREETING UINT64_C(0x66007e5a)
+#define MEDUSA_COMM_VERSION UINT64_C(3)
+#define MEDUSA_COMM_KCLASSDEF UINT32_C(0x02)
+#define MEDUSA_COMM_EVTYPEDEF UINT32_C(0x04)
+#define MEDUSA_COMM_READY_REQUEST UINT32_C(0x06)
+#define MEDUSA_COMM_AUTHANSWER UINT64_C(0x81)
+#define MEDUSA_COMM_AUTHREQUEST_PROGRESS UINT64_C(0x82)
+#define MEDUSA_COMM_READY_ANSWER UINT64_C(0x86)
+#define MEDUSA_COMM_ATTRNAME_MAX 27
+#define MEDUSA_COMM_KCLASSNAME_MAX 30
+#define MEDUSA_COMM_EVNAME_MAX 30
+#define MEDUSA_COMM_TYPE_END 0
+#define MEDUSA_DENY 1
+
+struct medusa_test_header {
+	uint64_t object;
+	uint32_t command;
+} __attribute__((packed));
+
+struct medusa_test_attribute {
+	uint16_t offset;
+	uint16_t length;
+	uint8_t type;
+	char name[MEDUSA_COMM_ATTRNAME_MAX];
+} __attribute__((packed));
+
+struct medusa_test_kclass {
+	uint64_t id;
+	uint16_t size;
+	char name[MEDUSA_COMM_KCLASSNAME_MAX];
+} __attribute__((packed));
+
+struct medusa_test_evtype {
+	uint64_t id;
+	uint16_t size;
+	uint16_t actbit;
+	uint64_t kclass[2];
+	char name[MEDUSA_COMM_EVNAME_MAX];
+	char arg_name[2][MEDUSA_COMM_ATTRNAME_MAX];
+} __attribute__((packed));
 
 static int failures;
 
@@ -526,6 +566,183 @@ static pid_t start_constable(void)
 	return child;
 }
 
+static bool read_exact(int fd, void *buffer, size_t size)
+{
+	char *cursor = buffer;
+
+	while (size) {
+		ssize_t count = read(fd, cursor, size);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0)
+			return false;
+		cursor += count;
+		size -= (size_t)count;
+	}
+	return true;
+}
+
+static bool write_exact(int fd, const void *buffer, size_t size)
+{
+	const char *cursor = buffer;
+
+	while (size) {
+		ssize_t count = write(fd, cursor, size);
+
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0)
+			return false;
+		cursor += count;
+		size -= (size_t)count;
+	}
+	return true;
+}
+
+static bool discard_protocol_attributes(int fd)
+{
+	struct medusa_test_attribute attribute;
+
+	do {
+		if (!read_exact(fd, &attribute, sizeof(attribute)))
+			return false;
+	} while (attribute.type != MEDUSA_COMM_TYPE_END);
+	return true;
+}
+
+static bool complete_raw_handshake(int fd)
+{
+	struct {
+		uint64_t greeting;
+		uint64_t version;
+	} greeting;
+
+	if (!read_exact(fd, &greeting, sizeof(greeting)) ||
+	    greeting.greeting != MEDUSA_COMM_GREETING ||
+	    greeting.version != MEDUSA_COMM_VERSION)
+		return false;
+
+	for (;;) {
+		struct medusa_test_header header;
+
+		if (!read_exact(fd, &header, sizeof(header)) || header.object)
+			return false;
+		switch (header.command) {
+		case MEDUSA_COMM_KCLASSDEF: {
+			struct medusa_test_kclass definition;
+
+			if (!read_exact(fd, &definition, sizeof(definition)) ||
+			    !discard_protocol_attributes(fd))
+				return false;
+			break;
+		}
+		case MEDUSA_COMM_EVTYPEDEF: {
+			struct medusa_test_evtype definition;
+
+			if (!read_exact(fd, &definition, sizeof(definition)) ||
+			    !discard_protocol_attributes(fd))
+				return false;
+			break;
+		}
+		case MEDUSA_COMM_READY_REQUEST: {
+			uint64_t answer = MEDUSA_COMM_READY_ANSWER;
+
+			return write_exact(fd, &answer, sizeof(answer));
+		}
+		default:
+			return false;
+		}
+	}
+}
+
+static bool send_request_progress(int fd, uint64_t request_id)
+{
+	struct {
+		uint64_t command;
+		uint64_t request_id;
+	} __attribute__((packed)) progress = {
+		.command = MEDUSA_COMM_AUTHREQUEST_PROGRESS,
+		.request_id = request_id,
+	};
+
+	return write_exact(fd, &progress, sizeof(progress));
+}
+
+static bool send_request_answer(int fd, uint64_t request_id, int16_t answer)
+{
+	struct {
+		uint64_t command;
+		uint64_t request_id;
+		int16_t answer;
+	} __attribute__((packed)) response = {
+		.command = MEDUSA_COMM_AUTHANSWER,
+		.request_id = request_id,
+		.answer = answer,
+	};
+
+	return write_exact(fd, &response, sizeof(response));
+}
+
+static pid_t start_renewing_server(int *ready_fd)
+{
+	int pipe_fds[2];
+	pid_t child;
+
+	if (pipe(pipe_fds) < 0)
+		return -1;
+	child = fork();
+	if (child < 0) {
+		close(pipe_fds[0]);
+		close(pipe_fds[1]);
+		return -1;
+	}
+	if (child == 0) {
+		struct {
+			uint64_t event_id;
+			uint64_t request_id;
+		} request;
+		char ready = 1;
+		int fd;
+		bool passed;
+
+		close(pipe_fds[0]);
+		fd = open("/dev/medusa", O_RDWR);
+		passed = fd >= 0 && complete_raw_handshake(fd);
+		if (!passed ||
+		    write(pipe_fds[1], &ready, sizeof(ready)) != sizeof(ready))
+			goto child_out;
+
+		/*
+		 * The first 16 bytes identify the event and request. The rest of
+		 * the legacy request may remain unread: writes use an independent
+		 * direction and are enough to exercise progress and completion.
+		 */
+		passed = read_exact(fd, &request, sizeof(request)) &&
+			 request.event_id && request.request_id;
+		if (!passed)
+			goto child_out;
+		sleep(3);
+		passed = send_request_progress(fd, request.request_id);
+		sleep(3);
+		passed = passed &&
+			 send_request_progress(fd, request.request_id);
+		sleep(2);
+		passed = passed &&
+			 send_request_answer(fd, request.request_id, MEDUSA_DENY);
+
+child_out:
+		if (fd >= 0)
+			close(fd);
+		close(pipe_fds[1]);
+		_exit(passed ? EXIT_SUCCESS : EXIT_FAILURE);
+	}
+
+	close(pipe_fds[1]);
+	*ready_fd = pipe_fds[0];
+	return child;
+}
+
 static pid_t start_handshake_holder(int *release_fd)
 {
 	char answer_packet[sizeof(uint64_t) * 2 + sizeof(int16_t)];
@@ -639,6 +856,7 @@ int main(int argc, char **argv)
 	pid_t initial;
 	pid_t cache_probe;
 	pid_t handshake;
+	pid_t lease_server;
 	pid_t replacement;
 	pid_t final_replacement;
 	pid_t flood_workers[DECISION_FLOOD_WORKERS];
@@ -650,12 +868,22 @@ int main(int argc, char **argv)
 	int id;
 	int flood_ids[DECISION_FLOOD_WORKERS];
 	int release_fd;
+	int lease_ready_fd;
 	int send_result;
+	int send_errno;
 	int handshake_status;
+	int lease_server_status;
 	int cache_probe_status;
+	char lease_ready;
 	bool handshake_released;
 	bool flood_workers_passed;
+	bool lease_events_baseline;
+	bool lease_status_baseline;
 	unsigned long long initial_generation;
+	unsigned long long lease_generation;
+	unsigned long long lease_renewals_before;
+	unsigned long long protocol_replies_before;
+	unsigned long long timed_out_before;
 	pid_t securityfs_readers[SECURITYFS_READERS];
 	size_t securityfs_reader_count = 0;
 	bool securityfs_readers_waited = false;
@@ -784,6 +1012,64 @@ int main(int argc, char **argv)
 
 	send_control("kill");
 	sleep(1);
+	lease_status_baseline =
+		read_file("/sys/kernel/security/medusa/status",
+			  status, sizeof(status));
+	lease_renewals_before =
+		status_counter(status, "protocol_lease_renewals=");
+	protocol_replies_before =
+		status_counter(status, "protocol_replies=");
+	lease_events_baseline =
+		read_file("/sys/kernel/security/medusa/events",
+			  events, sizeof(events));
+	timed_out_before = event_counter_total(events, "timed_out");
+	lease_ready_fd = -1;
+	lease_server = start_renewing_server(&lease_ready_fd);
+	lease_ready = 0;
+	result("lease_server_ready",
+	       lease_server > 0 &&
+	       read(lease_ready_fd, &lease_ready, sizeof(lease_ready)) ==
+		       sizeof(lease_ready) &&
+	       lease_ready == 1 &&
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       strstr(status, "protocol_state=ready\n") &&
+	       strstr(status, "authorization_server_health=healthy\n"));
+	lease_generation =
+		status_counter(status, "active_policy_generation=");
+	if (lease_generation > initial_generation)
+		initial_generation = lease_generation;
+	if (lease_ready_fd >= 0)
+		close(lease_ready_fd);
+	started = monotonic_seconds();
+	errno = 0;
+	send_result = lease_server > 0 && lease_ready == 1 ?
+		msgsnd(id, &message, sizeof(message.text), IPC_NOWAIT) : 0;
+	send_errno = errno;
+	elapsed = monotonic_seconds() - started;
+	lease_server_status = -1;
+	if (lease_server > 0)
+		waitpid(lease_server, &lease_server_status, 0);
+	result("lease_wait_extended",
+	       send_result == 0 && send_errno == 0 &&
+	       elapsed >= 7.0 && elapsed <= 14.0);
+	result("lease_reply_matched",
+	       lease_server > 0 && WIFEXITED(lease_server_status) &&
+	       WEXITSTATUS(lease_server_status) == EXIT_SUCCESS &&
+	       read_file("/sys/kernel/security/medusa/status",
+			 status, sizeof(status)) &&
+	       status_counter(status, "protocol_replies=") ==
+		       protocol_replies_before + 1);
+	result("lease_accounting",
+	       lease_status_baseline && lease_events_baseline &&
+	       status_counter(status, "protocol_lease_renewals=") >=
+		       lease_renewals_before + 2 &&
+	       status_counter(status, "pending_requests=") == 0 &&
+	       read_file("/sys/kernel/security/medusa/events",
+			 events, sizeof(events)) &&
+	       event_counter_total(events, "timed_out") ==
+		       timed_out_before);
+
 	release_fd = -1;
 	handshake = start_handshake_holder(&release_fd);
 	result("handshake_started", handshake > 0);

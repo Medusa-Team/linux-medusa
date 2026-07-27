@@ -56,11 +56,16 @@ takes the disconnected fail-open path for `mkdir`.
 The `degraded` scenario verifies the renewable lease, circuit breaker,
 structured fallback audit records, protocol error accounting, securityfs
 privilege and snapshot consistency, and recovery through newer policy
-generations. Its restart-stress phase stops Constable with 32 independent
-message-queue operations in flight, proves that at least eight requests are
-pending concurrently, kills the server, and requires every waiter to apply its
-installed baseline within three seconds. The pending table must return to zero
-before another Constable reconnects and restores the delegated denial.
+generations. A minimal protocol-v3 server renews one real request twice and
+answers after eight seconds; the operation must remain blocked beyond the
+initial five-second lease, and the status counters must report both renewals,
+one matched reply, and no leaked pending request. The separate silent-server
+case must still time out and open the circuit breaker. Its restart-stress phase
+then stops Constable with 32 independent message-queue operations in flight,
+proves that at least eight requests are pending concurrently, kills the server,
+and requires every waiter to apply its installed baseline within three
+seconds. The pending table must return to zero before another Constable
+reconnects and restores the delegated denial.
 
 The `stacking` scenario inherits the complete lifecycle test and additionally
 mounts securityfs and verifies that the kernel's runtime LSM list contains

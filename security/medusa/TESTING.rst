@@ -66,6 +66,21 @@ table.  A new Constable registration closes the breaker.  Lease duration is
 configured by ``CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS`` and defaults to
 5,000 milliseconds.
 
+The degraded QEMU scenario also connects a minimal protocol-v3 server, completes
+the dynamically announced class and event handshake, and holds one real
+delegated request for eight seconds.  The server renews that request after
+three and six seconds before sending its final answer.  The test requires the
+waiting operation to remain blocked past the original five-second lease,
+exactly one matched reply, at least two lease renewals, and no pending request
+after the server closes.  This complements the silent-server case in the same
+scenario, which must still expire after one lease and enter degraded mode.
+
+The minimal server deliberately does not implement object fetch/update.  After
+a reconnect, its renewed request can therefore be an object revalidation
+request rather than the eventual access event.  The integration assertion is
+about transport liveness and matched completion; it does not claim that a
+progress frame installs policy or refreshes an object context.
+
 Long waits remain subject to the hook-specific locking contract in
 ``LOCKING.rst``.  In particular, a progress message proves Constable liveness;
 it does not make a VFS-lock-bound or conditional IPC hook safe for an
