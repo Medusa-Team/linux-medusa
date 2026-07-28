@@ -34,6 +34,8 @@ MEDUSA_DECLARE_EVENT(truncate_access);
 MEDUSA_DECLARE_EVENT(fcntl_access);
 MEDUSA_DECLARE_EVENT(open_access);
 MEDUSA_DECLARE_EVENT(setresuid);
+MEDUSA_DECLARE_EVENT(fork_access);
+MEDUSA_DECLARE_EVENT(ptrace_access);
 MEDUSA_DECLARE_EVENT(ipc_perm_access);
 MEDUSA_DECLARE_EVENT(ipc_associate_access);
 MEDUSA_DECLARE_EVENT(ipc_ctl_access);
@@ -79,6 +81,8 @@ static void __init medusa_mark_enforced_events(void)
 	MEDUSA_MARK_EVENT_ENFORCED(fcntl_access, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(open_access, CONDITIONAL);
 	MEDUSA_MARK_EVENT_ENFORCED(setresuid, SLEEPABLE);
+	MEDUSA_MARK_EVENT_ENFORCED(fork_access, SLEEPABLE);
+	MEDUSA_MARK_EVENT_ENFORCED(ptrace_access, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(ipc_perm_access, CONDITIONAL);
 	MEDUSA_MARK_EVENT_ENFORCED(ipc_associate_access, CONDITIONAL);
 	MEDUSA_MARK_EVENT_ENFORCED(ipc_ctl_access, CONDITIONAL);
@@ -387,6 +391,14 @@ static int medusa_l1_task_alloc(struct task_struct *task,
 	struct medusa_l1_task_s *med = task_security(task);
 	enum medusa_task_context_mode mode = MEDUSA_TASK_CONTEXT_INHERIT;
 
+	/*
+	 * medusa_init() calls this helper once for the boot task.  Every real
+	 * security_task_alloc() call describes a proposed child and is
+	 * authorized against the parent before the child context is published.
+	 */
+	if (task != current && medusa_fork(clone_flags) == MED_DENY)
+		return -EACCES;
+
 	/* swapper(s) or a new user thread */
 	if (task == current ||
 	    ((task->flags & PF_KTHREAD) != (current->flags & PF_KTHREAD))) {
@@ -422,6 +434,25 @@ static int medusa_l1_task_alloc(struct task_struct *task,
 
 static void medusa_l1_task_free(struct task_struct *task)
 {
+}
+
+static int medusa_l1_ptrace_access_check(struct task_struct *child,
+					 unsigned int mode)
+{
+	if (medusa_ptrace(current, child, mode,
+			  MEDUSA_PTRACE_ACCESS_CHECK) == MED_DENY)
+		return -EACCES;
+
+	return 0;
+}
+
+static int medusa_l1_ptrace_traceme(struct task_struct *parent)
+{
+	if (medusa_ptrace(parent, current, 0,
+			  MEDUSA_PTRACE_TRACEME) == MED_DENY)
+		return -EACCES;
+
+	return 0;
 }
 
 #ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
@@ -629,6 +660,8 @@ static void medusa_l1_sk_clone_security(const struct sock *sk,
  */
 
 static struct security_hook_list medusa_l1_hooks[] = {
+	LSM_HOOK_INIT(ptrace_access_check, medusa_l1_ptrace_access_check),
+	LSM_HOOK_INIT(ptrace_traceme, medusa_l1_ptrace_traceme),
 	LSM_HOOK_INIT(bprm_creds_for_exec, medusa_l1_creds_for_exec),
 	//LSM_HOOK_INIT(bprm_creds_from_file, medusa_l1_creds_from_file),
 	//LSM_HOOK_INIT(bprm_check_security, medusa_l1_bprm_check_security),

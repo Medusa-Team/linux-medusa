@@ -33,7 +33,15 @@ extern void medusa_monitor_pexec(int flag);
 extern int medusa_monitored_afterexec(void);
 extern void medusa_monitor_afterexec(int flag);
 extern enum medusa_answer_t medusa_sexec(struct linux_binprm *bprm);
-extern enum medusa_answer_t medusa_ptrace(struct task_struct *tracer, struct task_struct *tracee);
+enum medusa_ptrace_operation {
+	MEDUSA_PTRACE_ACCESS_CHECK,
+	MEDUSA_PTRACE_TRACEME,
+};
+
+enum medusa_answer_t medusa_ptrace(struct task_struct *tracer,
+				   struct task_struct *tracee,
+				   unsigned int mode,
+				   enum medusa_ptrace_operation operation);
 extern void medusa_kernel_thread(int (*fn)(void *));
 
 extern int process_kobj_validate_task(struct task_struct *ts);
