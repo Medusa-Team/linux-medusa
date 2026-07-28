@@ -10,18 +10,18 @@ mediation.
 
 The supported access types are:
 
-====================== ========================= ==============================
-Access type            Linux 7.1 LSM hook        Stable policy inputs
-====================== ========================= ==============================
-``socket_create``      ``socket_create``         family, type, protocol
-``socket_bind``        ``socket_bind``           socket, requested local address
-``socket_connect``     ``socket_connect``        socket, requested peer address
-``socket_listen``      ``socket_listen``         socket, effective backlog
-``socket_accept``      ``socket_accept``         listening socket
-``socket_sendmsg``     ``socket_sendmsg``        socket, byte count, flags and
-                                                  an explicit destination, if any
-``socket_recvmsg``     ``socket_recvmsg``        socket, byte count and flags
-====================== ========================= ==============================
+=========================== ========================= ==============================
+Access type                 Linux 7.1 LSM hook        Stable policy inputs
+=========================== ========================= ==============================
+``socket_create``           ``socket_create``         family, type, protocol
+``socket_bind_access``      ``socket_bind``           socket, requested local address
+``socket_connect_access``   ``socket_connect``        socket, requested peer address
+``socket_listen_access``    ``socket_listen``         socket, effective backlog
+``socket_accept_access``    ``socket_accept``         listening socket
+``socket_sendmsg_access``   ``socket_sendmsg``        socket, byte count, flags and
+                                                       an explicit destination, if any
+``socket_recvmsg_access``   ``socket_recvmsg``        socket, byte count and flags
+=========================== ========================= ==============================
 
 All seven hooks run on the socket syscall path in task context and may use the
 synchronous Constable decision path.  ``accept`` is a decision about the
@@ -47,11 +47,17 @@ the supplied ``addrlen``.  Unsupported families remain outside the restored
 subset and are allowed without announcing a Medusa decision.
 
 The socket object reports its family, type, protocol, network namespace cookie,
-owner UID, and Medusa virtual-space state.  A requested bind address is event
-data, not durable socket identity: the LSM bind hook precedes the protocol bind
-operation and cannot know whether that operation later succeeds.  The socket
-class therefore does not claim that a previously requested address is the
-socket's current local address.
+owner UID, and Medusa virtual-space state.  In the restored subset that state
+is a kernel-owned, read-only default context: ``getsocket`` may authorize its
+generation validation, but protocol v4 cannot mutate the decision snapshot and
+the socket class deliberately offers no unsafe inode-based update operation.
+Socket decisions are triggered by the process subject; socket virtual spaces
+still participate in the local intersection check.
+
+A requested bind address is event data, not durable socket identity: the LSM
+bind hook precedes the protocol bind operation and cannot know whether that
+operation later succeeds.  The socket class therefore does not claim that a
+previously requested address is the socket's current local address.
 
 Blob ownership and namespaces
 -----------------------------

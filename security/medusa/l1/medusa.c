@@ -61,6 +61,7 @@ MEDUSA_DECLARE_EVENT(socket_listen_access);
 MEDUSA_DECLARE_EVENT(socket_accept_access);
 MEDUSA_DECLARE_EVENT(socket_sendmsg_access);
 MEDUSA_DECLARE_EVENT(socket_recvmsg_access);
+MEDUSA_DECLARE_EVENT(socket_event);
 #endif
 
 #define MEDUSA_MARK_EVENT_ENFORCED(name, context) \
@@ -105,6 +106,7 @@ static void __init medusa_mark_enforced_events(void)
 	MEDUSA_MARK_EVENT_ENFORCED(socket_accept_access, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(socket_sendmsg_access, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(socket_recvmsg_access, SLEEPABLE);
+	MEDUSA_MARK_EVENT_ENFORCED(socket_event, CONDITIONAL);
 #endif
 }
 

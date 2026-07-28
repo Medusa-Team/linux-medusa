@@ -46,6 +46,7 @@ inline int socket_kern2kobj(struct socket_kobject *sock_kobj, struct socket *soc
 		return -EINVAL;
 	}
 
+	memset(sock_kobj, 0, sizeof(*sock_kobj));
 	sock_kobj->dev = inode->i_sb->s_dev;
 	sock_kobj->ino = inode->i_ino;
 

@@ -25,7 +25,8 @@ MED_ACCTYPE(socket_create_access, "socket_create",
 
 static int __init socket_create_acctype_init(void)
 {
-	MED_REGISTER_ACCTYPE(socket_create_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
+	MED_REGISTER_ACCTYPE(socket_create_access,
+			     MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 

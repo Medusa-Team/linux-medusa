@@ -208,7 +208,7 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	fi
 	echo "nod /dev/console 0600 0 0 c 5 1"
 	echo "nod /dev/null 0666 0 0 c 1 3"
-	echo "nod /dev/medusa 0600 0 0 c 111 0"
+	echo "nod /dev/medusa 0600 0 0 c 10 111"
 } >"$work_dir/initramfs.list"
 
 "$work_dir/gen_init_cpio" "$work_dir/initramfs.list" |

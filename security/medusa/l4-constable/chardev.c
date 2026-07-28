@@ -31,6 +31,7 @@
 #include "l4/transport.h"
 
 #define MODULENAME "miscdevice/v4"
+#define MEDUSA_MISC_MINOR 111
 
 struct medusa_v4_frame {
 	struct list_head node;
@@ -1394,7 +1395,12 @@ static const struct file_operations medusa_v4_fops = {
 };
 
 static struct miscdevice medusa_v4_device = {
-	.minor = MISC_DYNAMIC_MINOR,
+	/*
+	 * A stable minor lets an initramfs provide /dev/medusa before init can
+	 * mount devtmpfs. This is required by the supported "start Constable
+	 * before init" boot mode.
+	 */
+	.minor = MEDUSA_MISC_MINOR,
 	.name = "medusa",
 	.fops = &medusa_v4_fops,
 	.mode = 0600,
