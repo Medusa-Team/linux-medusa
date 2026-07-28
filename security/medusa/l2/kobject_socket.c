@@ -2,7 +2,7 @@
 
 #include <linux/net.h>
 #include <net/sock.h>
-#include "../../fs/internal.h" /* For user_get_super() */
+#include <net/net_namespace.h>
 #include "l3/registry.h"
 #include "l2/kobject_socket.h"
 
@@ -12,8 +12,8 @@ MED_ATTRS(socket_kobject) {
 
 	MED_ATTR_RO(socket_kobject, type, "type", MED_UNSIGNED),
 	MED_ATTR_RO(socket_kobject, family, "family", MED_UNSIGNED),
-	MED_ATTR_RO(socket_kobject, addrlen, "addrlen", MED_UNSIGNED),
-	MED_ATTR(socket_kobject, address, "address", MED_BYTES),
+	MED_ATTR_RO(socket_kobject, protocol, "protocol", MED_UNSIGNED),
+	MED_ATTR_RO(socket_kobject, netns_cookie, "netns_cookie", MED_UNSIGNED),
 	MED_ATTR(socket_kobject, uid, "uid", MED_UNSIGNED),
 	MED_ATTR_OBJECT(socket_kobject),
 
@@ -50,85 +50,12 @@ inline int socket_kern2kobj(struct socket_kobject *sock_kobj, struct socket *soc
 	sock_kobj->ino = inode->i_ino;
 
 	sock_kobj->type = sock->type;
-	sock_kobj->family = sock->ops->family;
+	sock_kobj->family = sock->sk->sk_family;
+	sock_kobj->protocol = sock->sk->sk_protocol;
+	sock_kobj->netns_cookie = sock_net(sock->sk)->net_cookie;
 	sock_kobj->uid = sock->sk->sk_uid;
-	sock_kobj->addrlen = sk_sec->addrlen;
-	if (sk_sec->addrlen > 0) {
-		switch (sock->ops->family) {
-		case AF_INET:
-			sock_kobj->address.inet_i.port = sk_sec->address.inet_i.port;
-			memcpy(sock_kobj->address.inet_i.addrdata,
-			       sk_sec->address.inet_i.addrdata,
-			       4);
-			break;
-		case AF_INET6:
-			sock_kobj->address.inet6_i.port = sk_sec->address.inet6_i.port;
-			memcpy(sock_kobj->address.inet6_i.addrdata,
-			       sk_sec->address.inet6_i.addrdata,
-			       16);
-			break;
-		case AF_UNIX:
-			memcpy(sock_kobj->address.unix_i.addrdata,
-			       sk_sec->address.unix_i.addrdata,
-			       UNIX_PATH_MAX);
-			break;
-		default:
-			break;
-		}
-	}
 	sock_kobj->med_object = sk_sec->med_object;
 	return 0;
-}
-
-static struct medusa_kobject_s *socket_fetch(struct medusa_kobject_s *kobj)
-{
-	struct socket *sock;
-	struct inode *inode = NULL;
-	struct super_block *sb = NULL;
-	struct socket_kobject *s_kobj = (struct socket_kobject *)kobj;
-	struct medusa_kobject_s *retval = NULL;
-
-	if (s_kobj)
-		sb = user_get_super(s_kobj->dev, false);
-	if (sb) {
-		inode = ilookup(sb, s_kobj->ino);
-		drop_super(sb);
-	}
-
-	if (inode) {
-		sock = SOCKET_I(inode);
-		retval = kobj;
-		if (unlikely(socket_kern2kobj(s_kobj, sock) < 0))
-			retval = NULL;
-		iput(inode);
-	}
-
-	return retval;
-}
-
-static enum medusa_answer_t socket_update(struct medusa_kobject_s *kobj)
-{
-	struct socket *sock;
-	struct inode *inode = NULL;
-	struct super_block *sb = NULL;
-	struct socket_kobject *s_kobj = (struct socket_kobject *)kobj;
-	enum medusa_answer_t retval = MED_ERR;
-
-	if (s_kobj)
-		sb = user_get_super(s_kobj->dev, false);
-	if (sb) {
-		inode = ilookup(sb, s_kobj->ino);
-		drop_super(sb);
-	}
-	if (inode) {
-		sock = SOCKET_I(inode);
-		retval = MED_ALLOW;
-		if (unlikely(socket_kobj2kern(s_kobj, sock) < 0))
-			retval = MED_ERR;
-		iput(inode);
-	}
-
-	return retval;
 }
 
 MED_KCLASS(socket_kobject) {
@@ -136,8 +63,8 @@ MED_KCLASS(socket_kobject) {
 	"socket",
 	NULL,		/* init kclass */
 	NULL,		/* destroy kclass */
-	socket_fetch,
-	socket_update,
+	NULL,		/* fetch: socket inode identity is not lifetime-safe */
+	NULL,		/* update: socket state is event-scoped */
 	NULL,		/* unmonitor */
 };
 

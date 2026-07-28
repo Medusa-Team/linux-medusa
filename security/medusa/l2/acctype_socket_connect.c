@@ -8,7 +8,7 @@ struct socket_connect_access {
 	MEDUSA_ACCESS_HEADER;
 	sa_family_t family;
 	int addrlen;
-	union MED_ADDRESS address;
+	struct medusa_socket_address address;
 };
 
 MED_ATTRS(socket_connect_access) {
@@ -32,9 +32,16 @@ enum medusa_answer_t medusa_socket_connect(struct socket *sock,
 					   struct sockaddr *address,
 					   int addrlen)
 {
-	struct socket_connect_access access;
+	struct socket_connect_access access = {};
 	struct process_kobject process;
 	struct socket_kobject sock_kobj;
+	int error;
+
+	error = medusa_socket_address_parse(&access.address, address, addrlen);
+	if (error == -EAFNOSUPPORT)
+		return MED_ALLOW;
+	if (error)
+		return MED_ERR;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0 &&
@@ -52,33 +59,8 @@ enum medusa_answer_t medusa_socket_connect(struct socket *sock,
 	if (MEDUSA_MONITORED_ACCESS_S(socket_connect_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		socket_kern2kobj(&sock_kobj, sock);
-		access.family = address->sa_family;
+		access.family = access.address.family;
 		access.addrlen = addrlen;
-		switch (address->sa_family) {
-		case AF_INET:
-			if (addrlen < sizeof(struct sockaddr_in))
-				return MED_ERR;
-			access.address.inet_i.port = ((struct sockaddr_in *)address)->sin_port;
-			memcpy(access.address.inet_i.addrdata,
-			       (__be32 *)&((struct sockaddr_in *)address)->sin_addr,
-			       4);
-			break;
-		case AF_INET6:
-			if (addrlen < SIN6_LEN_RFC2133)
-				return MED_ERR;
-			access.address.inet6_i.port = ((struct sockaddr_in6 *)address)->sin6_port;
-			memcpy(access.address.inet6_i.addrdata,
-			       (__be32 *)((struct sockaddr_in6 *)address)->sin6_addr.s6_addr,
-			       16);
-			break;
-		case AF_UNIX:
-			memcpy(access.address.unix_i.addrdata,
-			       ((struct sockaddr_un *)address)->sun_path,
-			       UNIX_PATH_MAX);
-			break;
-		default:
-			return MED_ALLOW;
-		}
 
 		return MED_DECIDE(socket_connect_access, &access, &process, &sock_kobj);
 	}
