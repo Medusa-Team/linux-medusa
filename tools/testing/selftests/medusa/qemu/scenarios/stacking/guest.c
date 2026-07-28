@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 
 static int failures;
@@ -24,5 +25,8 @@ int main(void)
 	       errno == EACCES);
 	result("allow_after_apparmor_deny",
 	       mkdir("/tmp/medusa-apparmor-allowed", 0700) == 0);
+	errno = 0;
+	result("medusa_network_deny",
+	       socket(AF_UNIX, SOCK_SEQPACKET, 0) < 0 && errno == EACCES);
 	return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }
