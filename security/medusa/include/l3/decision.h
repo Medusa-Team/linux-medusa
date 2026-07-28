@@ -103,6 +103,9 @@ const char *medusa_unavailable_reason_name(
 	enum medusa_unavailable_reason reason);
 bool medusa_decision_is_authoritative(
 	const struct medusa_decision_result *result);
+bool medusa_domain_cache_decide(
+	struct medusa_evtype_s *evtype, u64 subject_domain, u64 object_domain,
+	u64 selector, struct medusa_decision_result *result);
 struct medusa_decision_result
 med_decide_result(struct medusa_evtype_s *evtype, void *event,
 		  void *o1, void *o2);

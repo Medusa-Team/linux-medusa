@@ -19,6 +19,7 @@
 #include <uapi/linux/medusa.h>
 
 #include "l3/arch.h"
+#include "l3/decision_cache.h"
 #include "l3/health.h"
 #include "l3/kobject.h"
 #include "l3/med_cache.h"
@@ -763,7 +764,7 @@ static bool medusa_v4_tlv_known(u16 type)
 	       (type >= MEDUSA_TLV_CLASS_ID &&
 		type <= MEDUSA_TLV_ENFORCEMENT) ||
 	       (type >= MEDUSA_TLV_FALLBACK_POLICY &&
-		type <= MEDUSA_TLV_CACHE_UPDATE) ||
+		type <= MEDUSA_TLV_DOMAIN_RULE) ||
 	       (type >= MEDUSA_TLV_ERROR_CODE &&
 		type <= MEDUSA_TLV_OFFENDING_TYPE);
 }
@@ -1018,6 +1019,17 @@ static int medusa_v4_handle_policy_begin(const u8 *data, size_t count)
 		v4_session.expected_generation = generation;
 		v4_session.replacing_policy = true;
 	}
+	error = medusa_decision_cache_begin(generation);
+	if (error) {
+		if (replacement) {
+			med_authserver_policy_replace_abort(
+				&medusa_v4_authserver);
+			v4_session.replacing_policy = false;
+			v4_session.expected_generation =
+				(u64)READ_ONCE(medusa_authserver_magic);
+		}
+		return error;
+	}
 	list_for_each_entry(event, &v4_session.events, node)
 		event->policy_staged = false;
 	v4_session.state = MEDUSA_STATE_POLICY_INSTALL;
@@ -1032,8 +1044,12 @@ static int medusa_v4_handle_policy_event(const u8 *data, size_t count)
 	const struct medusa_frame_header *header =
 		(const struct medusa_frame_header *)data;
 	struct medusa_v4_event *event;
+	struct medusa_domain_rule_spec *rules = NULL;
+	u32 rule_count = 0;
+	u32 rule_index = 0;
 	u32 event_id;
 	u8 policy;
+	size_t offset;
 	int error;
 
 	if (le64_to_cpu(header->request_id) ||
@@ -1054,9 +1070,69 @@ static int medusa_v4_handle_policy_event(const u8 *data, size_t count)
 		return -EALREADY;
 	error = med_authserver_stage_fallback_policy(
 		&medusa_v4_authserver, event->event, policy);
-	if (!error)
-		event->policy_staged = true;
-	return error;
+	if (error)
+		return error;
+
+	offset = MEDUSA_FRAME_HEADER_SIZE;
+	while (offset < count) {
+		const struct medusa_tlv *tlv =
+			(const struct medusa_tlv *)(data + offset);
+		size_t length = le32_to_cpu(tlv->length);
+
+		if (le16_to_cpu(tlv->type) == MEDUSA_TLV_DOMAIN_RULE)
+			rule_count++;
+		offset += MEDUSA_TLV_ALIGN_UP(length);
+	}
+	if (rule_count) {
+		if (!(v4_session.enabled_features &
+		      MEDUSA_FEATURE_DOMAIN_DECISION_CACHE))
+			return -EOPNOTSUPP;
+		rules = kcalloc(rule_count, sizeof(*rules), GFP_KERNEL);
+		if (!rules)
+			return -ENOMEM;
+	}
+	offset = MEDUSA_FRAME_HEADER_SIZE;
+	while (offset < count) {
+		const struct medusa_tlv *tlv =
+			(const struct medusa_tlv *)(data + offset);
+		size_t length = le32_to_cpu(tlv->length);
+
+		if (le16_to_cpu(tlv->type) == MEDUSA_TLV_DOMAIN_RULE) {
+			const struct medusa_domain_rule *rule =
+				(const struct medusa_domain_rule *)
+				((const u8 *)tlv + MEDUSA_TLV_HEADER_SIZE);
+			size_t value_length =
+				length - MEDUSA_TLV_HEADER_SIZE;
+
+			if (value_length != sizeof(*rule) ||
+			    memchr_inv(rule->reserved, 0,
+				       sizeof(rule->reserved))) {
+				error = -EINVAL;
+				goto out;
+			}
+			rules[rule_index++] =
+				(struct medusa_domain_rule_spec) {
+					.subject_domain = le64_to_cpu(
+						rule->subject_domain),
+					.object_domain = le64_to_cpu(
+						rule->object_domain),
+					.selector = le64_to_cpu(
+						rule->selector),
+					.answer =
+						(enum medusa_answer_t)
+						rule->answer,
+				};
+		}
+		offset += MEDUSA_TLV_ALIGN_UP(length);
+	}
+	error = medusa_decision_cache_stage_rules(
+		event->event, rules, rule_count);
+out:
+	kfree(rules);
+	if (error)
+		return error;
+	event->policy_staged = true;
+	return 0;
 }
 
 static int medusa_v4_handle_policy_commit(const u8 *data, size_t count)
@@ -1075,16 +1151,24 @@ static int medusa_v4_handle_policy_commit(const u8 *data, size_t count)
 	list_for_each_entry(event, &v4_session.events, node)
 		if (!event->policy_staged)
 			return -ENODATA;
+	error = medusa_decision_cache_prepare(
+		v4_session.expected_generation);
+	if (error)
+		return error;
 	error = v4_session.replacing_policy ?
 		med_authserver_policy_replace_commit(&medusa_v4_authserver) :
 		med_register_authserver(&medusa_v4_authserver);
-	if (error)
+	if (error) {
+		medusa_decision_cache_abort();
 		return error;
+	}
 	if ((u64)READ_ONCE(medusa_authserver_magic) !=
 	    v4_session.expected_generation) {
 		med_unregister_authserver(&medusa_v4_authserver);
+		medusa_decision_cache_abort();
 		return -ESTALE;
 	}
+	medusa_decision_cache_publish(v4_session.expected_generation);
 	medusa_server_health_mark_healthy(&constable_health);
 	v4_session.state = MEDUSA_STATE_READY;
 	if (v4_session.replacing_policy) {
@@ -1112,6 +1196,7 @@ static int medusa_v4_handle_policy_abort(const u8 *data, size_t count)
 	error = med_authserver_policy_replace_abort(&medusa_v4_authserver);
 	if (error)
 		return error;
+	medusa_decision_cache_abort();
 	v4_session.expected_generation =
 		(u64)READ_ONCE(medusa_authserver_magic);
 	v4_session.replacing_policy = false;
@@ -1510,6 +1595,7 @@ static int medusa_v4_release(struct inode *inode, struct file *file)
 		&constable_health, MEDUSA_HEALTH_DISCONNECTED);
 	mutex_unlock(&v4_session.state_lock);
 	med_unregister_authserver(&medusa_v4_authserver);
+	medusa_decision_cache_reset();
 	medusa_pending_request_cancel_all(MED_ERR);
 	wake_up_all(&v4_session.read_wait);
 	medusa_v4_purge_frames();

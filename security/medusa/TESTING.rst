@@ -262,6 +262,11 @@ QEMU scenario coverage
   Demonstrates one delegated ``ipc_msgsnd`` followed by a kernel-cached
   decision after Constable clears the message queue's monitoring bit.
 
+``domain-cache``
+  Installs wildcard ptrace and signal denials in the generation-scoped kernel
+  table, then proves both operations are denied without a Constable decision
+  event. This is the non-sleepable RCU lookup path.
+
 ``access``
   Exercises create/open/write/fcntl/chmod/chown/truncate, symlink/link/rename/
   unlink, mknod, mkdir/rmdir, chroot, exec, fork, signals, setresuid, and the

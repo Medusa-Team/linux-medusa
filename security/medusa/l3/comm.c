@@ -8,6 +8,7 @@
 
 #include "l3/audit_schema.h"
 #include "l3/arch.h"
+#include "l3/decision_cache.h"
 #include "l3/registry.h"
 #include "l3/server.h"
 
@@ -301,6 +302,26 @@ medusa_finish_decision(struct medusa_evtype_s *evtype,
 	medusa_account_decision(evtype, &result);
 	medusa_audit_degraded_decision(evtype, &result);
 	return result;
+}
+
+bool medusa_domain_cache_decide(
+	struct medusa_evtype_s *evtype, u64 subject_domain, u64 object_domain,
+	u64 selector, struct medusa_decision_result *result)
+{
+	enum medusa_answer_t answer;
+
+	if (!result ||
+	    !medusa_decision_cache_lookup(evtype, subject_domain,
+					  object_domain, selector, &answer))
+		return false;
+	*result = medusa_finish_decision(evtype,
+		(struct medusa_decision_result) {
+			.answer = answer,
+			.source = MEDUSA_DECISION_CACHE,
+			.unavailable = MEDUSA_AVAILABLE,
+			.policy_generation = medusa_current_policy_generation(),
+		});
+	return true;
 }
 
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,

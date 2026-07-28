@@ -36,6 +36,9 @@ MEDUSA_DECLARE_EVENT(open_access);
 MEDUSA_DECLARE_EVENT(setresuid);
 MEDUSA_DECLARE_EVENT(fork_access);
 MEDUSA_DECLARE_EVENT(ptrace_access);
+#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
+MEDUSA_DECLARE_EVENT(sendsig_access);
+#endif
 MEDUSA_DECLARE_EVENT(ipc_perm_access);
 MEDUSA_DECLARE_EVENT(ipc_associate_access);
 MEDUSA_DECLARE_EVENT(ipc_ctl_access);
@@ -83,6 +86,9 @@ static void __init medusa_mark_enforced_events(void)
 	MEDUSA_MARK_EVENT_ENFORCED(setresuid, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(fork_access, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(ptrace_access, CONDITIONAL);
+#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
+	MEDUSA_MARK_EVENT_ENFORCED(sendsig_access, LOCK_BOUND);
+#endif
 	MEDUSA_MARK_EVENT_ENFORCED(ipc_perm_access, CONDITIONAL);
 	MEDUSA_MARK_EVENT_ENFORCED(ipc_associate_access, CONDITIONAL);
 	MEDUSA_MARK_EVENT_ENFORCED(ipc_ctl_access, CONDITIONAL);

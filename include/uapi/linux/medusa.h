@@ -100,6 +100,7 @@ enum medusa_tlv_type {
 	MEDUSA_TLV_OBJECT_DATA = 36,
 	MEDUSA_TLV_STATUS = 37,
 	MEDUSA_TLV_CACHE_UPDATE = 38,
+	MEDUSA_TLV_DOMAIN_RULE = 39,
 	MEDUSA_TLV_ERROR_CODE = 48,
 	MEDUSA_TLV_ERROR_MESSAGE = 49,
 	MEDUSA_TLV_OFFENDING_TYPE = 50,
@@ -112,6 +113,7 @@ enum medusa_feature {
 	MEDUSA_FEATURE_AUDIT_FRAMES = 1ULL << 3,
 	MEDUSA_FEATURE_ATOMIC_POLICY_REPLACE = 1ULL << 4,
 	MEDUSA_FEATURE_REPLY_CACHE_UPDATE = 1ULL << 5,
+	MEDUSA_FEATURE_DOMAIN_DECISION_CACHE = 1ULL << 6,
 };
 
 #define MEDUSA_REQUIRED_FEATURES		\
@@ -122,7 +124,23 @@ enum medusa_feature {
 	 MEDUSA_FEATURE_OBJECT_FETCH_UPDATE |	\
 	 MEDUSA_FEATURE_AUDIT_FRAMES |		\
 	 MEDUSA_FEATURE_ATOMIC_POLICY_REPLACE |	\
-	 MEDUSA_FEATURE_REPLY_CACHE_UPDATE)
+	 MEDUSA_FEATURE_REPLY_CACHE_UPDATE |	\
+	 MEDUSA_FEATURE_DOMAIN_DECISION_CACHE)
+
+#define MEDUSA_POLICY_DOMAIN_ANY		(~0ULL)
+#define MEDUSA_POLICY_SELECTOR_ANY		(~0ULL)
+
+/*
+ * A POLICY_EVENT may carry an array of these rules.  Reserved bytes must be
+ * zero.  Exact keys take precedence over wildcard keys.
+ */
+struct medusa_domain_rule {
+	__le64 subject_domain;
+	__le64 object_domain;
+	__le64 selector;
+	__u8 answer;
+	__u8 reserved[7];
+};
 
 enum medusa_cache_update {
 	MEDUSA_CACHE_UPDATE_NONE = 0,

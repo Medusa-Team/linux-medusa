@@ -11,8 +11,10 @@
  *                  roderik.ploszek@gmail.com
  */
 
-#include "l3/registry.h"
+#include <uapi/linux/medusa.h>
+
 #include "l2/kobject_process.h"
+#include "l3/registry.h"
 
 /**
  * uid_differs() - Check equality of original and new (proposed) UID.
@@ -114,7 +116,11 @@ static int process_kobj2kern(struct process_kobject *tk, struct task_struct *ts)
 	bool change_luid = false;
 #endif
 
+	if (tk->policy_domain == MEDUSA_POLICY_DOMAIN_ANY)
+		return -EINVAL;
+
 	/* Save variable information stored in Medusa security context */
+	atomic64_set(&ts_security->policy_domain, tk->policy_domain);
 	ts_security->med_subject = tk->med_subject;
 	ts_security->med_object = tk->med_object;
 #if (defined(CONFIG_X86) || defined(CONFIG_X86_64)) && defined(CONFIG_MEDUSA_SYSCALL)
@@ -249,6 +255,7 @@ inline int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
 	/* Copy information from task_struct itself */
 
 	tk->pid = ts->pid;
+	tk->policy_domain = atomic64_read(&ts_security->policy_domain);
 	/* Take pids from global (i.e. init) namespace */
 	tk->pgrp = pid_nr(task_pgrp(ts));
 	tk->tgid = pid_nr(task_tgid(ts));
@@ -304,6 +311,7 @@ inline int process_kern2kobj(struct process_kobject *tk, struct task_struct *ts)
  */
 MED_ATTRS(process_kobject) {
 	MED_ATTR_KEY_RO(process_kobject, pid, "pid", MED_SIGNED),
+	MED_ATTR(process_kobject, policy_domain, "policy_domain", MED_UNSIGNED),
 	MED_ATTR_RO(process_kobject, pgrp, "pgrp", MED_SIGNED),
 	MED_ATTR_RO(process_kobject, tgid, "tgid", MED_SIGNED),
 	MED_ATTR_RO(process_kobject, session, "session", MED_SIGNED),

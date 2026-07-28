@@ -37,11 +37,13 @@ enum medusa_answer_t medusa_ptrace(struct task_struct *tracer,
 				   enum medusa_ptrace_operation operation)
 {
 	struct ptrace_access access;
+	struct medusa_decision_result cached;
 	struct process_kobject tracer_p;
 	struct process_kobject tracee_p;
 	bool can_validate = in_task() && !preempt_count() && !irqs_disabled();
 	bool tracer_valid;
 	bool tracee_valid;
+	bool monitored;
 
 	tracer_valid =
 		is_med_magic_valid(&(task_security(tracer)->med_object));
@@ -60,8 +62,21 @@ enum medusa_answer_t medusa_ptrace(struct task_struct *tracer,
 			    VS(task_security(tracee)))))
 		return MED_DENY;
 
-	if (MEDUSA_MONITORED_ACCESS_S(ptrace_access, task_security(tracer)) ||
-	    !tracer_valid || !tracee_valid) {
+	monitored =
+		MEDUSA_MONITORED_ACCESS_S(ptrace_access, task_security(tracer));
+	if (monitored || !tracer_valid || !tracee_valid) {
+		u64 selector = ((u64)operation << 32) | mode;
+
+		if (medusa_domain_cache_decide(
+			    &MED_EVTYPEOF(ptrace_access),
+			    atomic64_read(
+				    &task_security(tracer)->policy_domain),
+			    atomic64_read(
+				    &task_security(tracee)->policy_domain),
+			    selector, &cached))
+			return medusa_audit_decision_result(
+				"ptrace", cached,
+				task_security(tracer)->audit);
 		access.mode = mode;
 		access.operation = operation;
 		process_kern2kobj(&tracer_p, tracer);
