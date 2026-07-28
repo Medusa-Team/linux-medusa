@@ -3,6 +3,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_socket.h"
+#include "l2/audit_medusa.h"
 
 struct socket_create_access {
 	MEDUSA_ACCESS_HEADER;
@@ -46,7 +47,11 @@ enum medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 		access.family = family;
 		access.type = type;
 		access.protocol = protocol;
-		return MED_DECIDE(socket_create_access, &access, &process, &process);
+		return medusa_audit_decision_result(
+			"socket_create",
+			MED_DECIDE_RESULT(socket_create_access, &access,
+					  &process, &process),
+			task_security(current)->audit);
 	}
 
 	return MED_ALLOW;

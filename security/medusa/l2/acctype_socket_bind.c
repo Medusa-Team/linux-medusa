@@ -3,6 +3,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_socket.h"
+#include "l2/audit_medusa.h"
 
 struct socket_bind_access {
 	MEDUSA_ACCESS_HEADER;
@@ -51,8 +52,11 @@ medusa_socket_bind_security(struct socket *sock,
 	if (MEDUSA_MONITORED_ACCESS_S(socket_bind_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		socket_kern2kobj(&sock_kobj, sock);
-		return MED_DECIDE(socket_bind_access, access, &process,
-				  &sock_kobj);
+		return medusa_audit_decision_result(
+			"socket_bind",
+			MED_DECIDE_RESULT(socket_bind_access, access, &process,
+					  &sock_kobj),
+			task_security(current)->audit);
 	}
 	return MED_ALLOW;
 }

@@ -59,6 +59,24 @@ void medusa_audit_apply_local(struct medusa_audit_data *mad,
 	mad->policy_generation = medusa_current_policy_generation();
 }
 
+enum medusa_answer_t medusa_audit_decision_result(
+	const char *operation, struct medusa_decision_result result,
+	bool audit_requested)
+{
+	struct common_audit_data cad;
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
+
+	medusa_audit_apply_decision(&mad, result);
+	if (audit_requested || mad.unavailable != MEDUSA_AVAILABLE) {
+		cad.type = LSM_AUDIT_DATA_NONE;
+		cad.u.tsk = current;
+		mad.function = operation;
+		cad.medusa_audit_data = &mad;
+		medusa_audit_log_callback(&cad, NULL);
+	}
+	return mad.ans;
+}
+
 /*
  * medusa_pre - pre audit callback function to format audit record
  * @ab: audit buffer for formatting audit record

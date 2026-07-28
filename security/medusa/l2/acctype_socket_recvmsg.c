@@ -3,6 +3,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_socket.h"
+#include "l2/audit_medusa.h"
 
 struct socket_recvmsg_access {
 	MEDUSA_ACCESS_HEADER;
@@ -55,7 +56,11 @@ enum medusa_answer_t medusa_socket_recvmsg(struct socket *sock,
 		process_kern2kobj(&process, current);
 		socket_kern2kobj(&sock_kobj, sock);
 
-		return MED_DECIDE(socket_recvmsg_access, &access, &process, &sock_kobj);
+		return medusa_audit_decision_result(
+			"socket_recvmsg",
+			MED_DECIDE_RESULT(socket_recvmsg_access, &access,
+					  &process, &sock_kobj),
+			task_security(current)->audit);
 	}
 	return MED_ALLOW;
 }
