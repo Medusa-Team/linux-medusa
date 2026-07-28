@@ -4,6 +4,7 @@
 
 #include "l1/inode.h"
 #include "l1/ipc.h"
+#include "l1/socket.h"
 
 static void expect_default_object_context(struct kunit *test,
 					  struct medusa_object_s *object)
@@ -50,9 +51,34 @@ static void ipc_context_initialization(struct kunit *test)
 	}
 }
 
+#ifdef CONFIG_SECURITY_NETWORK
+static void socket_context_initialization_and_clone(struct kunit *test)
+{
+	struct medusa_l1_socket_s original;
+	struct medusa_l1_socket_s clone;
+
+	memset(&original, 0xff, sizeof(original));
+	memset(&clone, 0, sizeof(clone));
+	medusa_socket_context_init(&original);
+
+	expect_default_object_context(test, &original.med_object);
+	vs_clearbit(original.med_object.vs, 7);
+	act_clearbit(original.med_object.act, 11);
+	original.med_object.magic = 41;
+	original.med_object.cinfo.data[0] = 73;
+
+	medusa_socket_context_clone(&clone, &original);
+
+	KUNIT_EXPECT_MEMEQ(test, &clone, &original, sizeof(original));
+}
+#endif
+
 static struct kunit_case object_context_test_cases[] = {
 	KUNIT_CASE(inode_context_initialization),
 	KUNIT_CASE(ipc_context_initialization),
+#ifdef CONFIG_SECURITY_NETWORK
+	KUNIT_CASE(socket_context_initialization_and_clone),
+#endif
 	{}
 };
 

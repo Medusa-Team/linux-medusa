@@ -16,3 +16,4 @@ obj-$(CONFIG_MEDUSA_L3_TESTING) += comm-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += med_cache-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += pending-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += health-tests.o
+obj-$(CONFIG_MEDUSA_L3_TESTING) += socket-address-tests.o
