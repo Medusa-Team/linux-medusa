@@ -1118,7 +1118,6 @@ static int medusa_v4_handle_object(const u8 *data, size_t count, bool update)
 				class->class->attr, class->class->kobject_size,
 				fetched, &snapshot);
 	}
-	kvfree(key);
 	if (error)
 		goto out;
 	reply = medusa_v4_frame_new(
@@ -1142,8 +1141,11 @@ static int medusa_v4_handle_object(const u8 *data, size_t count, bool update)
 	else
 		error = medusa_v4_queue(reply);
 out:
-	if (fetched)
-		med_cache_free(fetched);
+	/*
+	 * Class fetch callbacks populate and return the caller-owned key
+	 * object. They do not return a med_cache allocation.
+	 */
+	kvfree(key);
 	kvfree(snapshot);
 	return error;
 }
