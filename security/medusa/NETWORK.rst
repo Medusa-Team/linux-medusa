@@ -113,3 +113,25 @@ The historical code is not safe to reactivate unchanged:
 The restored implementation consequently keeps address data on the access
 event, makes socket fetch/update unavailable, and tests current Linux 7.1
 semantics rather than treating the historical source as a specification.
+
+Verification
+------------
+
+The ``network`` QEMU scenario exercises every supported event with independent
+allow and deny policy. It covers IPv4, IPv6, and length-bounded abstract Unix
+addresses, verifies active class and event capability output, and requires
+operation-specific audit attribution. It also installs online-required policy
+for bind, disconnects Constable, and proves that the next bind is denied with
+``decision_source=online_required`` and ``unavailable=no_auth_server``.
+
+KUnit covers socket-context initialization and cloning through the LSM-assigned
+blob offset, plus bounded address parsing for each supported family. The
+AppArmor and SELinux stacking scenarios permit a test socket in the major LSM
+and require Medusa to deny it, in addition to proving a denial attributed only
+to the major LSM.
+
+Performance measurements use the self-contained network benchmark described in
+``tools/testing/selftests/medusa/qemu/README``. Results are labeled by policy
+mode and report connection setup operations and message throughput separately;
+the harness intentionally defines no timing threshold because emulated and
+native hosts are not directly comparable.

@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 87 tests in twelve suites:
+The KUnit configuration runs 91 tests in thirteen suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -24,11 +24,13 @@ The KUnit configuration runs 87 tests in twelve suites:
 * protocol-v3 answer lengths, verdicts, unknown IDs, stale IDs, and fallback
   policy command validation;
 * cache allocator growth across a size-class boundary;
-* dynamic task, inode, and SysV IPC LSM blob offsets;
+* dynamic task, inode, SysV IPC, and socket LSM blob offsets, including socket
+  initialization and clone isolation;
+* bounded IPv4, IPv6, pathname Unix, and abstract Unix socket-address parsing;
 * bounded audit-answer formatting and LSM return-value translation;
 * decision-source, authorization-server contact, and unavailability audit
   metadata, including request ID, policy generation, cache, virtual-space,
-  path-guard, and validation attribution;
+  path-guard, validation, and all seven socket-operation attributions;
 * independent pending-request IDs, out-of-order replies, policy generations,
   duplicate and unknown replies, bounded capacity, disconnect cleanup,
   timeout races, and renewable liveness leases;
@@ -190,9 +192,9 @@ disjoint source counters satisfy
 ``decisions = cached + auth_server + baseline + online_required +
 invalid_replies``; ``delegated`` independently records
 actual transport contact and can therefore overlap a timed-out baseline.
-The QEMU lifecycle scenario proves that ``ipc_msgsnd`` and the process and IPC
-classes are active, socket policy remains announcement-only, and an unmonitored
-``pexec`` is counted as a cached evaluation.
+The QEMU lifecycle and network scenarios prove that ``ipc_msgsnd``, the
+process and IPC classes, and the supported socket policy surface are active.
+An unmonitored ``pexec`` is counted as a cached evaluation.
 
 Protocol-error audit
 --------------------
@@ -324,6 +326,14 @@ QEMU scenario coverage
   generation invalidation turning a restrictive event fallback into the
   historical validation allow after disconnect.
 
+``network``
+  Proves independent delegated allow and deny behavior for create, bind,
+  connect, listen, accept, send, and receive. It exercises IPv4, IPv6, and
+  bounded abstract Unix-domain addresses, requires every event to appear as
+  active in securityfs, and checks an authorization-server audit record for
+  every hook. After Constable exits, an online-required bind must fail with
+  an explicitly attributed disconnected-server audit record.
+
 ``stacking.config``
   Enables AppArmor before Medusa in ``CONFIG_LSM``.  The ``stacking`` scenario
   requires both names in the kernel's runtime LSM list and inherits the full
@@ -332,7 +342,8 @@ QEMU scenario coverage
   succeeds. A negative assertion verifies that AppArmor's short-circuited
   denial is not attributed to Medusa. The reconnected Constable then proves an
   audited Medusa ``ipc_msgsnd`` denial while AppArmor permits the unconfined
-  init process.
+  init process. The confined helper also performs a socket operation that
+  AppArmor permits and Medusa independently denies.
 
 ``selinux-stacking.config``
   Enables SELinux before Medusa in ``CONFIG_LSM``. The ``selinux-stacking``
@@ -340,8 +351,10 @@ QEMU scenario coverage
   lifecycle scenario. It loads an enforcing policy generated from the
   kernel's minimal dummy policy, transitions only the guest helper into a
   restricted domain, and proves an audited SELinux directory denial while
-  Constable remains connected. The replacement Constable then proves the same
-  independent Medusa ``ipc_msgsnd`` denial used by the other lifecycle runs.
+  Constable remains connected. The helper's SELinux domain is permitted to
+  create sockets, allowing Medusa to independently deny a socket operation.
+  The replacement Constable then proves the same independent Medusa
+  ``ipc_msgsnd`` denial used by the other lifecycle runs.
 
 Stacked hook and audit composition
 ----------------------------------
@@ -367,7 +380,8 @@ The Linux 7.1 LSM table currently calls Medusa for:
 * set-user-ID credential changes;
 * signal virtual-space checks;
 * SysV IPC permission, associate, control, semop, shmat, msgsnd, and msgrcv;
-* task, inode, and SysV IPC security-context allocation.
+* socket create, bind, connect, listen, accept, sendmsg, and recvmsg;
+* task, inode, SysV IPC, and socket security-context allocation.
 
 Task allocation initializes or inherits a context, but does not call the
 registered ``fork`` access type.  Signal delivery performs a virtual-space
@@ -379,9 +393,8 @@ Registered but not wired
 The following access types are announced to Constable but have no active Linux
 7.1 LSM call site: ``after_exec``, ``capable``, ``create``, ``fork``, ``init``,
 ``lookup``, ``notify_change``, ``permission``, ``readlink``, ``sexec``,
-``ptrace``, and all socket create/bind/connect/listen/accept/send/receive
-events.  The socket hook block is commented out.  ``syscall`` is likewise not
-part of the normal tested configuration.
+and ``ptrace``. ``syscall`` is likewise not part of the normal tested
+configuration.
 
 Consequently, file creation in ``access`` is currently observed through the
 post-create open path; it does not prove the registered ``create`` event.
