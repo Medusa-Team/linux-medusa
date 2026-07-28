@@ -310,10 +310,16 @@ static void registry_state_names_are_stable(struct kunit *test)
 
 	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_DISCONNECTED);
 	KUNIT_EXPECT_STREQ(test, "disconnected", name);
-	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_HANDSHAKING);
-	KUNIT_EXPECT_STREQ(test, "handshaking", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_HANDSHAKE);
+	KUNIT_EXPECT_STREQ(test, "handshake", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_DEFINITIONS);
+	KUNIT_EXPECT_STREQ(test, "definitions", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_POLICY_INSTALL);
+	KUNIT_EXPECT_STREQ(test, "policy_install", name);
 	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_READY);
 	KUNIT_EXPECT_STREQ(test, "ready", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_DEGRADED);
+	KUNIT_EXPECT_STREQ(test, "degraded", name);
 	name = medusa_authserver_state_name(99);
 	KUNIT_EXPECT_STREQ(test, "invalid", name);
 }
