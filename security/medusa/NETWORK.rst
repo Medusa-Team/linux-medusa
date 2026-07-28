@@ -135,3 +135,22 @@ Performance measurements use the self-contained network benchmark described in
 mode and report connection setup operations and message throughput separately;
 the harness intentionally defines no timing threshold because emulated and
 native hosts are not directly comparable.
+
+The Phase 6 reference run used one Linux 7.1 ``#7`` image, QEMU TCG's ``max``
+CPU model, 100 operations per sample, and a 64-byte message. The disabled
+sample excluded Medusa with the kernel ``lsm=`` parameter, so all four samples
+used the identical kernel binary:
+
+================ ================ ==================
+Mode             Connections/s    Messages/s
+================ ================ ==================
+disabled                 17,950             68,162
+cached                     2,012             24,326
+audit-only                 1,261              6,080
+delegated                    540              1,231
+================ ================ ==================
+
+These are reproducibility evidence and a relative TCG comparison, not native
+performance claims. Raw records include nanosecond totals and payload
+throughput, and the scenario runner preserves the exact commands needed to
+repeat the matrix on a target host.
