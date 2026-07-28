@@ -24,6 +24,7 @@ static u64 active_policy_generation;
 static u64 last_ready_policy_generation;
 static unsigned int fallback_policy_slot;
 static unsigned int handshaking_fallback_slot;
+static bool policy_replacement;
 
 int medusa_authserver_magic = 1; /* the 'version' of authserver */
 /* WARNING! medusa_authserver_magic is not locked, nor atomic type,
@@ -441,7 +442,8 @@ int med_authserver_stage_fallback_policy(
 		return -EINVAL;
 
 	mutex_lock(&registry_lock);
-	if (handshaking_authserver != med_authserver) {
+	if (handshaking_authserver != med_authserver &&
+	    !(policy_replacement && authserver == med_authserver)) {
 		error = -EPERM;
 		goto out;
 	}
@@ -453,6 +455,84 @@ int med_authserver_stage_fallback_policy(
 		error = 0;
 		break;
 	}
+out:
+	mutex_unlock(&registry_lock);
+	return error;
+}
+
+/**
+ * med_authserver_policy_replace_begin - stage a live policy generation
+ * @med_authserver: the currently READY authorization server
+ *
+ * The active fallback slot remains visible until commit.  Copying begins only
+ * after an RCU grace period so an old reader cannot observe slot reuse.
+ */
+int med_authserver_policy_replace_begin(
+	struct medusa_authserver_s *med_authserver)
+{
+	struct medusa_evtype_s *event;
+	int error = 0;
+
+	mutex_lock(&registry_lock);
+	if (authserver != med_authserver || policy_replacement) {
+		error = authserver == med_authserver ? -EALREADY : -EPERM;
+		goto out;
+	}
+	handshaking_fallback_slot = medusa_fallback_slot_read() ^ 1U;
+	synchronize_rcu();
+	for (event = evtypes; event; event = event->next)
+		WRITE_ONCE(
+			event->fallback_policy[handshaking_fallback_slot],
+			medusa_get_fallback_policy(event));
+	policy_replacement = true;
+	authserver_state = MEDUSA_AUTHSERVER_POLICY_INSTALL;
+out:
+	mutex_unlock(&registry_lock);
+	return error;
+}
+
+/**
+ * med_authserver_policy_replace_commit - atomically publish a staged policy
+ * @med_authserver: the server that began replacement
+ *
+ * Advancing medusa_authserver_magic lazily invalidates every monitored task,
+ * inode, IPC, and socket context.  MAGIC_NOT_MONITORED objects retain their
+ * explicit cache state.
+ */
+int med_authserver_policy_replace_commit(
+	struct medusa_authserver_s *med_authserver)
+{
+	int error = 0;
+
+	mutex_lock(&registry_lock);
+	if (authserver != med_authserver || !policy_replacement) {
+		error = -EPERM;
+		goto out;
+	}
+	/* Pairs with the acquire in medusa_fallback_slot_read(). */
+	smp_store_release(&fallback_policy_slot, handshaking_fallback_slot);
+	medusa_authserver_magic++;
+	active_policy_generation = (u64)medusa_authserver_magic;
+	last_ready_policy_generation = active_policy_generation;
+	policy_replacement = false;
+	authserver_state = MEDUSA_AUTHSERVER_READY;
+out:
+	mutex_unlock(&registry_lock);
+	return error;
+}
+
+int med_authserver_policy_replace_abort(
+	struct medusa_authserver_s *med_authserver)
+{
+	int error = 0;
+
+	mutex_lock(&registry_lock);
+	if (authserver != med_authserver || !policy_replacement) {
+		error = -EPERM;
+		goto out;
+	}
+	policy_replacement = false;
+	authserver_state = MEDUSA_AUTHSERVER_READY;
 out:
 	mutex_unlock(&registry_lock);
 	return error;
@@ -491,6 +571,7 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 		smp_store_release(&fallback_policy_slot,
 				  handshaking_fallback_slot);
 	}
+	policy_replacement = false;
 	medusa_authserver_magic++;
 	authserver = med_authserver;
 	handshaking_authserver = NULL;
@@ -527,6 +608,7 @@ void med_unregister_authserver(struct medusa_authserver_s *med_authserver)
 		return;
 	}
 	medusa_authserver_magic++;
+	policy_replacement = false;
 	authserver = NULL;
 	authserver_state = MEDUSA_AUTHSERVER_DISCONNECTED;
 	active_policy_generation = 0;

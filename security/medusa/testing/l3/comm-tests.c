@@ -441,7 +441,11 @@ static void protocol_enforces_state_machine(struct kunit *test)
 	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
 		MEDUSA_STATE_POLICY_INSTALL, MEDUSA_MSG_POLICY_COMMIT));
 	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_POLICY_INSTALL, MEDUSA_MSG_POLICY_ABORT));
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
 		MEDUSA_STATE_READY, MEDUSA_MSG_DECISION_REPLY));
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_READY, MEDUSA_MSG_POLICY_BEGIN));
 	KUNIT_EXPECT_FALSE(test, medusa_v4_message_allowed(
 		MEDUSA_STATE_DEGRADED, MEDUSA_MSG_DECISION_REPLY));
 }

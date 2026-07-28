@@ -69,6 +69,7 @@ struct medusa_v4_session {
 	u32 next_class_id;
 	u32 next_event_id;
 	bool connected;
+	bool replacing_policy;
 };
 
 static struct medusa_v4_session v4_session;
@@ -577,6 +578,42 @@ static void medusa_v4_mark_degraded(enum medusa_health_reason reason)
 	wake_up_all(&v4_session.read_wait);
 }
 
+static int medusa_v4_cache_unmonitor(
+	struct medusa_kclass_s *class, struct medusa_kobject_s *object,
+	const char *attribute_name, unsigned int bit)
+{
+	struct medusa_attribute_s *attribute;
+
+	if (!class || !class->update)
+		return -EOPNOTSUPP;
+	for (attribute = class->attr;
+	     attribute && attribute->type != MED_END; attribute++) {
+		if (strcmp(attribute->name, attribute_name))
+			continue;
+		if (bit >= attribute->length * BITS_PER_BYTE)
+			return -ERANGE;
+		clear_bit(bit, (unsigned long *)(
+			(u8 *)object + attribute->offset));
+		return class->update(object) == MED_ALLOW ? 0 : -EIO;
+	}
+	return -ENOENT;
+}
+
+static void medusa_v4_apply_reply_cache_update(
+	struct medusa_event_s *event, struct medusa_kclass_s *subject_class,
+	struct medusa_kobject_s *subject, struct medusa_kclass_s *object_class,
+	struct medusa_kobject_s *object, u8 cache_update)
+{
+	unsigned int bit = event->evtype_id->bitnr & MASK_BITNR;
+
+	if (cache_update & MEDUSA_CACHE_UPDATE_SUBJECT)
+		medusa_v4_cache_unmonitor(
+			subject_class, subject, "med_sact", bit);
+	if (cache_update & MEDUSA_CACHE_UPDATE_OBJECT)
+		medusa_v4_cache_unmonitor(
+			object_class, object, "med_oact", bit);
+}
+
 static enum medusa_answer_t
 medusa_v4_decide(struct medusa_event_s *event, struct medusa_kobject_s *subject,
 		 struct medusa_kobject_s *object,
@@ -627,7 +664,10 @@ medusa_v4_decide(struct medusa_event_s *event, struct medusa_kobject_s *subject,
 		medusa_v4_find_class_locked(event->evtype_id->arg_kclass[0]);
 	object_class =
 		medusa_v4_find_class_locked(event->evtype_id->arg_kclass[1]);
-	if (!v4_session.connected || v4_session.state != MEDUSA_STATE_READY ||
+	if (!v4_session.connected ||
+	    (v4_session.state != MEDUSA_STATE_READY &&
+	     !(v4_session.replacing_policy &&
+	       v4_session.state == MEDUSA_STATE_POLICY_INSTALL)) ||
 	    !event_entry || !subject_class || !object_class) {
 		error = -EPIPE;
 		goto unlock;
@@ -708,6 +748,11 @@ unlock:
 		if (cancel)
 			medusa_v4_queue(cancel);
 	}
+	if (!error && answer == MED_ALLOW && pending.cache_update)
+		medusa_v4_apply_reply_cache_update(
+			event, subject_class->class, subject,
+			object_class->class, object,
+			pending.cache_update);
 	return answer;
 }
 
@@ -718,7 +763,7 @@ static bool medusa_v4_tlv_known(u16 type)
 	       (type >= MEDUSA_TLV_CLASS_ID &&
 		type <= MEDUSA_TLV_ENFORCEMENT) ||
 	       (type >= MEDUSA_TLV_FALLBACK_POLICY &&
-		type <= MEDUSA_TLV_STATUS) ||
+		type <= MEDUSA_TLV_CACHE_UPDATE) ||
 	       (type >= MEDUSA_TLV_ERROR_CODE &&
 		type <= MEDUSA_TLV_OFFENDING_TYPE);
 }
@@ -950,18 +995,35 @@ static int medusa_v4_handle_policy_begin(const u8 *data, size_t count)
 	const struct medusa_frame_header *header =
 		(const struct medusa_frame_header *)data;
 	struct medusa_v4_event *event;
+	u64 generation = le64_to_cpu(header->policy_generation);
+	bool replacement = v4_session.state == MEDUSA_STATE_READY;
+	int error;
 
 	if (count != MEDUSA_FRAME_HEADER_SIZE)
 		return -EMSGSIZE;
-	if (le64_to_cpu(header->request_id) ||
-	    le64_to_cpu(header->policy_generation) !=
-		    v4_session.expected_generation)
+	if (le64_to_cpu(header->request_id))
 		return -ESTALE;
+	if ((!replacement && generation != v4_session.expected_generation) ||
+	    (replacement &&
+	     generation != (u64)READ_ONCE(medusa_authserver_magic) + 1))
+		return -ESTALE;
+	if (replacement) {
+		if (!(v4_session.enabled_features &
+		      MEDUSA_FEATURE_ATOMIC_POLICY_REPLACE))
+			return -EOPNOTSUPP;
+		error = med_authserver_policy_replace_begin(
+			&medusa_v4_authserver);
+		if (error)
+			return error;
+		v4_session.expected_generation = generation;
+		v4_session.replacing_policy = true;
+	}
 	list_for_each_entry(event, &v4_session.events, node)
 		event->policy_staged = false;
 	v4_session.state = MEDUSA_STATE_POLICY_INSTALL;
-	med_authserver_set_state(&medusa_v4_authserver,
-				 MEDUSA_AUTHSERVER_POLICY_INSTALL);
+	if (!replacement)
+		med_authserver_set_state(&medusa_v4_authserver,
+					 MEDUSA_AUTHSERVER_POLICY_INSTALL);
 	return 0;
 }
 
@@ -1013,7 +1075,9 @@ static int medusa_v4_handle_policy_commit(const u8 *data, size_t count)
 	list_for_each_entry(event, &v4_session.events, node)
 		if (!event->policy_staged)
 			return -ENODATA;
-	error = med_register_authserver(&medusa_v4_authserver);
+	error = v4_session.replacing_policy ?
+		med_authserver_policy_replace_commit(&medusa_v4_authserver) :
+		med_register_authserver(&medusa_v4_authserver);
 	if (error)
 		return error;
 	if ((u64)READ_ONCE(medusa_authserver_magic) !=
@@ -1023,7 +1087,35 @@ static int medusa_v4_handle_policy_commit(const u8 *data, size_t count)
 	}
 	medusa_server_health_mark_healthy(&constable_health);
 	v4_session.state = MEDUSA_STATE_READY;
+	if (v4_session.replacing_policy) {
+		v4_session.replacing_policy = false;
+		medusa_pending_request_cancel_all(MED_ERR);
+	}
 	set_auth_server_ready();
+	return medusa_v4_send_simple(
+		MEDUSA_MSG_POLICY_READY, 0, v4_session.expected_generation);
+}
+
+static int medusa_v4_handle_policy_abort(const u8 *data, size_t count)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	int error;
+
+	if (count != MEDUSA_FRAME_HEADER_SIZE ||
+	    le64_to_cpu(header->request_id))
+		return -EMSGSIZE;
+	if (!v4_session.replacing_policy ||
+	    le64_to_cpu(header->policy_generation) !=
+		    v4_session.expected_generation)
+		return -ESTALE;
+	error = med_authserver_policy_replace_abort(&medusa_v4_authserver);
+	if (error)
+		return error;
+	v4_session.expected_generation =
+		(u64)READ_ONCE(medusa_authserver_magic);
+	v4_session.replacing_policy = false;
+	v4_session.state = MEDUSA_STATE_READY;
 	return medusa_v4_send_simple(
 		MEDUSA_MSG_POLICY_READY, 0, v4_session.expected_generation);
 }
@@ -1036,9 +1128,15 @@ static int medusa_v4_handle_reply(const u8 *data, size_t count)
 	u64 generation = le64_to_cpu(header->policy_generation);
 	u16 wire_answer;
 	s16 answer;
+	u8 cache_update = MEDUSA_CACHE_UPDATE_NONE;
+	size_t cache_length = 0;
+	const u8 *cache_wire;
 	int error;
 
-	if (!request_id || generation != v4_session.expected_generation)
+	if (!request_id ||
+	    (generation != v4_session.expected_generation &&
+	     !(v4_session.replacing_policy &&
+	       generation == (u64)READ_ONCE(medusa_authserver_magic))))
 		return -ESTALE;
 	error = medusa_v4_get_u16(data, count, MEDUSA_TLV_ANSWER, &wire_answer);
 	if (error)
@@ -1046,7 +1144,25 @@ static int medusa_v4_handle_reply(const u8 *data, size_t count)
 	answer = (s16)wire_answer;
 	if (answer != MED_ERR && answer != MED_DENY && answer != MED_ALLOW)
 		return -EINVAL;
-	error = medusa_pending_request_complete(request_id, generation, answer);
+	cache_wire = medusa_v4_find_tlv(
+		data, count, MEDUSA_TLV_CACHE_UPDATE, &cache_length, false);
+	if (IS_ERR(cache_wire))
+		return PTR_ERR(cache_wire);
+	if (cache_wire) {
+		if (!(v4_session.enabled_features &
+		      MEDUSA_FEATURE_REPLY_CACHE_UPDATE))
+			return -EOPNOTSUPP;
+		if (cache_length != sizeof(*cache_wire))
+			return -EMSGSIZE;
+		cache_update = *cache_wire;
+		if (cache_update > MEDUSA_CACHE_UPDATE_BOTH)
+			return -EINVAL;
+		if (cache_update != MEDUSA_CACHE_UPDATE_NONE &&
+		    answer != MED_ALLOW)
+			return -EINVAL;
+	}
+	error = medusa_pending_request_complete_with_cache(
+		request_id, generation, answer, cache_update);
 	if (!error)
 		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_REPLIES);
 	return error;
@@ -1062,7 +1178,10 @@ static int medusa_v4_handle_progress(const u8 *data, size_t count)
 
 	if (count != MEDUSA_FRAME_HEADER_SIZE)
 		return -EMSGSIZE;
-	if (!request_id || generation != v4_session.expected_generation)
+	if (!request_id ||
+	    (generation != v4_session.expected_generation &&
+	     !(v4_session.replacing_policy &&
+	       generation == (u64)READ_ONCE(medusa_authserver_magic))))
 		return -ESTALE;
 	error = medusa_pending_request_renew(request_id, generation);
 	if (!error)
@@ -1088,7 +1207,10 @@ static int medusa_v4_handle_object(const u8 *data, size_t count, bool update)
 	__le32 wire_status;
 	int error;
 
-	if (!request_id || generation != v4_session.expected_generation)
+	if (!request_id ||
+	    (generation != v4_session.expected_generation &&
+	     !(v4_session.replacing_policy &&
+	       generation == (u64)READ_ONCE(medusa_authserver_magic))))
 		return -ESTALE;
 	error = medusa_v4_get_u32(data, count, MEDUSA_TLV_CLASS_ID, &class_id);
 	object_data = medusa_v4_find_tlv(
@@ -1168,8 +1290,24 @@ static int medusa_v4_dispatch(const u8 *data, size_t count)
 			return medusa_v4_handle_policy_event(data, count);
 		if (type == MEDUSA_MSG_POLICY_COMMIT)
 			return medusa_v4_handle_policy_commit(data, count);
+		if (type == MEDUSA_MSG_POLICY_ABORT)
+			return medusa_v4_handle_policy_abort(data, count);
+		if (v4_session.replacing_policy &&
+		    type == MEDUSA_MSG_DECISION_REPLY)
+			return medusa_v4_handle_reply(data, count);
+		if (v4_session.replacing_policy &&
+		    type == MEDUSA_MSG_DECISION_PROGRESS)
+			return medusa_v4_handle_progress(data, count);
+		if (v4_session.replacing_policy &&
+		    type == MEDUSA_MSG_OBJECT_FETCH)
+			return medusa_v4_handle_object(data, count, false);
+		if (v4_session.replacing_policy &&
+		    type == MEDUSA_MSG_OBJECT_UPDATE)
+			return medusa_v4_handle_object(data, count, true);
 		return -EPROTO;
 	case MEDUSA_STATE_READY:
+		if (type == MEDUSA_MSG_POLICY_BEGIN)
+			return medusa_v4_handle_policy_begin(data, count);
 		if (type == MEDUSA_MSG_DECISION_REPLY)
 			return medusa_v4_handle_reply(data, count);
 		if (type == MEDUSA_MSG_DECISION_PROGRESS)
@@ -1335,6 +1473,7 @@ static int medusa_v4_open(struct inode *inode, struct file *file)
 	v4_session.expected_generation = 0;
 	v4_session.next_class_id = 0;
 	v4_session.next_event_id = 0;
+	v4_session.replacing_policy = false;
 	v4_session.owner_tgid = get_pid(task_tgid(current));
 	medusa_v4_authserver.tgid = get_pid(task_tgid(current));
 	file->private_data = &v4_session;

@@ -44,6 +44,22 @@ static void pending_requests_have_independent_ids_and_answers(struct kunit *test
 	KUNIT_EXPECT_EQ(test, 0U, medusa_pending_request_count());
 }
 
+static void pending_reply_carries_optional_cache_update(struct kunit *test)
+{
+	struct medusa_pending_request request;
+
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_register(&request, 18));
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_complete_with_cache(
+				request.id, 18, MED_ALLOW,
+				MEDUSA_CACHE_UPDATE_BOTH));
+	KUNIT_EXPECT_EQ(test, MED_ALLOW,
+			medusa_pending_request_wait(&request));
+	KUNIT_EXPECT_EQ(test, (u8)MEDUSA_CACHE_UPDATE_BOTH,
+			request.cache_update);
+}
+
 static void pending_requests_complete_in_reverse_order(struct kunit *test)
 {
 	static const unsigned int sizes[] = { 1, 32, 256 };
@@ -302,6 +318,7 @@ static void pending_completed_request_beats_timeout(struct kunit *test)
 
 static struct kunit_case pending_test_cases[] = {
 	KUNIT_CASE(pending_requests_have_independent_ids_and_answers),
+	KUNIT_CASE(pending_reply_carries_optional_cache_update),
 	KUNIT_CASE(pending_requests_complete_in_reverse_order),
 	KUNIT_CASE(pending_request_rejects_wrong_generation),
 	KUNIT_CASE(pending_request_rejects_unknown_and_duplicate_replies),

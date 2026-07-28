@@ -38,6 +38,7 @@ int medusa_pending_request_register(struct medusa_pending_request *request,
 	init_waitqueue_head(&request->state_changed);
 	INIT_HLIST_NODE(&request->table_node);
 	request->answer = MED_ERR;
+	request->cache_update = MEDUSA_CACHE_UPDATE_NONE;
 	request->policy_generation = policy_generation;
 	request->lease_sequence = 0;
 	request->registered = false;
@@ -93,8 +94,9 @@ out:
 	return error;
 }
 
-int medusa_pending_request_complete(u64 id, u64 policy_generation,
-				    enum medusa_answer_t answer)
+int medusa_pending_request_complete_with_cache(
+	u64 id, u64 policy_generation, enum medusa_answer_t answer,
+	u8 cache_update)
 {
 	struct medusa_pending_request *request;
 	int error = 0;
@@ -114,11 +116,19 @@ int medusa_pending_request_complete(u64 id, u64 policy_generation,
 	request->registered = false;
 	pending_request_count--;
 	request->answer = answer;
+	request->cache_update = cache_update;
 	complete(&request->done);
 	wake_up_all(&request->state_changed);
 out:
 	spin_unlock(&pending_requests_lock);
 	return error;
+}
+
+int medusa_pending_request_complete(u64 id, u64 policy_generation,
+				    enum medusa_answer_t answer)
+{
+	return medusa_pending_request_complete_with_cache(
+		id, policy_generation, answer, MEDUSA_CACHE_UPDATE_NONE);
 }
 
 int medusa_pending_request_renew(u64 id, u64 policy_generation)

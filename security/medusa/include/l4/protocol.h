@@ -18,12 +18,18 @@ medusa_v4_message_allowed(enum medusa_protocol_state state, u16 type)
 		return type == MEDUSA_MSG_POLICY_BEGIN;
 	case MEDUSA_STATE_POLICY_INSTALL:
 		return type == MEDUSA_MSG_POLICY_EVENT ||
-		       type == MEDUSA_MSG_POLICY_COMMIT;
+		       type == MEDUSA_MSG_POLICY_COMMIT ||
+		       type == MEDUSA_MSG_POLICY_ABORT ||
+		       type == MEDUSA_MSG_DECISION_REPLY ||
+		       type == MEDUSA_MSG_DECISION_PROGRESS ||
+		       type == MEDUSA_MSG_OBJECT_FETCH ||
+		       type == MEDUSA_MSG_OBJECT_UPDATE;
 	case MEDUSA_STATE_READY:
 		return type == MEDUSA_MSG_DECISION_REPLY ||
 		       type == MEDUSA_MSG_DECISION_PROGRESS ||
 		       type == MEDUSA_MSG_OBJECT_FETCH ||
-		       type == MEDUSA_MSG_OBJECT_UPDATE;
+		       type == MEDUSA_MSG_OBJECT_UPDATE ||
+		       type == MEDUSA_MSG_POLICY_BEGIN;
 	default:
 		return false;
 	}

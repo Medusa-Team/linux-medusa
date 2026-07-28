@@ -154,6 +154,65 @@ static void registry_aborts_staged_fallback_with_handshake(struct kunit *test)
 			medusa_get_fallback_policy(announced_event));
 }
 
+static void registry_atomically_replaces_live_policy(struct kunit *test)
+{
+	struct medusa_registry_status status;
+	enum medusa_fallback_policy original;
+	int ready_generation;
+
+	announced_event = NULL;
+	KUNIT_ASSERT_EQ(test, 0,
+			med_register_authserver_prepare(&fake_server));
+	KUNIT_ASSERT_NOT_NULL(test, announced_event);
+	original = medusa_get_fallback_policy(announced_event);
+	KUNIT_ASSERT_EQ(test, 0, med_register_authserver(&fake_server));
+	ready_generation = medusa_authserver_magic;
+
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_policy_replace_begin(&fake_server));
+	KUNIT_EXPECT_EQ(test, -EALREADY,
+			med_authserver_policy_replace_begin(&fake_server));
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_stage_fallback_policy(
+				&fake_server, announced_event,
+				MEDUSA_FALLBACK_BASELINE_DENY));
+	KUNIT_EXPECT_EQ(test, original,
+			medusa_get_fallback_policy(announced_event));
+	medusa_registry_status_snapshot(&status);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTHSERVER_POLICY_INSTALL,
+			status.server_state);
+	KUNIT_EXPECT_EQ(test, (u64)ready_generation,
+			status.active_policy_generation);
+
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_policy_replace_abort(&fake_server));
+	KUNIT_EXPECT_EQ(test, ready_generation, medusa_authserver_magic);
+	KUNIT_EXPECT_EQ(test, original,
+			medusa_get_fallback_policy(announced_event));
+
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_policy_replace_begin(&fake_server));
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_stage_fallback_policy(
+				&fake_server, announced_event,
+				MEDUSA_FALLBACK_BASELINE_DENY));
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_policy_replace_commit(&fake_server));
+	KUNIT_EXPECT_EQ(test, ready_generation + 1,
+			medusa_authserver_magic);
+	KUNIT_EXPECT_EQ(test, MEDUSA_FALLBACK_BASELINE_DENY,
+			medusa_get_fallback_policy(announced_event));
+	medusa_registry_status_snapshot(&status);
+	KUNIT_EXPECT_EQ(test, MEDUSA_AUTHSERVER_READY,
+			status.server_state);
+	KUNIT_EXPECT_EQ(test, (u64)(ready_generation + 1),
+			status.active_policy_generation);
+
+	med_unregister_authserver(&fake_server);
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_set_fallback_policy(announced_event, original));
+}
+
 static void registry_authserver_lifecycle(struct kunit *test)
 {
 	struct medusa_authserver_s *held;
@@ -344,6 +403,7 @@ static struct kunit_case registry_test_cases[] = {
 	KUNIT_CASE(registry_prepare_replays_definitions),
 	KUNIT_CASE(registry_commits_staged_fallback_only_at_ready),
 	KUNIT_CASE(registry_aborts_staged_fallback_with_handshake),
+	KUNIT_CASE(registry_atomically_replaces_live_policy),
 	KUNIT_CASE(registry_authserver_lifecycle),
 	KUNIT_CASE(registry_status_snapshots_lifecycle_and_health),
 	KUNIT_CASE(registry_reports_handshake_before_policy_ready),
