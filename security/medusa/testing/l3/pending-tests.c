@@ -44,6 +44,42 @@ static void pending_requests_have_independent_ids_and_answers(struct kunit *test
 	KUNIT_EXPECT_EQ(test, 0U, medusa_pending_request_count());
 }
 
+static void pending_requests_complete_in_reverse_order(struct kunit *test)
+{
+	static const unsigned int sizes[] = { 1, 32, 256 };
+	unsigned int size_index;
+
+	for (size_index = 0; size_index < ARRAY_SIZE(sizes); size_index++) {
+		struct medusa_pending_request *requests;
+		unsigned int count = sizes[size_index];
+		unsigned int index;
+
+		requests = kunit_kcalloc(test, count, sizeof(*requests),
+					GFP_KERNEL);
+		KUNIT_ASSERT_NOT_NULL(test, requests);
+		for (index = 0; index < count; index++)
+			KUNIT_ASSERT_EQ(
+				test, 0,
+				medusa_pending_request_register(
+					&requests[index], 71));
+		KUNIT_EXPECT_EQ(test, count,
+				medusa_pending_request_count());
+		for (index = count; index > 0; index--)
+			KUNIT_ASSERT_EQ(
+				test, 0,
+				medusa_pending_request_complete(
+					requests[index - 1].id, 71,
+					(index & 1) ? MED_ALLOW : MED_DENY));
+		for (index = 0; index < count; index++)
+			KUNIT_EXPECT_EQ(
+				test,
+				((index + 1) & 1) ? MED_ALLOW : MED_DENY,
+				medusa_pending_request_wait(&requests[index]));
+		KUNIT_EXPECT_EQ(test, 0U,
+				medusa_pending_request_count());
+	}
+}
+
 static void pending_request_rejects_wrong_generation(struct kunit *test)
 {
 	struct medusa_pending_request request;
@@ -266,6 +302,7 @@ static void pending_completed_request_beats_timeout(struct kunit *test)
 
 static struct kunit_case pending_test_cases[] = {
 	KUNIT_CASE(pending_requests_have_independent_ids_and_answers),
+	KUNIT_CASE(pending_requests_complete_in_reverse_order),
 	KUNIT_CASE(pending_request_rejects_wrong_generation),
 	KUNIT_CASE(pending_request_rejects_unknown_and_duplicate_replies),
 	KUNIT_CASE(pending_disconnect_completes_all_requests),
