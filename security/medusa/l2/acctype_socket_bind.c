@@ -58,7 +58,8 @@ medusa_socket_bind_security(struct socket *sock,
 					  &sock_kobj),
 			task_security(current)->audit);
 	}
-	return MED_ALLOW;
+	return medusa_audit_cached_allow("socket_bind",
+					 task_security(current)->audit);
 }
 
 enum medusa_answer_t medusa_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)

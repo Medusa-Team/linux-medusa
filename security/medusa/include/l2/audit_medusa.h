@@ -142,6 +142,8 @@ void medusa_audit_apply_local(struct medusa_audit_data *mad,
 enum medusa_answer_t medusa_audit_decision_result(
 	const char *operation, struct medusa_decision_result result,
 	bool audit_requested);
+enum medusa_answer_t medusa_audit_cached_allow(const char *operation,
+					       bool audit_requested);
 void medusa_audit_log_callback(struct common_audit_data *cad,
 			       void (*medusa_post)(struct audit_buffer *, void *));
 void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad);

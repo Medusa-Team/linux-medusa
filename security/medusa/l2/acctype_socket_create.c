@@ -54,7 +54,8 @@ enum medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 			task_security(current)->audit);
 	}
 
-	return MED_ALLOW;
+	return medusa_audit_cached_allow("socket_create",
+					 task_security(current)->audit);
 }
 
 device_initcall(socket_create_acctype_init);

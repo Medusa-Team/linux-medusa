@@ -79,6 +79,8 @@ decisions additionally use:
 ``cache``
   The event's monitoring bit was clear, so the installed kernel context
   allowed the operation without entering the central decision engine.
+  Supported socket hooks emit this record when the process audit flag is set;
+  this is the audit-only network benchmark path and never contacts Constable.
 
 ``virtual_space``
   The kernel virtual-space relationship directly denied the operation.

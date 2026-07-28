@@ -77,6 +77,19 @@ enum medusa_answer_t medusa_audit_decision_result(
 	return mad.ans;
 }
 
+enum medusa_answer_t medusa_audit_cached_allow(const char *operation,
+					       bool audit_requested)
+{
+	struct medusa_decision_result result = {
+		.answer = MED_ALLOW,
+		.source = MEDUSA_DECISION_CACHE,
+		.unavailable = MEDUSA_AVAILABLE,
+		.policy_generation = medusa_current_policy_generation(),
+	};
+
+	return medusa_audit_decision_result(operation, result, audit_requested);
+}
+
 /*
  * medusa_pre - pre audit callback function to format audit record
  * @ab: audit buffer for formatting audit record

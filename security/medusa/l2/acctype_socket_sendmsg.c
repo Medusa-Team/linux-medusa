@@ -78,7 +78,8 @@ enum medusa_answer_t medusa_socket_sendmsg(struct socket *sock, struct msghdr *m
 					  &process, &sock_kobj),
 			task_security(current)->audit);
 	}
-	return MED_ALLOW;
+	return medusa_audit_cached_allow("socket_sendmsg",
+					 task_security(current)->audit);
 }
 
 device_initcall(socket_sendmsg_access_init);
