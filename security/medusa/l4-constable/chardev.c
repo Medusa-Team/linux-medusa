@@ -907,7 +907,7 @@ static int medusa_v4_handle_hello(const u8 *data, size_t count)
 				 MEDUSA_AUTHSERVER_DEFINITIONS);
 
 	frame = medusa_v4_frame_new(
-		MEDUSA_MSG_HELLO_ACK, 0, v4_session.expected_generation, 48);
+		MEDUSA_MSG_HELLO_ACK, 0, v4_session.expected_generation, 64);
 	if (!frame)
 		return -ENOMEM;
 	error = medusa_v4_frame_add_u16(
