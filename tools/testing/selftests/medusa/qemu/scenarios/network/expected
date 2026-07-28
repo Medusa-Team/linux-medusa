@@ -14,6 +14,7 @@ MEDUSA_RESULT network send_allow PASS
 MEDUSA_RESULT network send_deny PASS
 MEDUSA_RESULT network receive_deny PASS
 MEDUSA_RESULT network receive_allow PASS
+MEDUSA_RESULT network degraded_bind_online_required_deny PASS
 MEDUSA_RESULT network complete PASS
 MEDUSA_EVENT getsocket
 MEDUSA_EVENT socket_create
@@ -23,6 +24,14 @@ MEDUSA_EVENT socket_listen_access
 MEDUSA_EVENT socket_accept_access
 MEDUSA_EVENT socket_sendmsg_access
 MEDUSA_EVENT socket_recvmsg_access
+Medusa: op=socket_create ans=DENY as_request=1 decision_source=auth_server
+Medusa: op=socket_bind ans=DENY as_request=1 decision_source=auth_server
+Medusa: op=socket_connect ans=DENY as_request=1 decision_source=auth_server
+Medusa: op=socket_listen ans=DENY as_request=1 decision_source=auth_server
+Medusa: op=socket_accept ans=DENY as_request=1 decision_source=auth_server
+Medusa: op=socket_sendmsg ans=DENY as_request=1 decision_source=auth_server
+Medusa: op=socket_recvmsg ans=DENY as_request=1 decision_source=auth_server
+Medusa: op=socket_bind ans=DENY as_request=0 decision_source=online_required unavailable=no_auth_server
 event=socket_create subject_class=process object_class=process
 event=socket_bind_access subject_class=process object_class=socket
 event=socket_connect_access subject_class=process object_class=socket

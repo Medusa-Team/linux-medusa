@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +34,17 @@ static void mount_one(const char *source, const char *target, const char *type)
 {
 	if (mount(source, target, type, 0, NULL) < 0 && errno != EBUSY)
 		perror(target);
+}
+
+static void disable_printk_ratelimit(void)
+{
+	static const char value[] = "0\n";
+	FILE *file = fopen("/proc/sys/kernel/printk_ratelimit", "w");
+
+	if (!file)
+		return;
+	fwrite(value, 1, sizeof(value) - 1, file);
+	fclose(file);
 }
 
 static void dump_inventory(const char *path)
@@ -219,11 +231,42 @@ static void test_send_and_receive(void)
 		close(pair[1]);
 }
 
+static void test_degraded_baseline(void)
+{
+	struct sockaddr_un address = {
+		.sun_family = AF_UNIX,
+		.sun_path = { 0, 'm', 'e', 'd', 'u', 's', 'a', '-', 'f' },
+	};
+	FILE *file = fopen("/constable.pid", "r");
+	long pid = -1;
+	int fd;
+
+	if (file) {
+		if (fscanf(file, "%ld", &pid) != 1)
+			pid = -1;
+		fclose(file);
+	}
+	if (pid > 1)
+		kill((pid_t)pid, SIGTERM);
+	sleep(1);
+
+	fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+	errno = 0;
+	result("degraded_bind_online_required_deny",
+	       pid > 1 && fd >= 0 &&
+	       bind(fd, (struct sockaddr *)&address,
+		    offsetof(struct sockaddr_un, sun_path) + 9) < 0 &&
+	       errno == EACCES);
+	if (fd >= 0)
+		close(fd);
+}
+
 int main(void)
 {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	setenv("PATH", "/sbin:/bin", 1);
 	mount_one("proc", "/proc", "proc");
+	disable_printk_ratelimit();
 	mount_one("sysfs", "/sys", "sysfs");
 	mount_one("devtmpfs", "/dev", "devtmpfs");
 	mount_one("securityfs", "/sys/kernel/security", "securityfs");
@@ -232,6 +275,7 @@ int main(void)
 	test_create_and_addresses();
 	test_listen_connect_and_accept();
 	test_send_and_receive();
+	test_degraded_baseline();
 	dump_inventory("/sys/kernel/security/medusa/events");
 	dump_inventory("/sys/kernel/security/medusa/classes");
 
