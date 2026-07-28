@@ -89,3 +89,7 @@ class are documented in ``security/medusa/PATH_GUARD.rst``.
 The securityfs boundary and the Phase 4 decision to defer arbitrary
 virtual-space/context queries until a safe protocol-v4 object-query ABI are
 documented in ``security/medusa/OBSERVABILITY.rst``.
+
+The reviewed Phase 6 socket subset, address semantics, stacking contract, and
+the reasons the 2019 implementation cannot be re-enabled unchanged are
+documented in ``security/medusa/NETWORK.rst``.
