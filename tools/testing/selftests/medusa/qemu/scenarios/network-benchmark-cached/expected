@@ -1,0 +1,2 @@
+MEDUSA_BENCH mode=cached metric=connection_setup
+MEDUSA_BENCH mode=cached metric=message_throughput

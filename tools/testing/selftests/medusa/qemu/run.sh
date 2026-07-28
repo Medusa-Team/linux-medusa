@@ -89,6 +89,9 @@ fi
 if expected_lsms="$(scenario_file expected-lsms)"; then
 	cp "$expected_lsms" "$work_dir/input/expected-lsms"
 fi
+if benchmark_mode="$(scenario_file benchmark-mode)"; then
+	cp "$benchmark_mode" "$work_dir/input/benchmark-mode"
+fi
 if apparmor_profile="$(scenario_file apparmor.profile)"; then
 	if [ -n "${APPARMOR_POLICY:-}" ]; then
 		cp "$(realpath "$APPARMOR_POLICY")" \
@@ -197,6 +200,9 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	if [ -f "$work_dir/input/expected-lsms" ]; then
 		echo "file /etc/expected-lsms $work_dir/input/expected-lsms 0644 0 0"
 	fi
+	if [ -f "$work_dir/input/benchmark-mode" ]; then
+		echo "file /etc/benchmark-mode $work_dir/input/benchmark-mode 0644 0 0"
+	fi
 	if [ -f "$work_dir/input/apparmor.policy" ]; then
 		echo "file /etc/apparmor.policy $work_dir/input/apparmor.policy 0600 0 0"
 	fi
@@ -220,7 +226,7 @@ timeout "${QEMU_TIMEOUT:-90}" qemu-system-x86_64 \
 	-m 1024 \
 	-kernel "$kernel_image" \
 	-initrd "$work_dir/initramfs.cpio.gz" \
-	-append "console=ttyS0 rdinit=/sbin/init panic=-1 audit=1 audit_backlog_limit=8192" \
+	-append "console=ttyS0 rdinit=/sbin/init panic=-1 audit=1 audit_backlog_limit=8192 ${QEMU_APPEND_EXTRA:-}" \
 	-nographic \
 	-no-reboot 2>&1 | tee "$work_dir/console.log"
 

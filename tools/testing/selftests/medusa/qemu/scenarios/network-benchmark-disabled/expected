@@ -1,0 +1,2 @@
+MEDUSA_BENCH mode=disabled metric=connection_setup
+MEDUSA_BENCH mode=disabled metric=message_throughput

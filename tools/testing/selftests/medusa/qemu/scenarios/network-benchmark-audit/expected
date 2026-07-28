@@ -1,0 +1,3 @@
+MEDUSA_BENCH mode=audit-only metric=connection_setup
+MEDUSA_BENCH mode=audit-only metric=message_throughput
+Medusa: op=socket_create ans=ALLOW as_request=0 decision_source=cache
