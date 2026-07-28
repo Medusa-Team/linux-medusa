@@ -14,11 +14,7 @@ struct medusa_evtype_s;
  * The policy is intentionally a single value so one event's fallback can be
  * replaced atomically while decisions are running.
  */
-enum medusa_fallback_policy {
-	MEDUSA_FALLBACK_BASELINE_ALLOW,
-	MEDUSA_FALLBACK_BASELINE_DENY,
-	MEDUSA_FALLBACK_ONLINE_REQUIRED,
-};
+#include <uapi/linux/medusa.h>
 
 enum medusa_decision_source {
 	MEDUSA_DECISION_AUTH_SERVER,

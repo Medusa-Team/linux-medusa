@@ -13,6 +13,9 @@ static DEFINE_HASHTABLE(pending_requests, MEDUSA_PENDING_HASH_BITS);
 static DEFINE_SPINLOCK(pending_requests_lock);
 static atomic64_t next_request_id = ATOMIC64_INIT(0);
 static unsigned int pending_request_count;
+static unsigned int pending_request_limit = MEDUSA_PENDING_REQUEST_LIMIT;
+static unsigned int decision_timeout_ms =
+	CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS;
 
 static struct medusa_pending_request *find_pending_request(u64 id)
 {
@@ -40,7 +43,7 @@ int medusa_pending_request_register(struct medusa_pending_request *request,
 	request->registered = false;
 
 	spin_lock(&pending_requests_lock);
-	if (pending_request_count >= MEDUSA_PENDING_REQUEST_LIMIT) {
+	if (pending_request_count >= pending_request_limit) {
 		error = -ENOSPC;
 		goto out;
 	}
@@ -67,6 +70,27 @@ void medusa_pending_request_unregister(struct medusa_pending_request *request)
 		pending_request_count--;
 	}
 	spin_unlock(&pending_requests_lock);
+}
+
+int medusa_pending_request_cancel(struct medusa_pending_request *request,
+				  enum medusa_answer_t answer)
+{
+	int error = 0;
+
+	spin_lock(&pending_requests_lock);
+	if (!request->registered) {
+		error = -ENOENT;
+		goto out;
+	}
+	hlist_del_init(&request->table_node);
+	request->registered = false;
+	pending_request_count--;
+	request->answer = answer;
+	complete(&request->done);
+	wake_up_all(&request->state_changed);
+out:
+	spin_unlock(&pending_requests_lock);
+	return error;
 }
 
 int medusa_pending_request_complete(u64 id, u64 policy_generation,
@@ -143,12 +167,26 @@ int medusa_pending_request_wait_timeout(
 		lease_sequence = request->lease_sequence;
 		spin_unlock(&pending_requests_lock);
 
-		if (wait_event_timeout(
-			    request->state_changed,
-			    !READ_ONCE(request->registered) ||
-			    READ_ONCE(request->lease_sequence) != lease_sequence,
-			    timeout))
-			continue;
+		{
+			long waited = wait_event_killable_timeout(
+				request->state_changed,
+				!READ_ONCE(request->registered) ||
+				READ_ONCE(request->lease_sequence) !=
+					lease_sequence,
+				timeout);
+
+			if (waited < 0) {
+				if (!medusa_pending_request_cancel(
+					    request, MED_ERR)) {
+					*answer = MED_ERR;
+					return (int)waited;
+				}
+				*answer = request->answer;
+				return 0;
+			}
+			if (waited)
+				continue;
+		}
 
 		spin_lock(&pending_requests_lock);
 		if (request->registered &&
@@ -191,4 +229,39 @@ unsigned int medusa_pending_request_count(void)
 	count = pending_request_count;
 	spin_unlock(&pending_requests_lock);
 	return count;
+}
+
+unsigned int medusa_pending_request_limit(void)
+{
+	return READ_ONCE(pending_request_limit);
+}
+
+int medusa_pending_request_set_limit(unsigned int limit)
+{
+	int error = 0;
+
+	if (!limit || limit > MEDUSA_PENDING_REQUEST_LIMIT_MAX)
+		return -ERANGE;
+
+	spin_lock(&pending_requests_lock);
+	if (limit < pending_request_count)
+		error = -EBUSY;
+	else
+		pending_request_limit = limit;
+	spin_unlock(&pending_requests_lock);
+	return error;
+}
+
+unsigned int medusa_decision_timeout_ms(void)
+{
+	return READ_ONCE(decision_timeout_ms);
+}
+
+int medusa_decision_timeout_set_ms(unsigned int timeout_ms)
+{
+	if (timeout_ms < MEDUSA_DECISION_TIMEOUT_MIN_MS ||
+	    timeout_ms > MEDUSA_DECISION_TIMEOUT_MAX_MS)
+		return -ERANGE;
+	WRITE_ONCE(decision_timeout_ms, timeout_ms);
+	return 0;
 }

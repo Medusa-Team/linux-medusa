@@ -1,353 +1,596 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 
-/*
- * L4 authorization server for Medusa DS9
- * Copyright (C) 2002 Milan Pikula <www@terminus.sk>, all rights reserved.
- *
- * This program comes with both BSD and GNU GPL v2 licenses. Check the
- * documentation for more information.
- *
- *
- * This server communicates with an user-space
- * authorization daemon, using a character device
- *
- *	  /dev/medusa c 111 0		on Linux
- *	  /dev/medusa c 90 0		on NetBSD
- */
-
-/* TODO: Check the calls to l3; they can't be called from a lock. */
-#include <linux/module.h>
-#include <linux/semaphore.h>
-#include <linux/sched/signal.h>
-#include <linux/device.h>
-#include <linux/poll.h>
-#include <linux/preempt.h>
-#include <linux/rwsem.h>
-#include <linux/unaligned.h>
+#include <linux/capability.h>
+#include <linux/errno.h>
+#include <linux/fs.h>
+#include <linux/kernel.h>
+#include <linux/list.h>
+#include <linux/miscdevice.h>
 #include <linux/mm.h>
+#include <linux/module.h>
+#include <linux/overflow.h>
+#include <linux/poll.h>
+#include <linux/rcupdate.h>
+#include <linux/sched/signal.h>
+#include <linux/slab.h>
+#include <linux/spinlock.h>
+#include <linux/unaligned.h>
+#include <linux/uaccess.h>
+#include <uapi/linux/medusa.h>
 
-#include "l1/task.h"
 #include "l3/arch.h"
 #include "l3/health.h"
-#include "l3/registry.h"
-#include "l3/server.h"
+#include "l3/kobject.h"
 #include "l3/med_cache.h"
+#include "l3/med_model.h"
 #include "l3/pending.h"
 #include "l3/protocol_stats.h"
+#include "l3/registry.h"
+#include "l3/server.h"
 #include "l4/auth_server.h"
-#include "l4/comm.h"
-#include "l4/protocol.h"
-#include "l4/teleport.h"
+#include "l4/transport.h"
 
-#define MEDUSA_MAJOR 111
-#define MODULENAME "chardev/linux"
+#define MODULENAME "miscdevice/v4"
 
-static int user_release(struct inode *inode, struct file *file);
-
-static struct teleport_s teleport = {
-	.cycle = tpc_HALT,
+struct medusa_v4_frame {
+	struct list_head node;
+	size_t length;
+	size_t capacity;
+	u8 data[];
 };
 
-/* constable, our brave userspace daemon */
-static atomic_t constable_present = ATOMIC_INIT(0);
+struct medusa_v4_class {
+	struct list_head node;
+	struct medusa_kclass_s *class;
+	u32 id;
+};
+
+struct medusa_v4_event {
+	struct list_head node;
+	struct medusa_evtype_s *event;
+	u32 id;
+	bool policy_staged;
+};
+
+struct medusa_v4_session {
+	struct mutex state_lock;
+	struct mutex read_lock;
+	struct mutex write_lock;
+	spinlock_t queue_lock;
+	wait_queue_head_t read_wait;
+	struct list_head frames;
+	struct list_head classes;
+	struct list_head events;
+	struct pid *owner_tgid;
+	enum medusa_protocol_state state;
+	u64 enabled_features;
+	u64 expected_generation;
+	u32 next_class_id;
+	u32 next_event_id;
+	bool connected;
+};
+
+static struct medusa_v4_session v4_session;
+static struct medusa_transport medusa_v4_transport;
 static struct medusa_server_health constable_health =
 	MEDUSA_SERVER_HEALTH_INIT;
-static struct task_struct *constable;
-static DEFINE_SEMAPHORE(constable_openclose, 1);
 
-
-/* fetch or update answer */
-static atomic_t fetch_requests = ATOMIC_INIT(0);
-static atomic_t update_requests = ATOMIC_INIT(0);
-
-/* to-register queue for constable */
-static DEFINE_MUTEX(registration_lock);
-/* the following two are circular lists, they have to be global
- * because of put operations in user_close()
- */
-static struct medusa_kclass_s *kclasses_registered;
-static struct medusa_evtype_s *evtypes_registered;
-static atomic_t announce_ready = ATOMIC_INIT(0);
-
-/* a question from kernel to constable */
-static atomic_t questions = ATOMIC_INIT(0);
-static atomic_t questions_waiting = ATOMIC_INIT(0);
-
-static DECLARE_WAIT_QUEUE_HEAD(close_wait);
-
-static DECLARE_WAIT_QUEUE_HEAD(userspace_chardev);
-static struct semaphore user_read_lock;
-static struct semaphore queue_items;
-static struct semaphore queue_lock;
-static LIST_HEAD(tele_queue);
-struct tele_item {
-	struct teleport_insn_s *tele;
-	struct list_head list;
-	size_t size;
-	void (*post)(void *arg);
-};
-
-// Next three variables are used by user_open. They are here because we have to
-// free the underlying data structures and clear them in user_close.
-static size_t left_in_teleport;
-static struct tele_item *local_list_item;
-static struct teleport_insn_s *processed_teleport;
-
-static DECLARE_RWSEM(lightswitch);
-
-/*******************************************************************************
- * kernel-space interface
- */
-
-static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
-		struct medusa_kobject_s *o1,
-		struct medusa_kobject_s *o2,
-		struct medusa_authserver_decision *decision);
-static int l4_add_kclass(struct medusa_kclass_s *cl);
-static int l4_add_evtype(struct medusa_evtype_s *at);
-static void l4_close_wake(void);
-static bool l4_is_healthy(void);
-static enum medusa_health_reason l4_health_reason(void);
-
-static struct medusa_authserver_s chardev_medusa = {
-	.name = MODULENAME,
-	.close = l4_close_wake,
-	.add_kclass = l4_add_kclass,
-	.add_evtype = l4_add_evtype,
-	.decide = l4_decide,
-	.is_healthy = l4_is_healthy,
-	.health_reason = l4_health_reason,
-};
-
-/*
- * Used to clean up data structures after fetch or update.
- */
-static void post_write(void *mem)
+static void medusa_v4_close_wake(void)
 {
-	if (((struct teleport_insn_s *)mem)[1].args.put32.what == MEDUSA_COMM_FETCH_ANSWER)
-		med_cache_free(((struct teleport_insn_s *)mem)[4].args.cutnpaste.from);
-	med_cache_free(mem);
+	wake_up_all(&v4_session.read_wait);
 }
 
-static int am_i_constable(void)
-{
-	if (!constable)
-		return 0;
-
-	rcu_read_lock();
-	if (task_tgid(current) == task_tgid(constable)) {
-		rcu_read_unlock();
-		return 1;
-	}
-	rcu_read_unlock();
-
-	return 0;
-}
-
-static bool l4_cannot_wait(void)
-{
-	if (!in_task() || preempt_count() || irqs_disabled())
-		return true;
-#ifdef CONFIG_DEBUG_ATOMIC_SLEEP
-	if (current->non_block_count)
-		return true;
-#endif
-	return false;
-}
-
-static bool l4_is_healthy(void)
+static bool medusa_v4_is_healthy(void)
 {
 	return medusa_server_health_is_healthy(&constable_health);
 }
 
-static enum medusa_health_reason l4_health_reason(void)
+static enum medusa_health_reason medusa_v4_health_reason(void)
 {
 	return medusa_server_health_reason(&constable_health);
 }
 
-static void l4_mark_unhealthy(enum medusa_health_reason reason)
+static int medusa_v4_add_class(struct medusa_kclass_s *class);
+static void medusa_v4_del_class(struct medusa_kclass_s *class);
+static int medusa_v4_add_event(struct medusa_evtype_s *event);
+static void medusa_v4_del_event(struct medusa_evtype_s *event);
+static enum medusa_answer_t
+medusa_v4_decide(struct medusa_event_s *event, struct medusa_kobject_s *subject,
+		 struct medusa_kobject_s *object,
+		 struct medusa_authserver_decision *decision);
+
+static struct medusa_authserver_s medusa_v4_authserver = {
+	.name = MODULENAME,
+	.close = medusa_v4_close_wake,
+	.add_kclass = medusa_v4_add_class,
+	.del_kclass = medusa_v4_del_class,
+	.add_evtype = medusa_v4_add_event,
+	.del_evtype = medusa_v4_del_event,
+	.decide = medusa_v4_decide,
+	.is_healthy = medusa_v4_is_healthy,
+	.health_reason = medusa_v4_health_reason,
+};
+
+static struct medusa_v4_frame *
+medusa_v4_frame_new(u16 type, u64 request_id, u64 generation,
+		    size_t payload_capacity)
+{
+	struct medusa_frame_header *header;
+	struct medusa_v4_frame *frame;
+
+	if (payload_capacity > MEDUSA_FRAME_MAX_PAYLOAD)
+		return NULL;
+	frame = kvzalloc(struct_size(frame, data,
+				    MEDUSA_FRAME_HEADER_SIZE + payload_capacity),
+			 GFP_KERNEL);
+	if (!frame)
+		return NULL;
+	INIT_LIST_HEAD(&frame->node);
+	frame->length = MEDUSA_FRAME_HEADER_SIZE;
+	frame->capacity = MEDUSA_FRAME_HEADER_SIZE + payload_capacity;
+	header = (struct medusa_frame_header *)frame->data;
+	header->version = cpu_to_le16(MEDUSA_PROTOCOL_VERSION);
+	header->type = cpu_to_le16(type);
+	header->request_id = cpu_to_le64(request_id);
+	header->policy_generation = cpu_to_le64(generation);
+	return frame;
+}
+
+static int medusa_v4_frame_add(struct medusa_v4_frame *frame, u16 type,
+			       u16 flags, const void *value, size_t value_length)
+{
+	struct medusa_frame_header *header;
+	struct medusa_tlv *tlv;
+	size_t length;
+	size_t aligned;
+
+	if (check_add_overflow((size_t)MEDUSA_TLV_HEADER_SIZE, value_length,
+			       &length))
+		return -EOVERFLOW;
+	aligned = MEDUSA_TLV_ALIGN_UP(length);
+	if (aligned < length || aligned > frame->capacity - frame->length)
+		return -EMSGSIZE;
+	tlv = (struct medusa_tlv *)(frame->data + frame->length);
+	tlv->type = cpu_to_le16(type);
+	tlv->flags = cpu_to_le16(flags);
+	tlv->length = cpu_to_le32(length);
+	if (value_length)
+		memcpy((u8 *)tlv + MEDUSA_TLV_HEADER_SIZE, value, value_length);
+	frame->length += aligned;
+	header = (struct medusa_frame_header *)frame->data;
+	header->payload_length =
+		cpu_to_le32(frame->length - MEDUSA_FRAME_HEADER_SIZE);
+	return 0;
+}
+
+static int medusa_v4_frame_add_u8(struct medusa_v4_frame *frame, u16 type,
+				  u8 value)
+{
+	return medusa_v4_frame_add(frame, type, 0, &value, sizeof(value));
+}
+
+static int medusa_v4_frame_add_u16(struct medusa_v4_frame *frame, u16 type,
+				   u16 value)
+{
+	__le16 wire = cpu_to_le16(value);
+
+	return medusa_v4_frame_add(frame, type, 0, &wire, sizeof(wire));
+}
+
+static int medusa_v4_frame_add_u32(struct medusa_v4_frame *frame, u16 type,
+				   u32 value)
+{
+	__le32 wire = cpu_to_le32(value);
+
+	return medusa_v4_frame_add(frame, type, 0, &wire, sizeof(wire));
+}
+
+static int medusa_v4_frame_add_u64(struct medusa_v4_frame *frame, u16 type,
+				   u64 value)
+{
+	__le64 wire = cpu_to_le64(value);
+
+	return medusa_v4_frame_add(frame, type, 0, &wire, sizeof(wire));
+}
+
+static void medusa_v4_frame_free(struct medusa_v4_frame *frame)
+{
+	kvfree(frame);
+}
+
+static int medusa_v4_misc_queue(void *context, void *transport_frame)
+{
+	struct medusa_v4_session *session = context;
+	struct medusa_v4_frame *frame = transport_frame;
+	unsigned long flags;
+
+	spin_lock_irqsave(&session->queue_lock, flags);
+	if (!session->connected) {
+		spin_unlock_irqrestore(&session->queue_lock, flags);
+		medusa_v4_frame_free(frame);
+		return -EPIPE;
+	}
+	list_add_tail(&frame->node, &session->frames);
+	spin_unlock_irqrestore(&session->queue_lock, flags);
+	wake_up_interruptible(&session->read_wait);
+	return 0;
+}
+
+static struct medusa_transport medusa_v4_transport = {
+	.name = "miscdevice",
+	.context = &v4_session,
+	.queue = medusa_v4_misc_queue,
+};
+
+static int medusa_v4_queue(struct medusa_v4_frame *frame)
+{
+	return medusa_transport_queue(&medusa_v4_transport, frame);
+}
+
+static void medusa_v4_purge_frames(void)
+{
+	struct medusa_v4_frame *frame;
+	struct medusa_v4_frame *temporary;
+	unsigned long flags;
+	LIST_HEAD(discard);
+
+	spin_lock_irqsave(&v4_session.queue_lock, flags);
+	list_splice_init(&v4_session.frames, &discard);
+	spin_unlock_irqrestore(&v4_session.queue_lock, flags);
+	list_for_each_entry_safe(frame, temporary, &discard, node) {
+		list_del(&frame->node);
+		medusa_v4_frame_free(frame);
+	}
+}
+
+static struct medusa_v4_class *
+medusa_v4_find_class_locked(const struct medusa_kclass_s *class)
+{
+	struct medusa_v4_class *entry;
+
+	list_for_each_entry(entry, &v4_session.classes, node)
+		if (entry->class == class)
+			return entry;
+	return NULL;
+}
+
+static struct medusa_v4_class *medusa_v4_find_class_id_locked(u32 id)
+{
+	struct medusa_v4_class *entry;
+
+	list_for_each_entry(entry, &v4_session.classes, node)
+		if (entry->id == id)
+			return entry;
+	return NULL;
+}
+
+static struct medusa_v4_event *
+medusa_v4_find_event_locked(const struct medusa_evtype_s *event)
+{
+	struct medusa_v4_event *entry;
+
+	list_for_each_entry(entry, &v4_session.events, node)
+		if (entry->event == event)
+			return entry;
+	return NULL;
+}
+
+static struct medusa_v4_event *medusa_v4_find_event_id_locked(u32 id)
+{
+	struct medusa_v4_event *entry;
+
+	list_for_each_entry(entry, &v4_session.events, node)
+		if (entry->id == id)
+			return entry;
+	return NULL;
+}
+
+static size_t medusa_v4_attribute_capacity(struct medusa_attribute_s *attrs)
+{
+	struct medusa_attribute_s *attr;
+	size_t capacity = 0;
+
+	for (attr = attrs; attr && attr->type != MED_END; attr++) {
+		size_t name_length = strnlen(attr->name, MEDUSA_ATTRNAME_MAX);
+
+		capacity += MEDUSA_TLV_ALIGN_UP(
+			MEDUSA_TLV_HEADER_SIZE +
+			sizeof(struct medusa_attribute_definition) + name_length);
+	}
+	return capacity;
+}
+
+static u16 medusa_v4_attr_flags(unsigned int type)
+{
+	u16 flags = 0;
+
+	if (type & MED_RO)
+		flags |= MEDUSA_ATTR_F_READ_ONLY;
+	if (type & MED_KEY)
+		flags |= MEDUSA_ATTR_F_PRIMARY_KEY;
+	if ((type & 0x30U) == MED_BE)
+		flags |= MEDUSA_ATTR_F_BIG_ENDIAN;
+	if ((type & 0x30U) == MED_LE)
+		flags |= MEDUSA_ATTR_F_LITTLE_ENDIAN;
+	return flags;
+}
+
+static int medusa_v4_add_attributes(struct medusa_v4_frame *frame,
+				    struct medusa_attribute_s *attrs)
+{
+	struct medusa_attribute_definition definition;
+	struct medusa_attribute_s *attr;
+	u8 *value;
+	u32 id = 1;
+	int error;
+
+	for (attr = attrs; attr && attr->type != MED_END; attr++, id++) {
+		size_t name_length = strnlen(attr->name, MEDUSA_ATTRNAME_MAX);
+		size_t value_length = sizeof(definition) + name_length;
+
+		if (attr->offset > U32_MAX || attr->length > U32_MAX ||
+		    name_length > U16_MAX)
+			return -EOVERFLOW;
+		value = kzalloc(value_length, GFP_KERNEL);
+		if (!value)
+			return -ENOMEM;
+		memset(&definition, 0, sizeof(definition));
+		definition.id = cpu_to_le32(id);
+		definition.offset = cpu_to_le32(attr->offset);
+		definition.length = cpu_to_le32(attr->length);
+		definition.type = cpu_to_le16(attr->type & 0x0fU);
+		definition.flags = cpu_to_le16(medusa_v4_attr_flags(attr->type));
+		definition.name_length = cpu_to_le16(name_length);
+		memcpy(value, &definition, sizeof(definition));
+		memcpy(value + sizeof(definition), attr->name, name_length);
+		error = medusa_v4_frame_add(frame, MEDUSA_TLV_ATTRIBUTE,
+					    MEDUSA_TLV_F_ARRAY, value,
+					    value_length);
+		kfree(value);
+		if (error)
+			return error;
+	}
+	return 0;
+}
+
+static struct medusa_v4_frame *
+medusa_v4_class_definition_locked(struct medusa_v4_class *entry)
+{
+	struct medusa_v4_frame *frame;
+	size_t name_length;
+	size_t capacity;
+	int error;
+
+	name_length = strnlen(entry->class->name, MEDUSA_KCLASSNAME_MAX);
+	capacity = 32 + MEDUSA_TLV_ALIGN_UP(MEDUSA_TLV_HEADER_SIZE +
+					    name_length) +
+		   medusa_v4_attribute_capacity(entry->class->attr);
+	frame = medusa_v4_frame_new(MEDUSA_MSG_CLASS_DEFINITION, 0,
+				    v4_session.expected_generation, capacity);
+	if (!frame)
+		return NULL;
+	error = medusa_v4_frame_add_u32(frame, MEDUSA_TLV_CLASS_ID, entry->id);
+	error = error ?: medusa_v4_frame_add(
+		frame, MEDUSA_TLV_NAME, 0, entry->class->name, name_length);
+	error = error ?: medusa_v4_frame_add_u32(
+		frame, MEDUSA_TLV_OBJECT_SIZE, entry->class->kobject_size);
+	error = error ?: medusa_v4_add_attributes(frame, entry->class->attr);
+	if (error) {
+		medusa_v4_frame_free(frame);
+		return NULL;
+	}
+	return frame;
+}
+
+static struct medusa_v4_frame *
+medusa_v4_event_definition_locked(struct medusa_v4_event *entry)
+{
+	struct medusa_v4_class *subject;
+	struct medusa_v4_class *object;
+	struct medusa_v4_frame *frame;
+	struct medusa_evtype_s *event = entry->event;
+	size_t name_length = strnlen(event->name, MEDUSA_EVNAME_MAX);
+	size_t subject_name_length =
+		strnlen(event->arg_name[0], MEDUSA_ATTRNAME_MAX);
+	size_t object_name_length =
+		strnlen(event->arg_name[1], MEDUSA_ATTRNAME_MAX);
+	size_t capacity;
+	int error;
+
+	subject = medusa_v4_find_class_locked(event->arg_kclass[0]);
+	object = medusa_v4_find_class_locked(event->arg_kclass[1]);
+	if (!subject || !object)
+		return NULL;
+	capacity = 96 + MEDUSA_TLV_ALIGN_UP(MEDUSA_TLV_HEADER_SIZE +
+					    name_length) +
+		   MEDUSA_TLV_ALIGN_UP(MEDUSA_TLV_HEADER_SIZE +
+				       subject_name_length) +
+		   MEDUSA_TLV_ALIGN_UP(MEDUSA_TLV_HEADER_SIZE +
+				       object_name_length) +
+		   medusa_v4_attribute_capacity(event->attr);
+	frame = medusa_v4_frame_new(MEDUSA_MSG_EVENT_DEFINITION, 0,
+				    v4_session.expected_generation, capacity);
+	if (!frame)
+		return NULL;
+	error = medusa_v4_frame_add_u32(frame, MEDUSA_TLV_EVENT_ID, entry->id);
+	error = error ?: medusa_v4_frame_add(
+		frame, MEDUSA_TLV_NAME, 0, event->name, name_length);
+	error = error ?: medusa_v4_frame_add_u32(
+		frame, MEDUSA_TLV_EVENT_SIZE, event->event_size);
+	error = error ?: medusa_v4_frame_add_u32(
+		frame, MEDUSA_TLV_SUBJECT_CLASS_ID, subject->id);
+	error = error ?: medusa_v4_frame_add_u32(
+		frame, MEDUSA_TLV_OBJECT_CLASS_ID, object->id);
+	error = error ?: medusa_v4_frame_add(
+		frame, MEDUSA_TLV_SUBJECT_NAME, 0, event->arg_name[0],
+		subject_name_length);
+	error = error ?: medusa_v4_frame_add(
+		frame, MEDUSA_TLV_OBJECT_NAME, 0, event->arg_name[1],
+		object_name_length);
+	error = error ?: medusa_v4_frame_add_u16(
+		frame, MEDUSA_TLV_TRIGGER, event->bitnr);
+	error = error ?: medusa_v4_frame_add_u8(
+		frame, MEDUSA_TLV_ENFORCEMENT, event->enforced);
+	error = error ?: medusa_v4_add_attributes(frame, event->attr);
+	if (error) {
+		medusa_v4_frame_free(frame);
+		return NULL;
+	}
+	return frame;
+}
+
+static int medusa_v4_add_class(struct medusa_kclass_s *class)
+{
+	struct medusa_v4_class *entry;
+	struct medusa_v4_frame *frame = NULL;
+
+	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	if (!entry)
+		return -ENOMEM;
+	mutex_lock(&v4_session.state_lock);
+	if (medusa_v4_find_class_locked(class)) {
+		mutex_unlock(&v4_session.state_lock);
+		kfree(entry);
+		return -EEXIST;
+	}
+	entry->class = class;
+	entry->id = ++v4_session.next_class_id;
+	list_add_tail(&entry->node, &v4_session.classes);
+	if (v4_session.state == MEDUSA_STATE_DEFINITIONS ||
+	    v4_session.state == MEDUSA_STATE_READY)
+		frame = medusa_v4_class_definition_locked(entry);
+	mutex_unlock(&v4_session.state_lock);
+	if (frame)
+		return medusa_v4_queue(frame);
+	return 0;
+}
+
+static void medusa_v4_del_class(struct medusa_kclass_s *class)
+{
+	struct medusa_v4_class *entry = NULL;
+
+	mutex_lock(&v4_session.state_lock);
+	entry = medusa_v4_find_class_locked(class);
+	if (entry)
+		list_del(&entry->node);
+	mutex_unlock(&v4_session.state_lock);
+	kfree(entry);
+}
+
+static int medusa_v4_add_event(struct medusa_evtype_s *event)
+{
+	struct medusa_v4_event *entry;
+	struct medusa_v4_frame *frame = NULL;
+
+	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	if (!entry)
+		return -ENOMEM;
+	mutex_lock(&v4_session.state_lock);
+	if (medusa_v4_find_event_locked(event)) {
+		mutex_unlock(&v4_session.state_lock);
+		kfree(entry);
+		return -EEXIST;
+	}
+	entry->event = event;
+	entry->id = ++v4_session.next_event_id;
+	list_add_tail(&entry->node, &v4_session.events);
+	if (v4_session.state == MEDUSA_STATE_DEFINITIONS ||
+	    v4_session.state == MEDUSA_STATE_READY)
+		frame = medusa_v4_event_definition_locked(entry);
+	mutex_unlock(&v4_session.state_lock);
+	if (frame)
+		return medusa_v4_queue(frame);
+	return 0;
+}
+
+static void medusa_v4_del_event(struct medusa_evtype_s *event)
+{
+	struct medusa_v4_event *entry = NULL;
+
+	mutex_lock(&v4_session.state_lock);
+	entry = medusa_v4_find_event_locked(event);
+	if (entry)
+		list_del(&entry->node);
+	mutex_unlock(&v4_session.state_lock);
+	kfree(entry);
+}
+
+static int medusa_v4_snapshot(struct medusa_attribute_s *attrs,
+			      size_t object_size, const void *object, u8 **result)
+{
+	struct medusa_attribute_s *attr;
+	u8 *snapshot;
+
+	snapshot = kvzalloc(object_size, GFP_KERNEL);
+	if (!snapshot)
+		return -ENOMEM;
+	for (attr = attrs; attr && attr->type != MED_END; attr++) {
+		if (attr->offset > object_size ||
+		    attr->length > object_size - attr->offset) {
+			kvfree(snapshot);
+			return -EOVERFLOW;
+		}
+		memcpy(snapshot + attr->offset, (const u8 *)object + attr->offset,
+		       attr->length);
+	}
+	*result = snapshot;
+	return 0;
+}
+
+static int medusa_v4_restore(struct medusa_attribute_s *attrs,
+			     size_t object_size, const u8 *snapshot,
+			     size_t snapshot_size, void **result)
+{
+	struct medusa_attribute_s *attr;
+	u8 *object;
+
+	if (snapshot_size != object_size)
+		return -EMSGSIZE;
+	object = kvzalloc(object_size, GFP_KERNEL);
+	if (!object)
+		return -ENOMEM;
+	for (attr = attrs; attr && attr->type != MED_END; attr++) {
+		if (attr->offset > object_size ||
+		    attr->length > object_size - attr->offset) {
+			kvfree(object);
+			return -EOVERFLOW;
+		}
+		memcpy(object + attr->offset, snapshot + attr->offset,
+		       attr->length);
+	}
+	*result = object;
+	return 0;
+}
+
+static void medusa_v4_mark_degraded(enum medusa_health_reason reason)
 {
 	if (medusa_server_health_mark_unhealthy(&constable_health, reason))
-		med_pr_warn("authorization server circuit breaker opened, reason=%d\n",
-			    reason);
-
-	/*
-	 * Wake every slow-path caller so each event can apply its own installed
-	 * fallback. New calls are rejected by is_healthy().
-	 */
+		med_pr_warn("protocol v4 entered DEGRADED, reason=%d\n", reason);
+	mutex_lock(&v4_session.state_lock);
+	if (v4_session.connected)
+		v4_session.state = MEDUSA_STATE_DEGRADED;
+	mutex_unlock(&v4_session.state_lock);
+	med_authserver_set_state(&medusa_v4_authserver,
+				 MEDUSA_AUTHSERVER_DEGRADED);
 	medusa_pending_request_cancel_all(MED_ERR);
-	wake_up_all(&userspace_chardev);
+	wake_up_all(&v4_session.read_wait);
 }
 
-static void l4_record_protocol_error(enum medusa_protocol_counter counter,
-				     bool command_present, u64 command,
-				     bool request_present, u64 request_id,
-				     int error)
+static enum medusa_answer_t
+medusa_v4_decide(struct medusa_event_s *event, struct medusa_kobject_s *subject,
+		 struct medusa_kobject_s *object,
+		 struct medusa_authserver_decision *decision)
 {
-	struct medusa_protocol_error_context context = {
-		.counter = counter,
-		.policy_generation =
-			(u64)READ_ONCE(medusa_authserver_magic),
-		.command = command,
-		.request_id = request_id,
-		.error = error,
-		.command_present = command_present,
-		.request_present = request_present,
-	};
-
-	medusa_protocol_record_error(&context);
-}
-
-static void l4_record_request_error(u64 command, u64 request_id, int error)
-{
-	if (error == -ENOENT)
-		l4_record_protocol_error(MEDUSA_PROTOCOL_UNKNOWN_REQUESTS,
-					 true, command, true, request_id, error);
-	else if (error == -ESTALE)
-		l4_record_protocol_error(MEDUSA_PROTOCOL_STALE_REQUESTS,
-					 true, command, true, request_id, error);
-}
-
-static void l4_record_malformed_message(bool command_present, u64 command)
-{
-	l4_record_protocol_error(MEDUSA_PROTOCOL_MALFORMED_MESSAGES,
-				 command_present, command, false, 0, -EMSGSIZE);
-}
-
-static void l4_close_wake(void)
-{
-	wake_up(&close_wait);
-}
-
-static int l4_add_kclass(struct medusa_kclass_s *cl)
-{
-	struct teleport_insn_s *tele_mem_kclass;
-	struct tele_item *local_tele_item;
-	int attr_num = 1;
-	struct medusa_attribute_s *attr_ptr;
-
-	tele_mem_kclass = (struct teleport_insn_s *)
-		med_cache_alloc_size(sizeof(struct teleport_insn_s) * 5);
-	if (!tele_mem_kclass)
-		return -ENOMEM;
-	local_tele_item = (struct tele_item *)
-		med_cache_alloc_size(sizeof(struct tele_item));
-	if (!local_tele_item) {
-		med_cache_free(tele_mem_kclass);
-		return -ENOMEM;
-	}
-
-	med_get_kclass(cl); // put is in user_release
-
-	mutex_lock(&registration_lock);
-	atomic_inc(&announce_ready);
-
-	cl->cinfo = (void *)kclasses_registered;
-	kclasses_registered = cl;
-	local_tele_item->size = 0;
-	tele_mem_kclass[0].opcode = tp_PUTPtr;
-	tele_mem_kclass[0].args.putPtr.what = 0;
-	local_tele_item->size += sizeof(MCPptr_t);
-	tele_mem_kclass[1].opcode = tp_PUT32;
-	tele_mem_kclass[1].args.put32.what =
-		MEDUSA_COMM_KCLASSDEF;
-	local_tele_item->size += sizeof(uint32_t);
-	tele_mem_kclass[2].opcode = tp_PUTKCLASS;
-	tele_mem_kclass[2].args.putkclass.kclassdef = cl;
-	local_tele_item->size += sizeof(struct medusa_comm_kclass_s);
-	tele_mem_kclass[3].opcode = tp_PUTATTRS;
-	tele_mem_kclass[3].args.putattrs.attrlist = cl->attr;
-	attr_ptr = cl->attr;
-	while (attr_ptr->type != MED_END) {
-		attr_num++;
-		attr_ptr++;
-	}
-	local_tele_item->size += attr_num * sizeof(struct medusa_comm_attribute_s);
-	tele_mem_kclass[4].opcode = tp_HALT;
-	local_tele_item->tele = tele_mem_kclass;
-	local_tele_item->post = med_cache_free;
-	down(&queue_lock);
-	list_add_tail(&local_tele_item->list, &tele_queue);
-	up(&queue_lock);
-	up(&queue_items);
-	wake_up(&userspace_chardev);
-	mutex_unlock(&registration_lock);
-	return 0;
-}
-
-static int l4_add_evtype(struct medusa_evtype_s *at)
-{
-	struct teleport_insn_s *tele_mem_evtype;
-	struct tele_item *local_tele_item;
-	int attr_num = 1;
-	struct medusa_attribute_s *attr_ptr;
-
-	med_pr_debug("%s: adding %s with bitnr=%d\n", __func__, at->name,
-		at->bitnr & MASK_BITNR);
-
-	tele_mem_evtype = (struct teleport_insn_s *)
-		med_cache_alloc_size(sizeof(struct teleport_insn_s)*5);
-	if (!tele_mem_evtype)
-		return -ENOMEM;
-	local_tele_item = (struct tele_item *)
-		med_cache_alloc_size(sizeof(struct tele_item));
-	if (!local_tele_item) {
-		med_cache_free(tele_mem_evtype);
-		return -ENOMEM;
-	}
-
-	mutex_lock(&registration_lock);
-	atomic_inc(&announce_ready);
-
-	at->cinfo = (void *)evtypes_registered;
-	evtypes_registered = at;
-	local_tele_item->size = 0;
-	tele_mem_evtype[0].opcode = tp_PUTPtr;
-	tele_mem_evtype[0].args.putPtr.what = 0;
-	local_tele_item->size += sizeof(MCPptr_t);
-	tele_mem_evtype[1].opcode = tp_PUT32;
-	tele_mem_evtype[1].args.put32.what =
-		MEDUSA_COMM_EVTYPEDEF;
-	local_tele_item->size += sizeof(uint32_t);
-	tele_mem_evtype[2].opcode = tp_PUTEVTYPE;
-	tele_mem_evtype[2].args.putevtype.evtypedef = at;
-	local_tele_item->size += sizeof(struct medusa_comm_evtype_s);
-	tele_mem_evtype[3].opcode = tp_PUTATTRS;
-	tele_mem_evtype[3].args.putattrs.attrlist = at->attr;
-	attr_ptr = at->attr;
-	while (attr_ptr->type != MED_END) {
-		attr_num++;
-		attr_ptr++;
-	}
-	local_tele_item->size += attr_num * sizeof(struct medusa_comm_attribute_s);
-	tele_mem_evtype[4].opcode = tp_HALT;
-	local_tele_item->tele = tele_mem_evtype;
-	local_tele_item->post = med_cache_free;
-	down(&queue_lock);
-	list_add_tail(&local_tele_item->list, &tele_queue);
-	up(&queue_lock);
-	up(&queue_items);
-	wake_up(&userspace_chardev);
-	mutex_unlock(&registration_lock);
-	return 0;
-}
-
-/* the sad fact about this routine is that it sleeps...
- *
- * guess what? we can FULLY solve that silly problem on SMP,
- * eating one processor by a constable... ;) One can imagine
- * the performance improvement, and buy one more CPU in advance :)
- */
-static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
-		struct medusa_kobject_s *o1, struct medusa_kobject_s *o2,
-		struct medusa_authserver_decision *decision)
-{
-	enum medusa_answer_t retval;
 	struct medusa_pending_request pending;
-	struct teleport_insn_s *tele_mem_decide;
-	struct tele_item *local_tele_item;
-	char debug_cmdline[1024];
-	u64 policy_generation;
+	struct medusa_v4_class *subject_class;
+	struct medusa_v4_class *object_class;
+	struct medusa_v4_event *event_entry;
+	struct medusa_v4_frame *frame = NULL;
+	u8 *event_data = NULL;
+	u8 *subject_data = NULL;
+	u8 *object_data = NULL;
+	enum medusa_answer_t answer = MED_ERR;
+	u64 generation;
 	int error;
 
 	decision->request_id = 0;
@@ -357,977 +600,826 @@ static enum medusa_answer_t l4_decide(struct medusa_event_s *event,
 	decision->request_present = false;
 	decision->contacted = false;
 
-	/*
-	 * A userspace decision blocks.  Some legacy hooks can reach this layer
-	 * while preemption or interrupts are disabled, especially SysV IPC on
-	 * UP kernels where a non-debug spinlock has no inspectable owner.
-	 * Refuse the slow path here rather than scheduling from atomic context.
-	 * The decision engine will eventually resolve MED_ERR through the
-	 * installed kernel baseline policy.
-	 */
-	if (l4_cannot_wait()) {
+	if (!in_task() || preempt_count() || irqs_disabled()) {
 		decision->unavailable = MEDUSA_NON_SLEEPABLE_CONTEXT;
-		med_pr_warn_ratelimited("%s: cannot delegate '%s' from non-sleepable context\n",
-				       __func__, event->evtype_id->name);
 		return MED_ERR;
 	}
-	if (am_i_constable())
-		return MED_ALLOW;
-
-	if (current->pid < 1)
-		return MED_ERR;
-	tele_mem_decide = (struct teleport_insn_s *)
-		med_cache_alloc_size(sizeof(struct teleport_insn_s)*6);
-	if (!tele_mem_decide)
+	if (!medusa_v4_is_healthy())
 		return MED_ERR;
 
-	local_tele_item = (struct tele_item *)
-		med_cache_alloc_size(sizeof(struct tele_item));
-	if (!local_tele_item) {
-		med_cache_free(tele_mem_decide);
-		return MED_ERR;
-	}
-	local_tele_item->tele = tele_mem_decide;
-	local_tele_item->size = 0;
-	local_tele_item->post = med_cache_free;
-
-	/*
-	 * We might be called with the IPC ids->rwsem held (from IPC security
-	 * hooks) and lightswitch should always nest inside the ids->rwsem one.
-	 * Attention: authorization server must NOT use IPC subsystem at all to
-	 * ========== avoid deadlock (trying to lock ids->rwsem inside the
-	 *            lightswitch)!.
-	 */
-	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
-
-	policy_generation = (u64)READ_ONCE(medusa_authserver_magic);
-	error = medusa_pending_request_register(&pending, policy_generation);
+	generation = (u64)READ_ONCE(medusa_authserver_magic);
+	error = medusa_pending_request_register(&pending, generation);
 	if (error) {
-		med_cache_free(tele_mem_decide);
-		med_cache_free(local_tele_item);
-		up_read(&lightswitch);
-		med_pr_err("%s: pending request error: %d\n", __func__, error);
-		if (error == -ENOSPC)
-			l4_mark_unhealthy(MEDUSA_HEALTH_OVERLOADED);
-		if (error == -ENOSPC)
+		if (error == -ENOSPC) {
 			decision->unavailable = MEDUSA_AUTH_SERVER_OVERLOADED;
+			medusa_v4_mark_degraded(MEDUSA_HEALTH_OVERLOADED);
+		}
 		return MED_ERR;
 	}
 	decision->request_id = pending.id;
-	decision->policy_generation = pending.policy_generation;
+	decision->policy_generation = generation;
 	decision->request_present = true;
 
-#define decision_evtype (event->evtype_id)
-	tele_mem_decide[0].opcode = tp_PUTPtr;
-	tele_mem_decide[0].args.putPtr.what = (MCPptr_t)decision_evtype; // possibility to encryption JK march 2015
-	local_tele_item->size += sizeof(MCPptr_t);
-	tele_mem_decide[1].opcode = tp_PUTPtr;
-	tele_mem_decide[1].args.putPtr.what = (MCPptr_t)pending.id;
-	local_tele_item->size += sizeof(MCPptr_t);
-	tele_mem_decide[2].opcode = tp_CUTNPASTE;
-	tele_mem_decide[2].args.cutnpaste.from = (unsigned char *)event;
-	tele_mem_decide[2].args.cutnpaste.count = decision_evtype->event_size;
-	local_tele_item->size += decision_evtype->event_size;
-	tele_mem_decide[3].opcode = tp_CUTNPASTE;
-	tele_mem_decide[3].args.cutnpaste.from = (unsigned char *)o1;
-	tele_mem_decide[3].args.cutnpaste.count =
-		decision_evtype->arg_kclass[0]->kobject_size;
-	local_tele_item->size += decision_evtype->arg_kclass[0]->kobject_size;
-	if (o1 == o2) {
-		tele_mem_decide[4].opcode = tp_HALT;
-	} else {
-		tele_mem_decide[4].opcode = tp_CUTNPASTE;
-		tele_mem_decide[4].args.cutnpaste.from =
-			(unsigned char *)o2;
-		tele_mem_decide[4].args.cutnpaste.count =
-			decision_evtype->arg_kclass[1]->kobject_size;
-		local_tele_item->size += decision_evtype->arg_kclass[1]->kobject_size;
-		tele_mem_decide[5].opcode = tp_HALT;
+	mutex_lock(&v4_session.state_lock);
+	event_entry = medusa_v4_find_event_locked(event->evtype_id);
+	subject_class =
+		medusa_v4_find_class_locked(event->evtype_id->arg_kclass[0]);
+	object_class =
+		medusa_v4_find_class_locked(event->evtype_id->arg_kclass[1]);
+	if (!v4_session.connected || v4_session.state != MEDUSA_STATE_READY ||
+	    !event_entry || !subject_class || !object_class) {
+		error = -EPIPE;
+		goto unlock;
 	}
-
-	/* TODO: Replace by constable tgid and move up right below lightswitch */
-	if (!atomic_read(&constable_present)) {
-		med_cache_free(local_tele_item);
-		med_cache_free(tele_mem_decide);
+	error = medusa_v4_snapshot(event->evtype_id->attr,
+				   event->evtype_id->event_size, event,
+				   &event_data);
+	error = error ?: medusa_v4_snapshot(
+		subject_class->class->attr, subject_class->class->kobject_size,
+		subject, &subject_data);
+	if (object == subject) {
+		object_data = subject_data;
+	} else {
+		error = error ?: medusa_v4_snapshot(
+			object_class->class->attr,
+			object_class->class->kobject_size, object,
+			&object_data);
+	}
+	if (error)
+		goto unlock;
+	frame = medusa_v4_frame_new(
+		MEDUSA_MSG_DECISION_REQUEST, pending.id, generation,
+		96 + event->evtype_id->event_size +
+		subject_class->class->kobject_size +
+		object_class->class->kobject_size);
+	if (!frame) {
+		error = -ENOMEM;
+		goto unlock;
+	}
+	error = medusa_v4_frame_add_u32(
+		frame, MEDUSA_TLV_EVENT_ID, event_entry->id);
+	error = error ?: medusa_v4_frame_add(
+		frame, MEDUSA_TLV_EVENT_DATA, 0, event_data,
+		event->evtype_id->event_size);
+	error = error ?: medusa_v4_frame_add_u32(
+		frame, MEDUSA_TLV_SUBJECT_CLASS_ID, subject_class->id);
+	error = error ?: medusa_v4_frame_add(
+		frame, MEDUSA_TLV_SUBJECT_DATA, 0, subject_data,
+		subject_class->class->kobject_size);
+	error = error ?: medusa_v4_frame_add_u32(
+		frame, MEDUSA_TLV_OBJECT_CLASS_ID, object_class->id);
+	error = error ?: medusa_v4_frame_add(
+		frame, MEDUSA_TLV_OBJECT_DATA, 0, object_data,
+		object_class->class->kobject_size);
+unlock:
+	mutex_unlock(&v4_session.state_lock);
+	if (object_data != subject_data)
+		kvfree(object_data);
+	kvfree(subject_data);
+	kvfree(event_data);
+	if (error) {
+		if (frame)
+			medusa_v4_frame_free(frame);
 		medusa_pending_request_unregister(&pending);
-		up_read(&lightswitch);
 		return MED_ERR;
 	}
-
-	debug_cmdline[0] = '\0';
-	/* get_cmdline() is too expensive; uncomment it manually while debugging */
-	//get_cmdline(current, debug_cmdline, 1023);
-	//debug_cmdline[1023] = '\0';
-	med_pr_debug("task pid %d ('%s'), new question 0x%llx for '%s'",
-		     current->pid, debug_cmdline, pending.id,
-		     decision_evtype->name);
-
-#undef decision_evtype
-	// insert teleport structure to the queue
-	down(&queue_lock);
-	list_add_tail(&local_tele_item->list, &tele_queue);
-	up(&queue_lock);
-	up(&queue_items);
-	atomic_inc(&questions);
-
-	up_read(&lightswitch);
-	wake_up(&userspace_chardev);
+	error = medusa_v4_queue(frame);
+	if (error) {
+		medusa_pending_request_unregister(&pending);
+		return MED_ERR;
+	}
 	decision->contacted = true;
 	error = medusa_pending_request_wait_timeout(
-		&pending,
-		msecs_to_jiffies(CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS),
-		&retval);
+		&pending, msecs_to_jiffies(medusa_decision_timeout_ms()),
+		&answer);
 	if (error == -ETIMEDOUT) {
 		decision->unavailable = MEDUSA_DECISION_TIMED_OUT;
-		l4_mark_unhealthy(MEDUSA_HEALTH_DECISION_TIMEOUT);
-	}
+		medusa_v4_mark_degraded(MEDUSA_HEALTH_DECISION_TIMEOUT);
+	} else if (error == -ERESTARTSYS) {
+		struct medusa_v4_frame *cancel;
 
-	/*
-	 * We might be called with the IPC ids->rwsem held (from IPC security
-	 * hooks) and lightswitch should always nest inside the ids->rwsem one.
-	 * Attention: authorization server must NOT use IPC subsystem at all to
-	 * ========== avoid deadlock (trying to lock ids->rwsem inside the
-	 *            lightswitch)!.
-	 */
-	down_read_nested(&lightswitch, SINGLE_DEPTH_NESTING);
-	if (retval != MED_ERR && atomic_read(&constable_present) &&
-	    policy_generation == (u64)READ_ONCE(medusa_authserver_magic))
-		atomic_dec(&questions_waiting);
-	if (retval != MED_ERR) {
-		med_pr_debug("task pid %d, question 0x%llx answer %d",
-			     current->pid, pending.id, retval);
-	} else {
-		med_pr_err("task pid %d, question 0x%llx for '%s' not answered, authorization server disconnected",
-			   current->pid, pending.id, event->evtype_id->name);
-	}
-	up_read(&lightswitch);
-	return retval;
-}
-
-/***********************************************************************
- * user-space interface
- */
-
-static ssize_t user_read(struct file *filp, char __user *buf, size_t count, loff_t *ppos);
-static ssize_t user_write(struct file *filp, const char __user *buf, size_t count, loff_t *ppos);
-static unsigned int user_poll(struct file *filp, poll_table *wait);
-static int user_open(struct inode *inode, struct file *file);
-static int user_release(struct inode *inode, struct file *file);
-
-static const struct file_operations fops = {
-	.read		= user_read,
-	.write		= user_write,
-	.llseek		= noop_llseek,
-	.poll		= user_poll,
-	.open		= user_open,
-	.release	= user_release
-	/* We don't support async IO. I have no idea, when to call kill_fasync
-	 * to be correct. Only on decisions? Or also on answers to user-space
-	 * questions? Not a big problem, though... noone seems to be supporting
-	 * it anyway :). If you need it, let me know. <www@terminus.sk>
-	 *
-	 * Also, we don't like the ioctl() - we hope the character device can
-	 * be used over the network.
-	 */
-};
-/* TODO: userspace_buf is GLOBAL variable */
-static char __user *userspace_buf;
-
-static ssize_t to_user(void *from, size_t len)
-{ /* we verify the access rights elsewhere */
-	if (__copy_to_user(userspace_buf, from, len))
-		;
-	userspace_buf += len;
-	return len;
-}
-
-static void decrement_counters(struct teleport_insn_s *tele)
-{
-	if (tele[1].opcode == tp_HALT)
-		return;
-	switch (tele[2].opcode) {
-	case tp_CUTNPASTE: // Authorization server answer
-		atomic_inc(&questions_waiting);
-		atomic_dec(&questions);
-		break;
-	case tp_PUTPtr: // Fetch or update
-		switch (tele[1].args.put32.what) {
-		case MEDUSA_COMM_FETCH_ANSWER:
-		case MEDUSA_COMM_FETCH_ERROR:
-			atomic_dec(&fetch_requests);
-			break;
-		case MEDUSA_COMM_UPDATE_ANSWER:
-			atomic_dec(&update_requests);
-			break;
-		}
-		break;
-	case tp_PUTKCLASS:
-	case tp_PUTEVTYPE:
-	case tp_PUTREADY:
-		atomic_dec(&announce_ready);
-		break;
-	}
-}
-
-/*
- * trylock - if true, don't block
- * returns 1 if queue is empty, otherwise 0
- * returns -EPIPE if Constable was disconnected
- * while waiting for new event
- */
-static inline int teleport_pop(int trylock)
-{
-	if (trylock) {
-		if (down_trylock(&queue_items))
-			return 1;
-	} else {
-		up_read(&lightswitch);
-		while (down_timeout(&queue_items, 5*HZ) == -ETIME) {
-			down_read(&lightswitch);
-			if (!atomic_read(&constable_present))
-				return -EPIPE;
-			up_read(&lightswitch);
-		}
-		down_read(&lightswitch);
-	}
-	down(&queue_lock);
-	local_list_item = list_first_entry(&tele_queue, struct tele_item, list);
-	processed_teleport = local_list_item->tele;
-	left_in_teleport = local_list_item->size;
-	list_del(&(local_list_item->list));
-	up(&queue_lock);
-	teleport_reset(&teleport, &(processed_teleport[0]), to_user);
-	decrement_counters(processed_teleport);
-	return 0;
-}
-
-static inline void teleport_put(void)
-{
-	if (local_list_item->post)
-		local_list_item->post(processed_teleport);
-	med_cache_free(local_list_item);
-	processed_teleport = NULL;
-	local_list_item = NULL;
-}
-
-// Clear the teleport queue
-static inline void teleport_clear(void)
-{
-	struct list_head *pos, *next;
-
-	left_in_teleport = 0;
-	if (local_list_item)
-		teleport_put();
-	down(&queue_lock);
-	list_for_each_safe(pos, next, &tele_queue) {
-		local_list_item = list_entry(pos, struct tele_item, list);
-		processed_teleport = local_list_item->tele;
-		list_del(&(local_list_item->list));
-		teleport_put();
-	}
-	up(&queue_lock);
-}
-
-static int send_medusa_is_ready(void)
-{
-	struct teleport_insn_s *tele_mem;
-	struct tele_item *local_tele_item;
-
-	tele_mem = (struct teleport_insn_s *)
-		med_cache_alloc_size(sizeof(struct teleport_insn_s) * 4);
-	if (!tele_mem)
-		return -ENOMEM;
-	local_tele_item = (struct tele_item *)
-		med_cache_alloc_size(sizeof(struct tele_item));
-	if (!local_tele_item) {
-		med_cache_free(tele_mem);
-		return -ENOMEM;
-	}
-
-	atomic_inc(&announce_ready);
-	local_tele_item->size = 0;
-	tele_mem[0].opcode = tp_PUTPtr;
-	tele_mem[0].args.putPtr.what = 0;
-	local_tele_item->size += sizeof(MCPptr_t);
-	tele_mem[1].opcode = tp_PUT32;
-	tele_mem[1].args.put32.what = MEDUSA_COMM_READY_REQUEST;
-	local_tele_item->size += sizeof(uint32_t);
-	tele_mem[2].opcode = tp_PUTREADY; /* used only for decrement_counter() */
-	tele_mem[3].opcode = tp_HALT;
-	local_tele_item->tele = tele_mem;
-	local_tele_item->post = med_cache_free;
-	down(&queue_lock);
-	list_add_tail(&local_tele_item->list, &tele_queue);
-	up(&queue_lock);
-	up(&queue_items);
-	wake_up(&userspace_chardev);
-
-	return 0;
-}
-
-/*
- * READ()
- */
-static ssize_t user_read(struct file *filp, char __user *buf,
-		size_t count, loff_t *ppos)
-{
-	ssize_t retval;
-	size_t retval_sum = 0;
-
-	// Lightswitch
-	// has to be there: so close can't occur during read
-	down_read(&lightswitch);
-
-	if (!atomic_read(&constable_present)) {
-		up_read(&lightswitch);
-		return -EPIPE;
-	}
-
-	if (!am_i_constable()) {
-		up_read(&lightswitch);
-		return -EPERM;
-	}
-	if (*ppos != filp->f_pos) {
-		up_read(&lightswitch);
-		return -ESPIPE;
-	}
-	if (!access_ok(buf, count)) {
-		up_read(&lightswitch);
-		return -EFAULT;
-	}
-
-	// Lock it before someone can change the userspace_buf
-	// Only one reader can use it
-	down(&user_read_lock);
-	userspace_buf = buf;
-	// Get an item from the queue
-	// Get a new item only if the previous teleport has been fully transported
-	if (!left_in_teleport) {
-		// Interruptible waiting; -EPIPE if auth server was disconnected
-		if (teleport_pop(0) == -EPIPE) {
-			up(&user_read_lock);
-			up_read(&lightswitch);
-			return -EPIPE;
-		}
-	}
-	while (1) {
-		retval = teleport_cycle(&teleport, count);
-		if (retval < 0) { /* unexpected error; data lost */
-			// this teleport was broken, we get rid of it
-			left_in_teleport = 0;
-			teleport_put();
-			up(&user_read_lock);
-			up_read(&lightswitch);
-			return retval;
-		}
-		left_in_teleport -= retval;
-		count -= retval;
-		retval_sum += retval;
-		if (!left_in_teleport) {
-			// We can get rid of current teleport
-			teleport_put();
-			if (!count)
-				break;
-			// Userspace wants more data
-			if (teleport_pop(1))
-				break;
-			// left in teleport will be always zero, because while loop in
-			// teleport_reset loops while count is not zero until it encounters
-			// tpc_HALT
-		} else {
-			// Something was left in teleport
-			if (retval == 0 && teleport.cycle == tpc_HALT) {
-				// Discard current teleport
-				left_in_teleport = 0;
-				teleport_put();
-				// Get new teleport
-				if (teleport_pop(0) == -EPIPE) {
-					up(&user_read_lock);
-					up_read(&lightswitch);
-					return -EPIPE;
-				}
-				continue;
-			}
-			break;
-		}
-	} // while
-	if (retval_sum > 0 || teleport.cycle != tpc_HALT) {
-		up(&user_read_lock);
-		up_read(&lightswitch);
-		return retval_sum;
-	}
-
-	// Something is still in teleport, but we didn't transport any data
-	up(&user_read_lock);
-	up_read(&lightswitch);
-	return 0;
-}
-
-/*
- * WRITE()
- */
-static ssize_t user_write(struct file *filp, const char __user *buf, size_t count, loff_t *ppos)
-{
-	size_t orig_count = count;
-	struct medusa_kclass_s *cl;
-	struct teleport_insn_s *tele_mem_write;
-	struct tele_item *local_tele_item;
-	enum medusa_answer_t answ_result;
-	MCPptr_t recv_type;
-	MCPptr_t answ_kclassid = 0;
-	struct medusa_kobject_s *answ_kobj = NULL;
-	MCPptr_t answ_seq = 0;
-	char recv_buf[sizeof(MCPptr_t)*2];
-	char *kclass_buf;
-	u64 id;
-	u64 gen;
-	s16 answer;
-
-	// Lightswitch
-	// has to be there so close can't occur during write
-	down_read(&lightswitch);
-
-	if (!atomic_read(&constable_present)) {
-		up_read(&lightswitch);
-		med_pr_err("write: constable not present\n");
-		return -EPIPE;
-	}
-
-	if (!am_i_constable()) {
-		up_read(&lightswitch);
-		med_pr_err("write: not called by authorization server\n");
-		return -EPERM;
-	}
-	if (*ppos != filp->f_pos) {
-		up_read(&lightswitch);
-		med_pr_err("write: incorrect file position\n");
-		return -ESPIPE;
-	}
-	if (!access_ok(buf, count)) {
-		up_read(&lightswitch);
-		med_pr_err("write: can't read buffer\n");
-		return -EFAULT;
-	}
-	if (count < sizeof(MCPptr_t)) {
-		l4_record_malformed_message(false, 0);
-		up_read(&lightswitch);
-		return -EMSGSIZE;
-	}
-
-	if (__copy_from_user(((char *)&recv_type), buf,
-				sizeof(MCPptr_t))) {
-		up_read(&lightswitch);
-		med_pr_err("write: can't copy buffer\n");
-		return -EFAULT;
-	}
-	buf += sizeof(MCPptr_t);
-	count -= sizeof(MCPptr_t);
-
-	if (!medusa_comm_command_is_supported(recv_type)) {
-		l4_record_protocol_error(MEDUSA_PROTOCOL_UNKNOWN_COMMANDS,
-					 true, recv_type, false, 0,
-					 -EOPNOTSUPP);
-		up_read(&lightswitch);
-		med_pr_err("Protocol error at write(): unknown command %llx!\n",
-			   recv_type);
-		return -EOPNOTSUPP;
-	}
-
-	// Type of the message is received
-	if (recv_type == MEDUSA_COMM_AUTHANSWER) {
-		if (count != MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE) {
-			l4_record_malformed_message(true, recv_type);
-			up_read(&lightswitch);
-			return -EMSGSIZE;
-		}
-		if (__copy_from_user(recv_buf, buf, sizeof(int16_t) + sizeof(MCPptr_t))) {
-			up_read(&lightswitch);
-			med_pr_err("write: can't copy buffer\n");
-			return -EFAULT;
-		}
-		buf += sizeof(int16_t) + sizeof(MCPptr_t);
-		count -= sizeof(int16_t) + sizeof(MCPptr_t);
-
-		id = get_unaligned((u64 *)recv_buf);
-		answer = get_unaligned((s16 *)(recv_buf + sizeof(MCPptr_t)));
-		answ_result = medusa_comm_validate_authanswer(
-			MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE,
-			answer, true);
-		if (answ_result == -EINVAL)
-			l4_record_protocol_error(MEDUSA_PROTOCOL_INVALID_ANSWERS,
-						 true, recv_type, true, id,
-						 answ_result);
-		if (!answ_result)
-			gen =
-				(u64)READ_ONCE(medusa_authserver_magic);
-		if (!answ_result)
-			answ_result = medusa_pending_request_complete(id, gen, answer);
-		if (answ_result) {
-			l4_record_request_error(recv_type, id, answ_result);
-			up_read(&lightswitch);
-			med_pr_err("decision_answer: invalid answer for request %llx: %d\n",
-				   id, answ_result);
-			return answ_result;
-		}
-		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_REPLIES);
-		med_pr_debug("answer received for %llx\n",
-			     id);
-
-	} else if (recv_type == MEDUSA_COMM_AUTHREQUEST_PROGRESS) {
-		if (count != MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE) {
-			l4_record_malformed_message(true, recv_type);
-			up_read(&lightswitch);
-			return -EMSGSIZE;
-		}
-		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t))) {
-			up_read(&lightswitch);
-			return -EFAULT;
-		}
-
-		id = get_unaligned((u64 *)recv_buf);
-		gen = (u64)READ_ONCE(medusa_authserver_magic);
-		answ_result = medusa_pending_request_renew(id, gen);
-		if (answ_result) {
-			l4_record_request_error(recv_type, id, answ_result);
-			up_read(&lightswitch);
-			med_pr_err("decision_progress: invalid request %llx: %d\n",
-				   id, answ_result);
-			return answ_result;
-		}
-		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_LEASE_RENEWALS);
-		med_pr_debug("decision lease renewed for %llx\n", id);
-
-	} else if (recv_type == MEDUSA_COMM_FALLBACK_POLICY) {
-		u8 fallback_policy;
-
-		if (count != MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE) {
-			l4_record_malformed_message(true, recv_type);
-			up_read(&lightswitch);
-			return -EMSGSIZE;
-		}
-		if (__copy_from_user(recv_buf, buf, count)) {
-			up_read(&lightswitch);
-			return -EFAULT;
-		}
-		id = get_unaligned((u64 *)recv_buf);
-		fallback_policy = recv_buf[sizeof(MCPptr_t)];
-		answ_result = medusa_comm_validate_fallback_policy(
-			count, fallback_policy);
-		if (!answ_result)
-			answ_result = med_authserver_stage_fallback_policy(
-				&chardev_medusa, id, fallback_policy);
-		if (answ_result) {
-			l4_record_protocol_error(
-				MEDUSA_PROTOCOL_MALFORMED_MESSAGES, true,
-				recv_type, true, id, answ_result);
-			up_read(&lightswitch);
-			return answ_result;
-		}
-
-	} else if (recv_type == MEDUSA_COMM_FETCH_REQUEST ||
-			recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
-		if (__copy_from_user(recv_buf, buf, sizeof(MCPptr_t)*2)) {
-			up_read(&lightswitch);
-			med_pr_err("write: can't copy buffer\n");
-			return -EFAULT;
-		}
-		buf += sizeof(MCPptr_t)*2;
-		count -= sizeof(MCPptr_t)*2;
-
-		cl = med_get_kclass_by_pointer(
-				*(struct medusa_kclass_s **)(recv_buf) // posibility to decrypt JK march 2015
-				);
-		if (!cl) {
-			med_pr_err("Protocol error at write(): unknown kclass 0x%p!\n",
-				(void *)(*(MCPptr_t *)(recv_buf)));
-			up_read(&lightswitch);
-			return -ENOENT;
-		}
-		kclass_buf = (char *) med_cache_alloc_size(cl->kobject_size);
-		if (!kclass_buf) {
-			up_read(&lightswitch);
-			med_pr_err("write: OOM while `kclass_buf` alloc\n");
-			return -ENOMEM;
-		}
-		if (__copy_from_user(kclass_buf, buf, cl->kobject_size)) {
-			med_cache_free(kclass_buf);
-			up_read(&lightswitch);
-			med_pr_err("write: can't copy buffer\n");
-			return -EFAULT;
-		}
-		buf += cl->kobject_size;
-		count -= cl->kobject_size;
-
-		// if (atomic_read(&fetch_requests) || atomic_read(&update_requests)) {
-		//	/* not so much to do... */
-		//	med_put_kclass(answ_kclass);
-		//     // ked si to uzivatel precita, tak urob put - tam, kde sa rusi objekt
-		// }
-
-		answ_kclassid = (*(MCPptr_t *)(recv_buf));
-		answ_seq = *(((MCPptr_t *)(recv_buf))+1);
-
-
-		if (recv_type == MEDUSA_COMM_FETCH_REQUEST) {
-			if (cl->fetch)
-				answ_kobj = cl->fetch((struct medusa_kobject_s *)
-						kclass_buf);
-			else {
-				answ_kobj = NULL;
-				med_cache_free(kclass_buf);
-			}
-		} else {
-			if (cl->update)
-				answ_result = cl->update(
-						(struct medusa_kobject_s *)kclass_buf);
-			else
-				answ_result = MED_ERR;
-			med_cache_free(kclass_buf);
-		}
-		// Dynamic telemem structure for fetch/update
-		tele_mem_write = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*6);
-		if (!tele_mem_write) {
-			med_cache_free(kclass_buf);
-			up_read(&lightswitch);
-			med_pr_err("write: OOM while `tele_mem_write` alloc");
-			return -ENOMEM;
-		}
-		local_tele_item = (struct tele_item *) med_cache_alloc_size(sizeof(struct tele_item));
-		if (!local_tele_item) {
-			med_cache_free(tele_mem_write);
-			med_cache_free(kclass_buf);
-			up_read(&lightswitch);
-			med_pr_err("write: OOM while `local_tele_item` alloc");
-			return -ENOMEM;
-		}
-		local_tele_item->size = 0;
-		tele_mem_write[0].opcode = tp_PUTPtr;
-		tele_mem_write[0].args.putPtr.what = 0;
-		local_tele_item->size += sizeof(MCPptr_t);
-		tele_mem_write[1].opcode = tp_PUT32;
-		if (recv_type == MEDUSA_COMM_FETCH_REQUEST) { /* fetch */
-			tele_mem_write[1].args.put32.what = answ_kobj ?
-				MEDUSA_COMM_FETCH_ANSWER : MEDUSA_COMM_FETCH_ERROR;
-		} else { /* update */
-			tele_mem_write[1].args.put32.what = MEDUSA_COMM_UPDATE_ANSWER;
-		}
-		local_tele_item->size += sizeof(uint32_t);
-		tele_mem_write[2].opcode = tp_PUTPtr;
-		tele_mem_write[2].args.putPtr.what = (MCPptr_t)answ_kclassid;
-		local_tele_item->size += sizeof(MCPptr_t);
-		tele_mem_write[3].opcode = tp_PUTPtr;
-		tele_mem_write[3].args.putPtr.what = (MCPptr_t)answ_seq;
-		local_tele_item->size += sizeof(MCPptr_t);
-		if (recv_type == MEDUSA_COMM_UPDATE_REQUEST) {
-			//med_pr_debug("answering update %llu\n", answ_seq);
-			tele_mem_write[4].opcode = tp_PUT32;
-			tele_mem_write[4].args.put32.what = answ_result;
-			local_tele_item->size += sizeof(uint32_t);
-			tele_mem_write[5].opcode = tp_HALT;
-		} else if (answ_kobj) {
-			tele_mem_write[4].opcode = tp_CUTNPASTE;
-			tele_mem_write[4].args.cutnpaste.from = (void *)answ_kobj;
-			tele_mem_write[4].args.cutnpaste.count = cl->kobject_size;
-			local_tele_item->size += cl->kobject_size;
-			tele_mem_write[5].opcode = tp_HALT;
-		} else
-			tele_mem_write[4].opcode = tp_HALT;
-		med_put_kclass(cl); /* slightly too soon */ /* TODO Find out what is this */
-		local_tele_item->tele = tele_mem_write;
-		local_tele_item->post = post_write;
-		down(&queue_lock);
-		list_add(&(local_tele_item->list), &tele_queue);
-		up(&queue_lock);
-		up(&queue_items);
 		/*
-		 * Increment counters right after inserting data into teleport
-		 * to avoid data processing if they are not ready yet: authserver
-		 * can be woken up from another parts of this module, too.
+		 * A delegated hook runs in the originating task.  Fatal-signal
+		 * wakeup is therefore the task-exit cancellation point.
 		 */
-		if (recv_type == MEDUSA_COMM_FETCH_REQUEST) /* fetch */
-			atomic_inc(&fetch_requests);
-		else /* update */
-			atomic_inc(&update_requests);
-		wake_up(&userspace_chardev);
-	} else if (recv_type == MEDUSA_COMM_READY_ANSWER) {
-		if (count) {
-			l4_record_malformed_message(true, recv_type);
-			up_read(&lightswitch);
+		cancel = medusa_v4_frame_new(
+			MEDUSA_MSG_DECISION_CANCEL, pending.id, generation, 0);
+		if (cancel)
+			medusa_v4_queue(cancel);
+	}
+	return answer;
+}
+
+static bool medusa_v4_tlv_known(u16 type)
+{
+	return (type >= MEDUSA_TLV_MIN_VERSION &&
+		type <= MEDUSA_TLV_STATE) ||
+	       (type >= MEDUSA_TLV_CLASS_ID &&
+		type <= MEDUSA_TLV_ENFORCEMENT) ||
+	       (type >= MEDUSA_TLV_FALLBACK_POLICY &&
+		type <= MEDUSA_TLV_STATUS) ||
+	       (type >= MEDUSA_TLV_ERROR_CODE &&
+		type <= MEDUSA_TLV_OFFENDING_TYPE);
+}
+
+static int medusa_v4_validate_frame(const u8 *data, size_t count)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	size_t payload_length;
+	size_t offset;
+
+	if (count < MEDUSA_FRAME_HEADER_SIZE)
+		return -EMSGSIZE;
+	if (le16_to_cpu(header->version) != MEDUSA_PROTOCOL_VERSION)
+		return -EPROTONOSUPPORT;
+	if (le32_to_cpu(header->flags) & ~MEDUSA_FRAME_F_REQUIRED_MASK)
+		return -EINVAL;
+	if (header->reserved)
+		return -EINVAL;
+	payload_length = le32_to_cpu(header->payload_length);
+	if (payload_length > MEDUSA_FRAME_MAX_PAYLOAD ||
+	    payload_length != count - MEDUSA_FRAME_HEADER_SIZE)
+		return -EMSGSIZE;
+	offset = MEDUSA_FRAME_HEADER_SIZE;
+	while (offset < count) {
+		const struct medusa_tlv *tlv;
+		size_t length;
+		size_t aligned;
+		size_t index;
+		u16 type;
+		u16 flags;
+
+		if (count - offset < MEDUSA_TLV_HEADER_SIZE)
 			return -EMSGSIZE;
-		}
-		/* register auth server */
-		medusa_server_health_mark_healthy(&constable_health);
-		if (med_register_authserver(&chardev_medusa) < 0) {
-			medusa_server_health_mark_unhealthy(
-				&constable_health, MEDUSA_HEALTH_DISCONNECTED);
-			med_pr_warn("Failed to register auth server: "
-				    "no decision request will be send to it!");
-			up_read(&lightswitch);
-			return -EPERM;
-		}
-		med_pr_info("authorization server circuit breaker closed\n");
-		set_auth_server_ready();
+		tlv = (const struct medusa_tlv *)(data + offset);
+		length = le32_to_cpu(tlv->length);
+		type = le16_to_cpu(tlv->type);
+		flags = le16_to_cpu(tlv->flags);
+		if (flags & ~(MEDUSA_TLV_F_REQUIRED | MEDUSA_TLV_F_ARRAY))
+			return -EINVAL;
+		if (length < MEDUSA_TLV_HEADER_SIZE)
+			return -EMSGSIZE;
+		aligned = MEDUSA_TLV_ALIGN_UP(length);
+		if (aligned < length || aligned > count - offset)
+			return -EMSGSIZE;
+		if (!medusa_v4_tlv_known(type) &&
+		    (flags & MEDUSA_TLV_F_REQUIRED))
+			return -EOPNOTSUPP;
+		for (index = length; index < aligned; index++)
+			if (data[offset + index])
+				return -EINVAL;
+		offset += aligned;
 	}
-	up_read(&lightswitch);
-	return orig_count;
+	return offset == count ? 0 : -EMSGSIZE;
 }
 
-/*
- * POLL()
- */
-static unsigned int user_poll(struct file *filp, poll_table *wait)
+static const void *medusa_v4_find_tlv(const u8 *data, size_t count, u16 type,
+				      size_t *value_length, bool required)
 {
-	if (!am_i_constable())
-		return -EPERM;
+	size_t offset = MEDUSA_FRAME_HEADER_SIZE;
+	const void *found = NULL;
 
-	if (!atomic_read(&constable_present))
-		return -EPIPE;
-	poll_wait(filp, &userspace_chardev, wait);
-	if (teleport.cycle != tpc_HALT) {
-		return POLLIN | POLLRDNORM;
-	} else if (atomic_read(&fetch_requests) || atomic_read(&update_requests) ||
-		   atomic_read(&announce_ready) || atomic_read(&questions)) {
-		return POLLIN | POLLRDNORM;
-	} else if (atomic_read(&questions_waiting)) {
-		return POLLOUT | POLLWRNORM;
+	while (offset < count) {
+		const struct medusa_tlv *tlv =
+			(const struct medusa_tlv *)(data + offset);
+		size_t length = le32_to_cpu(tlv->length);
+
+		if (le16_to_cpu(tlv->type) == type) {
+			if (found)
+				return ERR_PTR(-EEXIST);
+			found = (const u8 *)tlv + MEDUSA_TLV_HEADER_SIZE;
+			*value_length = length - MEDUSA_TLV_HEADER_SIZE;
+		}
+		offset += MEDUSA_TLV_ALIGN_UP(length);
 	}
-	// userspace_chardev wakes up only when adding teleport to the queue
-	// for user to read
-	return POLLOUT | POLLWRNORM;
+	if (!found && required)
+		return ERR_PTR(-ENOENT);
+	return found;
 }
 
-/*
- * OPEN()
- */
-static int user_open(struct inode *inode, struct file *file)
+static int medusa_v4_get_u8(const u8 *data, size_t count, u16 type, u8 *value)
 {
-	int retval = -EPERM;
-	struct teleport_insn_s *tele_mem_open = NULL;
-	struct tele_item *local_tele_item;
+	size_t length = 0;
+	const u8 *wire = medusa_v4_find_tlv(data, count, type, &length, true);
 
-	//MOD_INC_USE_COUNT; Not needed anymore JK
+	if (IS_ERR(wire))
+		return PTR_ERR(wire);
+	if (length != sizeof(*wire))
+		return -EMSGSIZE;
+	*value = *wire;
+	return 0;
+}
 
-	down(&constable_openclose);
-	if (atomic_read(&constable_present))
+static int medusa_v4_get_u16(const u8 *data, size_t count, u16 type,
+			     u16 *value)
+{
+	size_t length = 0;
+	const __le16 *wire =
+		medusa_v4_find_tlv(data, count, type, &length, true);
+
+	if (IS_ERR(wire))
+		return PTR_ERR(wire);
+	if (length != sizeof(*wire))
+		return -EMSGSIZE;
+	*value = get_unaligned_le16(wire);
+	return 0;
+}
+
+static int medusa_v4_get_u32(const u8 *data, size_t count, u16 type,
+			     u32 *value)
+{
+	size_t length = 0;
+	const __le32 *wire =
+		medusa_v4_find_tlv(data, count, type, &length, true);
+
+	if (IS_ERR(wire))
+		return PTR_ERR(wire);
+	if (length != sizeof(*wire))
+		return -EMSGSIZE;
+	*value = get_unaligned_le32(wire);
+	return 0;
+}
+
+static int medusa_v4_get_u64(const u8 *data, size_t count, u16 type,
+			     u64 *value)
+{
+	size_t length = 0;
+	const __le64 *wire =
+		medusa_v4_find_tlv(data, count, type, &length, true);
+
+	if (IS_ERR(wire))
+		return PTR_ERR(wire);
+	if (length != sizeof(*wire))
+		return -EMSGSIZE;
+	*value = get_unaligned_le64(wire);
+	return 0;
+}
+
+static int medusa_v4_send_simple(u16 type, u64 request_id, u64 generation)
+{
+	struct medusa_v4_frame *frame =
+		medusa_v4_frame_new(type, request_id, generation, 0);
+
+	if (!frame)
+		return -ENOMEM;
+	return medusa_v4_queue(frame);
+}
+
+static int medusa_v4_handle_hello(const u8 *data, size_t count)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	struct medusa_v4_class *class;
+	struct medusa_v4_event *event;
+	struct medusa_v4_frame *frame;
+	u64 required_features;
+	u64 optional_features;
+	u16 min_version;
+	u16 max_version;
+	int error;
+
+	if (le64_to_cpu(header->request_id) ||
+	    le64_to_cpu(header->policy_generation))
+		return -EINVAL;
+	error = medusa_v4_get_u16(
+		data, count, MEDUSA_TLV_MIN_VERSION, &min_version);
+	error = error ?: medusa_v4_get_u16(
+		data, count, MEDUSA_TLV_MAX_VERSION, &max_version);
+	error = error ?: medusa_v4_get_u64(
+		data, count, MEDUSA_TLV_REQUIRED_FEATURES, &required_features);
+	error = error ?: medusa_v4_get_u64(
+		data, count, MEDUSA_TLV_OPTIONAL_FEATURES, &optional_features);
+	if (error)
+		return error;
+	if (min_version > MEDUSA_PROTOCOL_VERSION ||
+	    max_version < MEDUSA_PROTOCOL_VERSION)
+		return -EPROTONOSUPPORT;
+	if (required_features & ~MEDUSA_SUPPORTED_FEATURES)
+		return -EOPNOTSUPP;
+	v4_session.enabled_features =
+		required_features | (optional_features & MEDUSA_SUPPORTED_FEATURES);
+	v4_session.expected_generation =
+		(u64)READ_ONCE(medusa_authserver_magic) + 1;
+	v4_session.state = MEDUSA_STATE_DEFINITIONS;
+	med_authserver_set_state(&medusa_v4_authserver,
+				 MEDUSA_AUTHSERVER_DEFINITIONS);
+
+	frame = medusa_v4_frame_new(
+		MEDUSA_MSG_HELLO_ACK, 0, v4_session.expected_generation, 48);
+	if (!frame)
+		return -ENOMEM;
+	error = medusa_v4_frame_add_u16(
+		frame, MEDUSA_TLV_MIN_VERSION, MEDUSA_PROTOCOL_VERSION);
+	error = error ?: medusa_v4_frame_add_u16(
+		frame, MEDUSA_TLV_MAX_VERSION, MEDUSA_PROTOCOL_VERSION);
+	error = error ?: medusa_v4_frame_add_u64(
+		frame, MEDUSA_TLV_ENABLED_FEATURES, v4_session.enabled_features);
+	error = error ?: medusa_v4_frame_add_u16(
+		frame, MEDUSA_TLV_STATE, MEDUSA_STATE_DEFINITIONS);
+	if (error) {
+		medusa_v4_frame_free(frame);
+		return error;
+	}
+	error = medusa_v4_queue(frame);
+	if (error)
+		return error;
+	list_for_each_entry(class, &v4_session.classes, node) {
+		frame = medusa_v4_class_definition_locked(class);
+		if (!frame)
+			return -ENOMEM;
+		error = medusa_v4_queue(frame);
+		if (error)
+			return error;
+	}
+	list_for_each_entry(event, &v4_session.events, node) {
+		frame = medusa_v4_event_definition_locked(event);
+		if (!frame)
+			return -ENOMEM;
+		error = medusa_v4_queue(frame);
+		if (error)
+			return error;
+	}
+	return medusa_v4_send_simple(
+		MEDUSA_MSG_DEFINITIONS_DONE, 0, v4_session.expected_generation);
+}
+
+static int medusa_v4_handle_policy_begin(const u8 *data, size_t count)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	struct medusa_v4_event *event;
+
+	if (count != MEDUSA_FRAME_HEADER_SIZE)
+		return -EMSGSIZE;
+	if (le64_to_cpu(header->request_id) ||
+	    le64_to_cpu(header->policy_generation) !=
+		    v4_session.expected_generation)
+		return -ESTALE;
+	list_for_each_entry(event, &v4_session.events, node)
+		event->policy_staged = false;
+	v4_session.state = MEDUSA_STATE_POLICY_INSTALL;
+	med_authserver_set_state(&medusa_v4_authserver,
+				 MEDUSA_AUTHSERVER_POLICY_INSTALL);
+	return 0;
+}
+
+static int medusa_v4_handle_policy_event(const u8 *data, size_t count)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	struct medusa_v4_event *event;
+	u32 event_id;
+	u8 policy;
+	int error;
+
+	if (le64_to_cpu(header->request_id) ||
+	    le64_to_cpu(header->policy_generation) !=
+		    v4_session.expected_generation)
+		return -ESTALE;
+	error = medusa_v4_get_u32(data, count, MEDUSA_TLV_EVENT_ID, &event_id);
+	error = error ?: medusa_v4_get_u8(
+		data, count, MEDUSA_TLV_FALLBACK_POLICY, &policy);
+	if (error)
+		return error;
+	if (policy > MEDUSA_FALLBACK_ONLINE_REQUIRED)
+		return -EINVAL;
+	event = medusa_v4_find_event_id_locked(event_id);
+	if (!event)
+		return -ENOENT;
+	if (event->policy_staged)
+		return -EALREADY;
+	error = med_authserver_stage_fallback_policy(
+		&medusa_v4_authserver, event->event, policy);
+	if (!error)
+		event->policy_staged = true;
+	return error;
+}
+
+static int medusa_v4_handle_policy_commit(const u8 *data, size_t count)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	struct medusa_v4_event *event;
+	int error;
+
+	if (count != MEDUSA_FRAME_HEADER_SIZE)
+		return -EMSGSIZE;
+	if (le64_to_cpu(header->request_id) ||
+	    le64_to_cpu(header->policy_generation) !=
+		    v4_session.expected_generation)
+		return -ESTALE;
+	list_for_each_entry(event, &v4_session.events, node)
+		if (!event->policy_staged)
+			return -ENODATA;
+	error = med_register_authserver(&medusa_v4_authserver);
+	if (error)
+		return error;
+	if ((u64)READ_ONCE(medusa_authserver_magic) !=
+	    v4_session.expected_generation) {
+		med_unregister_authserver(&medusa_v4_authserver);
+		return -ESTALE;
+	}
+	medusa_server_health_mark_healthy(&constable_health);
+	v4_session.state = MEDUSA_STATE_READY;
+	set_auth_server_ready();
+	return medusa_v4_send_simple(
+		MEDUSA_MSG_POLICY_READY, 0, v4_session.expected_generation);
+}
+
+static int medusa_v4_handle_reply(const u8 *data, size_t count)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	u64 request_id = le64_to_cpu(header->request_id);
+	u64 generation = le64_to_cpu(header->policy_generation);
+	u16 wire_answer;
+	s16 answer;
+	int error;
+
+	if (!request_id || generation != v4_session.expected_generation)
+		return -ESTALE;
+	error = medusa_v4_get_u16(data, count, MEDUSA_TLV_ANSWER, &wire_answer);
+	if (error)
+		return error;
+	answer = (s16)wire_answer;
+	if (answer != MED_ERR && answer != MED_DENY && answer != MED_ALLOW)
+		return -EINVAL;
+	error = medusa_pending_request_complete(request_id, generation, answer);
+	if (!error)
+		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_REPLIES);
+	return error;
+}
+
+static int medusa_v4_handle_progress(const u8 *data, size_t count)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	u64 request_id = le64_to_cpu(header->request_id);
+	u64 generation = le64_to_cpu(header->policy_generation);
+	int error;
+
+	if (count != MEDUSA_FRAME_HEADER_SIZE)
+		return -EMSGSIZE;
+	if (!request_id || generation != v4_session.expected_generation)
+		return -ESTALE;
+	error = medusa_pending_request_renew(request_id, generation);
+	if (!error)
+		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_LEASE_RENEWALS);
+	return error;
+}
+
+static int medusa_v4_handle_object(const u8 *data, size_t count, bool update)
+{
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	struct medusa_v4_class *class;
+	struct medusa_v4_frame *reply;
+	struct medusa_kobject_s *fetched = NULL;
+	void *key = NULL;
+	const u8 *object_data;
+	u8 *snapshot = NULL;
+	size_t object_length = 0;
+	u64 request_id = le64_to_cpu(header->request_id);
+	u64 generation = le64_to_cpu(header->policy_generation);
+	u32 class_id;
+	s32 status = 0;
+	__le32 wire_status;
+	int error;
+
+	if (!request_id || generation != v4_session.expected_generation)
+		return -ESTALE;
+	error = medusa_v4_get_u32(data, count, MEDUSA_TLV_CLASS_ID, &class_id);
+	object_data = medusa_v4_find_tlv(
+		data, count, MEDUSA_TLV_OBJECT_DATA, &object_length, true);
+	if (IS_ERR(object_data))
+		error = error ?: PTR_ERR(object_data);
+	if (error)
+		return error;
+	class = medusa_v4_find_class_id_locked(class_id);
+	if (!class)
+		return -ENOENT;
+	error = medusa_v4_restore(
+		class->class->attr, class->class->kobject_size, object_data,
+		object_length, &key);
+	if (error)
+		return error;
+	if (update) {
+		status = class->class->update ?
+			class->class->update(key) : MED_ERR;
+	} else {
+		fetched = class->class->fetch ?
+			class->class->fetch(key) : NULL;
+		if (!fetched)
+			status = -ENOENT;
+		else
+			error = medusa_v4_snapshot(
+				class->class->attr, class->class->kobject_size,
+				fetched, &snapshot);
+	}
+	kvfree(key);
+	if (error)
 		goto out;
-	medusa_server_health_mark_unhealthy(
-		&constable_health, MEDUSA_HEALTH_DISCONNECTED);
-
-	retval = -ENOMEM;
-	if (med_cache_register(sizeof(struct tele_item)))
-		goto out_free;
-	if (med_cache_register(sizeof(struct teleport_insn_s) * 2))
-		goto out_free;
-	if (med_cache_register(sizeof(struct teleport_insn_s) * 5))
-		goto out_free;
-	if (med_cache_register(sizeof(struct teleport_insn_s) * 6))
-		goto out_free;
-	tele_mem_open = (struct teleport_insn_s *) med_cache_alloc_size(sizeof(struct teleport_insn_s)*3);
-	if (!tele_mem_open)
-		goto out_free;
-	local_tele_item = (struct tele_item *) med_cache_alloc_size(sizeof(struct tele_item));
-	if (!local_tele_item)
-		goto out_free;
-
-	constable = current;
-
-	teleport.cycle = tpc_HALT;
-	// Reset semaphores
-	sema_init(&user_read_lock, 1);
-	sema_init(&queue_items, 0);
-	sema_init(&queue_lock, 1);
-
-	tele_mem_open[0].opcode = tp_PUTPtr;
-	tele_mem_open[0].args.putPtr.what = (MCPptr_t)MEDUSA_COMM_GREETING;
-	tele_mem_open[1].opcode = tp_PUTPtr;
-	tele_mem_open[1].args.putPtr.what = (MCPptr_t)MEDUSA_COMM_VERSION;
-	local_tele_item->size = sizeof(MCPptr_t)*2;
-	tele_mem_open[2].opcode = tp_HALT;
-	local_tele_item->tele = tele_mem_open;
-	local_tele_item->post = med_cache_free;
-	down(&queue_lock);
-	list_add_tail(&local_tele_item->list, &tele_queue);
-	up(&queue_lock);
-	up(&queue_items);
-	wake_up(&userspace_chardev);
-
-	chardev_medusa.tgid = get_pid(task_tgid(current));
-
-	retval = med_register_authserver_prepare(&chardev_medusa);
-	if (retval < 0) {
-		med_pr_warn("%s: med_register_authserver_prepare() failed with %d",
-			    __func__, retval);
-		teleport_clear();
+	reply = medusa_v4_frame_new(
+		update ? MEDUSA_MSG_OBJECT_UPDATE_REPLY :
+			 MEDUSA_MSG_OBJECT_FETCH_REPLY,
+		request_id, generation,
+		32 + (snapshot ? class->class->kobject_size : 0));
+	if (!reply) {
+		error = -ENOMEM;
 		goto out;
 	}
-
-	retval = send_medusa_is_ready();
-	if (retval < 0) {
-		med_pr_warn("%s: send_medusa_is_ready() failed with %d",
-			    __func__, retval);
-		teleport_clear();
-		goto out;
-	}
-
-	retval = med_authserver_handshake_begin(&chardev_medusa);
-	if (retval < 0) {
-		med_pr_warn("%s: authorization-server handshake already active\n",
-			    __func__);
-		teleport_clear();
-		goto out;
-	}
-
-	/* this must be the last thing done */
-	atomic_set(&constable_present, 1);
+	wire_status = cpu_to_le32(status);
+	error = medusa_v4_frame_add(
+		reply, MEDUSA_TLV_STATUS, 0, &wire_status, sizeof(wire_status));
+	if (!error && snapshot)
+		error = medusa_v4_frame_add(
+			reply, MEDUSA_TLV_OBJECT_DATA, 0, snapshot,
+			class->class->kobject_size);
+	if (error)
+		medusa_v4_frame_free(reply);
+	else
+		error = medusa_v4_queue(reply);
 out:
-	up(&constable_openclose);
-	return retval; /* 0 is success */
-
-out_free:
-	if (tele_mem_open)
-		med_cache_free(tele_mem_open);
-	goto out;
+	if (fetched)
+		med_cache_free(fetched);
+	kvfree(snapshot);
+	return error;
 }
 
-/*
- * CLOSE()
- */
-static int user_release(struct inode *inode, struct file *file)
+static int medusa_v4_dispatch(const u8 *data, size_t count)
 {
-	DECLARE_WAITQUEUE(waitqueue, current);
+	const struct medusa_frame_header *header =
+		(const struct medusa_frame_header *)data;
+	u16 type = le16_to_cpu(header->type);
 
-	// Operation close has to wait for read and write system calls to
-	// finish.
-	// Close has priority, so starvation can't occur. This is guaranteed by
-	// the kernel if PREEMPT_RT is not set.
-	down_write(&lightswitch);
-
-	if (!atomic_read(&constable_present)) {
-		up_write(&lightswitch);
-		return 0;
+	switch (v4_session.state) {
+	case MEDUSA_STATE_HANDSHAKE:
+		return type == MEDUSA_MSG_HELLO ?
+			medusa_v4_handle_hello(data, count) : -EPROTO;
+	case MEDUSA_STATE_DEFINITIONS:
+		return type == MEDUSA_MSG_POLICY_BEGIN ?
+			medusa_v4_handle_policy_begin(data, count) : -EPROTO;
+	case MEDUSA_STATE_POLICY_INSTALL:
+		if (type == MEDUSA_MSG_POLICY_EVENT)
+			return medusa_v4_handle_policy_event(data, count);
+		if (type == MEDUSA_MSG_POLICY_COMMIT)
+			return medusa_v4_handle_policy_commit(data, count);
+		return -EPROTO;
+	case MEDUSA_STATE_READY:
+		if (type == MEDUSA_MSG_DECISION_REPLY)
+			return medusa_v4_handle_reply(data, count);
+		if (type == MEDUSA_MSG_DECISION_PROGRESS)
+			return medusa_v4_handle_progress(data, count);
+		if (type == MEDUSA_MSG_OBJECT_FETCH)
+			return medusa_v4_handle_object(data, count, false);
+		if (type == MEDUSA_MSG_OBJECT_UPDATE)
+			return medusa_v4_handle_object(data, count, true);
+		return -EPROTO;
+	case MEDUSA_STATE_DEGRADED:
+		return -ESHUTDOWN;
+	default:
+		return -ENOTCONN;
 	}
+}
 
-	/* this function is invoked also from context of process which requires decision
-	 * after 5s of inactivity of our brave user space authorization server constable;
-	 * so we comment next two lines ;)
-	 */
-	/*
-	 * if (!am_i_constable())
-	 * return 0;
-	 */
-	mutex_lock(&registration_lock);
-	if (evtypes_registered) {
-		struct medusa_evtype_s *p1, *p2;
+static ssize_t medusa_v4_read(struct file *file, char __user *buffer,
+			      size_t count, loff_t *position)
+{
+	struct medusa_v4_frame *frame;
+	unsigned long flags;
+	ssize_t result;
+	int error;
 
-		p1 = evtypes_registered;
-		do {
-			p2 = p1;
-			p1 = (struct medusa_evtype_s *)p1->cinfo;
-			// med_put_evtype(p2);
-		} while (p1);
+	if (file->private_data != &v4_session)
+		return -EBADF;
+	if (*position)
+		*position = 0;
+	error = mutex_lock_interruptible(&v4_session.read_lock);
+	if (error)
+		return error;
+	for (;;) {
+		spin_lock_irqsave(&v4_session.queue_lock, flags);
+		if (!list_empty(&v4_session.frames))
+			break;
+		if (!v4_session.connected) {
+			spin_unlock_irqrestore(
+				&v4_session.queue_lock, flags);
+			result = -EPIPE;
+			goto out_unlock;
+		}
+		spin_unlock_irqrestore(&v4_session.queue_lock, flags);
+		if (file->f_flags & O_NONBLOCK) {
+			result = -EAGAIN;
+			goto out_unlock;
+		}
+		error = wait_event_interruptible(
+			v4_session.read_wait,
+			!READ_ONCE(v4_session.connected) ||
+			!list_empty_careful(&v4_session.frames));
+		if (error) {
+			result = error;
+			goto out_unlock;
+		}
 	}
-	evtypes_registered = NULL;
-	if (kclasses_registered) {
-		struct medusa_kclass_s *p1, *p2;
-
-		p1 = kclasses_registered;
-		do {
-			p2 = p1;
-			p1 = (struct medusa_kclass_s *)p1->cinfo;
-			med_put_kclass(p2);
-		} while (p1);
+	frame = list_first_entry(
+		&v4_session.frames, struct medusa_v4_frame, node);
+	if (count < frame->length) {
+		spin_unlock_irqrestore(&v4_session.queue_lock, flags);
+		result = -EMSGSIZE;
+		goto out_unlock;
 	}
-	kclasses_registered = NULL;
-	mutex_unlock(&registration_lock);
-	atomic_set(&fetch_requests, 0);
-	atomic_set(&update_requests, 0);
+	list_del(&frame->node);
+	spin_unlock_irqrestore(&v4_session.queue_lock, flags);
+	if (copy_to_user(buffer, frame->data, frame->length))
+		result = -EFAULT;
+	else
+		result = frame->length;
+	medusa_v4_frame_free(frame);
+out_unlock:
+	mutex_unlock(&v4_session.read_lock);
+	return result;
+}
 
-	med_pr_info("Security daemon unregistered.\n");
-#if defined(CONFIG_MEDUSA_HALT)
-	med_pr_warn("No security daemon, system halted.\n");
-	notifier_call_chain(&reboot_notifier_list, SYS_HALT, NULL);
-	machine_halt();
-#elif defined(CONFIG_MEDUSA_REBOOT)
-	med_pr_warn("No security daemon, rebooting system.\n");
-	ctrl_alt_del();
-#endif
-	add_wait_queue(&close_wait, &waitqueue);
-	med_unregister_authserver(&chardev_medusa);
-	down(&constable_openclose);
+static ssize_t medusa_v4_write(struct file *file, const char __user *buffer,
+			       size_t count, loff_t *position)
+{
+	u8 *data;
+	int error;
 
-	// All threads waiting for an answer will get an error, order of these
-	// functions is important!
-	atomic_set(&constable_present, 0);
+	if (file->private_data != &v4_session)
+		return -EBADF;
+	if (count > MEDUSA_FRAME_MAX_SIZE)
+		return -EMSGSIZE;
+	data = memdup_user(buffer, count);
+	if (IS_ERR(data))
+		return PTR_ERR(data);
+	error = medusa_v4_validate_frame(data, count);
+	if (error)
+		goto out;
+	error = mutex_lock_interruptible(&v4_session.write_lock);
+	if (error)
+		goto out;
+	mutex_lock(&v4_session.state_lock);
+	if (!v4_session.connected)
+		error = -EPIPE;
+	else
+		error = medusa_v4_dispatch(data, count);
+	mutex_unlock(&v4_session.state_lock);
+	mutex_unlock(&v4_session.write_lock);
+	if (error == -EPROTONOSUPPORT || error == -EOPNOTSUPP ||
+	    error == -EPROTO)
+		medusa_v4_mark_degraded(MEDUSA_HEALTH_PROTOCOL_ERROR);
+out:
+	kvfree(data);
+	if (error) {
+		medusa_protocol_counter_inc(MEDUSA_PROTOCOL_MALFORMED_MESSAGES);
+		return error;
+	}
+	return count;
+}
+
+static __poll_t medusa_v4_poll(struct file *file, poll_table *wait)
+{
+	__poll_t mask = EPOLLOUT | EPOLLWRNORM;
+	unsigned long flags;
+
+	poll_wait(file, &v4_session.read_wait, wait);
+	spin_lock_irqsave(&v4_session.queue_lock, flags);
+	if (!list_empty(&v4_session.frames))
+		mask |= EPOLLIN | EPOLLRDNORM;
+	if (!v4_session.connected)
+		mask |= EPOLLHUP;
+	spin_unlock_irqrestore(&v4_session.queue_lock, flags);
+	return mask;
+}
+
+static void medusa_v4_free_definitions(void)
+{
+	struct medusa_v4_class *class;
+	struct medusa_v4_class *class_temporary;
+	struct medusa_v4_event *event;
+	struct medusa_v4_event *event_temporary;
+
+	list_for_each_entry_safe(event, event_temporary,
+				 &v4_session.events, node) {
+		list_del(&event->node);
+		kfree(event);
+	}
+	list_for_each_entry_safe(class, class_temporary,
+				 &v4_session.classes, node) {
+		list_del(&class->node);
+		kfree(class);
+	}
+}
+
+static int medusa_v4_open(struct inode *inode, struct file *file)
+{
+	int error;
+
+	if (!capable(CAP_MAC_ADMIN))
+		return -EPERM;
+	mutex_lock(&v4_session.state_lock);
+	if (v4_session.connected) {
+		mutex_unlock(&v4_session.state_lock);
+		return -EBUSY;
+	}
+	medusa_v4_purge_frames();
+	medusa_v4_free_definitions();
+	v4_session.connected = true;
+	v4_session.state = MEDUSA_STATE_HANDSHAKE;
+	v4_session.enabled_features = 0;
+	v4_session.expected_generation = 0;
+	v4_session.next_class_id = 0;
+	v4_session.next_event_id = 0;
+	v4_session.owner_tgid = get_pid(task_tgid(current));
+	medusa_v4_authserver.tgid = get_pid(task_tgid(current));
+	file->private_data = &v4_session;
 	medusa_server_health_mark_unhealthy(
 		&constable_health, MEDUSA_HEALTH_DISCONNECTED);
-	put_pid(chardev_medusa.tgid);
-	chardev_medusa.tgid = NULL;
-	constable = NULL;
+	mutex_unlock(&v4_session.state_lock);
 
-	atomic_set(&questions, 0);
-	atomic_set(&questions_waiting, 0);
-	atomic_set(&announce_ready, 0);
+	error = med_register_authserver_prepare(&medusa_v4_authserver);
+	if (!error)
+		error = med_authserver_handshake_begin(&medusa_v4_authserver);
+	if (error) {
+		mutex_lock(&v4_session.state_lock);
+		v4_session.connected = false;
+		medusa_v4_free_definitions();
+		put_pid(v4_session.owner_tgid);
+		v4_session.owner_tgid = NULL;
+		put_pid(medusa_v4_authserver.tgid);
+		medusa_v4_authserver.tgid = NULL;
+		mutex_unlock(&v4_session.state_lock);
+		file->private_data = NULL;
+	}
+	return error;
+}
 
-	// Clear the teleport queue
-	teleport_clear();
-
+static int medusa_v4_release(struct inode *inode, struct file *file)
+{
+	if (file->private_data != &v4_session)
+		return 0;
+	mutex_lock(&v4_session.write_lock);
+	mutex_lock(&v4_session.state_lock);
+	v4_session.connected = false;
+	v4_session.state = MEDUSA_STATE_DISCONNECTED;
+	medusa_server_health_mark_unhealthy(
+		&constable_health, MEDUSA_HEALTH_DISCONNECTED);
+	mutex_unlock(&v4_session.state_lock);
+	med_unregister_authserver(&medusa_v4_authserver);
 	medusa_pending_request_cancel_all(MED_ERR);
-
-	up(&constable_openclose);
-	// wake up waiting processes, this has to be outside of constable_openclose
-	// lock because wake_up_all causes context switch (locking and unlocking
-	// cpu may not be the same)
-	if (am_i_constable()) {
-		get_task_struct(current);
-		set_current_state(TASK_UNINTERRUPTIBLE);
-		schedule();
-		put_task_struct(current);
-	} else
-		med_pr_crit("Authorization server is not responding.\n");
-	remove_wait_queue(&close_wait, &waitqueue);
-	//MOD_DEC_USE_COUNT; Not needed anymore? JK
-
-
-	teleport.cycle = tpc_HALT;
-	up_write(&lightswitch);
+	wake_up_all(&v4_session.read_wait);
+	medusa_v4_purge_frames();
+	mutex_lock(&v4_session.state_lock);
+	medusa_v4_free_definitions();
+	put_pid(v4_session.owner_tgid);
+	v4_session.owner_tgid = NULL;
+	put_pid(medusa_v4_authserver.tgid);
+	medusa_v4_authserver.tgid = NULL;
+	mutex_unlock(&v4_session.state_lock);
+	mutex_unlock(&v4_session.write_lock);
+	file->private_data = NULL;
 	return 0;
 }
 
-static struct class *medusa_class;
-static struct device *medusa_device;
+static const struct file_operations medusa_v4_fops = {
+	.owner = THIS_MODULE,
+	.open = medusa_v4_open,
+	.release = medusa_v4_release,
+	.read = medusa_v4_read,
+	.write = medusa_v4_write,
+	.poll = medusa_v4_poll,
+	.llseek = noop_llseek,
+};
 
-static int chardev_constable_init(void)
+static struct miscdevice medusa_v4_device = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "medusa",
+	.fops = &medusa_v4_fops,
+	.mode = 0600,
+};
+
+static int __init medusa_v4_init(void)
 {
-	med_pr_info("Registering L4 character device with major %d\n", MEDUSA_MAJOR);
-	if (register_chrdev(MEDUSA_MAJOR, MODULENAME, &fops)) {
-		med_pr_err("Cannot register character device with major %d\n", MEDUSA_MAJOR);
-		return -1;
-	}
-
-	medusa_class = class_create("medusa");
-	if (IS_ERR(medusa_class)) {
-		med_pr_err("Failed to register device class '%s'\n", "medusa");
-		return -1;
-	}
-
-	/* With a class, the easiest way to instantiate a device is to call device_create() */
-	medusa_device = device_create(medusa_class, NULL, MKDEV(MEDUSA_MAJOR, 0), NULL, "medusa");
-	if (IS_ERR(medusa_device)) {
-		med_pr_err("Failed to create device '%s'\n", "medusa");
-		return -1;
-	}
-	return 0;
+	mutex_init(&v4_session.state_lock);
+	mutex_init(&v4_session.read_lock);
+	mutex_init(&v4_session.write_lock);
+	spin_lock_init(&v4_session.queue_lock);
+	init_waitqueue_head(&v4_session.read_wait);
+	INIT_LIST_HEAD(&v4_session.frames);
+	INIT_LIST_HEAD(&v4_session.classes);
+	INIT_LIST_HEAD(&v4_session.events);
+	v4_session.state = MEDUSA_STATE_DISCONNECTED;
+	med_pr_info("registering protocol-v4 miscdevice /dev/medusa\n");
+	return misc_register(&medusa_v4_device);
 }
 
-static void chardev_constable_exit(void)
+static void __exit medusa_v4_exit(void)
 {
-	device_destroy(medusa_class, MKDEV(MEDUSA_MAJOR, 0));
-	class_unregister(medusa_class);
-	class_destroy(medusa_class);
-
-	unregister_chrdev(MEDUSA_MAJOR, MODULENAME);
+	misc_deregister(&medusa_v4_device);
 }
 
-module_init(chardev_constable_init);
-module_exit(chardev_constable_exit);
+module_init(medusa_v4_init);
+module_exit(medusa_v4_exit);
 MODULE_LICENSE("GPL");

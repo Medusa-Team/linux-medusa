@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include <generated/utsrelease.h>
+#include <linux/capability.h>
 #include <linux/fs.h>
 #include <linux/security.h>
 #include <linux/seq_file.h>
+#include <linux/uaccess.h>
 
 #include "l3/audit_schema.h"
 #include "l3/arch.h"
@@ -12,7 +14,7 @@
 #include "l3/protocol_stats.h"
 #include "l3/registry.h"
 #include "l3/securityfs.h"
-#include "l4/comm.h"
+#include <uapi/linux/medusa.h>
 
 static struct dentry *medusa_securityfs_dir;
 
@@ -35,7 +37,8 @@ static int medusa_status_show(struct seq_file *m, void *unused)
 		health = "unavailable";
 		health_reason = "disconnected";
 		policy_readiness = "unavailable";
-	} else if (status.server_state == MEDUSA_AUTHSERVER_HANDSHAKING) {
+	} else if (status.server_state != MEDUSA_AUTHSERVER_READY &&
+		   status.server_state != MEDUSA_AUTHSERVER_DEGRADED) {
 		authorization_server = "handshaking";
 		circuit_breaker = "not_ready";
 		health = "unavailable";
@@ -57,8 +60,7 @@ static int medusa_status_show(struct seq_file *m, void *unused)
 	}
 
 	seq_printf(m, "kernel_release=%s\n", UTS_RELEASE);
-	seq_printf(m, "protocol_version=%llu\n",
-		   (unsigned long long)MEDUSA_COMM_VERSION);
+	seq_printf(m, "protocol_version=%u\n", MEDUSA_PROTOCOL_VERSION);
 	seq_printf(m, "audit_schema_version=%u\n",
 		   MEDUSA_AUDIT_SCHEMA_VERSION);
 	seq_printf(m, "authorization_server=%s\n", authorization_server);
@@ -79,9 +81,10 @@ static int medusa_status_show(struct seq_file *m, void *unused)
 		   (unsigned long long)status.last_ready_policy_generation);
 	seq_printf(m, "pending_requests=%u\n",
 		   medusa_pending_request_count());
-	seq_printf(m, "pending_limit=%u\n", MEDUSA_PENDING_REQUEST_LIMIT);
+	seq_printf(m, "pending_limit=%u\n",
+		   medusa_pending_request_limit());
 	seq_printf(m, "decision_lease_ms=%u\n",
-		   CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS);
+		   medusa_decision_timeout_ms());
 	seq_printf(m, "protocol_replies=%llu\n",
 		   (unsigned long long)protocol.replies);
 	seq_printf(m, "protocol_lease_renewals=%llu\n",
@@ -146,6 +149,55 @@ static const struct file_operations medusa_classes_fops = {
 	.release = single_release,
 };
 
+static ssize_t medusa_control_read(struct file *file, char __user *buffer,
+				   size_t count, loff_t *position)
+{
+	unsigned int value = (uintptr_t)file->private_data ?
+		medusa_decision_timeout_ms() :
+		medusa_pending_request_limit();
+	char text[24];
+	int length;
+
+	length = scnprintf(text, sizeof(text), "%u\n", value);
+	return simple_read_from_buffer(buffer, count, position, text, length);
+}
+
+static ssize_t medusa_control_write(struct file *file,
+				    const char __user *buffer, size_t count,
+				    loff_t *position)
+{
+	unsigned int value;
+	int error;
+
+	if (!capable(CAP_MAC_ADMIN))
+		return -EPERM;
+	if (*position)
+		return -EINVAL;
+	error = kstrtouint_from_user(buffer, count, 10, &value);
+	if (error)
+		return error;
+	error = (uintptr_t)file->private_data ?
+		medusa_decision_timeout_set_ms(value) :
+		medusa_pending_request_set_limit(value);
+	if (error)
+		return error;
+	*position += count;
+	return count;
+}
+
+static int medusa_control_open(struct inode *inode, struct file *file)
+{
+	file->private_data = inode->i_private;
+	return 0;
+}
+
+static const struct file_operations medusa_control_fops = {
+	.open = medusa_control_open,
+	.read = medusa_control_read,
+	.write = medusa_control_write,
+	.llseek = noop_llseek,
+};
+
 bool medusa_securityfs_file(const struct file *file)
 {
 	return file->f_op == &medusa_status_fops ||
@@ -176,7 +228,19 @@ int __init medusa_securityfs_init(void)
 	if (IS_ERR(entry))
 		goto err;
 
-	med_pr_info("read-only status available in securityfs\n");
+	entry = securityfs_create_file("pending_limit", 0600,
+				       medusa_securityfs_dir, NULL,
+				       &medusa_control_fops);
+	if (IS_ERR(entry))
+		goto err;
+
+	entry = securityfs_create_file("decision_timeout_ms", 0600,
+				       medusa_securityfs_dir, (void *)1UL,
+				       &medusa_control_fops);
+	if (IS_ERR(entry))
+		goto err;
+
+	med_pr_info("status and privileged transport controls available in securityfs\n");
 	return 0;
 
 err:

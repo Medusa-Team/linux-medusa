@@ -98,6 +98,31 @@ static void pending_disconnect_completes_all_requests(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, 0U, medusa_pending_request_count());
 }
 
+static void pending_originator_cancel_removes_only_its_request(
+	struct kunit *test)
+{
+	struct medusa_pending_request cancelled;
+	struct medusa_pending_request survivor;
+
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_register(&cancelled, 8));
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_register(&survivor, 8));
+	KUNIT_EXPECT_EQ(test, 0,
+			medusa_pending_request_cancel(&cancelled, MED_ERR));
+	KUNIT_EXPECT_EQ(test, -ENOENT,
+			medusa_pending_request_complete(cancelled.id, 8,
+							MED_ALLOW));
+	KUNIT_EXPECT_EQ(test, 1U, medusa_pending_request_count());
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_pending_request_complete(survivor.id, 8,
+							MED_DENY));
+	KUNIT_EXPECT_EQ(test, MED_ERR,
+			medusa_pending_request_wait(&cancelled));
+	KUNIT_EXPECT_EQ(test, MED_DENY,
+			medusa_pending_request_wait(&survivor));
+}
+
 static void pending_request_table_is_bounded(struct kunit *test)
 {
 	struct medusa_pending_request *requests;
@@ -244,6 +269,7 @@ static struct kunit_case pending_test_cases[] = {
 	KUNIT_CASE(pending_request_rejects_wrong_generation),
 	KUNIT_CASE(pending_request_rejects_unknown_and_duplicate_replies),
 	KUNIT_CASE(pending_disconnect_completes_all_requests),
+	KUNIT_CASE(pending_originator_cancel_removes_only_its_request),
 	KUNIT_CASE(pending_request_table_is_bounded),
 	KUNIT_CASE(pending_request_timeout_removes_request),
 	KUNIT_CASE(pending_request_lease_can_be_renewed),

@@ -8,7 +8,7 @@
 #include <uapi/linux/lsm.h>
 
 #include "l4/auth_server.h"
-#include "l4/comm.h"
+#include <uapi/linux/medusa.h>
 #include "l3/registry.h"
 #include "l3/securityfs.h"
 #include "l3/arch.h"
