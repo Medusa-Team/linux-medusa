@@ -1,0 +1,34 @@
+MEDUSA_RESULT network create_allow PASS
+MEDUSA_RESULT network create_deny PASS
+MEDUSA_RESULT network unix_bind_deny PASS
+MEDUSA_RESULT network ipv6_connect_deny PASS
+MEDUSA_RESULT network unix_connect_deny PASS
+MEDUSA_RESULT network ipv4_bind_allow PASS
+MEDUSA_RESULT network listen_allow PASS
+MEDUSA_RESULT network listen_deny PASS
+MEDUSA_RESULT network unix_connect_allow PASS
+MEDUSA_RESULT network accept_allow PASS
+MEDUSA_RESULT network accept_deny PASS
+MEDUSA_RESULT network socketpair PASS
+MEDUSA_RESULT network send_allow PASS
+MEDUSA_RESULT network send_deny PASS
+MEDUSA_RESULT network receive_deny PASS
+MEDUSA_RESULT network receive_allow PASS
+MEDUSA_RESULT network complete PASS
+MEDUSA_EVENT getsocket
+MEDUSA_EVENT socket_create
+MEDUSA_EVENT socket_bind_access
+MEDUSA_EVENT socket_connect_access
+MEDUSA_EVENT socket_listen_access
+MEDUSA_EVENT socket_accept_access
+MEDUSA_EVENT socket_sendmsg_access
+MEDUSA_EVENT socket_recvmsg_access
+event=socket_create subject_class=process object_class=process
+event=socket_bind_access subject_class=process object_class=socket
+event=socket_connect_access subject_class=process object_class=socket
+event=socket_listen_access subject_class=process object_class=socket
+event=socket_accept_access subject_class=process object_class=socket
+event=socket_sendmsg_access subject_class=process object_class=socket
+event=socket_recvmsg_access subject_class=process object_class=socket
+class=socket enforcement=active
+!MEDUSA_RESULT network complete FAIL

@@ -41,6 +41,13 @@ The scenario also prints the securityfs event inventory for direct comparison
 of evaluations, cached checks, delegated decisions, fallbacks, and delegation
 context.
 
+The `network` scenario verifies the restored syscall-level socket subset. It
+requires delegated markers plus independent allow and `EACCES` results for
+create, bind, connect, listen, accept, send, and receive. IPv4, IPv6, and
+bounded abstract Unix-domain addresses are exercised. Packet/SKB hooks remain
+outside the supported subset. Merge `network.config` into the kernel test
+configuration before building it.
+
 The `lockdep` scenario inherits `access` and adds negative assertions for
 atomic sleeping, scheduling while atomic, recursive/circular locking,
 inconsistent lock state, unlock imbalance, and spinlock failures. Build its
