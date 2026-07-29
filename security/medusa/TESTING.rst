@@ -267,9 +267,13 @@ QEMU scenario coverage
   table, then proves both operations are denied without a Constable decision
   event. This is the non-sleepable RCU lookup path.
 
+``fs-create``
+  Exercises pre-inode regular-file create allow/deny through the lock-safe
+  domain cache, plus ``creat``, exclusive create, and create-through-open.
+
 ``access``
-  Exercises create/open/write/fcntl/chmod/chown/truncate, symlink/link/rename/
-  unlink, mknod, mkdir/rmdir, chroot, exec, fork, signals, setresuid, and the
+  Exercises open/write/fcntl/chmod/chown/truncate, symlink/link/rename/unlink,
+  mknod, mkdir/rmdir, chroot, exec, fork, signals, setresuid, and the
   message-queue, semaphore, and shared-memory operations exposed by the active
   LSM hooks.  It requires a Constable marker for every active access type
   exercised; an operation-level success without its event marker is not

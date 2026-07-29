@@ -48,6 +48,7 @@ Event                         LSM hook or dependency         Delegation     Stat
 ``open``                      ``file_open``                 conditional    Existing-file opens are sleepable; create/atomic-open
                                                                            paths can retain the parent inode ``i_rwsem``
 ``setresuid``                 ``task_fix_setuid``           sleepable      Prepared credentials, not yet committed
+``create``                    ``inode_create``              lock_bound     Parent directory ``i_rwsem``
 ``mknod``, ``mkdir``,         corresponding ``path_*``      lock_bound     Parent directory ``i_rwsem``
 ``symlink``, ``link``
 ``unlink``, ``rmdir``         corresponding ``path_*``      lock_bound     Parent directory ``i_rwsem``

@@ -1155,22 +1155,37 @@ static int medusa_v4_handle_policy_commit(const u8 *data, size_t count)
 		v4_session.expected_generation);
 	if (error)
 		return error;
+	/*
+	 * Initial registration advances the registry to the prepared generation
+	 * and exposes the server in one critical section. Publish the matching
+	 * cache first: it remains invisible while its generation is still in the
+	 * future, then becomes usable as soon as registration advances magic.
+	 */
+	if (!v4_session.replacing_policy)
+		medusa_decision_cache_publish(v4_session.expected_generation);
+	v4_session.state = MEDUSA_STATE_READY;
+	medusa_server_health_mark_healthy(&constable_health);
 	error = v4_session.replacing_policy ?
 		med_authserver_policy_replace_commit(&medusa_v4_authserver) :
 		med_register_authserver(&medusa_v4_authserver);
 	if (error) {
+		v4_session.state = MEDUSA_STATE_POLICY_INSTALL;
+		medusa_server_health_mark_unhealthy(&constable_health,
+						    MEDUSA_HEALTH_PROTOCOL_ERROR);
 		medusa_decision_cache_abort();
 		return error;
 	}
 	if ((u64)READ_ONCE(medusa_authserver_magic) !=
 	    v4_session.expected_generation) {
+		v4_session.state = MEDUSA_STATE_POLICY_INSTALL;
+		medusa_server_health_mark_unhealthy(&constable_health,
+						    MEDUSA_HEALTH_PROTOCOL_ERROR);
 		med_unregister_authserver(&medusa_v4_authserver);
 		medusa_decision_cache_abort();
 		return -ESTALE;
 	}
-	medusa_decision_cache_publish(v4_session.expected_generation);
-	medusa_server_health_mark_healthy(&constable_health);
-	v4_session.state = MEDUSA_STATE_READY;
+	if (v4_session.replacing_policy)
+		medusa_decision_cache_publish(v4_session.expected_generation);
 	if (v4_session.replacing_policy) {
 		v4_session.replacing_policy = false;
 		medusa_pending_request_cancel_all(MED_ERR);

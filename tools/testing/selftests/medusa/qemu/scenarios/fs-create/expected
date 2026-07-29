@@ -1,0 +1,15 @@
+MEDUSA_RESULT fs-create policy_ready PASS
+MEDUSA_RESULT fs-create deny_before_create PASS
+MEDUSA_RESULT fs-create denied_path_absent PASS
+MEDUSA_RESULT fs-create creat PASS
+MEDUSA_RESULT fs-create exclusive_create PASS
+MEDUSA_RESULT fs-create create_open PASS
+MEDUSA_RESULT fs-create complete PASS
+event=create
+!MEDUSA_RESULT fs-create policy_ready FAIL
+!MEDUSA_RESULT fs-create deny_before_create FAIL
+!MEDUSA_RESULT fs-create denied_path_absent FAIL
+!MEDUSA_RESULT fs-create creat FAIL
+!MEDUSA_RESULT fs-create exclusive_create FAIL
+!MEDUSA_RESULT fs-create create_open FAIL
+!MEDUSA_RESULT fs-create complete FAIL

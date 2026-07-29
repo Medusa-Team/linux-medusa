@@ -117,14 +117,16 @@ LSM hooks:
 
 Existing code:
 
-* ``acctype_create.c`` is registered but not wired;
-* creation is currently observed later through ``file_open``.
+* ``acctype_create.c`` is wired through ``inode_create``;
+* the parent directory is the stable object because the child inode does not
+  exist yet;
+* ``file_open`` remains a separate post-creation/open authorization point.
 
 Tasks:
 
-* [ ] Port ``create`` to the current idmapped-mount hook signature.
-* [ ] Authorize before the inode is created.
-* [ ] Test create, exclusive create, and create-through-open paths.
+* [x] Port ``create`` to the Linux 7.1 ``inode_create`` hook signature.
+* [x] Authorize before the inode is created.
+* [x] Test create, exclusive create, and create-through-open paths.
 
 Read, write, and execute permission
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

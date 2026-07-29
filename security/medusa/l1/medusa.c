@@ -33,6 +33,7 @@ MEDUSA_DECLARE_EVENT(ipc_event);
 MEDUSA_DECLARE_EVENT(truncate_access);
 MEDUSA_DECLARE_EVENT(fcntl_access);
 MEDUSA_DECLARE_EVENT(open_access);
+MEDUSA_DECLARE_EVENT(create_access);
 MEDUSA_DECLARE_EVENT(setresuid);
 MEDUSA_DECLARE_EVENT(fork_access);
 MEDUSA_DECLARE_EVENT(ptrace_access);
@@ -83,6 +84,7 @@ static void __init medusa_mark_enforced_events(void)
 	MEDUSA_MARK_EVENT_ENFORCED(truncate_access, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(fcntl_access, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(open_access, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(create_access, LOCK_BOUND);
 	MEDUSA_MARK_EVENT_ENFORCED(setresuid, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(fork_access, SLEEPABLE);
 	MEDUSA_MARK_EVENT_ENFORCED(ptrace_access, CONDITIONAL);
@@ -121,7 +123,6 @@ static void __init medusa_mark_enforced_events(void)
 }
 
 // TODO remove unused l2 events?
-//medusa_create(dentry, mode)
 //medusa_readlink(dentry)
 
 static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
@@ -186,6 +187,14 @@ static void medusa_l1_inode_free_security(struct inode *inode)
 		path_guard_free(med);
 }
 
+static int medusa_l1_inode_create(struct inode *dir, struct dentry *dentry,
+				  umode_t mode)
+{
+	if (medusa_create(dir, dentry, mode) == MED_DENY)
+		return -EACCES;
+	return 0;
+}
+
 /*
 static int medusa_l1_inode_permission(struct inode *inode, int mask)
 {
@@ -210,6 +219,9 @@ static int medusa_l1_inode_permission(struct inode *inode, int mask)
 static int medusa_l1_path_mknod(const struct path *dir, struct dentry *dentry,
 				umode_t mode, unsigned int dev)
 {
+	/* Regular files are authorized by inode_create below. */
+	if (S_ISREG(mode))
+		return 0;
 	if (medusa_mknod(dir, dentry, mode, dev) == MED_DENY)
 		return -EACCES;
 	return 0;
@@ -710,6 +722,7 @@ static struct security_hook_list medusa_l1_hooks[] = {
 	LSM_HOOK_INIT(path_chroot, medusa_l1_path_chroot),
 #endif /* CONFIG_SECURITY_PATH */
 
+	LSM_HOOK_INIT(inode_create, medusa_l1_inode_create),
 	//LSM_HOOK_INIT(inode_permission, medusa_l1_inode_permission),
 
 	//LSM_HOOK_INIT(file_permission, medusa_l1_file_permission),

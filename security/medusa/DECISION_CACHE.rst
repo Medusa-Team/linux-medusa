@@ -44,3 +44,11 @@ Constable accepts:
 Each key can be an integer (decimal or ``0x`` form) or ``*``. For example,
 ``--domain-rule ptrace:*:*:*=deny`` denies every monitored ptrace operation
 without a userspace round trip.
+
+Regular-file creation uses the complete ``umode_t`` passed to
+``inode_create`` as its selector, including ``S_IFREG``. The object domain is
+currently zero because the stable object is the parent inode and file objects
+do not yet carry policy domains. For example, selector ``33161`` represents a
+regular file with mode ``0611``. This cache is checked before parent-object
+validation because ``inode_create`` does not provide the vfsmount required to
+reconstruct and validate an authoritative parent path.
