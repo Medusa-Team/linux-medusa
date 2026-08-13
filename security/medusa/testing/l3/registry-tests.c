@@ -158,7 +158,7 @@ static void registry_atomically_replaces_live_policy(struct kunit *test)
 {
 	struct medusa_registry_status status;
 	enum medusa_fallback_policy original;
-	int ready_generation;
+	u64 ready_generation;
 
 	announced_event = NULL;
 	KUNIT_ASSERT_EQ(test, 0,
@@ -216,7 +216,7 @@ static void registry_atomically_replaces_live_policy(struct kunit *test)
 static void registry_authserver_lifecycle(struct kunit *test)
 {
 	struct medusa_authserver_s *held;
-	int initial_magic = medusa_authserver_magic;
+	u64 initial_magic = medusa_authserver_magic;
 	int result;
 
 	close_calls = 0;
@@ -257,7 +257,7 @@ static void registry_authserver_lifecycle(struct kunit *test)
 static void registry_status_snapshots_lifecycle_and_health(struct kunit *test)
 {
 	struct medusa_registry_status status;
-	u64 initial_generation = (u64)medusa_authserver_magic;
+	u64 initial_generation = medusa_authserver_magic;
 
 	medusa_registry_status_snapshot(&status);
 	KUNIT_ASSERT_FALSE(test, status.connected);
@@ -316,7 +316,7 @@ static void registry_status_snapshots_lifecycle_and_health(struct kunit *test)
 static void registry_reports_handshake_before_policy_ready(struct kunit *test)
 {
 	struct medusa_registry_status status;
-	u64 initial_generation = (u64)medusa_authserver_magic;
+	u64 initial_generation = medusa_authserver_magic;
 
 	fake_server.use_count = 0;
 	close_calls = 0;
@@ -347,7 +347,7 @@ static void registry_reports_handshake_before_policy_ready(struct kunit *test)
 static void registry_can_abort_incomplete_handshake(struct kunit *test)
 {
 	struct medusa_registry_status status;
-	u64 initial_generation = (u64)medusa_authserver_magic;
+	u64 initial_generation = medusa_authserver_magic;
 
 	close_calls = 0;
 	KUNIT_ASSERT_EQ(test, 0,

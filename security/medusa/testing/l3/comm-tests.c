@@ -27,7 +27,7 @@ static enum medusa_answer_t fake_decide(struct medusa_event_s *event,
 {
 	decision->request_id = 0x1234;
 	decision->policy_generation =
-		(u64)READ_ONCE(medusa_authserver_magic);
+		READ_ONCE(medusa_authserver_magic);
 	decision->unavailable = delegated_unavailable;
 	decision->request_present = true;
 	decision->contacted = true;
@@ -111,7 +111,7 @@ decide_without_server_uses_baseline_and_preserves_monitoring(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, MEDUSA_DECISION_BASELINE, result.source);
 	KUNIT_EXPECT_EQ(test, MEDUSA_NO_AUTH_SERVER, result.unavailable);
 	KUNIT_EXPECT_EQ(test, (u64)0, result.request_id);
-	KUNIT_EXPECT_EQ(test, (u64)READ_ONCE(medusa_authserver_magic),
+	KUNIT_EXPECT_EQ(test, READ_ONCE(medusa_authserver_magic),
 			result.policy_generation);
 	KUNIT_EXPECT_FALSE(test, result.request_present);
 	KUNIT_EXPECT_FALSE(test, result.authserver_contacted);
@@ -205,7 +205,7 @@ static void expect_delegated_answer(struct kunit *test,
 	close_calls = 0;
 	result = med_register_authserver(&fake_server);
 	KUNIT_ASSERT_EQ(test, 0, result);
-	expected_generation = (u64)READ_ONCE(medusa_authserver_magic);
+	expected_generation = READ_ONCE(medusa_authserver_magic);
 
 	decision = med_decide_result(&test_event_type, &event, &subject,
 				     &object);

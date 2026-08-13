@@ -634,7 +634,7 @@ medusa_v4_decide(struct medusa_event_s *event, struct medusa_kobject_s *subject,
 
 	decision->request_id = 0;
 	decision->policy_generation =
-		(u64)READ_ONCE(medusa_authserver_magic);
+		READ_ONCE(medusa_authserver_magic);
 	decision->unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
 	decision->request_present = false;
 	decision->contacted = false;
@@ -646,7 +646,7 @@ medusa_v4_decide(struct medusa_event_s *event, struct medusa_kobject_s *subject,
 	if (!medusa_v4_is_healthy())
 		return MED_ERR;
 
-	generation = (u64)READ_ONCE(medusa_authserver_magic);
+	generation = READ_ONCE(medusa_authserver_magic);
 	error = medusa_pending_request_register(&pending, generation);
 	if (error) {
 		if (error == -ENOSPC) {
@@ -947,7 +947,7 @@ static int medusa_v4_handle_hello(const u8 *data, size_t count)
 	v4_session.enabled_features =
 		required_features | (optional_features & MEDUSA_SUPPORTED_FEATURES);
 	v4_session.expected_generation =
-		(u64)READ_ONCE(medusa_authserver_magic) + 1;
+		READ_ONCE(medusa_authserver_magic) + 1;
 	v4_session.state = MEDUSA_STATE_DEFINITIONS;
 	med_authserver_set_state(&medusa_v4_authserver,
 				 MEDUSA_AUTHSERVER_DEFINITIONS);
@@ -1006,7 +1006,7 @@ static int medusa_v4_handle_policy_begin(const u8 *data, size_t count)
 		return -ESTALE;
 	if ((!replacement && generation != v4_session.expected_generation) ||
 	    (replacement &&
-	     generation != (u64)READ_ONCE(medusa_authserver_magic) + 1))
+	     generation != READ_ONCE(medusa_authserver_magic) + 1))
 		return -ESTALE;
 	if (replacement) {
 		if (!(v4_session.enabled_features &
@@ -1026,7 +1026,7 @@ static int medusa_v4_handle_policy_begin(const u8 *data, size_t count)
 				&medusa_v4_authserver);
 			v4_session.replacing_policy = false;
 			v4_session.expected_generation =
-				(u64)READ_ONCE(medusa_authserver_magic);
+				READ_ONCE(medusa_authserver_magic);
 		}
 		return error;
 	}
@@ -1156,13 +1156,13 @@ static int medusa_v4_handle_policy_commit(const u8 *data, size_t count)
 	if (error)
 		return error;
 	/*
-	 * Initial registration advances the registry to the prepared generation
-	 * and exposes the server in one critical section. Publish the matching
-	 * cache first: it remains invisible while its generation is still in the
-	 * future, then becomes usable as soon as registration advances magic.
+	 * Registration and replacement advance the registry generation in their
+	 * respective critical sections. Publish the matching cache first: it
+	 * remains invisible while its generation is still in the future, then
+	 * becomes usable as soon as the registry advances magic. Publishing after
+	 * a replacement commit would expose the new generation with the old cache.
 	 */
-	if (!v4_session.replacing_policy)
-		medusa_decision_cache_publish(v4_session.expected_generation);
+	medusa_decision_cache_publish(v4_session.expected_generation);
 	v4_session.state = MEDUSA_STATE_READY;
 	medusa_server_health_mark_healthy(&constable_health);
 	error = v4_session.replacing_policy ?
@@ -1172,20 +1172,18 @@ static int medusa_v4_handle_policy_commit(const u8 *data, size_t count)
 		v4_session.state = MEDUSA_STATE_POLICY_INSTALL;
 		medusa_server_health_mark_unhealthy(&constable_health,
 						    MEDUSA_HEALTH_PROTOCOL_ERROR);
-		medusa_decision_cache_abort();
+		medusa_decision_cache_revert(v4_session.expected_generation);
 		return error;
 	}
-	if ((u64)READ_ONCE(medusa_authserver_magic) !=
+	if (READ_ONCE(medusa_authserver_magic) !=
 	    v4_session.expected_generation) {
 		v4_session.state = MEDUSA_STATE_POLICY_INSTALL;
 		medusa_server_health_mark_unhealthy(&constable_health,
 						    MEDUSA_HEALTH_PROTOCOL_ERROR);
+		medusa_decision_cache_revert(v4_session.expected_generation);
 		med_unregister_authserver(&medusa_v4_authserver);
-		medusa_decision_cache_abort();
 		return -ESTALE;
 	}
-	if (v4_session.replacing_policy)
-		medusa_decision_cache_publish(v4_session.expected_generation);
 	if (v4_session.replacing_policy) {
 		v4_session.replacing_policy = false;
 		medusa_pending_request_cancel_all(MED_ERR);
@@ -1213,7 +1211,7 @@ static int medusa_v4_handle_policy_abort(const u8 *data, size_t count)
 		return error;
 	medusa_decision_cache_abort();
 	v4_session.expected_generation =
-		(u64)READ_ONCE(medusa_authserver_magic);
+		READ_ONCE(medusa_authserver_magic);
 	v4_session.replacing_policy = false;
 	v4_session.state = MEDUSA_STATE_READY;
 	return medusa_v4_send_simple(
@@ -1236,7 +1234,7 @@ static int medusa_v4_handle_reply(const u8 *data, size_t count)
 	if (!request_id ||
 	    (generation != v4_session.expected_generation &&
 	     !(v4_session.replacing_policy &&
-	       generation == (u64)READ_ONCE(medusa_authserver_magic))))
+	       generation == READ_ONCE(medusa_authserver_magic))))
 		return -ESTALE;
 	error = medusa_v4_get_u16(data, count, MEDUSA_TLV_ANSWER, &wire_answer);
 	if (error)
@@ -1281,7 +1279,7 @@ static int medusa_v4_handle_progress(const u8 *data, size_t count)
 	if (!request_id ||
 	    (generation != v4_session.expected_generation &&
 	     !(v4_session.replacing_policy &&
-	       generation == (u64)READ_ONCE(medusa_authserver_magic))))
+	       generation == READ_ONCE(medusa_authserver_magic))))
 		return -ESTALE;
 	error = medusa_pending_request_renew(request_id, generation);
 	if (!error)
@@ -1310,7 +1308,7 @@ static int medusa_v4_handle_object(const u8 *data, size_t count, bool update)
 	if (!request_id ||
 	    (generation != v4_session.expected_generation &&
 	     !(v4_session.replacing_policy &&
-	       generation == (u64)READ_ONCE(medusa_authserver_magic))))
+	       generation == READ_ONCE(medusa_authserver_magic))))
 		return -ESTALE;
 	error = medusa_v4_get_u32(data, count, MEDUSA_TLV_CLASS_ID, &class_id);
 	object_data = medusa_v4_find_tlv(

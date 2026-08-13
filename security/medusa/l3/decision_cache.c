@@ -42,6 +42,7 @@ struct medusa_rule_builder {
 
 static DEFINE_MUTEX(decision_cache_lock);
 static struct medusa_decision_table __rcu *active_table;
+static struct medusa_decision_table __rcu *previous_table;
 static struct medusa_decision_table *prepared_table;
 static struct medusa_rule_builder *staging_rules;
 
@@ -235,7 +236,8 @@ out:
 
 void medusa_decision_cache_publish(u64 generation)
 {
-	struct medusa_decision_table *old;
+	struct medusa_decision_table *old_previous;
+	struct medusa_decision_table *old_active;
 
 	mutex_lock(&decision_cache_lock);
 	if (WARN_ON_ONCE(!prepared_table ||
@@ -243,12 +245,33 @@ void medusa_decision_cache_publish(u64 generation)
 		mutex_unlock(&decision_cache_lock);
 		return;
 	}
-	old = rcu_replace_pointer(active_table, prepared_table,
-				  lockdep_is_held(&decision_cache_lock));
+	old_previous = rcu_dereference_protected(previous_table,
+						 lockdep_is_held(&decision_cache_lock));
+	old_active = rcu_replace_pointer(active_table, prepared_table,
+					 lockdep_is_held(&decision_cache_lock));
+	rcu_assign_pointer(previous_table, old_active);
 	prepared_table = NULL;
 	mutex_unlock(&decision_cache_lock);
-	if (old)
-		kvfree_rcu(old, rcu);
+	if (old_previous)
+		kvfree_rcu(old_previous, rcu);
+}
+
+void medusa_decision_cache_revert(u64 generation)
+{
+	struct medusa_decision_table *discard;
+	struct medusa_decision_table *previous;
+
+	mutex_lock(&decision_cache_lock);
+	discard = rcu_dereference_protected(active_table, 1);
+	previous = rcu_dereference_protected(previous_table, 1);
+	if (WARN_ON_ONCE(!discard || discard->generation != generation)) {
+		mutex_unlock(&decision_cache_lock);
+		return;
+	}
+	rcu_assign_pointer(active_table, previous);
+	RCU_INIT_POINTER(previous_table, NULL);
+	mutex_unlock(&decision_cache_lock);
+	kvfree_rcu(discard, rcu);
 }
 
 void medusa_decision_cache_abort(void)
@@ -266,15 +289,20 @@ void medusa_decision_cache_abort(void)
 
 void medusa_decision_cache_reset(void)
 {
-	struct medusa_decision_table *old;
+	struct medusa_decision_table *old_active;
+	struct medusa_decision_table *old_previous;
 
 	medusa_decision_cache_abort();
 	mutex_lock(&decision_cache_lock);
-	old = rcu_replace_pointer(active_table, NULL,
-				  lockdep_is_held(&decision_cache_lock));
+	old_active = rcu_replace_pointer(active_table, NULL,
+					 lockdep_is_held(&decision_cache_lock));
+	old_previous = rcu_replace_pointer(previous_table, NULL,
+					   lockdep_is_held(&decision_cache_lock));
 	mutex_unlock(&decision_cache_lock);
-	if (old)
-		kvfree_rcu(old, rcu);
+	if (old_active)
+		kvfree_rcu(old_active, rcu);
+	if (old_previous)
+		kvfree_rcu(old_previous, rcu);
 }
 
 static bool
@@ -310,13 +338,15 @@ bool medusa_decision_cache_lookup(const struct medusa_evtype_s *event,
 {
 	const struct medusa_decision_table *table;
 	static const u8 wildcard_order[] = { 0, 1, 2, 4, 3, 5, 6, 7 };
+	u64 generation = READ_ONCE(medusa_authserver_magic);
 	unsigned int index;
 	bool found = false;
 
 	rcu_read_lock();
 	table = rcu_dereference(active_table);
-	if (!table ||
-	    table->generation != (u64)READ_ONCE(medusa_authserver_magic))
+	if (!table || table->generation != generation)
+		table = rcu_dereference(previous_table);
+	if (!table || table->generation != generation)
 		goto out;
 
 	/* Exact keys win; progressively less-specific wildcard keys follow. */

@@ -26,13 +26,8 @@ static unsigned int fallback_policy_slot;
 static unsigned int handshaking_fallback_slot;
 static bool policy_replacement;
 
-int medusa_authserver_magic = 1; /* the 'version' of authserver */
-/* WARNING! medusa_authserver_magic is not locked, nor atomic type,
- * because we want to have as much portable (and easy and fast) code
- * as possible. thus we must change its value BEFORE modifying authserver,
- * and place some memory barrier between, or get lock there - the lock
- * hopefully contains some kind of such barrier ;).
- */
+u64 medusa_authserver_magic = 1; /* the policy generation */
+/* Writers hold registry_lock; lockless cache readers use READ_ONCE(). */
 
 static unsigned int medusa_fallback_slot_read(void)
 {
@@ -511,8 +506,8 @@ int med_authserver_policy_replace_commit(
 	}
 	/* Pairs with the acquire in medusa_fallback_slot_read(). */
 	smp_store_release(&fallback_policy_slot, handshaking_fallback_slot);
-	medusa_authserver_magic++;
-	active_policy_generation = (u64)medusa_authserver_magic;
+	WRITE_ONCE(medusa_authserver_magic, medusa_authserver_magic + 1);
+	active_policy_generation = medusa_authserver_magic;
 	last_ready_policy_generation = active_policy_generation;
 	policy_replacement = false;
 	authserver_state = MEDUSA_AUTHSERVER_READY;
@@ -572,11 +567,11 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 				  handshaking_fallback_slot);
 	}
 	policy_replacement = false;
-	medusa_authserver_magic++;
+	WRITE_ONCE(medusa_authserver_magic, medusa_authserver_magic + 1);
 	authserver = med_authserver;
 	handshaking_authserver = NULL;
 	authserver_state = MEDUSA_AUTHSERVER_READY;
-	active_policy_generation = (u64)medusa_authserver_magic;
+	active_policy_generation = medusa_authserver_magic;
 	last_ready_policy_generation = active_policy_generation;
 
 	mutex_unlock(&registry_lock);
@@ -607,7 +602,7 @@ void med_unregister_authserver(struct medusa_authserver_s *med_authserver)
 		mutex_unlock(&registry_lock);
 		return;
 	}
-	medusa_authserver_magic++;
+	WRITE_ONCE(medusa_authserver_magic, medusa_authserver_magic + 1);
 	policy_replacement = false;
 	authserver = NULL;
 	authserver_state = MEDUSA_AUTHSERVER_DISCONNECTED;
@@ -731,7 +726,7 @@ void medusa_registry_status_snapshot(struct medusa_registry_status *status)
 	status->health_reason = MEDUSA_HEALTH_DISCONNECTED;
 
 	mutex_lock(&registry_lock);
-	status->policy_generation = (u64)medusa_authserver_magic;
+	status->policy_generation = medusa_authserver_magic;
 	status->server_state = authserver_state;
 	status->active_policy_generation = active_policy_generation;
 	status->last_ready_policy_generation = last_ready_policy_generation;

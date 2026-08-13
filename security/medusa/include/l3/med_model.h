@@ -6,9 +6,9 @@
 #include "l3/config.h"
 #include "l3/vs_model.h"
 
-#define MAGIC_NOT_MONITORED (-1L)
+#define MAGIC_NOT_MONITORED U64_MAX
 
-extern int medusa_authserver_magic;
+extern u64 medusa_authserver_magic;
 
 struct s_cinfo_t {
 	u_int64_t data[1];
@@ -22,7 +22,7 @@ struct medusa_object_s {
 	struct vs_t vs;		/* virt. spaces of this object */
 	struct act_t act;	/* actions on this object, which are reported to L4 */
 	struct o_cinfo_t cinfo;	/* l4 hint */
-	int magic;		/* whether this piece of crap is valid */
+	u64 magic;		/* cache generation or MAGIC_NOT_MONITORED */
 };
 
 struct medusa_subject_s {
@@ -96,10 +96,10 @@ static inline bool is_med_magic_monitored(struct medusa_object_s *med_object)
 static inline bool is_med_magic_valid(struct medusa_object_s *med_object)
 {
 	return (med_object->magic == MAGIC_NOT_MONITORED) ||
-		(med_object->magic == medusa_authserver_magic);
+		(med_object->magic == READ_ONCE(medusa_authserver_magic));
 }
 
-static inline void _med_magic_set(struct medusa_object_s *med_object, int magic,
+static inline void _med_magic_set(struct medusa_object_s *med_object, u64 magic,
 				  bool force)
 {
 	// Do not change magic of not monitored tasks, if not forced
@@ -110,7 +110,7 @@ static inline void _med_magic_set(struct medusa_object_s *med_object, int magic,
 
 static inline void med_magic_validate(struct medusa_object_s *med_object)
 {
-	_med_magic_set(med_object, medusa_authserver_magic, false);
+	_med_magic_set(med_object, READ_ONCE(medusa_authserver_magic), false);
 }
 
 static inline void med_magic_not_monitored(struct medusa_object_s *med_object)

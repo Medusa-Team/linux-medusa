@@ -9,7 +9,7 @@
 #include "l3/med_model.h"
 
 struct medusa_decision_cache_test_context {
-	int generation;
+	u64 generation;
 };
 
 static int medusa_decision_cache_test_init(struct kunit *test)
@@ -90,7 +90,7 @@ static void stale_generation_never_matches(struct kunit *test)
 	KUNIT_EXPECT_FALSE(test, found);
 }
 
-static void replacement_is_not_visible_before_publish(struct kunit *test)
+static void replacement_switches_without_a_cache_gap(struct kunit *test)
 {
 	struct medusa_evtype_s event = {};
 	enum medusa_answer_t answer = MED_ERR;
@@ -113,15 +113,44 @@ static void replacement_is_not_visible_before_publish(struct kunit *test)
 	KUNIT_ASSERT_EQ(test, 0, ret);
 	KUNIT_ASSERT_EQ(test, 0,
 			medusa_decision_cache_prepare(generation + 1));
+	medusa_decision_cache_publish(generation + 1);
 	found = medusa_decision_cache_lookup(&event, 1, 2, 3, &answer);
 	KUNIT_ASSERT_TRUE(test, found);
 	KUNIT_EXPECT_EQ(test, MED_DENY, answer);
 
 	WRITE_ONCE(medusa_authserver_magic, generation + 1);
-	medusa_decision_cache_publish(generation + 1);
 	found = medusa_decision_cache_lookup(&event, 1, 2, 3, &answer);
 	KUNIT_ASSERT_TRUE(test, found);
 	KUNIT_EXPECT_EQ(test, MED_ALLOW, answer);
+}
+
+static void failed_replacement_restores_the_current_cache(struct kunit *test)
+{
+	struct medusa_evtype_s event = {};
+	enum medusa_answer_t answer = MED_ERR;
+	u64 generation = 351;
+	bool found;
+	int ret;
+
+	KUNIT_ASSERT_EQ(test, 0, medusa_decision_cache_begin(generation));
+	ret = medusa_decision_cache_stage(&event, 1, 2, 3, MED_DENY);
+	KUNIT_ASSERT_EQ(test, 0, ret);
+	KUNIT_ASSERT_EQ(test, 0, medusa_decision_cache_prepare(generation));
+	WRITE_ONCE(medusa_authserver_magic, generation);
+	medusa_decision_cache_publish(generation);
+
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_decision_cache_begin(generation + 1));
+	ret = medusa_decision_cache_stage(&event, 1, 2, 3, MED_ALLOW);
+	KUNIT_ASSERT_EQ(test, 0, ret);
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_decision_cache_prepare(generation + 1));
+	medusa_decision_cache_publish(generation + 1);
+	medusa_decision_cache_revert(generation + 1);
+
+	found = medusa_decision_cache_lookup(&event, 1, 2, 3, &answer);
+	KUNIT_ASSERT_TRUE(test, found);
+	KUNIT_EXPECT_EQ(test, MED_DENY, answer);
 }
 
 static void duplicate_batch_is_atomic(struct kunit *test)
@@ -152,7 +181,8 @@ static void duplicate_batch_is_atomic(struct kunit *test)
 static struct kunit_case medusa_decision_cache_test_cases[] = {
 	KUNIT_CASE(domain_cache_prefers_exact_rules),
 	KUNIT_CASE(stale_generation_never_matches),
-	KUNIT_CASE(replacement_is_not_visible_before_publish),
+	KUNIT_CASE(replacement_switches_without_a_cache_gap),
+	KUNIT_CASE(failed_replacement_restores_the_current_cache),
 	KUNIT_CASE(duplicate_batch_is_atomic),
 	{}
 };

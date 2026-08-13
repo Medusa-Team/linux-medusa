@@ -25,6 +25,7 @@ medusa_decision_cache_stage_rules(struct medusa_evtype_s *event,
 				  u32 count);
 int medusa_decision_cache_prepare(u64 generation);
 void medusa_decision_cache_publish(u64 generation);
+void medusa_decision_cache_revert(u64 generation);
 void medusa_decision_cache_abort(void);
 void medusa_decision_cache_reset(void);
 bool medusa_decision_cache_lookup(const struct medusa_evtype_s *event,

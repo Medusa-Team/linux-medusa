@@ -195,7 +195,7 @@ bool medusa_event_fallback_requires_decision(
 
 u64 medusa_current_policy_generation(void)
 {
-	return (u64)READ_ONCE(medusa_authserver_magic);
+	return READ_ONCE(medusa_authserver_magic);
 }
 
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy)
@@ -361,9 +361,9 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	enum medusa_fallback_policy fallback_policy =
 		medusa_get_fallback_policy(evtype);
 	u64 policy_generation =
-		(u64)READ_ONCE(medusa_authserver_magic);
+		READ_ONCE(medusa_authserver_magic);
 
-	if (ARCH_CANNOT_DECIDE(evtype)) {
+	if (ARCH_CANNOT_DECIDE()) {
 		result = medusa_fallback_result(evtype, fallback_policy,
 						MEDUSA_NON_SLEEPABLE_CONTEXT,
 						0, policy_generation, false,
