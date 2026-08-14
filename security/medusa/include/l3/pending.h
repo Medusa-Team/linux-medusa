@@ -10,6 +10,9 @@
 #include "l3/constants.h"
 
 #define MEDUSA_PENDING_REQUEST_LIMIT	1024U
+#define MEDUSA_PENDING_REQUEST_LIMIT_MAX 65536U
+#define MEDUSA_DECISION_TIMEOUT_MIN_MS	100U
+#define MEDUSA_DECISION_TIMEOUT_MAX_MS	60000U
 
 struct medusa_pending_request {
 	struct completion done;
@@ -25,6 +28,8 @@ struct medusa_pending_request {
 int medusa_pending_request_register(struct medusa_pending_request *request,
 				    u64 policy_generation);
 void medusa_pending_request_unregister(struct medusa_pending_request *request);
+int medusa_pending_request_cancel(struct medusa_pending_request *request,
+				  enum medusa_answer_t answer);
 int medusa_pending_request_complete(u64 id, u64 policy_generation,
 				    enum medusa_answer_t answer);
 int medusa_pending_request_renew(u64 id, u64 policy_generation);
@@ -35,5 +40,9 @@ int medusa_pending_request_wait_timeout(
 	enum medusa_answer_t *answer);
 void medusa_pending_request_cancel_all(enum medusa_answer_t answer);
 unsigned int medusa_pending_request_count(void);
+unsigned int medusa_pending_request_limit(void);
+int medusa_pending_request_set_limit(unsigned int limit);
+unsigned int medusa_decision_timeout_ms(void);
+int medusa_decision_timeout_set_ms(unsigned int timeout_ms);
 
 #endif /* _MEDUSA_PENDING_H */

@@ -37,6 +37,8 @@ const char *medusa_health_reason_name(enum medusa_health_reason reason)
 		return "decision_timeout";
 	case MEDUSA_HEALTH_OVERLOADED:
 		return "overloaded";
+	case MEDUSA_HEALTH_PROTOCOL_ERROR:
+		return "protocol_error";
 	default:
 		return "invalid";
 	}

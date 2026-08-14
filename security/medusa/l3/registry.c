@@ -376,7 +376,7 @@ int med_authserver_handshake_begin(struct medusa_authserver_s *med_authserver)
 	}
 
 	handshaking_authserver = med_authserver;
-	authserver_state = MEDUSA_AUTHSERVER_HANDSHAKING;
+	authserver_state = MEDUSA_AUTHSERVER_HANDSHAKE;
 	handshaking_fallback_slot = medusa_fallback_slot_read() ^ 1U;
 	/*
 	 * A reader can have sampled this inactive slot while it was active in
@@ -393,6 +393,31 @@ out:
 	return error;
 }
 
+int med_authserver_set_state(struct medusa_authserver_s *med_authserver,
+			     enum medusa_authserver_state state)
+{
+	int error = 0;
+
+	mutex_lock(&registry_lock);
+	if (state == MEDUSA_AUTHSERVER_DEGRADED) {
+		if (authserver != med_authserver)
+			error = -EPERM;
+		else
+			authserver_state = state;
+	} else if (state == MEDUSA_AUTHSERVER_HANDSHAKE ||
+		   state == MEDUSA_AUTHSERVER_DEFINITIONS ||
+		   state == MEDUSA_AUTHSERVER_POLICY_INSTALL) {
+		if (handshaking_authserver != med_authserver)
+			error = -EPERM;
+		else
+			authserver_state = state;
+	} else {
+		error = -EINVAL;
+	}
+	mutex_unlock(&registry_lock);
+	return error;
+}
+
 /**
  * med_authserver_stage_fallback_policy - stage one event policy for READY
  * @med_authserver: server owning the current handshake
@@ -404,7 +429,8 @@ out:
  * becomes eligible for decisions.
  */
 int med_authserver_stage_fallback_policy(
-	struct medusa_authserver_s *med_authserver, MCPptr_t event_id,
+	struct medusa_authserver_s *med_authserver,
+	struct medusa_evtype_s *event_id,
 	enum medusa_fallback_policy policy)
 {
 	struct medusa_evtype_s *event;
@@ -420,7 +446,7 @@ int med_authserver_stage_fallback_policy(
 		goto out;
 	}
 	for (event = evtypes; event; event = event->next) {
-		if ((MCPptr_t)event != event_id)
+		if (event != event_id)
 			continue;
 		WRITE_ONCE(event->fallback_policy[handshaking_fallback_slot],
 			   policy);
@@ -513,10 +539,16 @@ const char *medusa_authserver_state_name(enum medusa_authserver_state state)
 	switch (state) {
 	case MEDUSA_AUTHSERVER_DISCONNECTED:
 		return "disconnected";
-	case MEDUSA_AUTHSERVER_HANDSHAKING:
-		return "handshaking";
+	case MEDUSA_AUTHSERVER_HANDSHAKE:
+		return "handshake";
+	case MEDUSA_AUTHSERVER_DEFINITIONS:
+		return "definitions";
+	case MEDUSA_AUTHSERVER_POLICY_INSTALL:
+		return "policy_install";
 	case MEDUSA_AUTHSERVER_READY:
 		return "ready";
+	case MEDUSA_AUTHSERVER_DEGRADED:
+		return "degraded";
 	default:
 		return "invalid";
 	}

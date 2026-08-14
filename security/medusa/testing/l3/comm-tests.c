@@ -423,110 +423,64 @@ static void fallback_policy_names_are_stable(struct kunit *test)
 
 static void protocol_accepts_supported_answers(struct kunit *test)
 {
-	KUNIT_EXPECT_EQ(test, 0, medusa_comm_validate_authanswer(
-		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_ALLOW, true));
-	KUNIT_EXPECT_EQ(test, 0, medusa_comm_validate_authanswer(
-		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_DENY, true));
-	KUNIT_EXPECT_EQ(test, 0, medusa_comm_validate_authanswer(
-		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_ERR, true));
+	KUNIT_EXPECT_EQ(test, 0, medusa_v4_validate_answer(MED_ALLOW));
+	KUNIT_EXPECT_EQ(test, 0, medusa_v4_validate_answer(MED_DENY));
+	KUNIT_EXPECT_EQ(test, 0, medusa_v4_validate_answer(MED_ERR));
 }
 
-static void protocol_accepts_supported_userspace_commands(struct kunit *test)
+static void protocol_enforces_state_machine(struct kunit *test)
 {
-	bool supported;
-	u64 command;
-
-	supported = medusa_comm_command_is_supported(MEDUSA_COMM_AUTHANSWER);
-	KUNIT_EXPECT_TRUE(test, supported);
-	command = MEDUSA_COMM_AUTHREQUEST_PROGRESS;
-	supported = medusa_comm_command_is_supported(command);
-	KUNIT_EXPECT_TRUE(test, supported);
-	supported =
-		medusa_comm_command_is_supported(MEDUSA_COMM_FALLBACK_POLICY);
-	KUNIT_EXPECT_TRUE(test, supported);
-	supported = medusa_comm_command_is_supported(MEDUSA_COMM_FETCH_REQUEST);
-	KUNIT_EXPECT_TRUE(test, supported);
-	supported = medusa_comm_command_is_supported(MEDUSA_COMM_UPDATE_REQUEST);
-	KUNIT_EXPECT_TRUE(test, supported);
-	supported = medusa_comm_command_is_supported(MEDUSA_COMM_READY_ANSWER);
-	KUNIT_EXPECT_TRUE(test, supported);
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_HANDSHAKE, MEDUSA_MSG_HELLO));
+	KUNIT_EXPECT_FALSE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_HANDSHAKE, MEDUSA_MSG_POLICY_BEGIN));
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_DEFINITIONS, MEDUSA_MSG_POLICY_BEGIN));
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_POLICY_INSTALL, MEDUSA_MSG_POLICY_EVENT));
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_POLICY_INSTALL, MEDUSA_MSG_POLICY_COMMIT));
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_READY, MEDUSA_MSG_DECISION_REPLY));
+	KUNIT_EXPECT_FALSE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_DEGRADED, MEDUSA_MSG_DECISION_REPLY));
 }
 
-static void protocol_rejects_unknown_userspace_commands(struct kunit *test)
+static void protocol_frame_layout_is_stable(struct kunit *test)
 {
-	bool supported;
-
-	supported = medusa_comm_command_is_supported(0);
-	KUNIT_EXPECT_FALSE(test, supported);
-	supported = medusa_comm_command_is_supported(MEDUSA_COMM_AUTHREQUEST);
-	KUNIT_EXPECT_FALSE(test, supported);
-	supported = medusa_comm_command_is_supported(U64_MAX);
-	KUNIT_EXPECT_FALSE(test, supported);
-}
-
-static void protocol_rejects_malformed_answer_lengths(struct kunit *test)
-{
-	KUNIT_EXPECT_EQ(test, -EMSGSIZE, medusa_comm_validate_authanswer(
-		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE - 1, MED_ALLOW, true));
-	KUNIT_EXPECT_EQ(test, -EMSGSIZE, medusa_comm_validate_authanswer(
-		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE + 1, MED_ALLOW, true));
+	KUNIT_EXPECT_EQ(test, (size_t)MEDUSA_FRAME_HEADER_SIZE,
+			sizeof(struct medusa_frame_header));
+	KUNIT_EXPECT_EQ(test, (size_t)MEDUSA_TLV_HEADER_SIZE,
+			sizeof(struct medusa_tlv));
+	KUNIT_EXPECT_EQ(test, (size_t)16, MEDUSA_TLV_ALIGN_UP(9));
+	KUNIT_EXPECT_EQ(test, (size_t)16, MEDUSA_TLV_ALIGN_UP(16));
 }
 
 static void protocol_rejects_unknown_answer_code(struct kunit *test)
 {
-	KUNIT_EXPECT_EQ(test, -EINVAL, medusa_comm_validate_authanswer(
-		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, 2, true));
-}
-
-static void protocol_rejects_unknown_request_id(struct kunit *test)
-{
-	KUNIT_EXPECT_EQ(test, -ENOENT, medusa_comm_validate_authanswer(
-		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_ALLOW, false));
-}
-
-static void protocol_rejects_stale_request_id(struct kunit *test)
-{
-	bool request_pending = true;
-
-	request_pending = false;
-	KUNIT_EXPECT_EQ(test, -ENOENT, medusa_comm_validate_authanswer(
-		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_DENY,
-		request_pending));
-}
-
-static void protocol_validates_decision_progress(struct kunit *test)
-{
-	KUNIT_EXPECT_EQ(test, 0,
-			medusa_comm_validate_authrequest_progress(
-				MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE,
-				true));
-	KUNIT_EXPECT_EQ(test, -EMSGSIZE,
-			medusa_comm_validate_authrequest_progress(
-				MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE - 1,
-				true));
-	KUNIT_EXPECT_EQ(test, -ENOENT,
-			medusa_comm_validate_authrequest_progress(
-				MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE,
-				false));
+	KUNIT_EXPECT_EQ(test, -EINVAL, medusa_v4_validate_answer(2));
+	KUNIT_EXPECT_EQ(test, -EINVAL, medusa_v4_validate_answer(0));
 }
 
 static void protocol_validates_fallback_policy(struct kunit *test)
 {
-	KUNIT_EXPECT_EQ(test, 0,
-			medusa_comm_validate_fallback_policy(
-				MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE,
-				MEDUSA_COMM_FALLBACK_BASELINE_ALLOW));
-	KUNIT_EXPECT_EQ(test, 0,
-			medusa_comm_validate_fallback_policy(
-				MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE,
-				MEDUSA_COMM_FALLBACK_ONLINE_REQUIRED));
-	KUNIT_EXPECT_EQ(test, -EMSGSIZE,
-			medusa_comm_validate_fallback_policy(
-				MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE - 1,
-				MEDUSA_COMM_FALLBACK_BASELINE_DENY));
+	KUNIT_EXPECT_EQ(test, 0, medusa_v4_validate_fallback_policy(
+		MEDUSA_FALLBACK_BASELINE_ALLOW));
+	KUNIT_EXPECT_EQ(test, 0, medusa_v4_validate_fallback_policy(
+		MEDUSA_FALLBACK_ONLINE_REQUIRED));
 	KUNIT_EXPECT_EQ(test, -EINVAL,
-			medusa_comm_validate_fallback_policy(
-				MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE, 3));
+			medusa_v4_validate_fallback_policy(3));
+}
+
+static void protocol_negotiates_optional_features(struct kunit *test)
+{
+	u64 enabled = 0;
+
+	KUNIT_EXPECT_EQ(test, 0, medusa_v4_negotiate_features(
+		MEDUSA_REQUIRED_FEATURES, BIT_ULL(63), &enabled));
+	KUNIT_EXPECT_EQ(test, (u64)MEDUSA_REQUIRED_FEATURES, enabled);
+	KUNIT_EXPECT_EQ(test, -EOPNOTSUPP, medusa_v4_negotiate_features(
+		BIT_ULL(63), 0, &enabled));
 }
 
 static void decision_counters_attribute_final_verdicts(struct kunit *test)
@@ -721,14 +675,11 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(fallback_policy_rejects_invalid_values),
 	KUNIT_CASE(fallback_policy_names_are_stable),
 	KUNIT_CASE(protocol_accepts_supported_answers),
-	KUNIT_CASE(protocol_accepts_supported_userspace_commands),
-	KUNIT_CASE(protocol_rejects_unknown_userspace_commands),
-	KUNIT_CASE(protocol_rejects_malformed_answer_lengths),
+	KUNIT_CASE(protocol_enforces_state_machine),
+	KUNIT_CASE(protocol_frame_layout_is_stable),
 	KUNIT_CASE(protocol_rejects_unknown_answer_code),
-	KUNIT_CASE(protocol_rejects_unknown_request_id),
-	KUNIT_CASE(protocol_rejects_stale_request_id),
-	KUNIT_CASE(protocol_validates_decision_progress),
 	KUNIT_CASE(protocol_validates_fallback_policy),
+	KUNIT_CASE(protocol_negotiates_optional_features),
 	KUNIT_CASE(decision_counters_attribute_final_verdicts),
 	KUNIT_CASE(decision_counter_wrap_is_well_defined),
 	KUNIT_CASE(monitoring_cache_accounting_is_explicit),

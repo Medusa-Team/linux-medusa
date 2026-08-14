@@ -243,7 +243,7 @@ static void medusa_audit_degraded_decision(
 		" authserver_contacted=%u"
 		" degraded_sequence=%llu suppressed=%d",
 		MEDUSA_AUDIT_SCHEMA_VERSION, MEDUSA_AUDIT_RECORD_DECISION,
-		(unsigned long long)MEDUSA_COMM_VERSION,
+		(unsigned long long)MEDUSA_PROTOCOL_VERSION,
 		(unsigned long long)result->policy_generation,
 		evtype->name, evtype->bitnr & MASK_BITNR,
 		evtype->arg_kclass[0]->name, evtype->arg_kclass[1]->name,

@@ -1,65 +1,54 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-
 #ifndef _MEDUSA_PROTOCOL_H
 #define _MEDUSA_PROTOCOL_H
 
 #include <linux/errno.h>
 #include <linux/types.h>
+#include <uapi/linux/medusa.h>
 
 #include "l3/constants.h"
-#include "l4/comm.h"
 
-#define MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE \
-	(sizeof(MCPptr_t) + sizeof(s16))
-#define MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE sizeof(MCPptr_t)
-#define MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE \
-	sizeof(struct medusa_comm_fallback_policy_s)
-
-static inline bool medusa_comm_command_is_supported(u64 command)
+static inline bool
+medusa_v4_message_allowed(enum medusa_protocol_state state, u16 type)
 {
-	switch (command) {
-	case MEDUSA_COMM_AUTHANSWER:
-	case MEDUSA_COMM_AUTHREQUEST_PROGRESS:
-	case MEDUSA_COMM_FALLBACK_POLICY:
-	case MEDUSA_COMM_FETCH_REQUEST:
-	case MEDUSA_COMM_UPDATE_REQUEST:
-	case MEDUSA_COMM_READY_ANSWER:
-		return true;
+	switch (state) {
+	case MEDUSA_STATE_HANDSHAKE:
+		return type == MEDUSA_MSG_HELLO;
+	case MEDUSA_STATE_DEFINITIONS:
+		return type == MEDUSA_MSG_POLICY_BEGIN;
+	case MEDUSA_STATE_POLICY_INSTALL:
+		return type == MEDUSA_MSG_POLICY_EVENT ||
+		       type == MEDUSA_MSG_POLICY_COMMIT;
+	case MEDUSA_STATE_READY:
+		return type == MEDUSA_MSG_DECISION_REPLY ||
+		       type == MEDUSA_MSG_DECISION_PROGRESS ||
+		       type == MEDUSA_MSG_OBJECT_FETCH ||
+		       type == MEDUSA_MSG_OBJECT_UPDATE;
 	default:
 		return false;
 	}
 }
 
-static inline int medusa_comm_validate_fallback_policy(size_t payload_size,
-						       u8 policy)
+static inline int medusa_v4_validate_answer(s16 answer)
 {
-	if (payload_size != MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE)
-		return -EMSGSIZE;
-	if (policy > MEDUSA_COMM_FALLBACK_ONLINE_REQUIRED)
+	if (answer != MED_ERR && answer != MED_DENY && answer != MED_ALLOW)
 		return -EINVAL;
 	return 0;
 }
 
-static inline int medusa_comm_validate_authanswer(size_t payload_size,
-						   s16 answer,
-						   bool request_pending)
+static inline int medusa_v4_validate_fallback_policy(u8 policy)
 {
-	if (payload_size != MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE)
-		return -EMSGSIZE;
-	if (answer != MED_ALLOW && answer != MED_DENY && answer != MED_ERR)
+	if (policy > MEDUSA_FALLBACK_ONLINE_REQUIRED)
 		return -EINVAL;
-	if (!request_pending)
-		return -ENOENT;
 	return 0;
 }
 
-static inline int medusa_comm_validate_authrequest_progress(size_t payload_size,
-							     bool request_pending)
+static inline int medusa_v4_negotiate_features(u64 required, u64 optional,
+					       u64 *enabled)
 {
-	if (payload_size != MEDUSA_COMM_AUTHREQUEST_PROGRESS_PAYLOAD_SIZE)
-		return -EMSGSIZE;
-	if (!request_pending)
-		return -ENOENT;
+	if (required & ~MEDUSA_SUPPORTED_FEATURES)
+		return -EOPNOTSUPP;
+	*enabled = required | (optional & MEDUSA_SUPPORTED_FEATURES);
 	return 0;
 }
 

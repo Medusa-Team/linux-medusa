@@ -95,15 +95,16 @@ static void registry_commits_staged_fallback_only_at_ready(struct kunit *test)
 			med_authserver_handshake_begin(&fake_server));
 	KUNIT_EXPECT_EQ(test, -EPERM,
 			med_authserver_stage_fallback_policy(
-				&other_server, (MCPptr_t)announced_event,
+				&other_server, announced_event,
 				MEDUSA_FALLBACK_BASELINE_DENY));
 	KUNIT_EXPECT_EQ(test, -ENOENT,
 			med_authserver_stage_fallback_policy(
-				&fake_server, (MCPptr_t)&fake_server,
+				&fake_server,
+				(struct medusa_evtype_s *)&fake_server,
 				MEDUSA_FALLBACK_BASELINE_DENY));
 	KUNIT_ASSERT_EQ(test, 0,
 			med_authserver_stage_fallback_policy(
-				&fake_server, (MCPptr_t)announced_event,
+				&fake_server, announced_event,
 				MEDUSA_FALLBACK_BASELINE_DENY));
 	KUNIT_EXPECT_EQ(test, original,
 			medusa_get_fallback_policy(announced_event));
@@ -120,7 +121,7 @@ static void registry_commits_staged_fallback_only_at_ready(struct kunit *test)
 			med_authserver_handshake_begin(&fake_server));
 	KUNIT_ASSERT_EQ(test, 0,
 			med_authserver_stage_fallback_policy(
-				&fake_server, (MCPptr_t)announced_event,
+				&fake_server, announced_event,
 				MEDUSA_FALLBACK_ONLINE_REQUIRED));
 	KUNIT_EXPECT_EQ(test, MEDUSA_FALLBACK_BASELINE_DENY,
 			medusa_get_fallback_policy(announced_event));
@@ -145,7 +146,7 @@ static void registry_aborts_staged_fallback_with_handshake(struct kunit *test)
 			med_authserver_handshake_begin(&fake_server));
 	KUNIT_ASSERT_EQ(test, 0,
 			med_authserver_stage_fallback_policy(
-				&fake_server, (MCPptr_t)announced_event,
+				&fake_server, announced_event,
 				MEDUSA_FALLBACK_ONLINE_REQUIRED));
 
 	med_unregister_authserver(&fake_server);
@@ -309,10 +310,16 @@ static void registry_state_names_are_stable(struct kunit *test)
 
 	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_DISCONNECTED);
 	KUNIT_EXPECT_STREQ(test, "disconnected", name);
-	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_HANDSHAKING);
-	KUNIT_EXPECT_STREQ(test, "handshaking", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_HANDSHAKE);
+	KUNIT_EXPECT_STREQ(test, "handshake", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_DEFINITIONS);
+	KUNIT_EXPECT_STREQ(test, "definitions", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_POLICY_INSTALL);
+	KUNIT_EXPECT_STREQ(test, "policy_install", name);
 	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_READY);
 	KUNIT_EXPECT_STREQ(test, "ready", name);
+	name = medusa_authserver_state_name(MEDUSA_AUTHSERVER_DEGRADED);
+	KUNIT_EXPECT_STREQ(test, "degraded", name);
 	name = medusa_authserver_state_name(99);
 	KUNIT_EXPECT_STREQ(test, "invalid", name);
 }

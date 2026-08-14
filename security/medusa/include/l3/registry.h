@@ -21,9 +21,14 @@ struct seq_file;
 
 enum medusa_authserver_state {
 	MEDUSA_AUTHSERVER_DISCONNECTED,
-	MEDUSA_AUTHSERVER_HANDSHAKING,
+	MEDUSA_AUTHSERVER_HANDSHAKE,
+	MEDUSA_AUTHSERVER_DEFINITIONS,
+	MEDUSA_AUTHSERVER_POLICY_INSTALL,
 	MEDUSA_AUTHSERVER_READY,
+	MEDUSA_AUTHSERVER_DEGRADED,
 };
+
+#define MEDUSA_AUTHSERVER_HANDSHAKING MEDUSA_AUTHSERVER_HANDSHAKE
 
 struct medusa_registry_status {
 	u64 policy_generation;
@@ -89,8 +94,11 @@ const char *medusa_delegation_context_name(
 /* interface to L4 */
 extern int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver);
 int med_authserver_handshake_begin(struct medusa_authserver_s *med_authserver);
+int med_authserver_set_state(struct medusa_authserver_s *med_authserver,
+			     enum medusa_authserver_state state);
 int med_authserver_stage_fallback_policy(
-	struct medusa_authserver_s *med_authserver, MCPptr_t event_id,
+	struct medusa_authserver_s *med_authserver,
+	struct medusa_evtype_s *event_id,
 	enum medusa_fallback_policy policy);
 extern int med_register_authserver(struct medusa_authserver_s *med_authserver);
 extern void med_unregister_authserver(struct medusa_authserver_s *med_authserver);

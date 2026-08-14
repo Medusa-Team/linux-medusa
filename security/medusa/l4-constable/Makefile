@@ -6,8 +6,5 @@ ifdef CONFIG_SECURITY_MEDUSA_GCOV_PROFILE
 GCOV_PROFILE := y
 endif
 
-export-objs :=  teleport_cycle teleport_reset
-
-l4-constable-y:= teleport.o chardev.o auth_server.o
+l4-constable-y := chardev.o auth_server.o
 obj-y := l4-constable.o
-

@@ -6,7 +6,7 @@
 
 #include "l3/audit_schema.h"
 #include "l3/protocol_stats.h"
-#include "l4/comm.h"
+#include <uapi/linux/medusa.h>
 
 #define MEDUSA_PROTOCOL_AUDIT_INTERVAL (5 * HZ)
 #define MEDUSA_PROTOCOL_AUDIT_BURST 3
@@ -130,7 +130,7 @@ void medusa_protocol_record_error(const struct medusa_protocol_error_context *co
 			 "Medusa: audit_schema=%u record=%s protocol=%llu",
 			 MEDUSA_AUDIT_SCHEMA_VERSION,
 			 MEDUSA_AUDIT_RECORD_PROTOCOL_ERROR,
-			 (unsigned long long)MEDUSA_COMM_VERSION);
+			 (unsigned long long)MEDUSA_PROTOCOL_VERSION);
 	audit_log_format(ab, " policy_generation=%llu error_kind=%s",
 			 (unsigned long long)context->policy_generation,
 			 medusa_protocol_error_name(context->counter));
