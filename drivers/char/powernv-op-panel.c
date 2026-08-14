@@ -167,7 +167,7 @@ static int oppanel_probe(struct platform_device *pdev)
 	if (!oppanel_data)
 		return -ENOMEM;
 
-	oppanel_lines = kcalloc(num_lines, sizeof(oppanel_line_t), GFP_KERNEL);
+	oppanel_lines = kzalloc_objs(oppanel_line_t, num_lines);
 	if (!oppanel_lines) {
 		rc = -ENOMEM;
 		goto free_oppanel_data;
@@ -213,7 +213,7 @@ static struct platform_driver oppanel_driver = {
 		.of_match_table	= oppanel_match,
 	},
 	.probe	= oppanel_probe,
-	.remove_new = oppanel_remove,
+	.remove	= oppanel_remove,
 };
 
 module_platform_driver(oppanel_driver);

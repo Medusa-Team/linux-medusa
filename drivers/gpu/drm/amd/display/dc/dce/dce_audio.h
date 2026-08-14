@@ -151,21 +151,13 @@ struct audio *dce_audio_create(
 		const struct dce_audio_shift *shifts,
 		const struct dce_audio_mask *masks);
 
-#if defined(CONFIG_DRM_AMD_DC_SI)
-struct audio *dce60_audio_create(
-		struct dc_context *ctx,
-		unsigned int inst,
-		const struct dce_audio_registers *reg,
-		const struct dce_audio_shift *shifts,
-		const struct dce_audio_mask *masks);
-#endif
-
 void dce_aud_destroy(struct audio **audio);
 
 void dce_aud_hw_init(struct audio *audio);
 
 void dce_aud_az_enable(struct audio *audio);
 void dce_aud_az_disable(struct audio *audio);
+void dce_aud_az_disable_hbr_audio(struct audio *audio);
 
 void dce_aud_az_configure(struct audio *audio,
 	enum signal_type signal,

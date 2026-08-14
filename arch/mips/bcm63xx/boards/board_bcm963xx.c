@@ -42,7 +42,7 @@ static struct board_info __initdata board_cvg834g = {
 	.expected_cpu_id = 0x3368,
 
 	.ephy_reset_gpio = 36,
-	.ephy_reset_gpio_flags = GPIOF_INIT_HIGH,
+	.ephy_reset_gpio_flags = GPIOF_OUT_INIT_HIGH,
 	.has_pci = 1,
 	.has_uart0 = 1,
 	.has_uart1 = 1,
@@ -764,7 +764,7 @@ void __init board_prom_init(void)
 			snprintf(cfe_version, 12, "%s", (char *) &cfe[4]);
 		}
 	} else {
-		strcpy(cfe_version, "unknown");
+		strscpy(cfe_version, "unknown");
 	}
 	pr_info("CFE version: %s\n", cfe_version);
 

@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 /*
  * Copyright (C) 2016 Felix Fietkau <nbd@nbd.name>
  * Copyright (C) 2018 Lorenzo Bianconi <lorenzo.bianconi83@gmail.com>
  */
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "mt76x02_eeprom.h"
 

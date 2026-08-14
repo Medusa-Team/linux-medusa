@@ -341,7 +341,7 @@ static int xlnx_formatter_pcm_open(struct snd_soc_component *component,
 		 !adata->s2mm_presence)
 		return -ENODEV;
 
-	stream_data = kzalloc(sizeof(*stream_data), GFP_KERNEL);
+	stream_data = kzalloc_obj(*stream_data);
 	if (!stream_data)
 		return -ENOMEM;
 
@@ -582,7 +582,7 @@ static const struct snd_soc_component_driver xlnx_asoc_component = {
 	.hw_params		= xlnx_formatter_pcm_hw_params,
 	.trigger		= xlnx_formatter_pcm_trigger,
 	.pointer		= xlnx_formatter_pcm_pointer,
-	.pcm_construct		= xlnx_formatter_pcm_new,
+	.pcm_new		= xlnx_formatter_pcm_new,
 };
 
 static int xlnx_formatter_pcm_probe(struct platform_device *pdev)
@@ -713,7 +713,7 @@ MODULE_DEVICE_TABLE(of, xlnx_formatter_pcm_of_match);
 
 static struct platform_driver xlnx_formatter_pcm_driver = {
 	.probe	= xlnx_formatter_pcm_probe,
-	.remove_new = xlnx_formatter_pcm_remove,
+	.remove = xlnx_formatter_pcm_remove,
 	.driver	= {
 		.name	= DRV_NAME,
 		.of_match_table	= xlnx_formatter_pcm_of_match,

@@ -402,7 +402,7 @@ static int path_init(struct mmphw_path_plat *path_plat,
 	dev_info(ctrl->dev, "%s: %s\n", __func__, config->name);
 
 	/* init driver data */
-	path_info = kzalloc(sizeof(*path_info), GFP_KERNEL);
+	path_info = kzalloc_obj(*path_info);
 	if (!path_info)
 		return 0;
 
@@ -512,16 +512,13 @@ static int mmphw_probe(struct platform_device *pdev)
 	}
 
 	/* get clock */
-	ctrl->clk = devm_clk_get(ctrl->dev, mi->clk_name);
+	ctrl->clk = devm_clk_get_enabled(ctrl->dev, mi->clk_name);
 	if (IS_ERR(ctrl->clk)) {
 		ret = PTR_ERR(ctrl->clk);
 		dev_err_probe(ctrl->dev, ret,
 			      "unable to get clk %s\n", mi->clk_name);
 		goto failed;
 	}
-	ret = clk_prepare_enable(ctrl->clk);
-	if (ret)
-		goto failed;
 
 	/* init global regs */
 	ctrl_set_default(ctrl);
@@ -556,7 +553,6 @@ failed_path_init:
 		path_deinit(path_plat);
 	}
 
-	clk_disable_unprepare(ctrl->clk);
 failed:
 	dev_err(&pdev->dev, "device init failed\n");
 

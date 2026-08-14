@@ -381,18 +381,16 @@ static irqreturn_t ads8688_trigger_handler(int irq, void *p)
 	struct iio_poll_func *pf = p;
 	struct iio_dev *indio_dev = pf->indio_dev;
 	/* Ensure naturally aligned timestamp */
-	u16 buffer[ADS8688_MAX_CHANNELS + sizeof(s64)/sizeof(u16)] __aligned(8);
+	u16 buffer[ADS8688_MAX_CHANNELS + sizeof(s64)/sizeof(u16)] __aligned(8) = { };
 	int i, j = 0;
 
-	for (i = 0; i < indio_dev->masklength; i++) {
-		if (!test_bit(i, indio_dev->active_scan_mask))
-			continue;
+	iio_for_each_active_channel(indio_dev, i) {
 		buffer[j] = ads8688_read(indio_dev, i);
 		j++;
 	}
 
-	iio_push_to_buffers_with_timestamp(indio_dev, buffer,
-			iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_ts(indio_dev, buffer, sizeof(buffer),
+				    iio_get_time_ns(indio_dev));
 
 	iio_trigger_notify_done(indio_dev->trig);
 
@@ -454,9 +452,9 @@ static int ads8688_probe(struct spi_device *spi)
 }
 
 static const struct spi_device_id ads8688_id[] = {
-	{"ads8684", ID_ADS8684},
-	{"ads8688", ID_ADS8688},
-	{}
+	{ "ads8684", ID_ADS8684 },
+	{ "ads8688", ID_ADS8688 },
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, ads8688_id);
 

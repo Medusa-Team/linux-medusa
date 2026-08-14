@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 /*
  * Copyright (C) 2018 Lorenzo Bianconi <lorenzo.bianconi83@gmail.com>
  */
@@ -188,10 +188,7 @@ static void mt76x02u_pre_tbtt_work(struct work_struct *work)
 	struct sk_buff *skb;
 	int nbeacons;
 
-	if (!dev->mt76.beacon_mask)
-		return;
-
-	if (mt76_hw(dev)->conf.flags & IEEE80211_CONF_OFFCHANNEL)
+	if (!dev->mt76.beacon_mask || dev->mphy.offchannel)
 		return;
 
 	__skb_queue_head_init(&data.q);
@@ -267,8 +264,8 @@ void mt76x02u_init_beacon_config(struct mt76x02_dev *dev)
 	};
 	dev->beacon_ops = &beacon_ops;
 
-	hrtimer_init(&dev->pre_tbtt_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	dev->pre_tbtt_timer.function = mt76x02u_pre_tbtt_interrupt;
+	hrtimer_setup(&dev->pre_tbtt_timer, mt76x02u_pre_tbtt_interrupt, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL);
 	INIT_WORK(&dev->pre_tbtt_work, mt76x02u_pre_tbtt_work);
 
 	mt76x02_init_beacon_config(dev);

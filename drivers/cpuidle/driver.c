@@ -8,6 +8,8 @@
  * This code is licenced under the GPL.
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/sched.h>
@@ -193,6 +195,14 @@ static void __cpuidle_driver_init(struct cpuidle_driver *drv)
 			s->exit_latency_ns =  0;
 		else
 			s->exit_latency = div_u64(s->exit_latency_ns, NSEC_PER_USEC);
+
+		/*
+		 * Warn if the exit latency of a CPU idle state exceeds its
+		 * target residency which is assumed to never happen in cpuidle
+		 * in multiple places.
+		 */
+		if (s->exit_latency_ns > s->target_residency_ns)
+			pr_warn("Idle state %d target residency too low\n", i);
 	}
 }
 
@@ -261,7 +271,7 @@ static void __cpuidle_unregister_driver(struct cpuidle_driver *drv)
  * @drv: a pointer to a valid struct cpuidle_driver
  *
  * Register the driver under a lock to prevent concurrent attempts to
- * [un]register the driver from occuring at the same time.
+ * [un]register the driver from occurring at the same time.
  *
  * Returns 0 on success, a negative error code (returned by
  * __cpuidle_register_driver()) otherwise.
@@ -296,7 +306,7 @@ EXPORT_SYMBOL_GPL(cpuidle_register_driver);
  * @drv: a pointer to a valid struct cpuidle_driver
  *
  * Unregisters the cpuidle driver under a lock to prevent concurrent attempts
- * to [un]register the driver from occuring at the same time.  @drv has to
+ * to [un]register the driver from occurring at the same time.  @drv has to
  * match the currently registered driver.
  */
 void cpuidle_unregister_driver(struct cpuidle_driver *drv)

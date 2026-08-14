@@ -62,7 +62,7 @@ properties:
   default-state:
     description:
       The initial state of the LED. If the LED is already on or off and the
-      default-state property is set the to same value, then no glitch should be
+      default-state property is set to the same value, then no glitch should be
       produced where the LED momentarily turns off (or on). The "keep" setting
       will keep the LED at whatever its current state is, without producing a
       glitch.
@@ -113,9 +113,13 @@ properties:
             # LED indicates NAND memory activity (deprecated),
             # in new implementations use "mtd"
           - nand-disk
+            # LED indicates network activity
+          - netdev
             # No trigger assigned to the LED. This is the default mode
             # if trigger is absent
           - none
+            # LED indicates remote control feedback
+          - rc-feedback
             # LED indicates camera torch state
           - torch
             # LED indicates USB gadget activity
@@ -169,6 +173,12 @@ properties:
       led-max-microamp.
     $ref: /schemas/types.yaml#/definitions/uint32
 
+  default-brightness:
+    description:
+      Brightness to be set if LED's default state is on. Used only during
+      initialization. If the option is not set then max brightness is used.
+    $ref: /schemas/types.yaml#/definitions/uint32
+
   panic-indicator:
     description:
       This property specifies that the LED should be used, if at all possible,
@@ -200,6 +210,12 @@ properties:
       #trigger-source-cells property in the source node.
     $ref: /schemas/types.yaml#/definitions/phandle-array
 
+  active-high:
+    type: boolean
+    description:
+      Makes LED active high. To turn the LED ON, line needs to be
+      set to high voltage instead of low.
+
   active-low:
     type: boolean
     description:
@@ -222,6 +238,14 @@ properties:
     description:
       Maximum timeout in microseconds after which the flash LED is turned off.
       Required for flash LED nodes with configurable timeout.
+
+allOf:
+  - if:
+      required:
+        - active-low
+    then:
+      properties:
+        active-high: false
 
 additionalProperties: true
 

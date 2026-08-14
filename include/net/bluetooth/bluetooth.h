@@ -29,6 +29,7 @@
 #include <linux/poll.h>
 #include <net/sock.h>
 #include <linux/seq_file.h>
+#include <linux/ethtool.h>
 
 #define BT_SUBSYS_VERSION	2
 #define BT_SUBSYS_REVISION	22
@@ -123,26 +124,36 @@ struct bt_voice {
 
 #define BT_VOICE_TRANSPARENT			0x0003
 #define BT_VOICE_CVSD_16BIT			0x0060
+#define BT_VOICE_TRANSPARENT_16BIT		0x0063
 
 #define BT_SNDMTU		12
 #define BT_RCVMTU		13
 #define BT_PHY			14
 
-#define BT_PHY_BR_1M_1SLOT	0x00000001
-#define BT_PHY_BR_1M_3SLOT	0x00000002
-#define BT_PHY_BR_1M_5SLOT	0x00000004
-#define BT_PHY_EDR_2M_1SLOT	0x00000008
-#define BT_PHY_EDR_2M_3SLOT	0x00000010
-#define BT_PHY_EDR_2M_5SLOT	0x00000020
-#define BT_PHY_EDR_3M_1SLOT	0x00000040
-#define BT_PHY_EDR_3M_3SLOT	0x00000080
-#define BT_PHY_EDR_3M_5SLOT	0x00000100
-#define BT_PHY_LE_1M_TX		0x00000200
-#define BT_PHY_LE_1M_RX		0x00000400
-#define BT_PHY_LE_2M_TX		0x00000800
-#define BT_PHY_LE_2M_RX		0x00001000
-#define BT_PHY_LE_CODED_TX	0x00002000
-#define BT_PHY_LE_CODED_RX	0x00004000
+#define BT_PHY_BR_1M_1SLOT	BIT(0)
+#define BT_PHY_BR_1M_3SLOT	BIT(1)
+#define BT_PHY_BR_1M_5SLOT	BIT(2)
+#define BT_PHY_EDR_2M_1SLOT	BIT(3)
+#define BT_PHY_EDR_2M_3SLOT	BIT(4)
+#define BT_PHY_EDR_2M_5SLOT	BIT(5)
+#define BT_PHY_EDR_3M_1SLOT	BIT(6)
+#define BT_PHY_EDR_3M_3SLOT	BIT(7)
+#define BT_PHY_EDR_3M_5SLOT	BIT(8)
+#define BT_PHY_LE_1M_TX		BIT(9)
+#define BT_PHY_LE_1M_RX		BIT(10)
+#define BT_PHY_LE_2M_TX		BIT(11)
+#define BT_PHY_LE_2M_RX		BIT(12)
+#define BT_PHY_LE_CODED_TX	BIT(13)
+#define BT_PHY_LE_CODED_RX	BIT(14)
+
+#define BT_PHY_BREDR_MASK	(BT_PHY_BR_1M_1SLOT | BT_PHY_BR_1M_3SLOT | \
+				 BT_PHY_BR_1M_5SLOT | BT_PHY_EDR_2M_1SLOT | \
+				 BT_PHY_EDR_2M_3SLOT | BT_PHY_EDR_2M_5SLOT | \
+				 BT_PHY_EDR_3M_1SLOT | BT_PHY_EDR_3M_3SLOT | \
+				 BT_PHY_EDR_3M_5SLOT)
+#define BT_PHY_LE_MASK		(BT_PHY_LE_1M_TX | BT_PHY_LE_1M_RX | \
+				 BT_PHY_LE_2M_TX | BT_PHY_LE_2M_RX | \
+				 BT_PHY_LE_CODED_TX | BT_PHY_LE_CODED_RX)
 
 #define BT_MODE			15
 
@@ -155,6 +166,7 @@ struct bt_voice {
 #define BT_PKT_STATUS           16
 
 #define BT_SCM_PKT_STATUS	0x03
+#define BT_SCM_ERROR		0x04
 
 #define BT_ISO_QOS		17
 
@@ -170,7 +182,7 @@ struct bt_iso_io_qos {
 	__u32 interval;
 	__u16 latency;
 	__u16 sdu;
-	__u8  phy;
+	__u8  phys;
 	__u8  rtn;
 };
 
@@ -209,9 +221,9 @@ struct bt_iso_qos {
 	};
 };
 
-#define BT_ISO_PHY_1M		0x01
-#define BT_ISO_PHY_2M		0x02
-#define BT_ISO_PHY_CODED	0x04
+#define BT_ISO_PHY_1M		BIT(0)
+#define BT_ISO_PHY_2M		BIT(1)
+#define BT_ISO_PHY_CODED	BIT(2)
 #define BT_ISO_PHY_ANY		(BT_ISO_PHY_1M | BT_ISO_PHY_2M | \
 				 BT_ISO_PHY_CODED)
 
@@ -241,6 +253,12 @@ struct bt_codecs {
 
 #define BT_ISO_BASE		20
 
+/* Socket option value 21 reserved */
+
+#define BT_PKT_SEQNUM		22
+
+#define BT_SCM_PKT_SEQNUM	0x05
+
 __printf(1, 2)
 void bt_info(const char *fmt, ...);
 __printf(1, 2)
@@ -263,7 +281,8 @@ void bt_err_ratelimited(const char *fmt, ...);
 #define BT_ERR(fmt, ...)	bt_err(fmt "\n", ##__VA_ARGS__)
 
 #if IS_ENABLED(CONFIG_BT_FEATURE_DEBUG)
-#define BT_DBG(fmt, ...)	bt_dbg(fmt "\n", ##__VA_ARGS__)
+#define BT_DBG(fmt, ...) \
+	bt_dbg("%s:%d: " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
 #else
 #define BT_DBG(fmt, ...)	pr_debug(fmt "\n", ##__VA_ARGS__)
 #endif
@@ -379,6 +398,7 @@ void baswap(bdaddr_t *dst, const bdaddr_t *src);
 struct bt_sock {
 	struct sock sk;
 	struct list_head accept_q;
+	spinlock_t accept_q_lock; /* protects accept_q */
 	struct sock *parent;
 	unsigned long flags;
 	void (*skb_msg_name)(struct sk_buff *, void *, int *);
@@ -388,7 +408,8 @@ struct bt_sock {
 enum {
 	BT_SK_DEFER_SETUP,
 	BT_SK_SUSPEND,
-	BT_SK_PKT_STATUS
+	BT_SK_PKT_STATUS,
+	BT_SK_PKT_SEQNUM,
 };
 
 struct bt_sock_list {
@@ -403,6 +424,7 @@ int  bt_sock_register(int proto, const struct net_proto_family *ops);
 void bt_sock_unregister(int proto);
 void bt_sock_link(struct bt_sock_list *l, struct sock *s);
 void bt_sock_unlink(struct bt_sock_list *l, struct sock *s);
+bool bt_sock_linked(struct bt_sock_list *l, struct sock *s);
 struct sock *bt_sock_alloc(struct net *net, struct socket *sock,
 			   struct proto *prot, int proto, gfp_t prio, int kern);
 int  bt_sock_recvmsg(struct socket *sock, struct msghdr *msg, size_t len,
@@ -445,6 +467,9 @@ void hci_req_cmd_complete(struct hci_dev *hdev, u16 opcode, u8 status,
 			  hci_req_complete_t *req_complete,
 			  hci_req_complete_skb_t *req_complete_skb);
 
+int hci_ethtool_ts_info(unsigned int index, int sk_proto,
+			struct kernel_ethtool_ts_info *ts_info);
+
 #define HCI_REQ_START	BIT(0)
 #define HCI_REQ_SKB	BIT(1)
 
@@ -468,6 +493,7 @@ struct bt_skb_cb {
 	u8 pkt_type;
 	u8 force_active;
 	u16 expect;
+	u16 pkt_seqnum;
 	u8 incoming:1;
 	u8 pkt_status:2;
 	union {
@@ -481,6 +507,7 @@ struct bt_skb_cb {
 
 #define hci_skb_pkt_type(skb) bt_cb((skb))->pkt_type
 #define hci_skb_pkt_status(skb) bt_cb((skb))->pkt_status
+#define hci_skb_pkt_seqnum(skb) bt_cb((skb))->pkt_seqnum
 #define hci_skb_expect(skb) bt_cb((skb))->expect
 #define hci_skb_opcode(skb) bt_cb((skb))->hci.opcode
 #define hci_skb_event(skb) bt_cb((skb))->hci.req_event
@@ -589,15 +616,6 @@ static inline struct sk_buff *bt_skb_sendmmsg(struct sock *sk,
 	return skb;
 }
 
-static inline int bt_copy_from_sockptr(void *dst, size_t dst_size,
-				       sockptr_t src, size_t src_size)
-{
-	if (dst_size > src_size)
-		return -EINVAL;
-
-	return copy_from_sockptr(dst, src, dst_size);
-}
-
 int bt_to_errno(u16 code);
 __u8 bt_status(int err);
 
@@ -640,7 +658,7 @@ static inline void sco_exit(void)
 #if IS_ENABLED(CONFIG_BT_LE)
 int iso_init(void);
 int iso_exit(void);
-bool iso_enabled(void);
+bool iso_inited(void);
 #else
 static inline int iso_init(void)
 {
@@ -652,7 +670,7 @@ static inline int iso_exit(void)
 	return 0;
 }
 
-static inline bool iso_enabled(void)
+static inline bool iso_inited(void)
 {
 	return false;
 }

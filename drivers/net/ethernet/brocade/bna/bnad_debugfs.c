@@ -45,7 +45,7 @@ bnad_debugfs_open_fwtrc(struct inode *inode, struct file *file)
 	unsigned long flags;
 	int rc;
 
-	fw_debug = kzalloc(sizeof(struct bnad_debug_info), GFP_KERNEL);
+	fw_debug = kzalloc_obj(struct bnad_debug_info);
 	if (!fw_debug)
 		return -ENOMEM;
 
@@ -85,7 +85,7 @@ bnad_debugfs_open_fwsave(struct inode *inode, struct file *file)
 	unsigned long flags;
 	int rc;
 
-	fw_debug = kzalloc(sizeof(struct bnad_debug_info), GFP_KERNEL);
+	fw_debug = kzalloc_obj(struct bnad_debug_info);
 	if (!fw_debug)
 		return -ENOMEM;
 
@@ -122,7 +122,7 @@ bnad_debugfs_open_reg(struct inode *inode, struct file *file)
 {
 	struct bnad_debug_info *reg_debug;
 
-	reg_debug = kzalloc(sizeof(struct bnad_debug_info), GFP_KERNEL);
+	reg_debug = kzalloc_obj(struct bnad_debug_info);
 	if (!reg_debug)
 		return -ENOMEM;
 
@@ -185,7 +185,7 @@ bnad_debugfs_open_drvinfo(struct inode *inode, struct file *file)
 	struct bnad_debug_info *drv_info;
 	int rc;
 
-	drv_info = kzalloc(sizeof(struct bnad_debug_info), GFP_KERNEL);
+	drv_info = kzalloc_obj(struct bnad_debug_info);
 	if (!drv_info)
 		return -ENOMEM;
 
@@ -500,11 +500,6 @@ bnad_debugfs_init(struct bnad *bnad)
 	if (!bna_debugfs_root) {
 		bna_debugfs_root = debugfs_create_dir("bna", NULL);
 		atomic_set(&bna_debugfs_port_count, 0);
-		if (!bna_debugfs_root) {
-			netdev_warn(bnad->netdev,
-				    "debugfs root dir creation failed\n");
-			return;
-		}
 	}
 
 	/* Setup the pci_dev debugfs directory for the port */
@@ -517,18 +512,11 @@ bnad_debugfs_init(struct bnad *bnad)
 
 		for (i = 0; i < ARRAY_SIZE(bnad_debugfs_files); i++) {
 			file = &bnad_debugfs_files[i];
-			bnad->bnad_dentry_files[i] =
-					debugfs_create_file(file->name,
-							file->mode,
-							bnad->port_debugfs_root,
-							bnad,
-							file->fops);
-			if (!bnad->bnad_dentry_files[i]) {
-				netdev_warn(bnad->netdev,
-					    "create %s entry failed\n",
-					    file->name);
-				return;
-			}
+			debugfs_create_file(file->name,
+					    file->mode,
+					    bnad->port_debugfs_root,
+					    bnad,
+					    file->fops);
 		}
 	}
 }
@@ -537,15 +525,6 @@ bnad_debugfs_init(struct bnad *bnad)
 void
 bnad_debugfs_uninit(struct bnad *bnad)
 {
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(bnad_debugfs_files); i++) {
-		if (bnad->bnad_dentry_files[i]) {
-			debugfs_remove(bnad->bnad_dentry_files[i]);
-			bnad->bnad_dentry_files[i] = NULL;
-		}
-	}
-
 	/* Remove the pci_dev debugfs directory for the port */
 	if (bnad->port_debugfs_root) {
 		debugfs_remove(bnad->port_debugfs_root);

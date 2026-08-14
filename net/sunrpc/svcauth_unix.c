@@ -72,7 +72,7 @@ struct auth_domain *unix_domain_find(char *name)
 			return rv;
 		}
 
-		new = kmalloc(sizeof(*new), GFP_KERNEL);
+		new = kmalloc_obj(*new);
 		if (new == NULL)
 			return NULL;
 		kref_init(&new->h.ref);
@@ -143,7 +143,7 @@ static void update(struct cache_head *cnew, struct cache_head *citem)
 }
 static struct cache_head *ip_map_alloc(void)
 {
-	struct ip_map *i = kmalloc(sizeof(*i), GFP_KERNEL);
+	struct ip_map *i = kmalloc_obj(*i);
 	if (i)
 		return &i->h;
 	else
@@ -458,7 +458,7 @@ static void unix_gid_update(struct cache_head *cnew, struct cache_head *citem)
 }
 static struct cache_head *unix_gid_alloc(void)
 {
-	struct unix_gid *g = kmalloc(sizeof(*g), GFP_KERNEL);
+	struct unix_gid *g = kmalloc_obj(*g);
 	if (g)
 		return &g->h;
 	else
@@ -697,7 +697,8 @@ svcauth_unix_set_client(struct svc_rqst *rqstp)
 	rqstp->rq_auth_stat = rpc_autherr_badcred;
 	ipm = ip_map_cached_get(xprt);
 	if (ipm == NULL)
-		ipm = __ip_map_lookup(sn->ip_map_cache, rqstp->rq_server->sv_program->pg_class,
+		ipm = __ip_map_lookup(sn->ip_map_cache,
+				      rqstp->rq_server->sv_programs->pg_class,
 				    &sin6->sin6_addr);
 
 	if (ipm == NULL)

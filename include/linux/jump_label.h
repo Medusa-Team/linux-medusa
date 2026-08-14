@@ -75,6 +75,7 @@
 
 #include <linux/types.h>
 #include <linux/compiler.h>
+#include <linux/cleanup.h>
 
 extern bool static_key_initialized;
 
@@ -86,13 +87,6 @@ struct static_key {
 	atomic_t enabled;
 #ifdef CONFIG_JUMP_LABEL
 /*
- * Note:
- *   To make anonymous unions work with old compilers, the static
- *   initialization of them requires brackets. This creates a dependency
- *   on the order of the struct with the initializers. If any fields
- *   are added, STATIC_KEY_INIT_TRUE and STATIC_KEY_INIT_FALSE may need
- *   to be modified.
- *
  * bit 0 => 1 if key is initially true
  *	    0 if initially false
  * bit 1 => 1 if points to struct static_key_mod
@@ -237,19 +231,12 @@ extern void static_key_enable_cpuslocked(struct static_key *key);
 extern void static_key_disable_cpuslocked(struct static_key *key);
 extern enum jump_label_type jump_label_init_type(struct jump_entry *entry);
 
-/*
- * We should be using ATOMIC_INIT() for initializing .enabled, but
- * the inclusion of atomic.h is problematic for inclusion of jump_label.h
- * in 'low-level' headers. Thus, we are initializing .enabled with a
- * raw value, but have added a BUILD_BUG_ON() to catch any issues in
- * jump_label_init() see: kernel/jump_label.c.
- */
 #define STATIC_KEY_INIT_TRUE					\
-	{ .enabled = { 1 },					\
-	  { .type = JUMP_TYPE_TRUE } }
+	{ .enabled = ATOMIC_INIT(1),				\
+	  .type = JUMP_TYPE_TRUE }
 #define STATIC_KEY_INIT_FALSE					\
-	{ .enabled = { 0 },					\
-	  { .type = JUMP_TYPE_FALSE } }
+	{ .enabled = ATOMIC_INIT(0),				\
+	  .type = JUMP_TYPE_FALSE }
 
 #else  /* !CONFIG_JUMP_LABEL */
 
@@ -346,6 +333,8 @@ static inline void static_key_disable(struct static_key *key)
 #define STATIC_KEY_INIT_FALSE	{ .enabled = ATOMIC_INIT(0) }
 
 #endif	/* CONFIG_JUMP_LABEL */
+
+DEFINE_LOCK_GUARD_0(jump_label_lock, jump_label_lock(), jump_label_unlock())
 
 #define STATIC_KEY_INIT STATIC_KEY_INIT_FALSE
 #define jump_label_enabled static_key_enabled

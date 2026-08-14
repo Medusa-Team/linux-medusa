@@ -102,7 +102,6 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_driver.h>
@@ -110,7 +109,6 @@
 
 struct drivetemp_data {
 	struct list_head list;		/* list of instantiated devices */
-	struct mutex lock;		/* protect data buffer accesses */
 	struct scsi_device *sdev;	/* SCSI device */
 	struct device *dev;		/* instantiating device */
 	struct device *hwdev;		/* hardware monitoring device */
@@ -165,6 +163,7 @@ static int drivetemp_scsi_command(struct drivetemp_data *st,
 {
 	u8 scsi_cmd[MAX_COMMAND_SIZE];
 	enum req_op op;
+	int err;
 
 	memset(scsi_cmd, 0, sizeof(scsi_cmd));
 	scsi_cmd[0] = ATA_16;
@@ -192,8 +191,11 @@ static int drivetemp_scsi_command(struct drivetemp_data *st,
 	scsi_cmd[12] = lba_high;
 	scsi_cmd[14] = ata_command;
 
-	return scsi_execute_cmd(st->sdev, scsi_cmd, op, st->smartdata,
-				ATA_SECT_SIZE, HZ, 5, NULL);
+	err = scsi_execute_cmd(st->sdev, scsi_cmd, op, st->smartdata,
+			       ATA_SECT_SIZE, 10 * HZ, 5, NULL);
+	if (err > 0)
+		err = -EIO;
+	return err;
 }
 
 static int drivetemp_ata_command(struct drivetemp_data *st, u8 feature,
@@ -458,9 +460,7 @@ static int drivetemp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_temp_input:
 	case hwmon_temp_lowest:
 	case hwmon_temp_highest:
-		mutex_lock(&st->lock);
 		err = st->get_temp(st, attr, val);
-		mutex_unlock(&st->lock);
 		break;
 	case hwmon_temp_lcrit:
 		*val = st->temp_lcrit;
@@ -556,13 +556,12 @@ static int drivetemp_add(struct device *dev)
 	struct drivetemp_data *st;
 	int err;
 
-	st = kzalloc(sizeof(*st), GFP_KERNEL);
+	st = kzalloc_obj(*st);
 	if (!st)
 		return -ENOMEM;
 
 	st->sdev = sdev;
 	st->dev = dev;
-	mutex_init(&st->lock);
 
 	if (drivetemp_identify(st)) {
 		err = -ENODEV;

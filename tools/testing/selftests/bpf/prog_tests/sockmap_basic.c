@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2020 Cloudflare
 #include <error.h>
-#include <netinet/tcp.h>
+#include <linux/tcp.h>
+#include <linux/socket.h>
 #include <sys/epoll.h>
 
 #include "test_progs.h"
@@ -12,6 +13,7 @@
 #include "test_sockmap_progs_query.skel.h"
 #include "test_sockmap_pass_prog.skel.h"
 #include "test_sockmap_drop_prog.skel.h"
+#include "test_sockmap_change_tail.skel.h"
 #include "bpf_iter_sockmap.skel.h"
 
 #include "sockmap_helpers.h"
@@ -20,6 +22,15 @@
 
 #define TCP_REPAIR_ON		1
 #define TCP_REPAIR_OFF_NO_WP	-1	/* Turn off without window probes */
+
+/**
+ * SOL_TCP is defined in <netinet/tcp.h> (glibc), but the copybuf_address
+ * field of tcp_zerocopy_receive is not yet included in older versions.
+ * This workaround remains necessary until the glibc update propagates.
+ */
+#ifndef SOL_TCP
+#define SOL_TCP 6
+#endif
 
 static int connected_socket_v4(void)
 {
@@ -108,6 +119,39 @@ out:
 	close(s);
 }
 
+static void test_sockmap_vsock_delete_on_close(void)
+{
+	int map, c, p, err, zero = 0;
+
+	map = bpf_map_create(BPF_MAP_TYPE_SOCKMAP, NULL, sizeof(int),
+			     sizeof(int), 1, NULL);
+	if (!ASSERT_OK_FD(map, "bpf_map_create"))
+		return;
+
+	err = create_pair(AF_VSOCK, SOCK_STREAM, &c, &p);
+	if (!ASSERT_OK(err, "create_pair"))
+		goto close_map;
+
+	if (xbpf_map_update_elem(map, &zero, &c, BPF_NOEXIST))
+		goto close_socks;
+
+	xclose(c);
+	xclose(p);
+
+	err = create_pair(AF_VSOCK, SOCK_STREAM, &c, &p);
+	if (!ASSERT_OK(err, "create_pair"))
+		goto close_map;
+
+	err = bpf_map_update_elem(map, &zero, &c, BPF_NOEXIST);
+	ASSERT_OK(err, "after close(), bpf_map_update");
+
+close_socks:
+	xclose(c);
+	xclose(p);
+close_map:
+	xclose(map);
+}
+
 static void test_skmsg_helpers(enum bpf_map_type map_type)
 {
 	struct test_skmsg_load_helpers *skel;
@@ -160,7 +204,7 @@ static void test_skmsg_helpers_with_link(enum bpf_map_type map_type)
 	/* Fail since bpf_link for the same prog type has been created. */
 	link2 = bpf_program__attach_sockmap(prog_clone, map);
 	if (!ASSERT_ERR_PTR(link2, "bpf_program__attach_sockmap")) {
-		bpf_link__detach(link2);
+		bpf_link__destroy(link2);
 		goto out;
 	}
 
@@ -186,7 +230,7 @@ static void test_skmsg_helpers_with_link(enum bpf_map_type map_type)
 	if (!ASSERT_OK(err, "bpf_link_update"))
 		goto out;
 out:
-	bpf_link__detach(link);
+	bpf_link__destroy(link);
 	test_skmsg_load_helpers__destroy(skel);
 }
 
@@ -373,7 +417,7 @@ static void test_sockmap_skb_verdict_attach_with_link(void)
 	if (!ASSERT_OK_PTR(link, "bpf_program__attach_sockmap"))
 		goto out;
 
-	bpf_link__detach(link);
+	bpf_link__destroy(link);
 
 	err = bpf_prog_attach(bpf_program__fd(prog), map, BPF_SK_SKB_STREAM_VERDICT, 0);
 	if (!ASSERT_OK(err, "bpf_prog_attach"))
@@ -382,7 +426,7 @@ static void test_sockmap_skb_verdict_attach_with_link(void)
 	/* Fail since attaching with the same prog/map has been done. */
 	link = bpf_program__attach_sockmap(prog, map);
 	if (!ASSERT_ERR_PTR(link, "bpf_program__attach_sockmap"))
-		bpf_link__detach(link);
+		bpf_link__destroy(link);
 
 	err = bpf_prog_detach2(bpf_program__fd(prog), map, BPF_SK_SKB_STREAM_VERDICT);
 	if (!ASSERT_OK(err, "bpf_prog_detach2"))
@@ -451,11 +495,11 @@ out:
 #define MAX_EVENTS 10
 static void test_sockmap_skb_verdict_shutdown(void)
 {
+	int n, err, map, verdict, c1 = -1, p1 = -1;
 	struct epoll_event ev, events[MAX_EVENTS];
-	int n, err, map, verdict, s, c1 = -1, p1 = -1;
 	struct test_sockmap_pass_prog *skel;
-	int epollfd;
 	int zero = 0;
+	int epollfd;
 	char b;
 
 	skel = test_sockmap_pass_prog__open_and_load();
@@ -469,10 +513,7 @@ static void test_sockmap_skb_verdict_shutdown(void)
 	if (!ASSERT_OK(err, "bpf_prog_attach"))
 		goto out;
 
-	s = socket_loopback(AF_INET, SOCK_STREAM);
-	if (s < 0)
-		goto out;
-	err = create_pair(s, AF_INET, SOCK_STREAM, &c1, &p1);
+	err = create_pair(AF_INET, SOCK_STREAM, &c1, &p1);
 	if (err < 0)
 		goto out;
 
@@ -495,8 +536,8 @@ static void test_sockmap_skb_verdict_shutdown(void)
 	if (!ASSERT_EQ(err, 1, "epoll_wait(fd)"))
 		goto out_close;
 
-	n = recv(c1, &b, 1, SOCK_NONBLOCK);
-	ASSERT_EQ(n, 0, "recv_timeout(fin)");
+	n = recv(c1, &b, 1, MSG_DONTWAIT);
+	ASSERT_EQ(n, 0, "recv(fin)");
 out_close:
 	close(c1);
 	close(p1);
@@ -504,13 +545,15 @@ out:
 	test_sockmap_pass_prog__destroy(skel);
 }
 
-static void test_sockmap_skb_verdict_fionread(bool pass_prog)
+
+static void do_test_sockmap_skb_verdict_fionread(int sotype, bool pass_prog)
 {
+	int err, map, verdict, c0 = -1, c1 = -1, p0 = -1, p1 = -1;
 	int expected, zero = 0, sent, recvd, avail;
-	int err, map, verdict, s, c0 = -1, c1 = -1, p0 = -1, p1 = -1;
 	struct test_sockmap_pass_prog *pass = NULL;
 	struct test_sockmap_drop_prog *drop = NULL;
 	char buf[256] = "0123456789";
+	int split_len = sizeof(buf) / 2;
 
 	if (pass_prog) {
 		pass = test_sockmap_pass_prog__open_and_load();
@@ -518,7 +561,10 @@ static void test_sockmap_skb_verdict_fionread(bool pass_prog)
 			return;
 		verdict = bpf_program__fd(pass->progs.prog_skb_verdict);
 		map = bpf_map__fd(pass->maps.sock_map_rx);
-		expected = sizeof(buf);
+		if (sotype == SOCK_DGRAM)
+			expected = split_len; /* FIONREAD for UDP is different from TCP */
+		else
+			expected = sizeof(buf);
 	} else {
 		drop = test_sockmap_drop_prog__open_and_load();
 		if (!ASSERT_OK_PTR(drop, "open_and_load"))
@@ -534,25 +580,23 @@ static void test_sockmap_skb_verdict_fionread(bool pass_prog)
 	if (!ASSERT_OK(err, "bpf_prog_attach"))
 		goto out;
 
-	s = socket_loopback(AF_INET, SOCK_STREAM);
-	if (!ASSERT_GT(s, -1, "socket_loopback(s)"))
-		goto out;
-	err = create_socket_pairs(s, AF_INET, SOCK_STREAM, &c0, &c1, &p0, &p1);
-	if (!ASSERT_OK(err, "create_socket_pairs(s)"))
+	err = create_socket_pairs(AF_INET, sotype, &c0, &c1, &p0, &p1);
+	if (!ASSERT_OK(err, "create_socket_pairs()"))
 		goto out;
 
 	err = bpf_map_update_elem(map, &zero, &c1, BPF_NOEXIST);
 	if (!ASSERT_OK(err, "bpf_map_update_elem(c1)"))
 		goto out_close;
 
-	sent = xsend(p1, &buf, sizeof(buf), 0);
-	ASSERT_EQ(sent, sizeof(buf), "xsend(p0)");
+	sent = xsend(p1, &buf, split_len, 0);
+	sent += xsend(p1, &buf, sizeof(buf) - split_len, 0);
+	ASSERT_EQ(sent, sizeof(buf), "xsend(p1)");
 	err = ioctl(c1, FIONREAD, &avail);
 	ASSERT_OK(err, "ioctl(FIONREAD) error");
 	ASSERT_EQ(avail, expected, "ioctl(FIONREAD)");
 	/* On DROP test there will be no data to read */
 	if (pass_prog) {
-		recvd = recv_timeout(c1, &buf, sizeof(buf), SOCK_NONBLOCK, IO_TIMEOUT_SEC);
+		recvd = recv_timeout(c1, &buf, sizeof(buf), MSG_DONTWAIT, IO_TIMEOUT_SEC);
 		ASSERT_EQ(recvd, sizeof(buf), "recv_timeout(c0)");
 	}
 
@@ -568,18 +612,68 @@ out:
 		test_sockmap_drop_prog__destroy(drop);
 }
 
+static void test_sockmap_skb_verdict_fionread(bool pass_prog)
+{
+	do_test_sockmap_skb_verdict_fionread(SOCK_STREAM, pass_prog);
+	do_test_sockmap_skb_verdict_fionread(SOCK_DGRAM, pass_prog);
+}
+
+static void test_sockmap_skb_verdict_change_tail(void)
+{
+	struct test_sockmap_change_tail *skel;
+	int err, map, verdict;
+	int c1, p1, sent, recvd;
+	int zero = 0;
+	char buf[2];
+
+	skel = test_sockmap_change_tail__open_and_load();
+	if (!ASSERT_OK_PTR(skel, "open_and_load"))
+		return;
+	verdict = bpf_program__fd(skel->progs.prog_skb_verdict);
+	map = bpf_map__fd(skel->maps.sock_map_rx);
+
+	err = bpf_prog_attach(verdict, map, BPF_SK_SKB_STREAM_VERDICT, 0);
+	if (!ASSERT_OK(err, "bpf_prog_attach"))
+		goto out;
+	err = create_pair(AF_INET, SOCK_STREAM, &c1, &p1);
+	if (!ASSERT_OK(err, "create_pair()"))
+		goto out;
+	err = bpf_map_update_elem(map, &zero, &c1, BPF_NOEXIST);
+	if (!ASSERT_OK(err, "bpf_map_update_elem(c1)"))
+		goto out_close;
+	sent = xsend(p1, "Tr", 2, 0);
+	ASSERT_EQ(sent, 2, "xsend(p1)");
+	recvd = recv(c1, buf, 2, 0);
+	ASSERT_EQ(recvd, 1, "recv(c1)");
+	ASSERT_EQ(skel->data->change_tail_ret, 0, "change_tail_ret");
+
+	sent = xsend(p1, "G", 1, 0);
+	ASSERT_EQ(sent, 1, "xsend(p1)");
+	recvd = recv(c1, buf, 2, 0);
+	ASSERT_EQ(recvd, 2, "recv(c1)");
+	ASSERT_EQ(skel->data->change_tail_ret, 0, "change_tail_ret");
+
+	sent = xsend(p1, "E", 1, 0);
+	ASSERT_EQ(sent, 1, "xsend(p1)");
+	recvd = recv(c1, buf, 1, 0);
+	ASSERT_EQ(recvd, 1, "recv(c1)");
+	ASSERT_EQ(skel->data->change_tail_ret, -EINVAL, "change_tail_ret");
+
+out_close:
+	close(c1);
+	close(p1);
+out:
+	test_sockmap_change_tail__destroy(skel);
+}
+
 static void test_sockmap_skb_verdict_peek_helper(int map)
 {
-	int err, s, c1, p1, zero = 0, sent, recvd, avail;
+	int err, c1, p1, zero = 0, sent, recvd, avail;
 	char snd[256] = "0123456789";
 	char rcv[256] = "0";
 
-	s = socket_loopback(AF_INET, SOCK_STREAM);
-	if (!ASSERT_GT(s, -1, "socket_loopback(s)"))
-		return;
-
-	err = create_pair(s, AF_INET, SOCK_STREAM, &c1, &p1);
-	if (!ASSERT_OK(err, "create_pairs(s)"))
+	err = create_pair(AF_INET, SOCK_STREAM, &c1, &p1);
+	if (!ASSERT_OK(err, "create_pair()"))
 		return;
 
 	err = bpf_map_update_elem(map, &zero, &c1, BPF_NOEXIST);
@@ -653,13 +747,13 @@ static void test_sockmap_skb_verdict_peek_with_link(void)
 	test_sockmap_skb_verdict_peek_helper(map);
 	ASSERT_EQ(pass->bss->clone_called, 1, "clone_called");
 out:
-	bpf_link__detach(link);
+	bpf_link__destroy(link);
 	test_sockmap_pass_prog__destroy(pass);
 }
 
 static void test_sockmap_unconnected_unix(void)
 {
-	int err, map, stream = 0, dgram = 0, zero = 0;
+	int err, map, stream = -1, dgram = -1, zero = 0;
 	struct test_sockmap_pass_prog *skel;
 
 	skel = test_sockmap_pass_prog__open_and_load();
@@ -670,22 +764,22 @@ static void test_sockmap_unconnected_unix(void)
 
 	stream = xsocket(AF_UNIX, SOCK_STREAM, 0);
 	if (stream < 0)
-		return;
+		goto out;
 
 	dgram = xsocket(AF_UNIX, SOCK_DGRAM, 0);
-	if (dgram < 0) {
-		close(stream);
-		return;
-	}
+	if (dgram < 0)
+		goto out;
 
 	err = bpf_map_update_elem(map, &zero, &stream, BPF_ANY);
-	ASSERT_ERR(err, "bpf_map_update_elem(stream)");
+	if (!ASSERT_ERR(err, "bpf_map_update_elem(stream)"))
+		goto out;
 
 	err = bpf_map_update_elem(map, &zero, &dgram, BPF_ANY);
 	ASSERT_OK(err, "bpf_map_update_elem(dgram)");
-
+out:
 	close(stream);
 	close(dgram);
+	test_sockmap_pass_prog__destroy(skel);
 }
 
 static void test_sockmap_many_socket(void)
@@ -863,8 +957,10 @@ static void test_sockmap_same_sock(void)
 
 	err = socketpair(AF_UNIX, SOCK_STREAM, 0, stream);
 	ASSERT_OK(err, "socketpair(af_unix, sock_stream)");
-	if (err)
+	if (err) {
+		close(tcp);
 		goto out;
+	}
 
 	for (i = 0; i < 2; i++) {
 		err = bpf_map_update_elem(map, &zero, &stream[0], BPF_ANY);
@@ -883,15 +979,351 @@ static void test_sockmap_same_sock(void)
 		ASSERT_OK(err, "bpf_map_update_elem(tcp)");
 	}
 
+	close(tcp);
 	err = bpf_map_delete_elem(map, &zero);
-	ASSERT_OK(err, "bpf_map_delete_elem(entry)");
+	ASSERT_ERR(err, "bpf_map_delete_elem(entry)");
 
 	close(stream[0]);
 	close(stream[1]);
 out:
 	close(dgram);
-	close(tcp);
 	close(udp);
+	test_sockmap_pass_prog__destroy(skel);
+}
+
+static void test_sockmap_skb_verdict_vsock_poll(void)
+{
+	struct test_sockmap_pass_prog *skel;
+	int err, map, conn, peer;
+	struct bpf_program *prog;
+	struct bpf_link *link;
+	char buf = 'x';
+	int zero = 0;
+
+	skel = test_sockmap_pass_prog__open_and_load();
+	if (!ASSERT_OK_PTR(skel, "open_and_load"))
+		return;
+
+	if (create_pair(AF_VSOCK, SOCK_STREAM, &conn, &peer))
+		goto destroy;
+
+	prog = skel->progs.prog_skb_verdict;
+	map = bpf_map__fd(skel->maps.sock_map_rx);
+	link = bpf_program__attach_sockmap(prog, map);
+	if (!ASSERT_OK_PTR(link, "bpf_program__attach_sockmap"))
+		goto close;
+
+	err = bpf_map_update_elem(map, &zero, &conn, BPF_ANY);
+	if (!ASSERT_OK(err, "bpf_map_update_elem"))
+		goto detach;
+
+	if (xsend(peer, &buf, 1, 0) != 1)
+		goto detach;
+
+	err = poll_read(conn, IO_TIMEOUT_SEC);
+	if (!ASSERT_OK(err, "poll"))
+		goto detach;
+
+	if (xrecv_nonblock(conn, &buf, 1, 0) != 1)
+		FAIL("xrecv_nonblock");
+detach:
+	bpf_link__destroy(link);
+close:
+	xclose(conn);
+	xclose(peer);
+destroy:
+	test_sockmap_pass_prog__destroy(skel);
+}
+
+static void test_sockmap_vsock_unconnected(void)
+{
+	struct sockaddr_storage addr;
+	int map, s, zero = 0;
+	socklen_t alen;
+
+	map = bpf_map_create(BPF_MAP_TYPE_SOCKMAP, NULL, sizeof(int),
+			     sizeof(int), 1, NULL);
+	if (!ASSERT_OK_FD(map, "bpf_map_create"))
+		return;
+
+	s = xsocket(AF_VSOCK, SOCK_STREAM, 0);
+	if (s < 0)
+		goto close_map;
+
+	/* Fail connect(), but trigger transport assignment. */
+	init_addr_loopback(AF_VSOCK, &addr, &alen);
+	if (!ASSERT_ERR(connect(s, sockaddr(&addr), alen), "connect"))
+		goto close_sock;
+
+	ASSERT_ERR(bpf_map_update_elem(map, &zero, &s, BPF_ANY), "map_update");
+
+close_sock:
+	xclose(s);
+close_map:
+	xclose(map);
+}
+
+/* it is used to reproduce WARNING */
+static void test_sockmap_zc(void)
+{
+	int map, err, sent, recvd, zero = 0, one = 1, on = 1;
+	char buf[10] = "0123456789", rcv[11], addr[100];
+	struct test_sockmap_pass_prog *skel = NULL;
+	int c0 = -1, p0 = -1, c1 = -1, p1 = -1;
+	struct tcp_zerocopy_receive zc;
+	socklen_t zc_len = sizeof(zc);
+	struct bpf_program *prog;
+
+	skel = test_sockmap_pass_prog__open_and_load();
+	if (!ASSERT_OK_PTR(skel, "open_and_load"))
+		return;
+
+	if (create_socket_pairs(AF_INET, SOCK_STREAM, &c0, &c1, &p0, &p1))
+		goto end;
+
+	prog = skel->progs.prog_skb_verdict_ingress;
+	map = bpf_map__fd(skel->maps.sock_map_rx);
+
+	err = bpf_prog_attach(bpf_program__fd(prog), map, BPF_SK_SKB_STREAM_VERDICT, 0);
+	if (!ASSERT_OK(err, "bpf_prog_attach"))
+		goto end;
+
+	err = bpf_map_update_elem(map, &zero, &p0, BPF_ANY);
+	if (!ASSERT_OK(err, "bpf_map_update_elem"))
+		goto end;
+
+	err = bpf_map_update_elem(map, &one, &p1, BPF_ANY);
+	if (!ASSERT_OK(err, "bpf_map_update_elem"))
+		goto end;
+
+	sent = xsend(c0, buf, sizeof(buf), 0);
+	if (!ASSERT_EQ(sent, sizeof(buf), "xsend"))
+		goto end;
+
+	/* trigger tcp_bpf_recvmsg_parser and inc copied_seq of p1 */
+	recvd = recv_timeout(p1, rcv, sizeof(rcv), MSG_DONTWAIT, 1);
+	if (!ASSERT_EQ(recvd, sent, "recv_timeout(p1)"))
+		goto end;
+
+	/* uninstall sockmap of p1 */
+	bpf_map_delete_elem(map, &one);
+
+	/* trigger tcp stack and the rcv_nxt of p1 is less than copied_seq */
+	sent = xsend(c1, buf, sizeof(buf) - 1, 0);
+	if (!ASSERT_EQ(sent, sizeof(buf) - 1, "xsend"))
+		goto end;
+
+	err = setsockopt(p1, SOL_SOCKET, SO_ZEROCOPY, &on, sizeof(on));
+	if (!ASSERT_OK(err, "setsockopt"))
+		goto end;
+
+	memset(&zc, 0, sizeof(zc));
+	zc.copybuf_address = (__u64)((unsigned long)addr);
+	zc.copybuf_len = sizeof(addr);
+
+	err = getsockopt(p1, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE, &zc, &zc_len);
+	if (!ASSERT_OK(err, "getsockopt"))
+		goto end;
+
+end:
+	if (c0 >= 0)
+		close(c0);
+	if (p0 >= 0)
+		close(p0);
+	if (c1 >= 0)
+		close(c1);
+	if (p1 >= 0)
+		close(p1);
+	test_sockmap_pass_prog__destroy(skel);
+}
+
+/* it is used to check whether copied_seq of sk is correct */
+static void test_sockmap_copied_seq(bool strp)
+{
+	int i, map, err, sent, recvd, zero = 0, one = 1;
+	struct test_sockmap_pass_prog *skel = NULL;
+	int c0 = -1, p0 = -1, c1 = -1, p1 = -1;
+	char buf[10] = "0123456789", rcv[11];
+	struct bpf_program *prog;
+
+	skel = test_sockmap_pass_prog__open_and_load();
+	if (!ASSERT_OK_PTR(skel, "open_and_load"))
+		return;
+
+	if (create_socket_pairs(AF_INET, SOCK_STREAM, &c0, &c1, &p0, &p1))
+		goto end;
+
+	prog = skel->progs.prog_skb_verdict_ingress;
+	map = bpf_map__fd(skel->maps.sock_map_rx);
+
+	err = bpf_prog_attach(bpf_program__fd(prog), map, BPF_SK_SKB_STREAM_VERDICT, 0);
+	if (!ASSERT_OK(err, "bpf_prog_attach verdict"))
+		goto end;
+
+	if (strp) {
+		prog = skel->progs.prog_skb_verdict_ingress_strp;
+		err = bpf_prog_attach(bpf_program__fd(prog), map, BPF_SK_SKB_STREAM_PARSER, 0);
+		if (!ASSERT_OK(err, "bpf_prog_attach parser"))
+			goto end;
+	}
+
+	err = bpf_map_update_elem(map, &zero, &p0, BPF_ANY);
+	if (!ASSERT_OK(err, "bpf_map_update_elem(p0)"))
+		goto end;
+
+	err = bpf_map_update_elem(map, &one, &p1, BPF_ANY);
+	if (!ASSERT_OK(err, "bpf_map_update_elem(p1)"))
+		goto end;
+
+	/* just trigger sockamp: data sent by c0 will be received by p1 */
+	sent = xsend(c0, buf, sizeof(buf), 0);
+	if (!ASSERT_EQ(sent, sizeof(buf), "xsend(c0), bpf"))
+		goto end;
+
+	/* do partial read */
+	recvd = recv_timeout(p1, rcv, 1, MSG_DONTWAIT, 1);
+	recvd += recv_timeout(p1, rcv + 1, sizeof(rcv) - 1, MSG_DONTWAIT, 1);
+	if (!ASSERT_EQ(recvd, sent, "recv_timeout(p1), bpf") ||
+	    !ASSERT_OK(memcmp(buf, rcv, recvd), "data mismatch"))
+		goto end;
+
+	/* uninstall sockmap of p1 and p0 */
+	err = bpf_map_delete_elem(map, &one);
+	if (!ASSERT_OK(err, "bpf_map_delete_elem(1)"))
+		goto end;
+
+	err = bpf_map_delete_elem(map, &zero);
+	if (!ASSERT_OK(err, "bpf_map_delete_elem(0)"))
+		goto end;
+
+	/* now all sockets become plain socket, they should still work */
+	for (i = 0; i < 5; i++) {
+		/* test copied_seq of p1 by running tcp native stack */
+		sent = xsend(c1, buf, sizeof(buf), 0);
+		if (!ASSERT_EQ(sent, sizeof(buf), "xsend(c1), native"))
+			goto end;
+
+		recvd = recv(p1, rcv, sizeof(rcv), MSG_DONTWAIT);
+		if (!ASSERT_EQ(recvd, sent, "recv_timeout(p1), native"))
+			goto end;
+
+		/* p0 previously redirected skb to p1, we also check copied_seq of p0 */
+		sent = xsend(c0, buf, sizeof(buf), 0);
+		if (!ASSERT_EQ(sent, sizeof(buf), "xsend(c0), native"))
+			goto end;
+
+		recvd = recv(p0, rcv, sizeof(rcv), MSG_DONTWAIT);
+		if (!ASSERT_EQ(recvd, sent, "recv_timeout(p0), native"))
+			goto end;
+	}
+
+end:
+	if (c0 >= 0)
+		close(c0);
+	if (p0 >= 0)
+		close(p0);
+	if (c1 >= 0)
+		close(c1);
+	if (p1 >= 0)
+		close(p1);
+	test_sockmap_pass_prog__destroy(skel);
+}
+
+/* Wait until FIONREAD returns the expected value or timeout */
+static int wait_for_fionread(int fd, int expected, unsigned int timeout_ms)
+{
+	unsigned int elapsed = 0;
+	int avail = 0;
+
+	while (elapsed < timeout_ms) {
+		if (ioctl(fd, FIONREAD, &avail) < 0)
+			return -errno;
+		if (avail >= expected)
+			return avail;
+		usleep(1000);
+		elapsed++;
+	}
+	return avail;
+}
+
+/* it is used to send data to via native stack and BPF redirecting */
+static void test_sockmap_multi_channels(int sotype)
+{
+	int map, err, sent, recvd, zero = 0, one = 1, avail = 0, expected;
+	struct test_sockmap_pass_prog *skel = NULL;
+	int c0 = -1, p0 = -1, c1 = -1, p1 = -1;
+	char buf[10] = "0123456789", rcv[11];
+	struct bpf_program *prog;
+
+	skel = test_sockmap_pass_prog__open_and_load();
+	if (!ASSERT_OK_PTR(skel, "open_and_load"))
+		return;
+
+	err = create_socket_pairs(AF_INET, sotype, &c0, &c1, &p0, &p1);
+	if (err)
+		goto end;
+
+	prog = skel->progs.prog_skb_verdict_ingress;
+	map = bpf_map__fd(skel->maps.sock_map_rx);
+
+	err = bpf_prog_attach(bpf_program__fd(prog), map, BPF_SK_SKB_STREAM_VERDICT, 0);
+	if (!ASSERT_OK(err, "bpf_prog_attach verdict"))
+		goto end;
+
+	err = bpf_map_update_elem(map, &zero, &p0, BPF_ANY);
+	if (!ASSERT_OK(err, "bpf_map_update_elem(p0)"))
+		goto end;
+
+	err = bpf_map_update_elem(map, &one, &p1, BPF_ANY);
+	if (!ASSERT_OK(err, "bpf_map_update_elem"))
+		goto end;
+
+	/* send data to p1 via native stack */
+	sent = xsend(c1, buf, 2, 0);
+	if (!ASSERT_EQ(sent, 2, "xsend(2)"))
+		goto end;
+
+	avail = wait_for_fionread(p1, 2, IO_TIMEOUT_SEC);
+	ASSERT_EQ(avail, 2, "ioctl(FIONREAD) partial return");
+
+	/* send data to p1 via bpf redirecting */
+	sent = xsend(c0, buf + 2, sizeof(buf) - 2, 0);
+	if (!ASSERT_EQ(sent, sizeof(buf) - 2, "xsend(remain-data)"))
+		goto end;
+
+	/* Poll FIONREAD until expected bytes arrive, poll_read() is unreliable
+	 * here since it may return immediately if prior data is already queued.
+	 */
+	expected = sotype == SOCK_DGRAM ? 2 : sizeof(buf);
+	avail = wait_for_fionread(p1, expected, IO_TIMEOUT_SEC);
+	ASSERT_EQ(avail, expected, "ioctl(FIONREAD) full return");
+
+	recvd = recv_timeout(p1, rcv, expected, MSG_DONTWAIT, 1);
+	if (!ASSERT_EQ(recvd, expected, "recv_timeout(p1)") ||
+	    !ASSERT_OK(memcmp(buf, rcv, recvd), "data mismatch"))
+		goto end;
+
+	/* process remaining data for udp if secondary data is available */
+	expected = sizeof(buf) - expected;
+	if (expected) {
+		avail = wait_for_fionread(p1, expected, IO_TIMEOUT_SEC);
+		ASSERT_EQ(avail, expected, "second ioctl(FIONREAD) full return");
+
+		recvd = recv_timeout(p1, rcv, expected, MSG_DONTWAIT, 1);
+		if (!ASSERT_EQ(recvd, expected, "second recv_timeout(p1)") ||
+		    !ASSERT_OK(memcmp(buf + sizeof(buf) - expected, rcv, recvd),
+			       "second data mismatch"))
+			goto end;
+	}
+end:
+	if (c0 >= 0)
+		close(c0);
+	if (p0 >= 0)
+		close(p0);
+	if (c1 >= 0)
+		close(c1);
+	if (p1 >= 0)
+		close(p1);
 	test_sockmap_pass_prog__destroy(skel);
 }
 
@@ -901,6 +1333,8 @@ void test_sockmap_basic(void)
 		test_sockmap_create_update_free(BPF_MAP_TYPE_SOCKMAP);
 	if (test__start_subtest("sockhash create_update_free"))
 		test_sockmap_create_update_free(BPF_MAP_TYPE_SOCKHASH);
+	if (test__start_subtest("sockmap vsock delete on close"))
+		test_sockmap_vsock_delete_on_close();
 	if (test__start_subtest("sockmap sk_msg load helpers"))
 		test_skmsg_helpers(BPF_MAP_TYPE_SOCKMAP);
 	if (test__start_subtest("sockhash sk_msg load helpers"))
@@ -937,6 +1371,8 @@ void test_sockmap_basic(void)
 		test_sockmap_skb_verdict_fionread(true);
 	if (test__start_subtest("sockmap skb_verdict fionread on drop"))
 		test_sockmap_skb_verdict_fionread(false);
+	if (test__start_subtest("sockmap skb_verdict change tail"))
+		test_sockmap_skb_verdict_change_tail();
 	if (test__start_subtest("sockmap skb_verdict msg_f_peek"))
 		test_sockmap_skb_verdict_peek();
 	if (test__start_subtest("sockmap skb_verdict msg_f_peek with link"))
@@ -953,4 +1389,18 @@ void test_sockmap_basic(void)
 		test_skmsg_helpers_with_link(BPF_MAP_TYPE_SOCKMAP);
 	if (test__start_subtest("sockhash sk_msg attach sockhash helpers with link"))
 		test_skmsg_helpers_with_link(BPF_MAP_TYPE_SOCKHASH);
+	if (test__start_subtest("sockmap skb_verdict vsock poll"))
+		test_sockmap_skb_verdict_vsock_poll();
+	if (test__start_subtest("sockmap vsock unconnected"))
+		test_sockmap_vsock_unconnected();
+	if (test__start_subtest("sockmap with zc"))
+		test_sockmap_zc();
+	if (test__start_subtest("sockmap recover"))
+		test_sockmap_copied_seq(false);
+	if (test__start_subtest("sockmap recover with strp"))
+		test_sockmap_copied_seq(true);
+	if (test__start_subtest("sockmap tcp multi channels"))
+		test_sockmap_multi_channels(SOCK_STREAM);
+	if (test__start_subtest("sockmap udp multi channels"))
+		test_sockmap_multi_channels(SOCK_DGRAM);
 }

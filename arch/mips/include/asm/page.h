@@ -14,12 +14,7 @@
 #include <linux/kernel.h>
 #include <asm/mipsregs.h>
 
-/*
- * PAGE_SHIFT determines the page size
- */
-#define PAGE_SHIFT	CONFIG_PAGE_SHIFT
-#define PAGE_SIZE	(_AC(1,UL) << PAGE_SHIFT)
-#define PAGE_MASK	(~((1 << PAGE_SHIFT) - 1))
+#include <vdso/page.h>
 
 /*
  * This is used for calculating the real page sizes
@@ -95,6 +90,7 @@ static inline void clear_user_page(void *addr, unsigned long vaddr,
 	if (pages_do_alias((unsigned long) addr, vaddr & PAGE_MASK))
 		flush_data_cache_page((unsigned long)addr);
 }
+#define clear_user_page clear_user_page
 
 struct vm_area_struct;
 extern void copy_user_highpage(struct page *to, struct page *from,
@@ -217,7 +213,7 @@ extern bool __virt_addr_valid(const volatile void *kaddr);
 #define virt_addr_valid(kaddr)						\
 	__virt_addr_valid((const volatile void *) (kaddr))
 
-#define VM_DATA_DEFAULT_FLAGS	VM_DATA_FLAGS_TSK_EXEC
+#define VMA_DATA_DEFAULT_FLAGS	VMA_DATA_FLAGS_TSK_EXEC
 
 extern unsigned long __kaslr_offset;
 static inline unsigned long kaslr_offset(void)

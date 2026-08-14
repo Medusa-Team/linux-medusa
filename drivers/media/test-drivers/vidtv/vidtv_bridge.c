@@ -191,10 +191,11 @@ static int vidtv_start_streaming(struct vidtv_dvb *dvb)
 
 	mux_args.mux_buf_sz  = mux_buf_sz;
 
-	dvb->streaming = true;
 	dvb->mux = vidtv_mux_init(dvb->fe[0], dev, &mux_args);
 	if (!dvb->mux)
 		return -ENOMEM;
+
+	dvb->streaming = true;
 	vidtv_mux_start_thread(dvb->mux);
 
 	dev_dbg_ratelimited(dev, "Started streaming\n");
@@ -204,6 +205,11 @@ static int vidtv_start_streaming(struct vidtv_dvb *dvb)
 static int vidtv_stop_streaming(struct vidtv_dvb *dvb)
 {
 	struct device *dev = &dvb->pdev->dev;
+
+	if (!dvb->streaming) {
+		dev_warn_ratelimited(dev, "No streaming. Skipping.\n");
+		return 0;
+	}
 
 	dvb->streaming = false;
 	vidtv_mux_stop_thread(dvb->mux);
@@ -231,8 +237,10 @@ static int vidtv_start_feed(struct dvb_demux_feed *feed)
 
 	if (dvb->nfeeds == 1) {
 		ret = vidtv_start_streaming(dvb);
-		if (ret < 0)
+		if (ret < 0) {
+			dvb->nfeeds--;
 			rc = ret;
+		}
 	}
 
 	mutex_unlock(&dvb->feed_lock);
@@ -484,7 +492,7 @@ static int vidtv_bridge_probe(struct platform_device *pdev)
 	struct vidtv_dvb *dvb;
 	int ret;
 
-	dvb = kzalloc(sizeof(*dvb), GFP_KERNEL);
+	dvb = kzalloc_obj(*dvb);
 	if (!dvb)
 		return -ENOMEM;
 
@@ -572,7 +580,7 @@ static struct platform_driver vidtv_bridge_driver = {
 		.name = VIDTV_PDEV_NAME,
 	},
 	.probe    = vidtv_bridge_probe,
-	.remove_new = vidtv_bridge_remove,
+	.remove = vidtv_bridge_remove,
 };
 
 static void __exit vidtv_bridge_exit(void)

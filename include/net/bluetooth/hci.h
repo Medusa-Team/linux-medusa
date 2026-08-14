@@ -1,7 +1,7 @@
 /*
    BlueZ - Bluetooth protocol stack for Linux
    Copyright (C) 2000-2001 Qualcomm Incorporated
-   Copyright 2023 NXP
+   Copyright 2023-2024 NXP
 
    Written 2000,2001 by Maxim Krasnyansky <maxk@qualcomm.com>
 
@@ -29,6 +29,7 @@
 #define HCI_MAX_ACL_SIZE	1024
 #define HCI_MAX_SCO_SIZE	255
 #define HCI_MAX_ISO_SIZE	251
+#define HCI_MAX_ISO_BIS		31
 #define HCI_MAX_EVENT_SIZE	260
 #define HCI_MAX_FRAME_SIZE	(HCI_MAX_ACL_SIZE + 4)
 
@@ -67,6 +68,7 @@
 #define HCI_I2C		8
 #define HCI_SMD		9
 #define HCI_VIRTIO	10
+#define HCI_IPC		11
 
 /* HCI device quirks */
 enum {
@@ -206,6 +208,13 @@ enum {
 	 */
 	HCI_QUIRK_WIDEBAND_SPEECH_SUPPORTED,
 
+	/* When this quirk is set consider Sync Flow Control as supported by
+	 * the driver.
+	 *
+	 * This quirk must be set before hci_register_dev is called.
+	 */
+	HCI_QUIRK_SYNC_FLOWCTL_SUPPORTED,
+
 	/* When this quirk is set, the LE states reported through the
 	 * HCI_LE_READ_SUPPORTED_STATES are invalid/broken.
 	 *
@@ -300,6 +309,20 @@ enum {
 	 */
 	HCI_QUIRK_BROKEN_SET_RPA_TIMEOUT,
 
+	/*
+	 * When this quirk is set, the HCI_OP_LE_EXT_CREATE_CONN command is
+	 * disabled. This is required for the Actions Semiconductor ATS2851
+	 * based controllers, which erroneously claims to support it.
+	 */
+	HCI_QUIRK_BROKEN_EXT_CREATE_CONN,
+
+	/*
+	 * When this quirk is set, the command WRITE_AUTH_PAYLOAD_TIMEOUT is
+	 * skipped. This is required for the Actions Semiconductor ATS2851
+	 * based controllers, due to a race condition in pairing process.
+	 */
+	HCI_QUIRK_BROKEN_WRITE_AUTH_PAYLOAD_TIMEOUT,
+
 	/* When this quirk is set, MSFT extension monitor tracking by
 	 * address filter is supported. Since tracking quantity of each
 	 * pattern is limited, this feature supports tracking multiple
@@ -338,6 +361,24 @@ enum {
 	 * during the hdev->setup vendor callback.
 	 */
 	HCI_QUIRK_FIXUP_LE_EXT_ADV_REPORT_PHY,
+
+	/* When this quirk is set, the HCI_OP_READ_VOICE_SETTING command is
+	 * skipped. This is required for a subset of the CSR controller clones
+	 * which erroneously claim to support it.
+	 *
+	 * This quirk must be set before hci_register_dev is called.
+	 */
+	HCI_QUIRK_BROKEN_READ_VOICE_SETTING,
+
+	/* When this quirk is set, the HCI_OP_READ_PAGE_SCAN_TYPE command is
+	 * skipped. This is required for a subset of the CSR controller clones
+	 * which erroneously claim to support it.
+	 *
+	 * This quirk must be set before hci_register_dev is called.
+	 */
+	HCI_QUIRK_BROKEN_READ_PAGE_SCAN_TYPE,
+
+	__HCI_NUM_QUIRKS,
 };
 
 /* HCI device flags */
@@ -393,6 +434,7 @@ enum {
 	HCI_USER_CHANNEL,
 	HCI_EXT_CONFIGURED,
 	HCI_LE_ADV,
+	HCI_LE_ADV_0,
 	HCI_LE_PER_ADV,
 	HCI_LE_SCAN,
 	HCI_SSP_ENABLED,
@@ -416,13 +458,13 @@ enum {
 	HCI_WIDEBAND_SPEECH_ENABLED,
 	HCI_EVENT_FILTER_CONFIGURED,
 	HCI_PA_SYNC,
+	HCI_SCO_FLOWCTL,
 
 	HCI_DUT_MODE,
 	HCI_VENDOR_DIAG,
 	HCI_FORCE_BREDR_SMP,
 	HCI_FORCE_STATIC_ADDR,
 	HCI_LL_RPA_RESOLUTION,
-	HCI_ENABLE_LL_PRIVACY,
 	HCI_CMD_PENDING,
 	HCI_FORCE_NO_MITM,
 	HCI_QUALITY_REPORT,
@@ -447,6 +489,7 @@ enum {
 #define HCI_AUTO_OFF_TIMEOUT	msecs_to_jiffies(2000)	/* 2 seconds */
 #define HCI_ACL_CONN_TIMEOUT	msecs_to_jiffies(20000)	/* 20 seconds */
 #define HCI_LE_CONN_TIMEOUT	msecs_to_jiffies(20000)	/* 20 seconds */
+#define HCI_ISO_TX_TIMEOUT	usecs_to_jiffies(0x7fffff) /* 8388607 usecs */
 
 /* HCI data types */
 #define HCI_COMMAND_PKT		0x01
@@ -455,6 +498,7 @@ enum {
 #define HCI_EVENT_PKT		0x04
 #define HCI_ISODATA_PKT		0x05
 #define HCI_DIAG_PKT		0xf0
+#define HCI_DRV_PKT		0xf1
 #define HCI_VENDOR_PKT		0xff
 
 /* HCI packet types */
@@ -518,7 +562,9 @@ enum {
 #define ESCO_LINK	0x02
 /* Low Energy links do not have defined link type. Use invented one */
 #define LE_LINK		0x80
-#define ISO_LINK	0x82
+#define CIS_LINK	0x82
+#define BIS_LINK	0x83
+#define PA_LINK		0x84
 #define INVALID_LINK	0xff
 
 /* LMP features */
@@ -601,10 +647,15 @@ enum {
 #define HCI_LE_EXT_ADV			0x10
 #define HCI_LE_PERIODIC_ADV		0x20
 #define HCI_LE_CHAN_SEL_ALG2		0x40
+#define HCI_LE_PAST_SENDER		0x01
+#define HCI_LE_PAST_RECEIVER		0x02
 #define HCI_LE_CIS_CENTRAL		0x10
 #define HCI_LE_CIS_PERIPHERAL		0x20
 #define HCI_LE_ISO_BROADCASTER		0x40
 #define HCI_LE_ISO_SYNC_RECEIVER	0x80
+#define HCI_LE_LL_EXT_FEATURE		0x80
+#define HCI_LE_CS			0x40
+#define HCI_LE_CS_HOST			0x80
 
 /* Connection modes */
 #define HCI_CM_ACTIVE	0x0000
@@ -668,7 +719,7 @@ enum {
 #define HCI_ERROR_REMOTE_POWER_OFF	0x15
 #define HCI_ERROR_LOCAL_HOST_TERM	0x16
 #define HCI_ERROR_PAIRING_NOT_ALLOWED	0x18
-#define HCI_ERROR_UNSUPPORTED_REMOTE_FEATURE	0x1e
+#define HCI_ERROR_UNSUPPORTED_REMOTE_FEATURE	0x1a
 #define HCI_ERROR_INVALID_LL_PARAMS	0x1e
 #define HCI_ERROR_UNSPECIFIED		0x1f
 #define HCI_ERROR_ADVERTISING_TIMEOUT	0x3c
@@ -683,6 +734,7 @@ enum {
 #define HCI_RSSI_INVALID	127
 
 #define HCI_SYNC_HANDLE_INVALID	0xffff
+#define HCI_SID_INVALID		0xff
 
 #define HCI_ROLE_MASTER		0x00
 #define HCI_ROLE_SLAVE		0x01
@@ -836,6 +888,11 @@ struct hci_cp_remote_name_req {
 
 #define HCI_OP_REMOTE_NAME_REQ_CANCEL	0x041a
 struct hci_cp_remote_name_req_cancel {
+	bdaddr_t bdaddr;
+} __packed;
+
+struct hci_rp_remote_name_req_cancel {
+	__u8     status;
 	bdaddr_t bdaddr;
 } __packed;
 
@@ -1411,8 +1468,12 @@ struct hci_rp_read_data_block_size {
 } __packed;
 
 #define HCI_OP_READ_LOCAL_CODECS	0x100b
-struct hci_std_codecs {
+struct hci_std_codecs_hdr {
 	__u8	num;
+} __packed;
+
+struct hci_std_codecs {
+	struct hci_std_codecs_hdr;
 	__u8	codec[];
 } __packed;
 
@@ -1430,7 +1491,7 @@ struct hci_vnd_codecs {
 
 struct hci_rp_read_local_supported_codecs {
 	__u8	status;
-	struct hci_std_codecs std_codecs;
+	struct hci_std_codecs_hdr std_codecs;
 	struct hci_vnd_codecs vnd_codecs;
 } __packed;
 
@@ -1447,8 +1508,12 @@ struct hci_std_codec_v2 {
 	__u8	transport;
 } __packed;
 
-struct hci_std_codecs_v2 {
+struct hci_std_codecs_v2_hdr {
 	__u8	num;
+} __packed;
+
+struct hci_std_codecs_v2 {
+	struct hci_std_codecs_v2_hdr;
 	struct hci_std_codec_v2 codec[];
 } __packed;
 
@@ -1465,7 +1530,7 @@ struct hci_vnd_codecs_v2 {
 
 struct hci_rp_read_local_supported_codecs_v2 {
 	__u8	status;
-	struct hci_std_codecs_v2 std_codecs;
+	struct hci_std_codecs_v2_hdr std_codecs;
 	struct hci_vnd_codecs_v2 vendor_codecs;
 } __packed;
 
@@ -1510,6 +1575,11 @@ struct hci_rp_read_tx_power {
 	__u8     status;
 	__le16   handle;
 	__s8     tx_power;
+} __packed;
+
+#define HCI_OP_WRITE_SYNC_FLOWCTL	0x0c2f
+struct hci_cp_write_sync_flowctl {
+	__u8     enable;
 } __packed;
 
 #define HCI_OP_READ_PAGE_SCAN_TYPE	0x0c46
@@ -1823,6 +1893,15 @@ struct hci_cp_le_set_default_phy {
 #define HCI_LE_SET_PHY_2M		0x02
 #define HCI_LE_SET_PHY_CODED		0x04
 
+#define HCI_OP_LE_SET_PHY		0x2032
+struct hci_cp_le_set_phy {
+	__le16  handle;
+	__u8    all_phys;
+	__u8    tx_phys;
+	__u8    rx_phys;
+	__le16  phy_opts;
+} __packed;
+
 #define HCI_OP_LE_SET_EXT_SCAN_PARAMS   0x2041
 struct hci_cp_le_set_ext_scan_params {
 	__u8    own_addr_type;
@@ -1880,6 +1959,8 @@ struct hci_cp_le_pa_create_sync {
 	__le16    sync_timeout;
 	__u8      sync_cte_type;
 } __packed;
+
+#define HCI_OP_LE_PA_CREATE_SYNC_CANCEL	0x2045
 
 #define HCI_OP_LE_PA_TERM_SYNC		0x2046
 struct hci_cp_le_pa_term_sync {
@@ -2009,6 +2090,44 @@ struct hci_cp_le_set_privacy_mode {
 	__u8  mode;
 } __packed;
 
+#define HCI_OP_LE_PAST			0x205a
+struct hci_cp_le_past {
+	__le16 handle;
+	__le16 service_data;
+	__le16 sync_handle;
+} __packed;
+
+struct hci_rp_le_past {
+	__u8   status;
+	__le16 handle;
+} __packed;
+
+#define HCI_OP_LE_PAST_SET_INFO		0x205b
+struct hci_cp_le_past_set_info {
+	__le16 handle;
+	__le16 service_data;
+	__u8   adv_handle;
+} __packed;
+
+struct hci_rp_le_past_set_info {
+	__u8   status;
+	__le16 handle;
+} __packed;
+
+#define HCI_OP_LE_PAST_PARAMS		0x205c
+struct hci_cp_le_past_params {
+	__le16  handle;
+	__u8    mode;
+	__le16  skip;
+	__le16  sync_timeout;
+	__u8    cte_type;
+} __packed;
+
+struct hci_rp_le_past_params {
+	__u8   status;
+	__le16 handle;
+} __packed;
+
 #define HCI_OP_LE_READ_BUFFER_SIZE_V2	0x2060
 struct hci_rp_le_read_buffer_size_v2 {
 	__u8    status;
@@ -2036,8 +2155,8 @@ struct hci_cis_params {
 	__u8    cis_id;
 	__le16  c_sdu;
 	__le16  p_sdu;
-	__u8    c_phy;
-	__u8    p_phy;
+	__u8    c_phys;
+	__u8    p_phys;
 	__u8    c_rtn;
 	__u8    p_rtn;
 } __packed;
@@ -2155,6 +2274,217 @@ struct hci_cp_le_set_host_feature {
 	__u8     bit_number;
 	__u8     bit_value;
 } __packed;
+
+#define HCI_OP_LE_READ_ALL_LOCAL_FEATURES	0x2087
+struct hci_rp_le_read_all_local_features {
+	__u8    status;
+	__u8    page;
+	__u8    features[248];
+} __packed;
+
+#define HCI_OP_LE_READ_ALL_REMOTE_FEATURES	0x2088
+struct hci_cp_le_read_all_remote_features {
+	__le16	 handle;
+	__u8	 pages;
+} __packed;
+
+/* Channel Sounding Commands */
+#define HCI_OP_LE_CS_RD_LOCAL_SUPP_CAP	0x2089
+struct hci_rp_le_cs_rd_local_supp_cap {
+	__u8	status;
+	__u8	num_config_supported;
+	__le16	max_consecutive_procedures_supported;
+	__u8	num_antennas_supported;
+	__u8	max_antenna_paths_supported;
+	__u8	roles_supported;
+	__u8	modes_supported;
+	__u8	rtt_capability;
+	__u8	rtt_aa_only_n;
+	__u8	rtt_sounding_n;
+	__u8	rtt_random_payload_n;
+	__le16	nadm_sounding_capability;
+	__le16	nadm_random_capability;
+	__u8	cs_sync_phys_supported;
+	__le16	subfeatures_supported;
+	__le16	t_ip1_times_supported;
+	__le16	t_ip2_times_supported;
+	__le16	t_fcs_times_supported;
+	__le16	t_pm_times_supported;
+	__u8	t_sw_time_supported;
+	__u8	tx_snr_capability;
+} __packed;
+
+#define HCI_OP_LE_CS_RD_RMT_SUPP_CAP		0x208A
+struct hci_cp_le_cs_rd_local_supp_cap {
+	__le16	handle;
+} __packed;
+
+#define HCI_OP_LE_CS_WR_CACHED_RMT_SUPP_CAP	0x208B
+struct hci_cp_le_cs_wr_cached_rmt_supp_cap {
+	__le16	handle;
+	__u8	num_config_supported;
+	__le16	max_consecutive_procedures_supported;
+	__u8	num_antennas_supported;
+	__u8	max_antenna_paths_supported;
+	__u8	roles_supported;
+	__u8	modes_supported;
+	__u8	rtt_capability;
+	__u8	rtt_aa_only_n;
+	__u8	rtt_sounding_n;
+	__u8	rtt_random_payload_n;
+	__le16	nadm_sounding_capability;
+	__le16	nadm_random_capability;
+	__u8	cs_sync_phys_supported;
+	__le16	subfeatures_supported;
+	__le16	t_ip1_times_supported;
+	__le16	t_ip2_times_supported;
+	__le16	t_fcs_times_supported;
+	__le16	t_pm_times_supported;
+	__u8	t_sw_time_supported;
+	__u8	tx_snr_capability;
+} __packed;
+
+struct hci_rp_le_cs_wr_cached_rmt_supp_cap {
+	__u8	status;
+	__le16	handle;
+} __packed;
+
+#define HCI_OP_LE_CS_SEC_ENABLE			0x208C
+struct hci_cp_le_cs_sec_enable {
+	__le16	handle;
+} __packed;
+
+#define HCI_OP_LE_CS_SET_DEFAULT_SETTINGS	0x208D
+struct hci_cp_le_cs_set_default_settings {
+	__le16	handle;
+	__u8	role_enable;
+	__u8	cs_sync_ant_sel;
+	__s8	max_tx_power;
+} __packed;
+
+struct hci_rp_le_cs_set_default_settings {
+	__u8	status;
+	__le16	handle;
+} __packed;
+
+#define HCI_OP_LE_CS_RD_RMT_FAE_TABLE		0x208E
+struct hci_cp_le_cs_rd_rmt_fae_table {
+	__le16	handle;
+} __packed;
+
+#define HCI_OP_LE_CS_WR_CACHED_RMT_FAE_TABLE	0x208F
+struct hci_cp_le_cs_wr_rmt_cached_fae_table {
+	__le16	handle;
+	__u8	remote_fae_table[72];
+} __packed;
+
+struct hci_rp_le_cs_wr_rmt_cached_fae_table {
+	__u8	status;
+	__le16	handle;
+} __packed;
+
+#define HCI_OP_LE_CS_CREATE_CONFIG		0x2090
+struct hci_cp_le_cs_create_config {
+	__le16	handle;
+	__u8	config_id;
+	__u8	create_context;
+	__u8	main_mode_type;
+	__u8	sub_mode_type;
+	__u8	min_main_mode_steps;
+	__u8	max_main_mode_steps;
+	__u8	main_mode_repetition;
+	__u8	mode_0_steps;
+	__u8	role;
+	__u8	rtt_type;
+	__u8	cs_sync_phy;
+	__u8	channel_map[10];
+	__u8	channel_map_repetition;
+	__u8	channel_selection_type;
+	__u8	ch3c_shape;
+	__u8	ch3c_jump;
+	__u8	reserved;
+} __packed;
+
+#define HCI_OP_LE_CS_REMOVE_CONFIG		0x2091
+struct hci_cp_le_cs_remove_config {
+	__le16	handle;
+	__u8	config_id;
+} __packed;
+
+#define HCI_OP_LE_CS_SET_CH_CLASSIFICATION	0x2092
+struct hci_cp_le_cs_set_ch_classification {
+	__u8	ch_classification[10];
+} __packed;
+
+struct hci_rp_le_cs_set_ch_classification {
+	__u8	status;
+} __packed;
+
+#define HCI_OP_LE_CS_SET_PROC_PARAM		0x2093
+struct hci_cp_le_cs_set_proc_param {
+	__le16	handle;
+	__u8	config_id;
+	__le16	max_procedure_len;
+	__le16	min_procedure_interval;
+	__le16	max_procedure_interval;
+	__le16	max_procedure_count;
+	__u8	min_subevent_len[3];
+	__u8	max_subevent_len[3];
+	__u8	tone_antenna_config_selection;
+	__u8	phy;
+	__u8	tx_power_delta;
+	__u8	preferred_peer_antenna;
+	__u8	snr_control_initiator;
+	__u8	snr_control_reflector;
+} __packed;
+
+struct hci_rp_le_cs_set_proc_param {
+	__u8	status;
+	__le16	handle;
+} __packed;
+
+#define HCI_OP_LE_CS_SET_PROC_ENABLE		0x2094
+struct hci_cp_le_cs_set_proc_enable {
+	__le16	handle;
+	__u8	config_id;
+	__u8	enable;
+} __packed;
+
+#define HCI_OP_LE_CS_TEST			0x2095
+struct hci_cp_le_cs_test {
+	__u8	main_mode_type;
+	__u8	sub_mode_type;
+	__u8	main_mode_repetition;
+	__u8	mode_0_steps;
+	__u8	role;
+	__u8	rtt_type;
+	__u8	cs_sync_phy;
+	__u8	cs_sync_antenna_selection;
+	__u8	subevent_len[3];
+	__le16	subevent_interval;
+	__u8	max_num_subevents;
+	__u8	transmit_power_level;
+	__u8	t_ip1_time;
+	__u8	t_ip2_time;
+	__u8	t_fcs_time;
+	__u8	t_pm_time;
+	__u8	t_sw_time;
+	__u8	tone_antenna_config_selection;
+	__u8	reserved;
+	__u8	snr_control_initiator;
+	__u8	snr_control_reflector;
+	__le16	drbg_nonce;
+	__u8	channel_map_repetition;
+	__le16	override_config;
+	__u8	override_parameters_length;
+	__u8	override_parameters_data[];
+} __packed;
+
+struct hci_rp_le_cs_test {
+	__u8	status;
+} __packed;
+
+#define HCI_OP_LE_CS_TEST_END			0x2096
 
 /* ---- HCI Events ---- */
 struct hci_ev_status {
@@ -2578,6 +2908,7 @@ struct hci_ev_le_conn_complete {
 #define LE_EXT_ADV_DIRECT_IND		0x0004
 #define LE_EXT_ADV_SCAN_RSP		0x0008
 #define LE_EXT_ADV_LEGACY_PDU		0x0010
+#define LE_EXT_ADV_DATA_STATUS_MASK	0x0060
 #define LE_EXT_ADV_EVT_TYPE_MASK	0x007f
 
 #define ADDR_LE_DEV_PUBLIC		0x00
@@ -2723,6 +3054,11 @@ struct hci_ev_le_per_adv_report {
 	__u8     data[];
 } __packed;
 
+#define HCI_EV_LE_PA_SYNC_LOST		0x10
+struct hci_ev_le_pa_sync_lost {
+	__le16 handle;
+} __packed;
+
 #define LE_PA_DATA_COMPLETE	0x00
 #define LE_PA_DATA_MORE_TO_COME	0x01
 #define LE_PA_DATA_TRUNCATED	0x02
@@ -2733,6 +3069,20 @@ struct hci_evt_le_ext_adv_set_term {
 	__u8	handle;
 	__le16	conn_handle;
 	__u8	num_evts;
+} __packed;
+
+#define HCI_EV_LE_PAST_RECEIVED		0x18
+struct hci_ev_le_past_received {
+	__u8   status;
+	__le16 handle;
+	__le16 service_data;
+	__le16 sync_handle;
+	__u8   sid;
+	__u8   bdaddr_type;
+	bdaddr_t  bdaddr;
+	__u8   phy;
+	__le16 interval;
+	__u8   clock_accuracy;
 } __packed;
 
 #define HCI_EVT_LE_CIS_ESTABLISHED	0x19
@@ -2780,8 +3130,8 @@ struct hci_evt_le_create_big_complete {
 	__le16  bis_handle[];
 } __packed;
 
-#define HCI_EVT_LE_BIG_SYNC_ESTABILISHED 0x1d
-struct hci_evt_le_big_sync_estabilished {
+#define HCI_EVT_LE_BIG_SYNC_ESTABLISHED 0x1d
+struct hci_evt_le_big_sync_established {
 	__u8    status;
 	__u8    handle;
 	__u8    latency[3];
@@ -2793,6 +3143,12 @@ struct hci_evt_le_big_sync_estabilished {
 	__le16  interval;
 	__u8    num_bis;
 	__le16  bis[];
+} __packed;
+
+#define HCI_EVT_LE_BIG_SYNC_LOST 0x1e
+struct hci_evt_le_big_sync_lost {
+	__u8    handle;
+	__u8    reason;
 } __packed;
 
 #define HCI_EVT_LE_BIG_INFO_ADV_REPORT	0x22
@@ -2810,6 +3166,138 @@ struct hci_evt_le_big_info_adv_report {
 	__u8    phy;
 	__u8    framing;
 	__u8    encryption;
+} __packed;
+
+#define HCI_EVT_LE_ALL_REMOTE_FEATURES_COMPLETE 0x2b
+struct hci_evt_le_read_all_remote_features_complete {
+	__u8    status;
+	__le16  handle;
+	__u8    max_pages;
+	__u8    valid_pages;
+	__u8    features[248];
+} __packed;
+
+/* Channel Sounding Events */
+#define HCI_EVT_LE_CS_READ_RMT_SUPP_CAP_COMPLETE	0x2C
+struct hci_evt_le_cs_read_rmt_supp_cap_complete {
+	__u8	status;
+	__le16	handle;
+	__u8	num_configs_supp;
+	__le16	max_consec_proc_supp;
+	__u8	num_ant_supp;
+	__u8	max_ant_path_supp;
+	__u8	roles_supp;
+	__u8	modes_supp;
+	__u8	rtt_cap;
+	__u8	rtt_aa_only_n;
+	__u8	rtt_sounding_n;
+	__u8	rtt_rand_payload_n;
+	__le16	nadm_sounding_cap;
+	__le16	nadm_rand_cap;
+	__u8	cs_sync_phys_supp;
+	__le16	sub_feat_supp;
+	__le16	t_ip1_times_supp;
+	__le16	t_ip2_times_supp;
+	__le16	t_fcs_times_supp;
+	__le16	t_pm_times_supp;
+	__u8	t_sw_times_supp;
+	__u8	tx_snr_cap;
+} __packed;
+
+#define HCI_EVT_LE_CS_READ_RMT_FAE_TABLE_COMPLETE	0x2D
+struct hci_evt_le_cs_read_rmt_fae_table_complete {
+	__u8	status;
+	__le16	handle;
+	__u8	remote_fae_table[72];
+} __packed;
+
+#define HCI_EVT_LE_CS_SECURITY_ENABLE_COMPLETE		0x2E
+struct hci_evt_le_cs_security_enable_complete {
+	__u8	status;
+	__le16	handle;
+} __packed;
+
+#define HCI_EVT_LE_CS_CONFIG_COMPLETE			0x2F
+struct hci_evt_le_cs_config_complete {
+	__u8	status;
+	__le16	handle;
+	__u8	config_id;
+	__u8	action;
+	__u8	main_mode_type;
+	__u8	sub_mode_type;
+	__u8	min_main_mode_steps;
+	__u8	max_main_mode_steps;
+	__u8	main_mode_rep;
+	__u8	mode_0_steps;
+	__u8	role;
+	__u8	rtt_type;
+	__u8	cs_sync_phy;
+	__u8	channel_map[10];
+	__u8	channel_map_rep;
+	__u8	channel_sel_type;
+	__u8	ch3c_shape;
+	__u8	ch3c_jump;
+	__u8	reserved;
+	__u8	t_ip1_time;
+	__u8	t_ip2_time;
+	__u8	t_fcs_time;
+	__u8	t_pm_time;
+} __packed;
+
+#define HCI_EVT_LE_CS_PROCEDURE_ENABLE_COMPLETE		0x30
+struct hci_evt_le_cs_procedure_enable_complete {
+	__u8	status;
+	__le16	handle;
+	__u8	config_id;
+	__u8	state;
+	__u8	tone_ant_config_sel;
+	__s8	sel_tx_pwr;
+	__u8	sub_evt_len[3];
+	__u8	sub_evts_per_evt;
+	__le16	sub_evt_intrvl;
+	__le16	evt_intrvl;
+	__le16	proc_intrvl;
+	__le16	proc_counter;
+	__le16	max_proc_len;
+} __packed;
+
+#define HCI_EVT_LE_CS_SUBEVENT_RESULT			0x31
+struct hci_evt_le_cs_subevent_result {
+	__le16	handle;
+	__u8	config_id;
+	__le16	start_acl_conn_evt_counter;
+	__le16	proc_counter;
+	__le16	freq_comp;
+	__u8	ref_pwr_lvl;
+	__u8	proc_done_status;
+	__u8	subevt_done_status;
+	__u8	abort_reason;
+	__u8	num_ant_paths;
+	__u8	num_steps_reported;
+	__u8	step_mode[0]; /* depends on num_steps_reported */
+	__u8	step_channel[0]; /* depends on num_steps_reported */
+	__u8	step_data_length[0]; /* depends on num_steps_reported */
+	__u8	step_data[0]; /* depends on num_steps_reported */
+} __packed;
+
+#define HCI_EVT_LE_CS_SUBEVENT_RESULT_CONTINUE		0x32
+struct hci_evt_le_cs_subevent_result_continue {
+	__le16	handle;
+	__u8	config_id;
+	__u8	proc_done_status;
+	__u8	subevt_done_status;
+	__u8	abort_reason;
+	__u8	num_ant_paths;
+	__u8	num_steps_reported;
+	__u8	step_mode[0]; /* depends on num_steps_reported */
+	__u8	step_channel[0]; /* depends on num_steps_reported */
+	__u8	step_data_length[0]; /* depends on num_steps_reported */
+	__u8	step_data[0]; /* depends on num_steps_reported */
+} __packed;
+
+#define HCI_EVT_LE_CS_TEST_END_COMPLETE			0x33
+struct hci_evt_le_cs_test_end_complete {
+	__u8	status;
 } __packed;
 
 #define HCI_EV_VENDOR			0xff
@@ -2899,6 +3387,11 @@ static inline struct hci_acl_hdr *hci_acl_hdr(const struct sk_buff *skb)
 static inline struct hci_sco_hdr *hci_sco_hdr(const struct sk_buff *skb)
 {
 	return (struct hci_sco_hdr *) skb->data;
+}
+
+static inline struct hci_iso_hdr *hci_iso_hdr(const struct sk_buff *skb)
+{
+	return (struct hci_iso_hdr *)skb->data;
 }
 
 /* Command opcode pack/unpack */

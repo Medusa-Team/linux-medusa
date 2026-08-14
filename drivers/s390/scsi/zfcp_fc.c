@@ -7,8 +7,7 @@
  * Copyright IBM Corp. 2008, 2017
  */
 
-#define KMSG_COMPONENT "zfcp"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "zfcp: " fmt
 
 #include <linux/types.h>
 #include <linux/slab.h>
@@ -129,7 +128,7 @@ void zfcp_fc_enqueue_event(struct zfcp_adapter *adapter,
 {
 	struct zfcp_fc_event *event;
 
-	event = kmalloc(sizeof(struct zfcp_fc_event), GFP_ATOMIC);
+	event = kmalloc_obj(struct zfcp_fc_event, GFP_ATOMIC);
 	if (!event)
 		return;
 
@@ -537,6 +536,11 @@ static void zfcp_fc_adisc_handler(void *data)
 	/* port is still good, nothing to do */
  out:
 	atomic_andnot(ZFCP_STATUS_PORT_LINK_TEST, &port->status);
+	/*
+	 * port ref comes from get_device() in zfcp_fc_test_link() and
+	 * work item zfcp_fc_link_test_work() passes ref via
+	 * zfcp_fc_adisc() to here, if zfcp_fc_adisc() could send ADISC
+	 */
 	put_device(&port->dev);
 	kmem_cache_free(zfcp_fc_req_cache, fc_req);
 }
@@ -603,7 +607,7 @@ void zfcp_fc_link_test_work(struct work_struct *work)
 
 	retval = zfcp_fc_adisc(port);
 	if (retval == 0)
-		return;
+		return; /* port ref passed to zfcp_fc_adisc(), no put here */
 
 	/* send of ADISC was not possible */
 	atomic_andnot(ZFCP_STATUS_PORT_LINK_TEST, &port->status);
@@ -1112,7 +1116,7 @@ int zfcp_fc_gs_setup(struct zfcp_adapter *adapter)
 {
 	struct zfcp_fc_wka_ports *wka_ports;
 
-	wka_ports = kzalloc(sizeof(struct zfcp_fc_wka_ports), GFP_KERNEL);
+	wka_ports = kzalloc_obj(struct zfcp_fc_wka_ports);
 	if (!wka_ports)
 		return -ENOMEM;
 

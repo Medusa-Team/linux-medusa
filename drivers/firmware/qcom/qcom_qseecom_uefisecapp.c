@@ -699,20 +699,18 @@ static DEFINE_MUTEX(__qcuefi_lock);
 
 static int qcuefi_set_reference(struct qcuefi_client *qcuefi)
 {
-	mutex_lock(&__qcuefi_lock);
+	guard(mutex)(&__qcuefi_lock);
 
-	if (qcuefi && __qcuefi) {
-		mutex_unlock(&__qcuefi_lock);
+	if (qcuefi && __qcuefi)
 		return -EEXIST;
-	}
 
 	__qcuefi = qcuefi;
 
-	mutex_unlock(&__qcuefi_lock);
 	return 0;
 }
 
 static struct qcuefi_client *qcuefi_acquire(void)
+	__acquires(__qcuefi_lock)
 {
 	mutex_lock(&__qcuefi_lock);
 	if (!__qcuefi) {
@@ -723,6 +721,7 @@ static struct qcuefi_client *qcuefi_acquire(void)
 }
 
 static void qcuefi_release(void)
+	__releases(__qcuefi_lock)
 {
 	mutex_unlock(&__qcuefi_lock);
 }
@@ -814,15 +813,6 @@ static int qcom_uefisecapp_probe(struct auxiliary_device *aux_dev,
 
 	qcuefi->client = container_of(aux_dev, struct qseecom_client, aux_dev);
 
-	auxiliary_set_drvdata(aux_dev, qcuefi);
-	status = qcuefi_set_reference(qcuefi);
-	if (status)
-		return status;
-
-	status = efivars_register(&qcuefi->efivars, &qcom_efivar_ops);
-	if (status)
-		qcuefi_set_reference(NULL);
-
 	memset(&pool_config, 0, sizeof(pool_config));
 	pool_config.initial_size = SZ_4K;
 	pool_config.policy = QCOM_TZMEM_POLICY_MULTIPLIER;
@@ -832,6 +822,15 @@ static int qcom_uefisecapp_probe(struct auxiliary_device *aux_dev,
 	qcuefi->mempool = devm_qcom_tzmem_pool_new(&aux_dev->dev, &pool_config);
 	if (IS_ERR(qcuefi->mempool))
 		return PTR_ERR(qcuefi->mempool);
+
+	auxiliary_set_drvdata(aux_dev, qcuefi);
+	status = qcuefi_set_reference(qcuefi);
+	if (status)
+		return status;
+
+	status = efivars_register(&qcuefi->efivars, &qcom_efivar_ops);
+	if (status)
+		qcuefi_set_reference(NULL);
 
 	return status;
 }

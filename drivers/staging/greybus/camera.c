@@ -791,7 +791,7 @@ static int gb_camera_op_configure_streams(void *priv, unsigned int *nstreams,
 	if (gb_nstreams > GB_CAMERA_MAX_STREAMS)
 		return -EINVAL;
 
-	gb_streams = kcalloc(gb_nstreams, sizeof(*gb_streams), GFP_KERNEL);
+	gb_streams = kzalloc_objs(*gb_streams, gb_nstreams);
 	if (!gb_streams)
 		return -ENOMEM;
 
@@ -932,7 +932,7 @@ static ssize_t gb_camera_debugfs_configure_streams(struct gb_camera *gcam,
 		return ret;
 
 	/* For each stream to configure parse width, height and format */
-	streams = kcalloc(nstreams, sizeof(*streams), GFP_KERNEL);
+	streams = kzalloc_objs(*streams, nstreams);
 	if (!streams)
 		return -ENOMEM;
 
@@ -1128,18 +1128,7 @@ done:
 
 static int gb_camera_debugfs_open(struct inode *inode, struct file *file)
 {
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(gb_camera_debugfs_entries); ++i) {
-		const struct gb_camera_debugfs_entry *entry =
-			&gb_camera_debugfs_entries[i];
-
-		if (!strcmp(file->f_path.dentry->d_iname, entry->name)) {
-			file->private_data = (void *)entry;
-			break;
-		}
-	}
-
+	file->private_data = debugfs_get_aux(file);
 	return 0;
 }
 
@@ -1175,9 +1164,9 @@ static int gb_camera_debugfs_init(struct gb_camera *gcam)
 
 		gcam->debugfs.buffers[i].length = 0;
 
-		debugfs_create_file(entry->name, entry->mask,
-				    gcam->debugfs.root, gcam,
-				    &gb_camera_debugfs_ops);
+		debugfs_create_file_aux(entry->name, entry->mask,
+					gcam->debugfs.root, gcam, entry,
+					&gb_camera_debugfs_ops);
 	}
 
 	return 0;
@@ -1255,7 +1244,7 @@ static int gb_camera_probe(struct gb_bundle *bundle,
 	if (!mgmt_cport_id || !data_cport_id)
 		return -ENODEV;
 
-	gcam = kzalloc(sizeof(*gcam), GFP_KERNEL);
+	gcam = kzalloc_obj(*gcam);
 	if (!gcam)
 		return -ENOMEM;
 

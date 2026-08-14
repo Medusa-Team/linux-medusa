@@ -4,7 +4,7 @@
  * Copyright (c) 2012-2013 Red Hat, Inc.
  * All rights reserved.
  */
-#include "xfs.h"
+#include "xfs_platform.h"
 #include "xfs_shared.h"
 #include "xfs_fs.h"
 #include "xfs_format.h"
@@ -165,7 +165,7 @@ xfs_symlink(
 	/*
 	 * Allocate an inode for the symlink.
 	 */
-	error = xfs_dialloc(&tp, dp->i_ino, S_IFLNK, &ino);
+	error = xfs_dialloc(&tp, &args, &ino);
 	if (!error)
 		error = xfs_icreate(tp, ino, &args, &du.ip);
 	if (error)

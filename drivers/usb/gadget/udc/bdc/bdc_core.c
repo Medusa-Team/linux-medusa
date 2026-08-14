@@ -35,8 +35,8 @@ static int poll_oip(struct bdc *bdc, u32 usec)
 	u32 status;
 	int ret;
 
-	ret = readl_poll_timeout(bdc->regs + BDC_BDCSC, status,
-				 (BDC_CSTS(status) != BDC_OIP), 10, usec);
+	ret = readl_poll_timeout_atomic(bdc->regs + BDC_BDCSC, status,
+					(BDC_CSTS(status) != BDC_OIP), 10, usec);
 	if (ret)
 		dev_err(bdc->dev, "operation timedout BDCSC: 0x%08x\n", status);
 	else
@@ -397,8 +397,7 @@ static int bdc_mem_alloc(struct bdc *bdc)
 		"ieps:%d eops:%d num_eps:%d\n",
 		num_ieps, num_oeps, bdc->num_eps);
 	/* allocate array of ep pointers */
-	bdc->bdc_ep_array = kcalloc(bdc->num_eps, sizeof(struct bdc_ep *),
-								GFP_KERNEL);
+	bdc->bdc_ep_array = kzalloc_objs(struct bdc_ep *, bdc->num_eps);
 	if (!bdc->bdc_ep_array)
 		goto fail;
 
@@ -639,6 +638,7 @@ static const struct of_device_id bdc_of_match[] = {
 	{ .compatible = "brcm,bdc" },
 	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, bdc_of_match);
 
 static struct platform_driver bdc_driver = {
 	.driver		= {
@@ -647,7 +647,7 @@ static struct platform_driver bdc_driver = {
 		.of_match_table	= bdc_of_match,
 	},
 	.probe		= bdc_probe,
-	.remove_new	= bdc_remove,
+	.remove		= bdc_remove,
 };
 
 module_platform_driver(bdc_driver);

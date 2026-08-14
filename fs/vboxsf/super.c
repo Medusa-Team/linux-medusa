@@ -21,7 +21,7 @@
 
 #define VBOXSF_SUPER_MAGIC 0x786f4256 /* 'VBox' little endian */
 
-static const unsigned char VBSF_MOUNT_SIGNATURE[4] = "\000\377\376\375";
+static const unsigned char VBSF_MOUNT_SIGNATURE[4] __nonstring = "\000\377\376\375";
 
 static int follow_symlinks;
 module_param(follow_symlinks, int, 0444);
@@ -122,7 +122,7 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (!fc->source)
 		return -EINVAL;
 
-	sbi = kzalloc(sizeof(*sbi), GFP_KERNEL);
+	sbi = kzalloc_obj(*sbi);
 	if (!sbi)
 		return -ENOMEM;
 
@@ -189,7 +189,7 @@ static int vboxsf_fill_super(struct super_block *sb, struct fs_context *fc)
 	sb->s_blocksize = 1024;
 	sb->s_maxbytes = MAX_LFS_FILESIZE;
 	sb->s_op = &vboxsf_super_ops;
-	sb->s_d_op = &vboxsf_dentry_ops;
+	set_default_d_op(sb, &vboxsf_dentry_ops);
 
 	iroot = iget_locked(sb, 0);
 	if (!iroot) {
@@ -427,7 +427,7 @@ static int vboxsf_init_fs_context(struct fs_context *fc)
 {
 	struct vboxsf_fs_context *ctx;
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	ctx = kzalloc_obj(*ctx);
 	if (!ctx)
 		return -ENOMEM;
 

@@ -59,7 +59,6 @@
 # while it is forwarded between different vrfs.
 
 source lib.sh
-PATH=$PWD:$PWD/tools/testing/selftests/net:$PATH
 VERBOSE=0
 PAUSE_ON_FAIL=no
 DEFAULT_TTYPE=sym
@@ -276,7 +275,7 @@ setup_sym()
 
 
 	# Wait for ip config to settle
-	sleep 2
+	slowwait 5 ip netns exec $h1 "${ping6}" -c1 -w1 ${H2_N2_IP6} >/dev/null 2>&1
 }
 
 setup_asym()
@@ -371,7 +370,7 @@ setup_asym()
 	ip -netns $r2 -6 addr add dev eth1 ${R2_N2_IP6}/64 nodad
 
 	# Wait for ip config to settle
-	sleep 2
+	slowwait 5 ip netns exec $h1 "${ping6}" -c1 -w1 ${H2_N2_IP6} >/dev/null 2>&1
 }
 
 check_connectivity()
@@ -635,6 +634,8 @@ EOF
 
 # Some systems don't have a ping6 binary anymore
 command -v ping6 > /dev/null 2>&1 && ping6=$(command -v ping6) || ping6=$(command -v ping)
+
+check_gen_prog "nettest"
 
 TESTS_IPV4="ipv4_ping_ttl ipv4_traceroute ipv4_ping_frag ipv4_ping_local ipv4_tcp_local
 ipv4_udp_local ipv4_ping_ttl_asym ipv4_traceroute_asym"

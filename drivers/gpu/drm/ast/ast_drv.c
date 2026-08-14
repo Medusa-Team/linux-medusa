@@ -26,16 +26,18 @@
  * Authors: Dave Airlie <airlied@redhat.com>
  */
 
+#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/pci.h>
 
-#include <drm/drm_aperture.h>
+#include <drm/clients/drm_client_setup.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_fbdev_shmem.h>
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_module.h>
+#include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
 
 #include "ast_drv.h"
@@ -44,6 +46,34 @@ static int ast_modeset = -1;
 
 MODULE_PARM_DESC(modeset, "Disable/Enable modesetting");
 module_param_named(modeset, ast_modeset, int, 0400);
+
+void ast_device_init(struct ast_device *ast,
+		     enum ast_chip chip,
+		     enum ast_config_mode config_mode,
+		     void __iomem *regs,
+		     void __iomem *ioregs,
+		     const struct ast_device_quirks *quirks)
+{
+	ast->quirks = quirks;
+	ast->chip = chip;
+	ast->config_mode = config_mode;
+	ast->regs = regs;
+	ast->ioregs = ioregs;
+}
+
+void __ast_device_set_tx_chip(struct ast_device *ast, enum ast_tx_chip tx_chip)
+{
+	static const char * const info_str[] = {
+		"analog VGA",
+		"Sil164 TMDS transmitter",
+		"DP501 DisplayPort transmitter",
+		"ASPEED DisplayPort transmitter",
+	};
+
+	drm_info(&ast->base, "Using %s\n", info_str[tx_chip]);
+
+	ast->tx_chip = tx_chip;
+}
 
 /*
  * DRM driver
@@ -59,12 +89,12 @@ static const struct drm_driver ast_driver = {
 	.fops = &ast_fops,
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
-	.date = DRIVER_DATE,
 	.major = DRIVER_MAJOR,
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
 
-	DRM_GEM_SHMEM_DRIVER_OPS
+	DRM_GEM_SHMEM_DRIVER_OPS,
+	DRM_FBDEV_SHMEM_DRIVER_OPS,
 };
 
 /*
@@ -169,8 +199,8 @@ static int ast_detect_chip(struct pci_dev *pdev,
 
 			/* Patch AST2500/AST2510 */
 			if ((pdev->revision & 0xf0) == 0x40) {
-				if (!(vgacrd0 & AST_VRAM_INIT_STATUS_MASK))
-					ast_patch_ahb_2500(regs);
+				if (!(vgacrd0 & AST_IO_VGACRD0_VRAM_INIT_STATUS_MASK))
+					ast_2500_patch_ahb(regs);
 			}
 
 			/* Double check that it's actually working */
@@ -265,7 +295,7 @@ static int ast_detect_chip(struct pci_dev *pdev,
 	*chip_out = chip;
 	*config_mode_out = config_mode;
 
-	return 0;
+	return __AST_CHIP_GEN(chip);
 }
 
 static int ast_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -276,10 +306,11 @@ static int ast_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	void __iomem *ioregs;
 	enum ast_config_mode config_mode;
 	enum ast_chip chip;
+	unsigned int chip_gen;
 	struct drm_device *drm;
 	bool need_post = false;
 
-	ret = drm_aperture_remove_conflicting_pci_framebuffers(pdev, &ast_driver);
+	ret = aperture_remove_conflicting_pci_devices(pdev, ast_driver.name);
 	if (ret)
 		return ret;
 
@@ -287,9 +318,9 @@ static int ast_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (ret)
 		return ret;
 
-	regs = pcim_iomap(pdev, 1, 0);
-	if (!regs)
-		return -EIO;
+	regs = pcim_iomap_region(pdev, 1, "ast");
+	if (IS_ERR(regs))
+		return PTR_ERR(regs);
 
 	if (pdev->revision >= 0x40) {
 		/*
@@ -311,9 +342,9 @@ static int ast_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 		if (len < AST_IO_MM_LENGTH)
 			return -EIO;
-		ioregs = pcim_iomap(pdev, 2, 0);
-		if (!ioregs)
-			return -EIO;
+		ioregs = pcim_iomap_region(pdev, 2, "ast");
+		if (IS_ERR(ioregs))
+			return PTR_ERR(ioregs);
 	} else {
 		/*
 		 * Anything else is best effort.
@@ -348,10 +379,43 @@ static int ast_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		return ret;
 
 	ret = ast_detect_chip(pdev, regs, ioregs, &chip, &config_mode);
-	if (ret)
+	if (ret < 0)
 		return ret;
+	chip_gen = ret;
 
-	drm = ast_device_create(pdev, &ast_driver, chip, config_mode, regs, ioregs, need_post);
+	switch (chip_gen) {
+	case 1:
+		drm = ast_2000_device_create(pdev, &ast_driver, chip, config_mode,
+					     regs, ioregs, need_post);
+		break;
+	case 2:
+		drm = ast_2100_device_create(pdev, &ast_driver, chip, config_mode,
+					     regs, ioregs, need_post);
+		break;
+	case 3:
+		drm = ast_2200_device_create(pdev, &ast_driver, chip, config_mode,
+					     regs, ioregs, need_post);
+		break;
+	case 4:
+		drm = ast_2300_device_create(pdev, &ast_driver, chip, config_mode,
+					     regs, ioregs, need_post);
+		break;
+	case 5:
+		drm = ast_2400_device_create(pdev, &ast_driver, chip, config_mode,
+					     regs, ioregs, need_post);
+		break;
+	case 6:
+		drm = ast_2500_device_create(pdev, &ast_driver, chip, config_mode,
+					     regs, ioregs, need_post);
+		break;
+	case 7:
+		drm = ast_2600_device_create(pdev, &ast_driver, chip, config_mode,
+					     regs, ioregs, need_post);
+		break;
+	default:
+		dev_err(&pdev->dev, "Gen%d not supported\n", chip_gen);
+		return -ENODEV;
+	}
 	if (IS_ERR(drm))
 		return PTR_ERR(drm);
 	pci_set_drvdata(pdev, drm);
@@ -360,7 +424,7 @@ static int ast_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (ret)
 		return ret;
 
-	drm_fbdev_shmem_setup(drm, 32);
+	drm_client_setup(drm, NULL);
 
 	return 0;
 }
@@ -392,11 +456,15 @@ static int ast_drm_freeze(struct drm_device *dev)
 static int ast_drm_thaw(struct drm_device *dev)
 {
 	struct ast_device *ast = to_ast_device(dev);
+	int ret;
 
 	ast_enable_vga(ast->ioregs);
 	ast_open_key(ast->ioregs);
 	ast_enable_mmio(dev->dev, ast->ioregs);
-	ast_post_gpu(dev);
+
+	ret = ast_post_gpu(ast);
+	if (ret)
+		return ret;
 
 	return drm_mode_config_helper_resume(dev);
 }

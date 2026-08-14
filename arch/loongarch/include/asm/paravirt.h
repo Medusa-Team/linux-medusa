@@ -4,21 +4,15 @@
 
 #ifdef CONFIG_PARAVIRT
 
-#include <linux/static_call_types.h>
-struct static_key;
-extern struct static_key paravirt_steal_enabled;
-extern struct static_key paravirt_steal_rq_enabled;
+#include <linux/jump_label.h>
 
-u64 dummy_steal_clock(int cpu);
-DECLARE_STATIC_CALL(pv_steal_clock, dummy_steal_clock);
-
-static inline u64 paravirt_steal_clock(int cpu)
-{
-	return static_call(pv_steal_clock)(cpu);
-}
+DECLARE_STATIC_KEY_FALSE(virt_preempt_key);
+DECLARE_STATIC_KEY_FALSE(virt_spin_lock_key);
+DECLARE_PER_CPU(struct kvm_steal_time, steal_time);
 
 int __init pv_ipi_init(void);
 int __init pv_time_init(void);
+int __init pv_spinlock_init(void);
 
 #else
 
@@ -31,5 +25,11 @@ static inline int pv_time_init(void)
 {
 	return 0;
 }
+
+static inline int pv_spinlock_init(void)
+{
+	return 0;
+}
+
 #endif // CONFIG_PARAVIRT
 #endif

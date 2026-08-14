@@ -11,7 +11,7 @@
 #include "protocols.h"
 
 /* Updated only after ALL the mandatory features for that version are merged */
-#define SCMI_PROTOCOL_SUPPORTED_VERSION		0x20000
+#define SCMI_PROTOCOL_SUPPORTED_VERSION		0x20001
 
 #define VOLTAGE_DOMS_NUM_MASK		GENMASK(15, 0)
 #define REMAINING_LEVELS_MASK		GENMASK(31, 16)
@@ -66,7 +66,6 @@ struct scmi_resp_voltage_level_set_complete {
 };
 
 struct voltage_info {
-	unsigned int version;
 	unsigned int num_domains;
 	struct scmi_voltage_info *domains;
 };
@@ -229,8 +228,10 @@ static int scmi_voltage_descriptors_get(const struct scmi_protocol_handle *ph,
 		/* Retrieve domain attributes at first ... */
 		put_unaligned_le32(dom, td->tx.buf);
 		/* Skip domain on comms error */
-		if (ph->xops->do_xfer(ph, td))
+		if (ph->xops->do_xfer(ph, td)) {
+			ph->xops->reset_rx_to_maxsz(ph, td);
 			continue;
+		}
 
 		v = vinfo->domains + dom;
 		v->id = dom;
@@ -241,7 +242,7 @@ static int scmi_voltage_descriptors_get(const struct scmi_protocol_handle *ph,
 		 * If supported overwrite short name with the extended one;
 		 * on error just carry on and use already provided short name.
 		 */
-		if (PROTOCOL_REV_MAJOR(vinfo->version) >= 0x2) {
+		if (PROTOCOL_REV_MAJOR(ph->version) >= 0x2) {
 			if (SUPPORTS_EXTENDED_NAMES(attributes))
 				ph->hops->extended_name_get(ph,
 							VOLTAGE_DOMAIN_NAME_GET,
@@ -391,7 +392,7 @@ static int scmi_voltage_domains_num_get(const struct scmi_protocol_handle *ph)
 	return vinfo->num_domains;
 }
 
-static struct scmi_voltage_proto_ops voltage_proto_ops = {
+static const struct scmi_voltage_proto_ops voltage_proto_ops = {
 	.num_domains_get = scmi_voltage_domains_num_get,
 	.info_get = scmi_voltage_info_get,
 	.config_set = scmi_voltage_config_set,
@@ -403,20 +404,14 @@ static struct scmi_voltage_proto_ops voltage_proto_ops = {
 static int scmi_voltage_protocol_init(const struct scmi_protocol_handle *ph)
 {
 	int ret;
-	u32 version;
 	struct voltage_info *vinfo;
 
-	ret = ph->xops->version_get(ph, &version);
-	if (ret)
-		return ret;
-
 	dev_dbg(ph->dev, "Voltage Version %d.%d\n",
-		PROTOCOL_REV_MAJOR(version), PROTOCOL_REV_MINOR(version));
+		PROTOCOL_REV_MAJOR(ph->version), PROTOCOL_REV_MINOR(ph->version));
 
 	vinfo = devm_kzalloc(ph->dev, sizeof(*vinfo), GFP_KERNEL);
 	if (!vinfo)
 		return -ENOMEM;
-	vinfo->version = version;
 
 	ret = scmi_protocol_attributes_get(ph, vinfo);
 	if (ret)
@@ -435,7 +430,7 @@ static int scmi_voltage_protocol_init(const struct scmi_protocol_handle *ph)
 		dev_warn(ph->dev, "No Voltage domains found.\n");
 	}
 
-	return ph->set_priv(ph, vinfo, version);
+	return ph->set_priv(ph, vinfo);
 }
 
 static const struct scmi_protocol scmi_voltage = {

@@ -8,8 +8,7 @@
  *   Jan Glauber <jang@linux.vnet.ibm.com>
  */
 
-#define KMSG_COMPONENT "zpci"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "zpci: " fmt
 
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -59,16 +58,15 @@ static int disable_slot(struct hotplug_slot *hotplug_slot)
 
 	pdev = pci_get_slot(zdev->zbus->bus, zdev->devfn);
 	if (pdev && pci_num_vf(pdev)) {
-		pci_dev_put(pdev);
 		rc = -EBUSY;
 		goto out;
 	}
 
 	rc = zpci_deconfigure_device(zdev);
 out:
-	mutex_unlock(&zdev->state_lock);
 	if (pdev)
 		pci_dev_put(pdev);
+	mutex_unlock(&zdev->state_lock);
 	return rc;
 }
 
@@ -112,7 +110,7 @@ static int get_power_status(struct hotplug_slot *hotplug_slot, u8 *value)
 
 static int get_adapter_status(struct hotplug_slot *hotplug_slot, u8 *value)
 {
-	/* if the slot exits it always contains a function */
+	/* if the slot exists it always contains a function */
 	*value = 1;
 	return 0;
 }

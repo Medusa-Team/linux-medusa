@@ -3,7 +3,7 @@
  * Copyright (C) 2016 Oracle.  All Rights Reserved.
  * Author: Darrick J. Wong <darrick.wong@oracle.com>
  */
-#include "xfs.h"
+#include "xfs_platform.h"
 #include "xfs_fs.h"
 #include "xfs_format.h"
 #include "xfs_log_format.h"
@@ -77,6 +77,11 @@ xfs_bui_item_size(
 	*nbytes += xfs_bui_log_format_sizeof(buip->bui_format.bui_nextents);
 }
 
+unsigned int xfs_bui_log_space(unsigned int nr)
+{
+	return xlog_item_space(1, xfs_bui_log_format_sizeof(nr));
+}
+
 /*
  * This is called to fill in the vector of log iovecs for the
  * given bui log item. We use only 1 iovec, and we point that
@@ -87,10 +92,9 @@ xfs_bui_item_size(
 STATIC void
 xfs_bui_item_format(
 	struct xfs_log_item	*lip,
-	struct xfs_log_vec	*lv)
+	struct xlog_format_buf	*lfb)
 {
 	struct xfs_bui_log_item	*buip = BUI_ITEM(lip);
-	struct xfs_log_iovec	*vecp = NULL;
 
 	ASSERT(atomic_read(&buip->bui_next_extent) ==
 			buip->bui_format.bui_nextents);
@@ -98,7 +102,7 @@ xfs_bui_item_format(
 	buip->bui_format.bui_type = XFS_LI_BUI;
 	buip->bui_format.bui_size = 1;
 
-	xlog_copy_iovec(lv, &vecp, XLOG_REG_TYPE_BUI_FORMAT, &buip->bui_format,
+	xlog_format_copy(lfb, XLOG_REG_TYPE_BUI_FORMAT, &buip->bui_format,
 			xfs_bui_log_format_sizeof(buip->bui_format.bui_nextents));
 }
 
@@ -168,6 +172,11 @@ xfs_bud_item_size(
 	*nbytes += sizeof(struct xfs_bud_log_format);
 }
 
+unsigned int xfs_bud_log_space(void)
+{
+	return xlog_item_space(1, sizeof(struct xfs_bud_log_format));
+}
+
 /*
  * This is called to fill in the vector of log iovecs for the
  * given bud log item. We use only 1 iovec, and we point that
@@ -178,15 +187,14 @@ xfs_bud_item_size(
 STATIC void
 xfs_bud_item_format(
 	struct xfs_log_item	*lip,
-	struct xfs_log_vec	*lv)
+	struct xlog_format_buf	*lfb)
 {
 	struct xfs_bud_log_item	*budp = BUD_ITEM(lip);
-	struct xfs_log_iovec	*vecp = NULL;
 
 	budp->bud_format.bud_type = XFS_LI_BUD;
 	budp->bud_format.bud_size = 1;
 
-	xlog_copy_iovec(lv, &vecp, XLOG_REG_TYPE_BUD_FORMAT, &budp->bud_format,
+	xlog_format_copy(lfb, XLOG_REG_TYPE_BUD_FORMAT, &budp->bud_format,
 			sizeof(struct xfs_bud_log_format));
 }
 
@@ -237,7 +245,7 @@ xfs_bmap_update_diff_items(
 	struct xfs_bmap_intent		*ba = bi_entry(a);
 	struct xfs_bmap_intent		*bb = bi_entry(b);
 
-	return ba->bi_owner->i_ino - bb->bi_owner->i_ino;
+	return cmp_int(ba->bi_owner->i_ino, bb->bi_owner->i_ino);
 }
 
 /* Log bmap updates in the intent item. */
@@ -318,14 +326,16 @@ xfs_bmap_update_create_done(
 	return &budp->bud_item;
 }
 
-/* Take a passive ref to the AG containing the space we're mapping. */
+/* Take a passive ref to the group containing the space we're mapping. */
 static inline void
 xfs_bmap_update_get_group(
 	struct xfs_mount	*mp,
 	struct xfs_bmap_intent	*bi)
 {
+	enum xfs_group_type	type = XG_TYPE_AG;
+
 	if (xfs_ifork_is_realtime(bi->bi_owner, bi->bi_whichfork))
-		return;
+		type = XG_TYPE_RTG;
 
 	/*
 	 * Bump the intent count on behalf of the deferred rmap and refcount
@@ -334,7 +344,8 @@ xfs_bmap_update_get_group(
 	 * intent drops the intent count, ensuring that the intent count
 	 * remains nonzero across the transaction roll.
 	 */
-	bi->bi_pag = xfs_perag_intent_get(mp, bi->bi_bmap.br_startblock);
+	bi->bi_group = xfs_group_intent_get(mp, bi->bi_bmap.br_startblock,
+				type);
 }
 
 /* Add this deferred BUI to the transaction. */
@@ -343,21 +354,21 @@ xfs_bmap_defer_add(
 	struct xfs_trans	*tp,
 	struct xfs_bmap_intent	*bi)
 {
-	trace_xfs_bmap_defer(bi);
-
 	xfs_bmap_update_get_group(tp->t_mountp, bi);
+
+	/*
+	 * Ensure the deferred mapping is pre-recorded in i_delayed_blks.
+	 *
+	 * Otherwise stat can report zero blocks for an inode that actually has
+	 * data when the entire mapping is in the process of being overwritten
+	 * using the out of place write path. This is undone in xfs_bmapi_remap
+	 * after it has incremented di_nblocks for a successful operation.
+	 */
+	if (bi->bi_type == XFS_BMAP_MAP)
+		bi->bi_owner->i_delayed_blks += bi->bi_bmap.br_blockcount;
+
+	trace_xfs_bmap_defer(bi);
 	xfs_defer_add(tp, &bi->bi_list, &xfs_bmap_update_defer_type);
-}
-
-/* Release a passive AG ref after finishing mapping work. */
-static inline void
-xfs_bmap_update_put_group(
-	struct xfs_bmap_intent	*bi)
-{
-	if (xfs_ifork_is_realtime(bi->bi_owner, bi->bi_whichfork))
-		return;
-
-	xfs_perag_intent_put(bi->bi_pag);
 }
 
 /* Cancel a deferred bmap update. */
@@ -367,7 +378,10 @@ xfs_bmap_update_cancel_item(
 {
 	struct xfs_bmap_intent		*bi = bi_entry(item);
 
-	xfs_bmap_update_put_group(bi);
+	if (bi->bi_type == XFS_BMAP_MAP)
+		bi->bi_owner->i_delayed_blks -= bi->bi_bmap.br_blockcount;
+
+	xfs_group_intent_put(bi->bi_group);
 	kmem_cache_free(xfs_bmap_intent_cache, bi);
 }
 
@@ -464,6 +478,9 @@ xfs_bui_recover_work(
 	bi->bi_owner = *ipp;
 	xfs_bmap_update_get_group(mp, bi);
 
+	/* see xfs_bmap_defer_add for details */
+	if (bi->bi_type == XFS_BMAP_MAP)
+		bi->bi_owner->i_delayed_blks += bi->bi_bmap.br_blockcount;
 	xfs_defer_add_item(dfp, &bi->bi_list);
 	return bi;
 }
@@ -635,24 +652,24 @@ xlog_recover_bui_commit_pass2(
 	struct xfs_bui_log_format	*bui_formatp;
 	size_t				len;
 
-	bui_formatp = item->ri_buf[0].i_addr;
+	bui_formatp = item->ri_buf[0].iov_base;
 
-	if (item->ri_buf[0].i_len < xfs_bui_log_format_sizeof(0)) {
+	if (item->ri_buf[0].iov_len < xfs_bui_log_format_sizeof(0)) {
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
-				item->ri_buf[0].i_addr, item->ri_buf[0].i_len);
+				item->ri_buf[0].iov_base, item->ri_buf[0].iov_len);
 		return -EFSCORRUPTED;
 	}
 
 	if (bui_formatp->bui_nextents != XFS_BUI_MAX_FAST_EXTENTS) {
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
-				item->ri_buf[0].i_addr, item->ri_buf[0].i_len);
+				item->ri_buf[0].iov_base, item->ri_buf[0].iov_len);
 		return -EFSCORRUPTED;
 	}
 
 	len = xfs_bui_log_format_sizeof(bui_formatp->bui_nextents);
-	if (item->ri_buf[0].i_len != len) {
+	if (item->ri_buf[0].iov_len != len) {
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, mp,
-				item->ri_buf[0].i_addr, item->ri_buf[0].i_len);
+				item->ri_buf[0].iov_base, item->ri_buf[0].iov_len);
 		return -EFSCORRUPTED;
 	}
 
@@ -686,10 +703,10 @@ xlog_recover_bud_commit_pass2(
 {
 	struct xfs_bud_log_format	*bud_formatp;
 
-	bud_formatp = item->ri_buf[0].i_addr;
-	if (item->ri_buf[0].i_len != sizeof(struct xfs_bud_log_format)) {
+	bud_formatp = item->ri_buf[0].iov_base;
+	if (item->ri_buf[0].iov_len != sizeof(struct xfs_bud_log_format)) {
 		XFS_CORRUPTION_ERROR(__func__, XFS_ERRLEVEL_LOW, log->l_mp,
-				item->ri_buf[0].i_addr, item->ri_buf[0].i_len);
+				item->ri_buf[0].iov_base, item->ri_buf[0].iov_len);
 		return -EFSCORRUPTED;
 	}
 

@@ -96,8 +96,7 @@ static int hash__init_new_context(struct mm_struct *mm)
 {
 	int index;
 
-	mm->context.hash_context = kmalloc(sizeof(struct hash_mm_context),
-					   GFP_KERNEL);
+	mm->context.hash_context = kmalloc_obj(struct hash_mm_context);
 	if (!mm->context.hash_context)
 		return -ENOMEM;
 
@@ -124,8 +123,7 @@ static int hash__init_new_context(struct mm_struct *mm)
 #ifdef CONFIG_PPC_SUBPAGE_PROT
 		/* inherit subpage prot details if we have one. */
 		if (current->mm->context.hash_context->spt) {
-			mm->context.hash_context->spt = kmalloc(sizeof(struct subpage_prot_table),
-								GFP_KERNEL);
+			mm->context.hash_context->spt = kmalloc_obj(struct subpage_prot_table);
 			if (!mm->context.hash_context->spt) {
 				kfree(mm->context.hash_context);
 				return -ENOMEM;
@@ -150,8 +148,6 @@ static int hash__init_new_context(struct mm_struct *mm)
 void hash__setup_new_exec(void)
 {
 	slice_setup_new_exec();
-
-	slb_setup_new_exec();
 }
 #else
 static inline int hash__init_new_context(struct mm_struct *mm)
@@ -253,7 +249,7 @@ static void pmd_frag_destroy(void *pmd_frag)
 	count = ((unsigned long)pmd_frag & ~PAGE_MASK) >> PMD_FRAG_SIZE_SHIFT;
 	/* We allow PTE_FRAG_NR fragments from a PTE page */
 	if (atomic_sub_and_test(PMD_FRAG_NR - count, &ptdesc->pt_frag_refcount)) {
-		pagetable_pmd_dtor(ptdesc);
+		pagetable_dtor(ptdesc);
 		pagetable_free(ptdesc);
 	}
 }

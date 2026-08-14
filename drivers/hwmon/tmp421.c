@@ -19,7 +19,6 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/sysfs.h>
 
@@ -99,7 +98,6 @@ struct tmp421_channel {
 
 struct tmp421_data {
 	struct i2c_client *client;
-	struct mutex update_lock;
 	u32 temp_config[MAX_CHANNELS + 1];
 	struct hwmon_channel_info temp_info;
 	const struct hwmon_channel_info *info[2];
@@ -130,38 +128,28 @@ static int tmp421_update_device(struct tmp421_data *data)
 	int ret = 0;
 	int i;
 
-	mutex_lock(&data->update_lock);
-
 	if (time_after(jiffies, data->last_updated + (HZ / 2)) ||
 	    !data->valid) {
+		data->valid = false;
 		ret = i2c_smbus_read_byte_data(client, TMP421_CONFIG_REG_1);
 		if (ret < 0)
-			goto exit;
+			return ret;
 		data->config = ret;
 
 		for (i = 0; i < data->channels; i++) {
 			ret = i2c_smbus_read_byte_data(client, TMP421_TEMP_MSB[i]);
 			if (ret < 0)
-				goto exit;
+				return ret;
 			data->channel[i].temp = ret << 8;
 
 			ret = i2c_smbus_read_byte_data(client, TMP421_TEMP_LSB[i]);
 			if (ret < 0)
-				goto exit;
+				return ret;
 			data->channel[i].temp |= ret;
 		}
 		data->last_updated = jiffies;
 		data->valid = true;
 	}
-
-exit:
-	mutex_unlock(&data->update_lock);
-
-	if (ret < 0) {
-		data->valid = false;
-		return ret;
-	}
-
 	return 0;
 }
 
@@ -262,7 +250,6 @@ static umode_t tmp421_is_visible(const void *data, enum hwmon_sensor_types type,
 	switch (attr) {
 	case hwmon_temp_fault:
 	case hwmon_temp_input:
-		return 0444;
 	case hwmon_temp_label:
 		return 0444;
 	case hwmon_temp_enable:
@@ -381,7 +368,11 @@ static int tmp421_probe_child_from_dt(struct i2c_client *client,
 		return -EINVAL;
 	}
 
-	of_property_read_string(child, "label", &data->channel[i].label);
+	err = of_property_read_string(child, "label", &data->channel[i].label);
+	if (err == -ENODATA || err == -EILSEQ) {
+		dev_err(dev, "invalid label property in %pOFn\n", child);
+		return err;
+	}
 	if (data->channel[i].label)
 		data->temp_config[i] |= HWMON_T_LABEL;
 
@@ -410,18 +401,15 @@ static int tmp421_probe_from_dt(struct i2c_client *client, struct tmp421_data *d
 {
 	struct device *dev = &client->dev;
 	const struct device_node *np = dev->of_node;
-	struct device_node *child;
 	int err;
 
-	for_each_child_of_node(np, child) {
+	for_each_child_of_node_scoped(np, child) {
 		if (strcmp(child->name, "channel"))
 			continue;
 
 		err = tmp421_probe_child_from_dt(client, child, data);
-		if (err) {
-			of_node_put(child);
+		if (err)
 			return err;
-		}
 	}
 
 	return 0;
@@ -445,7 +433,6 @@ static int tmp421_probe(struct i2c_client *client)
 	if (!data)
 		return -ENOMEM;
 
-	mutex_init(&data->update_lock);
 	data->channels = (unsigned long)i2c_get_match_data(client);
 	data->client = client;
 

@@ -17,11 +17,12 @@ config CAN_EMS_USB
 config CAN_ESD_USB
 	tristate "esd electronics gmbh CAN/USB interfaces"
 	help
-	  This driver adds supports for several CAN/USB interfaces
+	  This driver adds support for several CAN/USB interfaces
 	  from esd electronics gmbh (https://www.esd.eu).
 
 	  The drivers supports the following devices:
 	    - esd CAN-USB/2
+	    - esd CAN-USB/3-FD
 	    - esd CAN-USB/Micro
 
 	  To compile this driver as a module, choose M here: the module
@@ -65,6 +66,7 @@ config CAN_GS_USB
 
 config CAN_KVASER_USB
 	tristate "Kvaser CAN/USB interface"
+	select NET_DEVLINK
 	help
 	  This driver adds support for Kvaser CAN/USB devices like Kvaser
 	  Leaf Light, Kvaser USBcan II and Kvaser Memorator Pro 5xHS.
@@ -131,6 +133,17 @@ config CAN_MCBA_USB
 	help
 	  This driver supports the CAN BUS Analyzer interface
 	  from Microchip (http://www.microchip.com/development-tools/).
+
+config CAN_NCT6694
+	tristate "Nuvoton NCT6694 Socket CANfd support"
+	depends on MFD_NCT6694
+	select CAN_RX_OFFLOAD
+	help
+	  If you say yes to this option, support will be included for Nuvoton
+	  NCT6694, a USB device to socket CANfd controller.
+
+	  This driver can also be built as a module. If so, the module will
+	  be called nct6694_canfd.
 
 config CAN_PEAK_USB
 	tristate "PEAK PCAN-USB/USB Pro interfaces for CAN 2.0b/CAN-FD"

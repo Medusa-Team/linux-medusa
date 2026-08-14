@@ -96,8 +96,9 @@ static u8	mptfcTaskCtx = MPT_MAX_PROTOCOL_DRIVERS;
 static u8	mptfcInternalCtx = MPT_MAX_PROTOCOL_DRIVERS;
 
 static int mptfc_target_alloc(struct scsi_target *starget);
-static int mptfc_slave_alloc(struct scsi_device *sdev);
-static int mptfc_qcmd(struct Scsi_Host *shost, struct scsi_cmnd *SCpnt);
+static int mptfc_sdev_init(struct scsi_device *sdev);
+static enum scsi_qc_status mptfc_qcmd(struct Scsi_Host *shost,
+				      struct scsi_cmnd *SCpnt);
 static void mptfc_target_destroy(struct scsi_target *starget);
 static void mptfc_set_rport_loss_tmo(struct fc_rport *rport, uint32_t timeout);
 static void mptfc_remove(struct pci_dev *pdev);
@@ -113,10 +114,10 @@ static const struct scsi_host_template mptfc_driver_template = {
 	.info				= mptscsih_info,
 	.queuecommand			= mptfc_qcmd,
 	.target_alloc			= mptfc_target_alloc,
-	.slave_alloc			= mptfc_slave_alloc,
-	.slave_configure		= mptscsih_slave_configure,
+	.sdev_init			= mptfc_sdev_init,
+	.sdev_configure			= mptscsih_sdev_configure,
 	.target_destroy			= mptfc_target_destroy,
-	.slave_destroy			= mptscsih_slave_destroy,
+	.sdev_destroy			= mptscsih_sdev_destroy,
 	.change_queue_depth 		= mptscsih_change_queue_depth,
 	.eh_timed_out			= fc_eh_timed_out,
 	.eh_abort_handler		= mptfc_abort,
@@ -137,7 +138,7 @@ static const struct scsi_host_template mptfc_driver_template = {
  * Supported hardware
  */
 
-static struct pci_device_id mptfc_pci_table[] = {
+static const struct pci_device_id mptfc_pci_table[] = {
 	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVICEID_FC909,
 		PCI_ANY_ID, PCI_ANY_ID },
 	{ PCI_VENDOR_ID_LSI_LOGIC, MPI_MANUFACTPAGE_DEVICEID_FC919,
@@ -483,7 +484,7 @@ mptfc_register_dev(MPT_ADAPTER *ioc, int channel, FCDevicePage0_t *pg0)
 		}
 	}
 	if (new_ri) {	/* allocate one */
-		ri = kzalloc(sizeof(struct mptfc_rport_info), GFP_KERNEL);
+		ri = kzalloc_obj(struct mptfc_rport_info);
 		if (!ri)
 			return;
 		list_add_tail(&ri->list, &ioc->fc_rports);
@@ -503,7 +504,7 @@ mptfc_register_dev(MPT_ADAPTER *ioc, int channel, FCDevicePage0_t *pg0)
 			/*
 			 * if already mapped, remap here.  If not mapped,
 			 * target_alloc will allocate vtarget and map,
-			 * slave_alloc will fill in vdevice from vtarget.
+			 * sdev_init will fill in vdevice from vtarget.
 			 */
 			if (ri->starget) {
 				vtarget = ri->starget->hostdata;
@@ -571,7 +572,7 @@ mptfc_target_alloc(struct scsi_target *starget)
 	struct mptfc_rport_info *ri;
 	int			rc;
 
-	vtarget = kzalloc(sizeof(VirtTarget), GFP_KERNEL);
+	vtarget = kzalloc_obj(VirtTarget);
 	if (!vtarget)
 		return -ENOMEM;
 	starget->hostdata = vtarget;
@@ -631,7 +632,7 @@ mptfc_dump_lun_info(MPT_ADAPTER *ioc, struct fc_rport *rport, struct scsi_device
  *	Init memory once per LUN.
  */
 static int
-mptfc_slave_alloc(struct scsi_device *sdev)
+mptfc_sdev_init(struct scsi_device *sdev)
 {
 	MPT_SCSI_HOST		*hd;
 	VirtTarget		*vtarget;
@@ -649,9 +650,9 @@ mptfc_slave_alloc(struct scsi_device *sdev)
 	hd = shost_priv(sdev->host);
 	ioc = hd->ioc;
 
-	vdevice = kzalloc(sizeof(VirtDevice), GFP_KERNEL);
+	vdevice = kzalloc_obj(VirtDevice);
 	if (!vdevice) {
-		printk(MYIOC_s_ERR_FMT "slave_alloc kmalloc(%zd) FAILED!\n",
+		printk(MYIOC_s_ERR_FMT "sdev_init kmalloc(%zd) FAILED!\n",
 				ioc->name, sizeof(VirtDevice));
 		return -ENOMEM;
 	}
@@ -676,8 +677,8 @@ mptfc_slave_alloc(struct scsi_device *sdev)
 	return 0;
 }
 
-static int
-mptfc_qcmd(struct Scsi_Host *shost, struct scsi_cmnd *SCpnt)
+static enum scsi_qc_status mptfc_qcmd(struct Scsi_Host *shost,
+				      struct scsi_cmnd *SCpnt)
 {
 	struct mptfc_rport_info	*ri;
 	struct fc_rport	*rport = starget_to_rport(scsi_target(SCpnt->device));
@@ -1349,11 +1350,8 @@ mptfc_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* initialize workqueue */
 
-	snprintf(ioc->fc_rescan_work_q_name, sizeof(ioc->fc_rescan_work_q_name),
-		 "mptfc_wq_%d", sh->host_no);
-	ioc->fc_rescan_work_q =
-		alloc_ordered_workqueue(ioc->fc_rescan_work_q_name,
-					WQ_MEM_RECLAIM);
+	ioc->fc_rescan_work_q = alloc_ordered_workqueue(
+		"mptfc_wq_%d", WQ_MEM_RECLAIM, sh->host_no);
 	if (!ioc->fc_rescan_work_q) {
 		error = -ENOMEM;
 		goto out_mptfc_host;

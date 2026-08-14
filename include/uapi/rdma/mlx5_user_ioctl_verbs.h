@@ -45,6 +45,8 @@ enum mlx5_ib_uapi_flow_table_type {
 	MLX5_IB_UAPI_FLOW_TABLE_TYPE_FDB	= 0x2,
 	MLX5_IB_UAPI_FLOW_TABLE_TYPE_RDMA_RX	= 0x3,
 	MLX5_IB_UAPI_FLOW_TABLE_TYPE_RDMA_TX	= 0x4,
+	MLX5_IB_UAPI_FLOW_TABLE_TYPE_RDMA_TRANSPORT_RX	= 0x5,
+	MLX5_IB_UAPI_FLOW_TABLE_TYPE_RDMA_TRANSPORT_TX	= 0x6,
 };
 
 enum mlx5_ib_uapi_flow_action_packet_reformat_type {
@@ -52,6 +54,10 @@ enum mlx5_ib_uapi_flow_action_packet_reformat_type {
 	MLX5_IB_UAPI_FLOW_ACTION_PACKET_REFORMAT_TYPE_L2_TO_L2_TUNNEL = 0x1,
 	MLX5_IB_UAPI_FLOW_ACTION_PACKET_REFORMAT_TYPE_L3_TUNNEL_TO_L2 = 0x2,
 	MLX5_IB_UAPI_FLOW_ACTION_PACKET_REFORMAT_TYPE_L2_TO_L3_TUNNEL = 0x3,
+};
+
+enum mlx5_ib_uapi_reg_dmabuf_flags {
+	MLX5_IB_UAPI_REG_DMABUF_ACCESS_DATA_DIRECT = 1 << 0,
 };
 
 struct mlx5_ib_uapi_devx_async_cmd_hdr {
@@ -92,6 +98,10 @@ enum mlx5_ib_uapi_query_port_flags {
 	MLX5_IB_UAPI_QUERY_PORT_VPORT_STEERING_ICM_TX	= 1 << 3,
 	MLX5_IB_UAPI_QUERY_PORT_VPORT_REG_C0		= 1 << 4,
 	MLX5_IB_UAPI_QUERY_PORT_ESW_OWNER_VHCA_ID	= 1 << 5,
+};
+
+enum mlx5_ib_uapi_var_alloc_flags {
+	MLX5_IB_UAPI_VAR_ALLOC_FLAG_TLP = 1 << 0,
 };
 
 struct mlx5_ib_uapi_reg {

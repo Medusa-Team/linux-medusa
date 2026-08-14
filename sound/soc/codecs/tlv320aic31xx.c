@@ -12,6 +12,7 @@
  * and mono/stereo Class-D speaker driver.
  */
 
+#include <linux/unaligned.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -22,6 +23,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/acpi.h>
+#include <linux/firmware.h>
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <sound/core.h>
@@ -797,7 +799,7 @@ static int aic31xx_add_controls(struct snd_soc_component *component)
 
 static int aic31xx_add_widgets(struct snd_soc_component *component)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct aic31xx_priv *aic31xx = snd_soc_component_get_drvdata(component);
 	int ret = 0;
 
@@ -893,7 +895,7 @@ static int aic31xx_setup_pll(struct snd_soc_component *component,
 		dev_err(component->dev,
 			"%s: Sample rate (%u) and format not supported\n",
 			__func__, params_rate(params));
-		/* See bellow for details how fix this. */
+		/* See below for details on how to fix this. */
 		return -EINVAL;
 	}
 	if (bclk_score != 0) {
@@ -1028,7 +1030,7 @@ static int aic31xx_dac_mute(struct snd_soc_dai *codec_dai, int mute,
 static int aic31xx_clock_master_routes(struct snd_soc_component *component,
 				       unsigned int fmt)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct aic31xx_priv *aic31xx = snd_soc_component_get_drvdata(component);
 	int ret;
 
@@ -1314,18 +1316,20 @@ static void aic31xx_power_off(struct snd_soc_component *component)
 static int aic31xx_set_bias_level(struct snd_soc_component *component,
 				  enum snd_soc_bias_level level)
 {
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
+
 	dev_dbg(component->dev, "## %s: %d -> %d\n", __func__,
-		snd_soc_component_get_bias_level(component), level);
+		snd_soc_dapm_get_bias_level(dapm), level);
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 		break;
 	case SND_SOC_BIAS_PREPARE:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_STANDBY)
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_STANDBY)
 			aic31xx_clk_on(component);
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		switch (snd_soc_component_get_bias_level(component)) {
+		switch (snd_soc_dapm_get_bias_level(dapm)) {
 		case SND_SOC_BIAS_OFF:
 			aic31xx_power_on(component);
 			break;
@@ -1337,7 +1341,7 @@ static int aic31xx_set_bias_level(struct snd_soc_component *component,
 		}
 		break;
 	case SND_SOC_BIAS_OFF:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_STANDBY)
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_STANDBY)
 			aic31xx_power_off(component);
 		break;
 	}
@@ -1638,15 +1642,103 @@ static const struct i2c_device_id aic31xx_i2c_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, aic31xx_i2c_id);
 
+static int tlv320dac3100_fw_load(struct aic31xx_priv *aic31xx,
+				 const u8 *data, size_t size)
+{
+	int ret, reg;
+	u16 val16;
+
+	/*
+	 * Coefficients firmware binary structure. Multi-byte values are big-endian.
+	 *
+	 * @0, 16bits: Magic (0xB30C)
+	 * @2, 16bits: Version (0x0100 for version 1.0)
+	 * @4, 8bits: DAC Processing Block Selection
+	 * @5, 62 16-bit values: Page 8 buffer A DAC programmable filter coefficients
+	 * @129, 12 16-bit values: Page 9 Buffer A DAC programmable filter coefficients
+	 *
+	 * Filter coefficients are interpreted as two's complement values
+	 * ranging from -32 768 to 32 767. For more details on filter coefficients,
+	 * please refer to the TLV320DAC3100 datasheet, tables 6-120 and 6-123.
+	 */
+
+	if (size != 153) {
+		dev_err(aic31xx->dev, "firmware size is %zu, expected 153 bytes\n", size);
+		return -EINVAL;
+	}
+
+	/* Check magic */
+	val16 = get_unaligned_be16(data);
+	if (val16 != 0xb30c) {
+		dev_err(aic31xx->dev, "fw magic is 0x%04x expected 0xb30c\n", val16);
+		return -EINVAL;
+	}
+	data += 2;
+
+	/* Check version */
+	val16 = get_unaligned_be16(data);
+	if (val16 != 0x0100) {
+		dev_err(aic31xx->dev, "invalid firmware version 0x%04x! expected 1", val16);
+		return -EINVAL;
+	}
+	data += 2;
+
+	ret = regmap_write(aic31xx->regmap, AIC31XX_DACPRB, *data);
+	if (ret) {
+		dev_err(aic31xx->dev, "failed to write PRB index: err %d\n", ret);
+		return ret;
+	}
+	data += 1;
+
+	/* Page 8 Buffer A coefficients */
+	for (reg = 2; reg < 126; reg++) {
+		ret = regmap_write(aic31xx->regmap, AIC31XX_REG(8, reg), *data);
+		if (ret) {
+			dev_err(aic31xx->dev,
+				"failed to write page 8 filter coefficient %d: err %d\n", reg, ret);
+			return ret;
+		}
+		data++;
+	}
+
+	/* Page 9 Buffer A coefficients */
+	for (reg = 2; reg < 26; reg++) {
+		ret = regmap_write(aic31xx->regmap, AIC31XX_REG(9, reg), *data);
+		if (ret) {
+			dev_err(aic31xx->dev,
+				"failed to write page 9 filter coefficient %d: err %d\n", reg, ret);
+			return ret;
+		}
+		data++;
+	}
+
+	dev_info(aic31xx->dev, "done loading DAC filter coefficients\n");
+
+	return ret;
+}
+
+static int tlv320dac3100_load_coeffs(struct aic31xx_priv *aic31xx,
+				     const char *fw_name)
+{
+	const struct firmware *fw;
+	int ret;
+
+	ret = request_firmware(&fw, fw_name, aic31xx->dev);
+	if (ret)
+		return ret;
+
+	ret = tlv320dac3100_fw_load(aic31xx, fw->data, fw->size);
+
+	release_firmware(fw);
+
+	return ret;
+}
+
 static int aic31xx_i2c_probe(struct i2c_client *i2c)
 {
 	struct aic31xx_priv *aic31xx;
 	unsigned int micbias_value = MICBIAS_2_0V;
-	const struct i2c_device_id *id = i2c_match_id(aic31xx_i2c_id, i2c);
 	int i, ret;
-
-	dev_dbg(&i2c->dev, "## %s: %s codec_type = %d\n", __func__,
-		id->name, (int)id->driver_data);
 
 	aic31xx = devm_kzalloc(&i2c->dev, sizeof(*aic31xx), GFP_KERNEL);
 	if (!aic31xx)
@@ -1664,7 +1756,7 @@ static int aic31xx_i2c_probe(struct i2c_client *i2c)
 	aic31xx->dev = &i2c->dev;
 	aic31xx->irq = i2c->irq;
 
-	aic31xx->codec_type = id->driver_data;
+	aic31xx->codec_type = (uintptr_t)i2c_get_match_data(i2c);
 
 	dev_set_drvdata(aic31xx->dev, aic31xx);
 
@@ -1725,6 +1817,12 @@ static int aic31xx_i2c_probe(struct i2c_client *i2c)
 			dev_err(aic31xx->dev, "Unable to request IRQ\n");
 			return ret;
 		}
+	}
+
+	if (aic31xx->codec_type == DAC3100) {
+		ret = tlv320dac3100_load_coeffs(aic31xx, "tlv320dac3100-coeffs.bin");
+		if (ret)
+			dev_warn(aic31xx->dev, "Did not load any filter coefficients\n");
 	}
 
 	if (aic31xx->codec_type & DAC31XX_BIT)

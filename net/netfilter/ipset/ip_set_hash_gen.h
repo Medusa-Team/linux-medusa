@@ -63,8 +63,8 @@ struct hbucket {
 		: jhash_size((htable_bits) - HTABLE_REGION_BITS))
 #define ahash_sizeof_regions(htable_bits)		\
 	(ahash_numof_locks(htable_bits) * sizeof(struct ip_set_region))
-#define ahash_region(n, htable_bits)		\
-	((n) % ahash_numof_locks(htable_bits))
+#define ahash_region(n)		\
+	((n) / jhash_size(HTABLE_REGION_BITS))
 #define ahash_bucket_start(h,  htable_bits)	\
 	((htable_bits) < HTABLE_REGION_BITS ? 0	\
 		: (h) * jhash_size(HTABLE_REGION_BITS))
@@ -386,8 +386,9 @@ static void
 mtype_ext_cleanup(struct ip_set *set, struct hbucket *n)
 {
 	int i;
+	u8 pos = smp_load_acquire(&n->pos);
 
-	for (i = 0; i < n->pos; i++)
+	for (i = 0; i < pos; i++)
 		if (test_bit(i, n->used))
 			ip_set_ext_destroy(set, ahash_data(n, i, set->dsize));
 }
@@ -490,7 +491,7 @@ mtype_gc_do(struct ip_set *set, struct htype *h, struct htable *t, u32 r)
 #ifdef IP_SET_HASH_WITH_NETS
 	u8 k;
 #endif
-	u8 htable_bits = t->htable_bits;
+	u8 pos, htable_bits = t->htable_bits;
 
 	spin_lock_bh(&t->hregion[r].lock);
 	for (i = ahash_bucket_start(r, htable_bits);
@@ -498,7 +499,8 @@ mtype_gc_do(struct ip_set *set, struct htype *h, struct htable *t, u32 r)
 		n = __ipset_dereference(hbucket(t, i));
 		if (!n)
 			continue;
-		for (j = 0, d = 0; j < n->pos; j++) {
+		pos = smp_load_acquire(&n->pos);
+		for (j = 0, d = 0; j < pos; j++) {
 			if (!test_bit(j, n->used)) {
 				d++;
 				continue;
@@ -534,7 +536,7 @@ mtype_gc_do(struct ip_set *set, struct htype *h, struct htable *t, u32 r)
 				/* Still try to delete expired elements. */
 				continue;
 			tmp->size = n->size - AHASH_INIT_SIZE;
-			for (j = 0, d = 0; j < n->pos; j++) {
+			for (j = 0, d = 0; j < pos; j++) {
 				if (!test_bit(j, n->used))
 					continue;
 				data = ahash_data(n, j, dsize);
@@ -623,7 +625,7 @@ mtype_resize(struct ip_set *set, bool retried)
 {
 	struct htype *h = set->data;
 	struct htable *t, *orig;
-	u8 htable_bits;
+	u8 pos, htable_bits;
 	size_t hsize, dsize = set->dsize;
 #ifdef IP_SET_HASH_WITH_NETS
 	u8 flags;
@@ -685,7 +687,8 @@ retry:
 			n = __ipset_dereference(hbucket(orig, i));
 			if (!n)
 				continue;
-			for (j = 0; j < n->pos; j++) {
+			pos = smp_load_acquire(&n->pos);
+			for (j = 0; j < pos; j++) {
 				if (!test_bit(j, n->used))
 					continue;
 				data = ahash_data(n, j, dsize);
@@ -702,7 +705,7 @@ retry:
 #endif
 				key = HKEY(data, h->initval, htable_bits);
 				m = __ipset_dereference(hbucket(t, key));
-				nr = ahash_region(key, htable_bits);
+				nr = ahash_region(key);
 				if (!m) {
 					m = kzalloc(sizeof(*m) +
 					    AHASH_INIT_SIZE * dsize,
@@ -809,9 +812,10 @@ mtype_ext_size(struct ip_set *set, u32 *elements, size_t *ext_size)
 {
 	struct htype *h = set->data;
 	const struct htable *t;
-	u32 i, j, r;
 	struct hbucket *n;
 	struct mtype_elem *data;
+	u32 i, j, r;
+	u8 pos;
 
 	t = rcu_dereference_bh(h->table);
 	for (r = 0; r < ahash_numof_locks(t->htable_bits); r++) {
@@ -820,7 +824,8 @@ mtype_ext_size(struct ip_set *set, u32 *elements, size_t *ext_size)
 			n = rcu_dereference_bh(hbucket(t, i));
 			if (!n)
 				continue;
-			for (j = 0; j < n->pos; j++) {
+			pos = smp_load_acquire(&n->pos);
+			for (j = 0; j < pos; j++) {
 				if (!test_bit(j, n->used))
 					continue;
 				data = ahash_data(n, j, set->dsize);
@@ -848,11 +853,12 @@ mtype_add(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 	bool flag_exist = flags & IPSET_FLAG_EXIST;
 	bool deleted = false, forceadd = false, reuse = false;
 	u32 r, key, multi = 0, elements, maxelem;
+	u8 npos = 0;
 
 	rcu_read_lock_bh();
 	t = rcu_dereference_bh(h->table);
 	key = HKEY(value, h->initval, t->htable_bits);
-	r = ahash_region(key, t->htable_bits);
+	r = ahash_region(key);
 	atomic_inc(&t->uref);
 	elements = t->hregion[r].elements;
 	maxelem = t->maxelem;
@@ -889,7 +895,8 @@ mtype_add(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 			ext_size(AHASH_INIT_SIZE, set->dsize);
 		goto copy_elem;
 	}
-	for (i = 0; i < n->pos; i++) {
+	npos = smp_load_acquire(&n->pos);
+	for (i = 0; i < npos; i++) {
 		if (!test_bit(i, n->used)) {
 			/* Reuse first deleted entry */
 			if (j == -1) {
@@ -933,7 +940,7 @@ mtype_add(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 	if (elements >= maxelem)
 		goto set_full;
 	/* Create a new slot */
-	if (n->pos >= n->size) {
+	if (npos >= n->size) {
 #ifdef IP_SET_HASH_WITH_MULTI
 		if (h->bucketsize >= AHASH_MAX_TUNED)
 			goto set_full;
@@ -962,7 +969,7 @@ mtype_add(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 	}
 
 copy_elem:
-	j = n->pos++;
+	j = npos++;
 	data = ahash_data(n, j, set->dsize);
 copy_data:
 	t->hregion[r].elements++;
@@ -985,6 +992,8 @@ overwrite_extensions:
 	if (SET_WITH_TIMEOUT(set))
 		ip_set_timeout_set(ext_timeout(data, set), ext->timeout);
 	smp_mb__before_atomic();
+	/* Ensure all data writes are visible before updating position */
+	smp_store_release(&n->pos, npos);
 	set_bit(j, n->used);
 	if (old != ERR_PTR(-ENOENT)) {
 		rcu_assign_pointer(hbucket(t, key), n);
@@ -998,7 +1007,7 @@ resize:
 		/* Resize is in process and kernel side add, save values */
 		struct mtype_resize_ad *x;
 
-		x = kzalloc(sizeof(struct mtype_resize_ad), GFP_ATOMIC);
+		x = kzalloc_obj(struct mtype_resize_ad, GFP_ATOMIC);
 		if (!x)
 			/* Don't bother */
 			goto out;
@@ -1043,6 +1052,7 @@ mtype_del(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 	int i, j, k, r, ret = -IPSET_ERR_EXIST;
 	u32 key, multi = 0;
 	size_t dsize = set->dsize;
+	u8 pos;
 
 	/* Userspace add and resize is excluded by the mutex.
 	 * Kernespace add does not trigger resize.
@@ -1050,7 +1060,7 @@ mtype_del(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 	rcu_read_lock_bh();
 	t = rcu_dereference_bh(h->table);
 	key = HKEY(value, h->initval, t->htable_bits);
-	r = ahash_region(key, t->htable_bits);
+	r = ahash_region(key);
 	atomic_inc(&t->uref);
 	rcu_read_unlock_bh();
 
@@ -1058,7 +1068,8 @@ mtype_del(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 	n = rcu_dereference_bh(hbucket(t, key));
 	if (!n)
 		goto out;
-	for (i = 0, k = 0; i < n->pos; i++) {
+	pos = smp_load_acquire(&n->pos);
+	for (i = 0, k = 0; i < pos; i++) {
 		if (!test_bit(i, n->used)) {
 			k++;
 			continue;
@@ -1072,8 +1083,8 @@ mtype_del(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 		ret = 0;
 		clear_bit(i, n->used);
 		smp_mb__after_atomic();
-		if (i + 1 == n->pos)
-			n->pos--;
+		if (i + 1 == pos)
+			smp_store_release(&n->pos, --pos);
 		t->hregion[r].elements--;
 #ifdef IP_SET_HASH_WITH_NETS
 		for (j = 0; j < IPSET_NET_COUNT; j++)
@@ -1086,8 +1097,7 @@ mtype_del(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 			/* Resize is in process and kernel side del,
 			 * save values
 			 */
-			x = kzalloc(sizeof(struct mtype_resize_ad),
-				    GFP_ATOMIC);
+			x = kzalloc_obj(struct mtype_resize_ad, GFP_ATOMIC);
 			if (x) {
 				x->ad = IPSET_DEL;
 				memcpy(&x->d, value,
@@ -1095,11 +1105,11 @@ mtype_del(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 				x->flags = flags;
 			}
 		}
-		for (; i < n->pos; i++) {
+		for (; i < pos; i++) {
 			if (!test_bit(i, n->used))
 				k++;
 		}
-		if (n->pos == 0 && k == 0) {
+		if (k == pos) {
 			t->hregion[r].ext_size -= ext_size(n->size, dsize);
 			rcu_assign_pointer(hbucket(t, key), NULL);
 			kfree_rcu(n, rcu);
@@ -1110,7 +1120,7 @@ mtype_del(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 			if (!tmp)
 				goto out;
 			tmp->size = n->size - AHASH_INIT_SIZE;
-			for (j = 0, k = 0; j < n->pos; j++) {
+			for (j = 0, k = 0; j < pos; j++) {
 				if (!test_bit(j, n->used))
 					continue;
 				data = ahash_data(n, j, dsize);
@@ -1171,6 +1181,7 @@ mtype_test_cidrs(struct ip_set *set, struct mtype_elem *d,
 	int ret, i, j = 0;
 #endif
 	u32 key, multi = 0;
+	u8 pos;
 
 	pr_debug("test by nets\n");
 	for (; j < NLEN && h->nets[j].cidr[0] && !multi; j++) {
@@ -1188,7 +1199,8 @@ mtype_test_cidrs(struct ip_set *set, struct mtype_elem *d,
 		n = rcu_dereference_bh(hbucket(t, key));
 		if (!n)
 			continue;
-		for (i = 0; i < n->pos; i++) {
+		pos = smp_load_acquire(&n->pos);
+		for (i = 0; i < pos; i++) {
 			if (!test_bit(i, n->used))
 				continue;
 			data = ahash_data(n, i, set->dsize);
@@ -1222,6 +1234,7 @@ mtype_test(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 	struct mtype_elem *data;
 	int i, ret = 0;
 	u32 key, multi = 0;
+	u8 pos;
 
 	rcu_read_lock_bh();
 	t = rcu_dereference_bh(h->table);
@@ -1244,7 +1257,8 @@ mtype_test(struct ip_set *set, void *value, const struct ip_set_ext *ext,
 		ret = 0;
 		goto out;
 	}
-	for (i = 0; i < n->pos; i++) {
+	pos = smp_load_acquire(&n->pos);
+	for (i = 0; i < pos; i++) {
 		if (!test_bit(i, n->used))
 			continue;
 		data = ahash_data(n, i, set->dsize);
@@ -1361,6 +1375,7 @@ mtype_list(const struct ip_set *set,
 	/* We assume that one hash bucket fills into one page */
 	void *incomplete;
 	int i, ret = 0;
+	u8 pos;
 
 	atd = nla_nest_start(skb, IPSET_ATTR_ADT);
 	if (!atd)
@@ -1379,7 +1394,8 @@ mtype_list(const struct ip_set *set,
 			 cb->args[IPSET_CB_ARG0], t, n);
 		if (!n)
 			continue;
-		for (i = 0; i < n->pos; i++) {
+		pos = smp_load_acquire(&n->pos);
+		for (i = 0; i < pos; i++) {
 			if (!test_bit(i, n->used))
 				continue;
 			e = ahash_data(n, i, set->dsize);

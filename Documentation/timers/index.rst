@@ -12,11 +12,4 @@ Timers
     hrtimers
     no_hz
     timekeeping
-    timers-howto
-
-.. only::  subproject and html
-
-   Indices
-   =======
-
-   * :ref:`genindex`
+    delay_sleep_functions

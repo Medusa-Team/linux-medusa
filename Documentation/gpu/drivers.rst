@@ -10,6 +10,7 @@ GPU Driver Documentation
    imagination/index
    mcde
    meson
+   nouveau
    pl111
    tegra
    tve200
@@ -22,10 +23,6 @@ GPU Driver Documentation
    afbc
    komeda-kms
    panfrost
-
-.. only::  subproject and html
-
-   Indices
-   =======
-
-   * :ref:`genindex`
+   panthor
+   zynqmp
+   nova/index

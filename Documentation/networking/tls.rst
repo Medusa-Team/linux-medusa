@@ -16,11 +16,13 @@ User interface
 Creating a TLS connection
 -------------------------
 
-First create a new TCP socket and set the TLS ULP.
+First create a new TCP socket and once the connection is established set the
+TLS ULP.
 
 .. code-block:: c
 
   sock = socket(AF_INET, SOCK_STREAM, 0);
+  connect(sock, addr, addrlen);
   setsockopt(sock, SOL_TCP, TCP_ULP, "tls", sizeof("tls"));
 
 Setting the TLS ULP allows us to set/get TLS socket options. Currently
@@ -200,6 +202,32 @@ received without a cmsg buffer set.
 
 recv will never return data from mixed types of TLS records.
 
+TLS 1.3 Key Updates
+-------------------
+
+In TLS 1.3, KeyUpdate handshake messages signal that the sender is
+updating its TX key. Any message sent after a KeyUpdate will be
+encrypted using the new key. The userspace library can pass the new
+key to the kernel using the TLS_TX and TLS_RX socket options, as for
+the initial keys. TLS version and cipher cannot be changed.
+
+To prevent attempting to decrypt incoming records using the wrong key,
+decryption will be paused when a KeyUpdate message is received by the
+kernel, until the new key has been provided using the TLS_RX socket
+option. Any read occurring after the KeyUpdate has been read and
+before the new key is provided will fail with EKEYEXPIRED. poll() will
+not report any read events from the socket until the new key is
+provided. There is no pausing on the transmit side.
+
+Userspace should make sure that the crypto_info provided has been set
+properly. In particular, the kernel will not check for key/nonce
+reuse.
+
+The number of successful and failed key updates is tracked in the
+``TlsTxRekeyOk``, ``TlsRxRekeyOk``, ``TlsTxRekeyError``,
+``TlsRxRekeyError`` statistics. The ``TlsRxRekeyReceived`` statistic
+counts KeyUpdate handshake messages that have been received.
+
 Integrating in to userspace TLS library
 ---------------------------------------
 
@@ -252,6 +280,26 @@ If the record decrypted turns out to had been padded or is not a data
 record it will be decrypted again into a kernel buffer without zero copy.
 Such events are counted in the ``TlsDecryptRetry`` statistic.
 
+TLS_TX_MAX_PAYLOAD_LEN
+~~~~~~~~~~~~~~~~~~~~~~
+
+Specifies the maximum size of the plaintext payload for transmitted TLS records.
+
+When this option is set, the kernel enforces the specified limit on all outgoing
+TLS records. No plaintext fragment will exceed this size. This option can be used
+to implement the TLS Record Size Limit extension [1].
+
+* For TLS 1.2, the value corresponds directly to the record size limit.
+* For TLS 1.3, the value should be set to record_size_limit - 1, since
+  the record size limit includes one additional byte for the ContentType
+  field.
+
+The valid range for this option is 64 to 16384 bytes for TLS 1.2, and 63 to
+16384 bytes for TLS 1.3. The lower minimum for TLS 1.3 accounts for the
+extra byte used by the ContentType field.
+
+[1] https://datatracker.ietf.org/doc/html/rfc8449
+
 Statistics
 ==========
 
@@ -286,3 +334,13 @@ TLS implementation exposes the following per-namespace statistics
 - ``TlsRxNoPadViolation`` -
   number of data RX records which had to be re-decrypted due to
   ``TLS_RX_EXPECT_NO_PAD`` mis-prediction.
+
+- ``TlsTxRekeyOk``, ``TlsRxRekeyOk`` -
+  number of successful rekeys on existing sessions for TX and RX
+
+- ``TlsTxRekeyError``, ``TlsRxRekeyError`` -
+  number of failed rekeys on existing sessions for TX and RX
+
+- ``TlsRxRekeyReceived`` -
+  number of received KeyUpdate handshake messages, requiring userspace
+  to provide a new RX key

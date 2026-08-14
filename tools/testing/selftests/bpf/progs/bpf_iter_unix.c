@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright Amazon.com Inc. or its affiliates. */
-#include "bpf_iter.h"
+#include <vmlinux.h>
 #include "bpf_tracing_net.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
 char _license[] SEC("license") = "GPL";
+
+SEC(".maps") struct {
+	__uint(type, BPF_MAP_TYPE_SOCKMAP);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, __u64);
+} sockmap;
 
 static long sock_i_ino(const struct sock *sk)
 {
@@ -75,6 +82,9 @@ int dump_unix(struct bpf_iter__unix *ctx)
 	}
 
 	BPF_SEQ_PRINTF(seq, "\n");
+
+	/* Test for deadlock. */
+	bpf_map_update_elem(&sockmap, &(int){0}, sk, 0);
 
 	return 0;
 }

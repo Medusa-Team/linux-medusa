@@ -186,7 +186,7 @@ union ucan_ctl_payload {
 	 */
 	struct ucan_ctl_cmd_get_protocol_version cmd_get_protocol_version;
 
-	u8 raw[128];
+	u8 fw_str[128];
 } __packed;
 
 enum {
@@ -330,9 +330,8 @@ static int ucan_alloc_context_array(struct ucan_priv *up)
 	/* release contexts if any */
 	ucan_release_context_array(up);
 
-	up->context_array = kcalloc(up->device_info.tx_fifo,
-				    sizeof(*up->context_array),
-				    GFP_KERNEL);
+	up->context_array = kzalloc_objs(*up->context_array,
+					 up->device_info.tx_fifo);
 	if (!up->context_array) {
 		netdev_err(up->netdev,
 			   "Not enough memory to allocate tx contexts\n");
@@ -424,18 +423,20 @@ static int ucan_ctrl_command_out(struct ucan_priv *up,
 			       UCAN_USB_CTL_PIPE_TIMEOUT);
 }
 
-static int ucan_device_request_in(struct ucan_priv *up,
-				  u8 cmd, u16 subcmd, u16 datalen)
+static void ucan_get_fw_str(struct ucan_priv *up, char *fw_str, size_t size)
 {
-	return usb_control_msg(up->udev,
-			       usb_rcvctrlpipe(up->udev, 0),
-			       cmd,
-			       USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
-			       subcmd,
-			       0,
-			       up->ctl_msg_buffer,
-			       datalen,
-			       UCAN_USB_CTL_PIPE_TIMEOUT);
+	int ret;
+
+	ret = usb_control_msg(up->udev, usb_rcvctrlpipe(up->udev, 0),
+			      UCAN_DEVICE_GET_FW_STRING,
+			      USB_DIR_IN | USB_TYPE_VENDOR |
+			      USB_RECIP_DEVICE,
+			      0, 0, fw_str, size - 1,
+			      UCAN_USB_CTL_PIPE_TIMEOUT);
+	if (ret > 0)
+		fw_str[ret] = '\0';
+	else
+		strscpy(fw_str, "unknown", size);
 }
 
 /* Parse the device information structure reported by the device and
@@ -747,7 +748,7 @@ static void ucan_read_bulk_callback(struct urb *urb)
 		len = le16_to_cpu(m->len);
 
 		/* check sanity (length of content) */
-		if (urb->actual_length - pos < len) {
+		if ((len == 0) || (urb->actual_length - pos < len)) {
 			netdev_warn(up->netdev,
 				    "invalid message (short; no data; l:%d)\n",
 				    urb->actual_length);
@@ -1231,7 +1232,6 @@ static const struct net_device_ops ucan_netdev_ops = {
 	.ndo_open = ucan_open,
 	.ndo_stop = ucan_close,
 	.ndo_start_xmit = ucan_start_xmit,
-	.ndo_change_mtu = can_change_mtu,
 };
 
 static const struct ethtool_ops ucan_ethtool_ops = {
@@ -1302,19 +1302,17 @@ static int ucan_probe(struct usb_interface *intf,
 		      const struct usb_device_id *id)
 {
 	int ret;
-	int i;
 	u32 protocol_version;
 	struct usb_device *udev;
 	struct net_device *netdev;
 	struct usb_host_interface *iface_desc;
 	struct ucan_priv *up;
-	struct usb_endpoint_descriptor *ep;
+	struct usb_endpoint_descriptor *ep_in, *ep_out;
 	u16 in_ep_size;
 	u16 out_ep_size;
 	u8 in_ep_addr;
 	u8 out_ep_addr;
 	union ucan_ctl_payload *ctl_msg_buffer;
-	char firmware_str[sizeof(union ucan_ctl_payload) + 1];
 
 	udev = interface_to_usbdev(intf);
 
@@ -1344,37 +1342,20 @@ static int ucan_probe(struct usb_interface *intf,
 	}
 
 	/* check interface endpoints */
-	in_ep_addr = 0;
-	out_ep_addr = 0;
-	in_ep_size = 0;
-	out_ep_size = 0;
-	for (i = 0; i < iface_desc->desc.bNumEndpoints; i++) {
-		ep = &iface_desc->endpoint[i].desc;
-
-		if (((ep->bEndpointAddress & USB_ENDPOINT_DIR_MASK) != 0) &&
-		    ((ep->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) ==
-		     USB_ENDPOINT_XFER_BULK)) {
-			/* In Endpoint */
-			in_ep_addr = ep->bEndpointAddress;
-			in_ep_addr &= USB_ENDPOINT_NUMBER_MASK;
-			in_ep_size = le16_to_cpu(ep->wMaxPacketSize);
-		} else if (((ep->bEndpointAddress & USB_ENDPOINT_DIR_MASK) ==
-			    0) &&
-			   ((ep->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) ==
-			    USB_ENDPOINT_XFER_BULK)) {
-			/* Out Endpoint */
-			out_ep_addr = ep->bEndpointAddress;
-			out_ep_addr &= USB_ENDPOINT_NUMBER_MASK;
-			out_ep_size = le16_to_cpu(ep->wMaxPacketSize);
-		}
-	}
-
-	/* check if interface is sane */
-	if (!in_ep_addr || !out_ep_addr) {
+	ret = usb_find_common_endpoints_reverse(iface_desc, &ep_in, &ep_out,
+						NULL, NULL);
+	if (ret) {
 		dev_err(&udev->dev, "%s: invalid endpoint configuration\n",
 			UCAN_DRIVER_NAME);
 		goto err_firmware_needs_update;
 	}
+
+	in_ep_addr = usb_endpoint_num(ep_in);
+	out_ep_addr = usb_endpoint_num(ep_out);
+	in_ep_size = usb_endpoint_maxp(ep_in);
+	out_ep_size = usb_endpoint_maxp(ep_out);
+
+	/* check if interface is sane */
 	if (in_ep_size < sizeof(struct ucan_message_in)) {
 		dev_err(&udev->dev, "%s: invalid in_ep MaxPacketSize\n",
 			UCAN_DRIVER_NAME);
@@ -1398,7 +1379,7 @@ static int ucan_probe(struct usb_interface *intf,
 	 */
 
 	/* Prepare Memory for control transfers */
-	ctl_msg_buffer = devm_kzalloc(&udev->dev,
+	ctl_msg_buffer = devm_kzalloc(&intf->dev,
 				      sizeof(union ucan_ctl_payload),
 				      GFP_KERNEL);
 	if (!ctl_msg_buffer) {
@@ -1527,17 +1508,6 @@ static int ucan_probe(struct usb_interface *intf,
 	 */
 	ucan_parse_device_info(up, &ctl_msg_buffer->cmd_get_device_info);
 
-	/* just print some device information - if available */
-	ret = ucan_device_request_in(up, UCAN_DEVICE_GET_FW_STRING, 0,
-				     sizeof(union ucan_ctl_payload));
-	if (ret > 0) {
-		/* copy string while ensuring zero termination */
-		strscpy(firmware_str, up->ctl_msg_buffer->raw,
-			sizeof(union ucan_ctl_payload) + 1);
-	} else {
-		strcpy(firmware_str, "unknown");
-	}
-
 	/* device is compatible, reset it */
 	ret = ucan_ctrl_command_out(up, UCAN_COMMAND_RESET, 0, 0);
 	if (ret < 0)
@@ -1555,7 +1525,10 @@ static int ucan_probe(struct usb_interface *intf,
 
 	/* initialisation complete, log device info */
 	netdev_info(up->netdev, "registered device\n");
-	netdev_info(up->netdev, "firmware string: %s\n", firmware_str);
+	ucan_get_fw_str(up, up->ctl_msg_buffer->fw_str,
+			sizeof(up->ctl_msg_buffer->fw_str));
+	netdev_info(up->netdev, "firmware string: %s\n",
+		    up->ctl_msg_buffer->fw_str);
 
 	/* success */
 	return 0;

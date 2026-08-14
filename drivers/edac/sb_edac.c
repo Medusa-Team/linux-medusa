@@ -29,6 +29,8 @@
 
 /* Static vars */
 static LIST_HEAD(sbridge_edac_list);
+static char sb_msg[256];
+static char sb_msg_full[512];
 
 /*
  * Alter this version for the module when modifications are made
@@ -362,11 +364,11 @@ struct sbridge_dev {
 	int			seg;
 	u8			bus, mc;
 	u8			node_id, source_id;
-	struct pci_dev		**pdev;
 	enum domain		dom;
 	int			n_devs;
 	int			i_devs;
 	struct mem_ctl_info	*mci;
+	struct pci_dev		*pdev[] __counted_by(n_devs);
 };
 
 struct knl_pvt {
@@ -769,22 +771,14 @@ static struct sbridge_dev *alloc_sbridge_dev(int seg, u8 bus, enum domain dom,
 {
 	struct sbridge_dev *sbridge_dev;
 
-	sbridge_dev = kzalloc(sizeof(*sbridge_dev), GFP_KERNEL);
+	sbridge_dev = kzalloc_flex(*sbridge_dev, pdev, table->n_devs_per_imc);
 	if (!sbridge_dev)
 		return NULL;
 
-	sbridge_dev->pdev = kcalloc(table->n_devs_per_imc,
-				    sizeof(*sbridge_dev->pdev),
-				    GFP_KERNEL);
-	if (!sbridge_dev->pdev) {
-		kfree(sbridge_dev);
-		return NULL;
-	}
-
+	sbridge_dev->n_devs = table->n_devs_per_imc;
 	sbridge_dev->seg = seg;
 	sbridge_dev->bus = bus;
 	sbridge_dev->dom = dom;
-	sbridge_dev->n_devs = table->n_devs_per_imc;
 	list_add_tail(&sbridge_dev->list, &sbridge_edac_list);
 
 	return sbridge_dev;
@@ -793,7 +787,6 @@ static struct sbridge_dev *alloc_sbridge_dev(int seg, u8 bus, enum domain dom,
 static void free_sbridge_dev(struct sbridge_dev *sbridge_dev)
 {
 	list_del(&sbridge_dev->list);
-	kfree(sbridge_dev->pdev);
 	kfree(sbridge_dev);
 }
 
@@ -3079,7 +3072,6 @@ static void sbridge_mce_output_error(struct mem_ctl_info *mci,
 	struct mem_ctl_info *new_mci;
 	struct sbridge_pvt *pvt = mci->pvt_info;
 	enum hw_event_mc_err_type tp_event;
-	char *optype, msg[256], msg_full[512];
 	bool ripv = GET_BITFIELD(m->mcgstatus, 0, 0);
 	bool overflow = GET_BITFIELD(m->status, 62, 62);
 	bool uncorrected_error = GET_BITFIELD(m->status, 61, 61);
@@ -3095,10 +3087,10 @@ static void sbridge_mce_output_error(struct mem_ctl_info *mci,
 	 * aligned address reported by patrol scrubber.
 	 */
 	u32 lsb = GET_BITFIELD(m->misc, 0, 5);
+	char *optype, *area_type = "DRAM";
 	long channel_mask, first_channel;
 	u8  rank = 0xff, socket, ha;
 	int rc, dimm;
-	char *area_type = "DRAM";
 
 	if (pvt->info.type != SANDY_BRIDGE)
 		recoverable = true;
@@ -3168,32 +3160,32 @@ static void sbridge_mce_output_error(struct mem_ctl_info *mci,
 			channel = knl_channel_remap(m->bank == 16, channel);
 			channel_mask = 1 << channel;
 
-			snprintf(msg, sizeof(msg),
-				"%s%s err_code:%04x:%04x channel:%d (DIMM_%c)",
-				overflow ? " OVERFLOW" : "",
-				(uncorrected_error && recoverable)
-				? " recoverable" : " ",
-				mscod, errcode, channel, A + channel);
+			snprintf(sb_msg, sizeof(sb_msg),
+				 "%s%s err_code:%04x:%04x channel:%d (DIMM_%c)",
+				 overflow ? " OVERFLOW" : "",
+				 (uncorrected_error && recoverable)
+				 ? " recoverable" : " ",
+				 mscod, errcode, channel, A + channel);
 			edac_mc_handle_error(tp_event, mci, core_err_cnt,
 				m->addr >> PAGE_SHIFT, m->addr & ~PAGE_MASK, 0,
 				channel, 0, -1,
-				optype, msg);
+				optype, sb_msg);
 		}
 		return;
 	} else if (lsb < 12) {
 		rc = get_memory_error_data(mci, m->addr, &socket, &ha,
 					   &channel_mask, &rank,
-					   &area_type, msg);
+					   &area_type, sb_msg);
 	} else {
 		rc = get_memory_error_data_from_mce(mci, m, &socket, &ha,
-						    &channel_mask, msg);
+						    &channel_mask, sb_msg);
 	}
 
 	if (rc < 0)
 		goto err_parsing;
 	new_mci = get_mci_for_node_id(socket, ha);
 	if (!new_mci) {
-		strcpy(msg, "Error: socket got corrupted!");
+		strscpy(sb_msg, "Error: socket got corrupted!");
 		goto err_parsing;
 	}
 	mci = new_mci;
@@ -3218,7 +3210,7 @@ static void sbridge_mce_output_error(struct mem_ctl_info *mci,
 	 */
 	if (!pvt->is_lockstep && !pvt->is_cur_addr_mirrored && !pvt->is_close_pg)
 		channel = first_channel;
-	snprintf(msg_full, sizeof(msg_full),
+	snprintf(sb_msg_full, sizeof(sb_msg_full),
 		 "%s%s area:%s err_code:%04x:%04x socket:%d ha:%d channel_mask:%ld rank:%d %s",
 		 overflow ? " OVERFLOW" : "",
 		 (uncorrected_error && recoverable) ? " recoverable" : "",
@@ -3226,9 +3218,9 @@ static void sbridge_mce_output_error(struct mem_ctl_info *mci,
 		 mscod, errcode,
 		 socket, ha,
 		 channel_mask,
-		 rank, msg);
+		 rank, sb_msg);
 
-	edac_dbg(0, "%s\n", msg_full);
+	edac_dbg(0, "%s\n", sb_msg_full);
 
 	/* FIXME: need support for channel mask */
 
@@ -3239,12 +3231,12 @@ static void sbridge_mce_output_error(struct mem_ctl_info *mci,
 	edac_mc_handle_error(tp_event, mci, core_err_cnt,
 			     m->addr >> PAGE_SHIFT, m->addr & ~PAGE_MASK, 0,
 			     channel, dimm, -1,
-			     optype, msg_full);
+			     optype, sb_msg_full);
 	return;
 err_parsing:
 	edac_mc_handle_error(tp_event, mci, core_err_cnt, 0, 0, 0,
 			     -1, -1, -1,
-			     msg, "");
+			     sb_msg, "");
 
 }
 

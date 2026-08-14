@@ -6,13 +6,13 @@
 #include <linux/kstrtox.h>
 #include <linux/nls.h>
 #include <linux/usb/composite.h>
+#include <linux/usb/func_utils.h>
 #include <linux/usb/gadget_configfs.h>
 #include <linux/usb/webusb.h>
 #include "configfs.h"
-#include "u_f.h"
 #include "u_os_desc.h"
 
-int check_user_usb_string(const char *name,
+static int check_user_usb_string(const char *name,
 		struct usb_gadget_strings *stringtab_dev)
 {
 	u16 num;
@@ -409,7 +409,7 @@ static void gadget_info_attr_release(struct config_item *item)
 	kfree(gi);
 }
 
-static struct configfs_item_operations gadget_root_item_ops = {
+static const struct configfs_item_operations gadget_root_item_ops = {
 	.release                = gadget_info_attr_release,
 };
 
@@ -514,7 +514,7 @@ static void config_usb_cfg_unlink(
 	WARN(1, "Unable to locate function to unbind\n");
 }
 
-static struct configfs_item_operations gadget_config_item_ops = {
+static const struct configfs_item_operations gadget_config_item_ops = {
 	.release                = gadget_config_attr_release,
 	.allow_link             = config_usb_cfg_link,
 	.drop_link              = config_usb_cfg_unlink,
@@ -663,7 +663,7 @@ static void function_drop(
 	config_item_put(item);
 }
 
-static struct configfs_group_operations functions_ops = {
+static const struct configfs_group_operations functions_ops = {
 	.make_group     = &function_make,
 	.drop_item      = &function_drop,
 };
@@ -727,7 +727,7 @@ static struct config_group *config_desc_make(
 	if (ret)
 		return ERR_PTR(ret);
 
-	cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+	cfg = kzalloc_obj(*cfg);
 	if (!cfg)
 		return ERR_PTR(-ENOMEM);
 	cfg->c.label = kstrdup(buf, GFP_KERNEL);
@@ -766,7 +766,7 @@ static void config_desc_drop(
 	config_item_put(item);
 }
 
-static struct configfs_group_operations config_desc_ops = {
+static const struct configfs_group_operations config_desc_ops = {
 	.make_group     = &config_desc_make,
 	.drop_item      = &config_desc_drop,
 };
@@ -799,7 +799,7 @@ static void gadget_language_attr_release(struct config_item *item)
 	kfree(gs);
 }
 
-static struct configfs_item_operations gadget_language_langid_item_ops = {
+static const struct configfs_item_operations gadget_language_langid_item_ops = {
 	.release                = gadget_language_attr_release,
 };
 
@@ -827,11 +827,15 @@ static ssize_t gadget_string_s_store(struct config_item *item, const char *page,
 {
 	struct gadget_string *string = to_gadget_string(item);
 	int size = min(sizeof(string->string), len + 1);
+	ssize_t cpy_len;
 
 	if (len > USB_MAX_STRING_LEN)
 		return -EINVAL;
 
-	return strscpy(string->string, page, size);
+	cpy_len = strscpy(string->string, page, size);
+	if (cpy_len > 0 && string->string[cpy_len - 1] == '\n')
+		string->string[cpy_len - 1] = 0;
+	return len;
 }
 CONFIGFS_ATTR(gadget_string_, s);
 
@@ -848,7 +852,7 @@ static void gadget_string_release(struct config_item *item)
 	kfree(string);
 }
 
-static struct configfs_item_operations gadget_string_item_ops = {
+static const struct configfs_item_operations gadget_string_item_ops = {
 	.release	= gadget_string_release,
 };
 
@@ -866,7 +870,7 @@ static struct config_item *gadget_language_string_make(struct config_group *grou
 
 	language = to_gadget_language(&group->cg_item);
 
-	string = kzalloc(sizeof(*string), GFP_KERNEL);
+	string = kzalloc_obj(*string);
 	if (!string)
 		return ERR_PTR(-ENOMEM);
 
@@ -897,12 +901,12 @@ static void gadget_language_string_drop(struct config_group *group,
 		string->usb_string.id = i++;
 }
 
-static struct configfs_group_operations gadget_language_langid_group_ops = {
+static const struct configfs_group_operations gadget_language_langid_group_ops = {
 	.make_item		= gadget_language_string_make,
 	.drop_item		= gadget_language_string_drop,
 };
 
-static struct config_item_type gadget_language_type = {
+static const struct config_item_type gadget_language_type = {
 	.ct_item_ops	= &gadget_language_langid_item_ops,
 	.ct_group_ops	= &gadget_language_langid_group_ops,
 	.ct_attrs	= gadget_language_langid_attrs,
@@ -918,7 +922,7 @@ static struct config_group *gadget_language_make(struct config_group *group,
 	int langs = 0;
 	int ret;
 
-	new = kzalloc(sizeof(*new), GFP_KERNEL);
+	new = kzalloc_obj(*new);
 	if (!new)
 		return ERR_PTR(-ENOMEM);
 
@@ -956,12 +960,12 @@ static void gadget_language_drop(struct config_group *group,
 	config_item_put(item);
 }
 
-static struct configfs_group_operations gadget_language_group_ops = {
+static const struct configfs_group_operations gadget_language_group_ops = {
 	.make_group     = &gadget_language_make,
 	.drop_item      = &gadget_language_drop,
 };
 
-static struct config_item_type gadget_language_strings_type = {
+static const struct config_item_type gadget_language_strings_type = {
 	.ct_group_ops   = &gadget_language_group_ops,
 	.ct_owner       = THIS_MODULE,
 };
@@ -1061,6 +1065,8 @@ static ssize_t webusb_landingPage_store(struct config_item *item, const char *pa
 	unsigned int bytes_to_strip = 0;
 	int l = len;
 
+	if (!len)
+		return len;
 	if (page[l - 1] == '\n') {
 		--l;
 		++bytes_to_strip;
@@ -1106,7 +1112,7 @@ static struct configfs_attribute *webusb_attrs[] = {
 	NULL,
 };
 
-static struct config_item_type webusb_type = {
+static const struct config_item_type webusb_type = {
 	.ct_attrs	= webusb_attrs,
 	.ct_owner	= THIS_MODULE,
 };
@@ -1184,7 +1190,9 @@ static ssize_t os_desc_qw_sign_store(struct config_item *item, const char *page,
 	struct gadget_info *gi = os_desc_item_to_gadget_info(item);
 	int res, l;
 
-	l = min((int)len, OS_STRING_QW_SIGN_LEN >> 1);
+	if (!len)
+		return len;
+	l = min_t(int, len, OS_STRING_QW_SIGN_LEN >> 1);
 	if (page[l - 1] == '\n')
 		--l;
 
@@ -1258,12 +1266,12 @@ static void os_desc_unlink(struct config_item *os_desc_ci,
 	mutex_unlock(&gi->lock);
 }
 
-static struct configfs_item_operations os_desc_ops = {
+static const struct configfs_item_operations os_desc_ops = {
 	.allow_link		= os_desc_link,
 	.drop_link		= os_desc_unlink,
 };
 
-static struct config_item_type os_desc_type = {
+static const struct config_item_type os_desc_type = {
 	.ct_item_ops	= &os_desc_ops,
 	.ct_attrs	= os_desc_attrs,
 	.ct_owner	= THIS_MODULE,
@@ -1383,7 +1391,7 @@ static void usb_os_desc_ext_prop_release(struct config_item *item)
 	kfree(ext_prop); /* frees a whole chunk */
 }
 
-static struct configfs_item_operations ext_prop_ops = {
+static const struct configfs_item_operations ext_prop_ops = {
 	.release		= usb_os_desc_ext_prop_release,
 };
 
@@ -1448,7 +1456,7 @@ static void ext_prop_drop(struct config_group *group, struct config_item *item)
 	config_item_put(item);
 }
 
-static struct configfs_group_operations interf_grp_ops = {
+static const struct configfs_group_operations interf_grp_ops = {
 	.make_item	= &ext_prop_make,
 	.drop_item	= &ext_prop_drop,
 };
@@ -1621,8 +1629,7 @@ configfs_attach_gadget_strings(struct gadget_info *gi)
 	if (!nlangs)
 		return NULL;
 
-	gadget_strings = kcalloc(nlangs + 1, /* including NULL terminator */
-				 sizeof(struct usb_gadget_strings *), GFP_KERNEL);
+	gadget_strings = kzalloc_objs(struct usb_gadget_strings *, nlangs + 1)/* including NULL terminator */;
 	if (!gadget_strings)
 		return ERR_PTR(-ENOMEM);
 
@@ -1637,8 +1644,8 @@ configfs_attach_gadget_strings(struct gadget_info *gi)
 			goto cleanup;
 		}
 
-		stringtab = kcalloc(language->nstrings + 1, sizeof(struct usb_string),
-				    GFP_KERNEL);
+		stringtab = kzalloc_objs(struct usb_string,
+					 language->nstrings + 1);
 		if (!stringtab) {
 			us = ERR_PTR(-ENOMEM);
 			goto cleanup;
@@ -1742,6 +1749,8 @@ static int configfs_composite_bind(struct usb_gadget *gadget,
 		cdev->use_os_string = true;
 		cdev->b_vendor_code = gi->b_vendor_code;
 		memcpy(cdev->qw_sign, gi->qw_sign, OS_STRING_QW_SIGN_LEN);
+	} else {
+		cdev->use_os_string = false;
 	}
 
 	if (gadget_is_otg(gadget) && !otg_desc[0]) {
@@ -1982,7 +1991,7 @@ static struct config_group *gadgets_make(
 {
 	struct gadget_info *gi;
 
-	gi = kzalloc(sizeof(*gi), GFP_KERNEL);
+	gi = kzalloc_obj(*gi);
 	if (!gi)
 		return ERR_PTR(-ENOMEM);
 
@@ -2051,7 +2060,7 @@ static void gadgets_drop(struct config_group *group, struct config_item *item)
 	config_item_put(item);
 }
 
-static struct configfs_group_operations gadgets_ops = {
+static const struct configfs_group_operations gadgets_ops = {
 	.make_group     = &gadgets_make,
 	.drop_item      = &gadgets_drop,
 };

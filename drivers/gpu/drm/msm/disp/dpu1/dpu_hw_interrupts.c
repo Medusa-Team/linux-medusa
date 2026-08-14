@@ -40,6 +40,15 @@
 #define MDP_INTF_REV_7xxx_INTR_TEAR_STATUS(intf)	(MDP_INTF_REV_7xxx_TEAR_OFF(intf) + 0x004)
 #define MDP_INTF_REV_7xxx_INTR_TEAR_CLEAR(intf)		(MDP_INTF_REV_7xxx_TEAR_OFF(intf) + 0x008)
 
+#define MDP_INTF_REV_13xx_OFF(intf)			(0x18d000 + 0x1000 * (intf))
+#define MDP_INTF_REV_13xx_INTR_EN(intf)			(MDP_INTF_REV_13xx_OFF(intf) + 0x1c0)
+#define MDP_INTF_REV_13xx_INTR_STATUS(intf)		(MDP_INTF_REV_13xx_OFF(intf) + 0x1c4)
+#define MDP_INTF_REV_13xx_INTR_CLEAR(intf)		(MDP_INTF_REV_13xx_OFF(intf) + 0x1c8)
+#define MDP_INTF_REV_13xx_TEAR_OFF(intf)		(0x18d800 + 0x1000 * (intf))
+#define MDP_INTF_REV_13xx_INTR_TEAR_EN(intf)		(MDP_INTF_REV_13xx_TEAR_OFF(intf) + 0x000)
+#define MDP_INTF_REV_13xx_INTR_TEAR_STATUS(intf)	(MDP_INTF_REV_13xx_TEAR_OFF(intf) + 0x004)
+#define MDP_INTF_REV_13xx_INTR_TEAR_CLEAR(intf)		(MDP_INTF_REV_13xx_TEAR_OFF(intf) + 0x008)
+
 /**
  * struct dpu_intr_reg - array of DPU register sets
  * @clr_off:	offset to CLEAR reg
@@ -199,6 +208,82 @@ static const struct dpu_intr_reg dpu_intr_set_7xxx[] = {
 	},
 };
 
+/*
+ * dpu_intr_set_13xx -  List of DPU interrupt registers for DPU >= 13.0
+ */
+static const struct dpu_intr_reg dpu_intr_set_13xx[] = {
+	[MDP_SSPP_TOP0_INTR] = {
+		INTR_CLEAR,
+		INTR_EN,
+		INTR_STATUS
+	},
+	[MDP_SSPP_TOP0_INTR2] = {
+		INTR2_CLEAR,
+		INTR2_EN,
+		INTR2_STATUS
+	},
+	[MDP_SSPP_TOP0_HIST_INTR] = {
+		HIST_INTR_CLEAR,
+		HIST_INTR_EN,
+		HIST_INTR_STATUS
+	},
+	[MDP_INTF0_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(0),
+		MDP_INTF_REV_13xx_INTR_EN(0),
+		MDP_INTF_REV_13xx_INTR_STATUS(0)
+	},
+	[MDP_INTF1_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(1),
+		MDP_INTF_REV_13xx_INTR_EN(1),
+		MDP_INTF_REV_13xx_INTR_STATUS(1)
+	},
+	[MDP_INTF1_TEAR_INTR] = {
+		MDP_INTF_REV_13xx_INTR_TEAR_CLEAR(1),
+		MDP_INTF_REV_13xx_INTR_TEAR_EN(1),
+		MDP_INTF_REV_13xx_INTR_TEAR_STATUS(1)
+	},
+	[MDP_INTF2_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(2),
+		MDP_INTF_REV_13xx_INTR_EN(2),
+		MDP_INTF_REV_13xx_INTR_STATUS(2)
+	},
+	[MDP_INTF2_TEAR_INTR] = {
+		MDP_INTF_REV_13xx_INTR_TEAR_CLEAR(2),
+		MDP_INTF_REV_13xx_INTR_TEAR_EN(2),
+		MDP_INTF_REV_13xx_INTR_TEAR_STATUS(2)
+	},
+	[MDP_INTF3_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(3),
+		MDP_INTF_REV_13xx_INTR_EN(3),
+		MDP_INTF_REV_13xx_INTR_STATUS(3)
+	},
+	[MDP_INTF4_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(4),
+		MDP_INTF_REV_13xx_INTR_EN(4),
+		MDP_INTF_REV_13xx_INTR_STATUS(4)
+	},
+	[MDP_INTF5_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(5),
+		MDP_INTF_REV_13xx_INTR_EN(5),
+		MDP_INTF_REV_13xx_INTR_STATUS(5)
+	},
+	[MDP_INTF6_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(6),
+		MDP_INTF_REV_13xx_INTR_EN(6),
+		MDP_INTF_REV_13xx_INTR_STATUS(6)
+	},
+	[MDP_INTF7_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(7),
+		MDP_INTF_REV_13xx_INTR_EN(7),
+		MDP_INTF_REV_13xx_INTR_STATUS(7)
+	},
+	[MDP_INTF8_INTR] = {
+		MDP_INTF_REV_13xx_INTR_CLEAR(8),
+		MDP_INTF_REV_13xx_INTR_EN(8),
+		MDP_INTF_REV_13xx_INTR_STATUS(8)
+	},
+};
+
 #define DPU_IRQ_MASK(irq_idx)	(BIT(DPU_IRQ_BIT(irq_idx)))
 
 static inline bool dpu_core_irq_is_valid(unsigned int irq_idx)
@@ -237,6 +322,11 @@ static void dpu_core_irq_callback_handler(struct dpu_kms *dpu_kms, unsigned int 
 	irq_entry->cb(irq_entry->arg);
 }
 
+/**
+ * dpu_core_irq - core IRQ handler
+ * @kms:		MSM KMS handle
+ * @return:		interrupt handling status
+ */
 irqreturn_t dpu_core_irq(struct msm_kms *kms)
 {
 	struct dpu_kms *dpu_kms = to_dpu_kms(kms);
@@ -442,6 +532,12 @@ static void dpu_disable_all_irqs(struct dpu_kms *dpu_kms)
 	wmb();
 }
 
+/**
+ * dpu_core_irq_read - IRQ helper function for reading IRQ status
+ * @dpu_kms:		DPU handle
+ * @irq_idx:		irq index
+ * @return:		non-zero if irq detected; otherwise no irq detected
+ */
 u32 dpu_core_irq_read(struct dpu_kms *dpu_kms,
 		      unsigned int irq_idx)
 {
@@ -476,6 +572,12 @@ u32 dpu_core_irq_read(struct dpu_kms *dpu_kms,
 	return intr_status;
 }
 
+/**
+ * dpu_hw_intr_init(): Initializes the interrupts hw object
+ * @dev:  Corresponding device for devres management
+ * @addr: mapped register io address of MDP
+ * @m:    pointer to MDSS catalog data
+ */
 struct dpu_hw_intr *dpu_hw_intr_init(struct drm_device *dev,
 				     void __iomem *addr,
 				     const struct dpu_mdss_cfg *m)
@@ -490,7 +592,9 @@ struct dpu_hw_intr *dpu_hw_intr_init(struct drm_device *dev,
 	if (!intr)
 		return ERR_PTR(-ENOMEM);
 
-	if (m->mdss_ver->core_major_ver >= 7)
+	if (m->mdss_ver->core_major_ver >= 13)
+		intr->intr_set = dpu_intr_set_13xx;
+	else if (m->mdss_ver->core_major_ver >= 7)
 		intr->intr_set = dpu_intr_set_7xxx;
 	else
 		intr->intr_set = dpu_intr_set_legacy;
@@ -517,6 +621,17 @@ struct dpu_hw_intr *dpu_hw_intr_init(struct drm_device *dev,
 	return intr;
 }
 
+/**
+ * dpu_core_irq_register_callback - For registering callback function on IRQ
+ *                             interrupt
+ * @dpu_kms:		DPU handle
+ * @irq_idx:		irq index
+ * @irq_cb:		IRQ callback function.
+ * @irq_arg:		IRQ callback argument.
+ * @return:		0 for success registering callback, otherwise failure
+ *
+ * This function supports registration of multiple callbacks for each interrupt.
+ */
 int dpu_core_irq_register_callback(struct dpu_kms *dpu_kms,
 				   unsigned int irq_idx,
 				   void (*irq_cb)(void *arg),
@@ -567,6 +682,15 @@ int dpu_core_irq_register_callback(struct dpu_kms *dpu_kms,
 	return 0;
 }
 
+/**
+ * dpu_core_irq_unregister_callback - For unregistering callback function on IRQ
+ *                             interrupt
+ * @dpu_kms:		DPU handle
+ * @irq_idx:		irq index
+ * @return:		0 for success registering callback, otherwise failure
+ *
+ * This function supports registration of multiple callbacks for each interrupt.
+ */
 int dpu_core_irq_unregister_callback(struct dpu_kms *dpu_kms,
 				     unsigned int irq_idx)
 {
@@ -628,6 +752,11 @@ static int dpu_debugfs_core_irq_show(struct seq_file *s, void *v)
 
 DEFINE_SHOW_ATTRIBUTE(dpu_debugfs_core_irq);
 
+/**
+ * dpu_debugfs_core_irq_init - register core irq debugfs
+ * @dpu_kms: pointer to kms
+ * @parent: debugfs directory root
+ */
 void dpu_debugfs_core_irq_init(struct dpu_kms *dpu_kms,
 		struct dentry *parent)
 {
@@ -636,6 +765,11 @@ void dpu_debugfs_core_irq_init(struct dpu_kms *dpu_kms,
 }
 #endif
 
+/**
+ * dpu_core_irq_preinstall - perform pre-installation of core IRQ handler
+ * @kms:		MSM KMS handle
+ * @return:		none
+ */
 void dpu_core_irq_preinstall(struct msm_kms *kms)
 {
 	struct dpu_kms *dpu_kms = to_dpu_kms(kms);
@@ -653,6 +787,11 @@ void dpu_core_irq_preinstall(struct msm_kms *kms)
 	}
 }
 
+/**
+ * dpu_core_irq_uninstall - uninstall core IRQ handler
+ * @kms:		MSM KMS handle
+ * @return:		none
+ */
 void dpu_core_irq_uninstall(struct msm_kms *kms)
 {
 	struct dpu_kms *dpu_kms = to_dpu_kms(kms);

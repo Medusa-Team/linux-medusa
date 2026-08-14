@@ -11,6 +11,8 @@
 #include <asm/ptrace.h>
 #include <linux/adb.h>
 #include <linux/backlight.h>
+#include <linux/fb.h>
+#include <linux/of.h>
 #include <linux/pmu.h>
 #include <asm/backlight.h>
 
@@ -178,7 +180,7 @@ void __init pmu_backlight_init(void)
 	}
 
 	bd->props.brightness = level;
-	bd->props.power = FB_BLANK_UNBLANK;
+	bd->props.power = BACKLIGHT_POWER_ON;
 	backlight_update_status(bd);
 
 	printk(KERN_INFO "PMU Backlight initialized (%s)\n", name);

@@ -277,19 +277,13 @@ static void __init srmmu_nocache_init(void)
 
 	bitmap_bits = srmmu_nocache_size >> SRMMU_NOCACHE_BITMAP_SHIFT;
 
-	srmmu_nocache_pool = memblock_alloc(srmmu_nocache_size,
+	srmmu_nocache_pool = memblock_alloc_or_panic(srmmu_nocache_size,
 					    SRMMU_NOCACHE_ALIGN_MAX);
-	if (!srmmu_nocache_pool)
-		panic("%s: Failed to allocate %lu bytes align=0x%x\n",
-		      __func__, srmmu_nocache_size, SRMMU_NOCACHE_ALIGN_MAX);
 	memset(srmmu_nocache_pool, 0, srmmu_nocache_size);
 
 	srmmu_nocache_bitmap =
-		memblock_alloc(BITS_TO_LONGS(bitmap_bits) * sizeof(long),
+		memblock_alloc_or_panic(BITS_TO_LONGS(bitmap_bits) * sizeof(long),
 			       SMP_CACHE_BYTES);
-	if (!srmmu_nocache_bitmap)
-		panic("%s: Failed to allocate %zu bytes\n", __func__,
-		      BITS_TO_LONGS(bitmap_bits) * sizeof(long));
 	bit_map_init(&srmmu_nocache_map, srmmu_nocache_bitmap, bitmap_bits);
 
 	srmmu_swapper_pg_dir = __srmmu_get_nocache(SRMMU_PGD_TABLE_SIZE, SRMMU_PGD_TABLE_SIZE);
@@ -356,7 +350,7 @@ pgtable_t pte_alloc_one(struct mm_struct *mm)
 	page = pfn_to_page(__nocache_pa((unsigned long)ptep) >> PAGE_SHIFT);
 	spin_lock(&mm->page_table_lock);
 	if (page_ref_inc_return(page) == 2 &&
-			!pagetable_pte_ctor(page_ptdesc(page))) {
+			!pagetable_pte_ctor(mm, page_ptdesc(page))) {
 		page_ref_dec(page);
 		ptep = NULL;
 	}
@@ -372,7 +366,7 @@ void pte_free(struct mm_struct *mm, pgtable_t ptep)
 	page = pfn_to_page(__nocache_pa((unsigned long)ptep) >> PAGE_SHIFT);
 	spin_lock(&mm->page_table_lock);
 	if (page_ref_dec_return(page) == 1)
-		pagetable_pte_dtor(page_ptdesc(page));
+		pagetable_dtor(page_ptdesc(page));
 	spin_unlock(&mm->page_table_lock);
 
 	srmmu_free_nocache(ptep, SRMMU_PTE_TABLE_SIZE);
@@ -452,9 +446,7 @@ static void __init sparc_context_init(int numctx)
 	unsigned long size;
 
 	size = numctx * sizeof(struct ctx_list);
-	ctx_list_pool = memblock_alloc(size, SMP_CACHE_BYTES);
-	if (!ctx_list_pool)
-		panic("%s: Failed to allocate %lu bytes\n", __func__, size);
+	ctx_list_pool = memblock_alloc_or_panic(size, SMP_CACHE_BYTES);
 
 	for (ctx = 0; ctx < numctx; ctx++) {
 		struct ctx_list *clist;
@@ -892,6 +884,13 @@ static void __init map_kernel(void)
 
 void (*poke_srmmu)(void) = NULL;
 
+void __init arch_zone_limits_init(unsigned long *max_zone_pfns)
+{
+	max_zone_pfns[ZONE_DMA] = max_low_pfn;
+	max_zone_pfns[ZONE_NORMAL] = max_low_pfn;
+	max_zone_pfns[ZONE_HIGHMEM] = highend_pfn;
+}
+
 void __init srmmu_paging_init(void)
 {
 	int i;
@@ -971,16 +970,6 @@ void __init srmmu_paging_init(void)
 	flush_tlb_all();
 
 	sparc_context_init(num_contexts);
-
-	{
-		unsigned long max_zone_pfn[MAX_NR_ZONES] = { 0 };
-
-		max_zone_pfn[ZONE_DMA] = max_low_pfn;
-		max_zone_pfn[ZONE_NORMAL] = max_low_pfn;
-		max_zone_pfn[ZONE_HIGHMEM] = highend_pfn;
-
-		free_area_init(max_zone_pfn);
-	}
 }
 
 void mmu_info(struct seq_file *m)

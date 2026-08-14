@@ -302,7 +302,7 @@ calc_sync_msg(unsigned int period, unsigned int offset, unsigned int fast,
 	msg[1] = offset;
 }
 
-static int wd33c93_queuecommand_lck(struct scsi_cmnd *cmd)
+static enum scsi_qc_status wd33c93_queuecommand_lck(struct scsi_cmnd *cmd)
 {
 	struct scsi_pointer *scsi_pointer = WD33C93_scsi_pointer(cmd);
 	struct WD33C93_hostdata *hostdata;
@@ -831,7 +831,7 @@ wd33c93_intr(struct Scsi_Host *instance)
 		/* construct an IDENTIFY message with correct disconnect bit */
 
 		hostdata->outgoing_msg[0] = IDENTIFY(0, cmd->device->lun);
-		if (scsi_pointer->phase)
+		if (WD33C93_scsi_pointer(cmd)->phase)
 			hostdata->outgoing_msg[0] |= 0x40;
 
 		if (hostdata->sync_stat[cmd->device->id] == SS_FIRST) {

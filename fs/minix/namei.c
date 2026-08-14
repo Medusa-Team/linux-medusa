@@ -104,15 +104,15 @@ static int minix_link(struct dentry * old_dentry, struct inode * dir,
 	return add_nondir(dentry, inode);
 }
 
-static int minix_mkdir(struct mnt_idmap *idmap, struct inode *dir,
-		       struct dentry *dentry, umode_t mode)
+static struct dentry *minix_mkdir(struct mnt_idmap *idmap, struct inode *dir,
+				  struct dentry *dentry, umode_t mode)
 {
 	struct inode * inode;
 	int err;
 
 	inode = minix_new_inode(dir, S_IFDIR | mode);
 	if (IS_ERR(inode))
-		return PTR_ERR(inode);
+		return ERR_CAST(inode);
 
 	inode_inc_link_count(dir);
 	minix_set_inode(inode, 0);
@@ -128,7 +128,7 @@ static int minix_mkdir(struct mnt_idmap *idmap, struct inode *dir,
 
 	d_instantiate(dentry, inode);
 out:
-	return err;
+	return ERR_PTR(err);
 
 out_fail:
 	inode_dec_link_count(inode);
@@ -141,15 +141,20 @@ out_fail:
 static int minix_unlink(struct inode * dir, struct dentry *dentry)
 {
 	struct inode * inode = d_inode(dentry);
-	struct page * page;
+	struct folio *folio;
 	struct minix_dir_entry * de;
 	int err;
 
-	de = minix_find_entry(dentry, &page);
+	if (inode->i_nlink == 0) {
+		minix_error_inode(inode, "inode has corrupted nlink");
+		return -EFSCORRUPTED;
+	}
+
+	de = minix_find_entry(dentry, &folio);
 	if (!de)
 		return -ENOENT;
-	err = minix_delete_entry(de, page);
-	unmap_and_put_page(page, de);
+	err = minix_delete_entry(de, folio);
+	folio_release_kmap(folio, de);
 
 	if (err)
 		return err;
@@ -161,15 +166,24 @@ static int minix_unlink(struct inode * dir, struct dentry *dentry)
 static int minix_rmdir(struct inode * dir, struct dentry *dentry)
 {
 	struct inode * inode = d_inode(dentry);
-	int err = -ENOTEMPTY;
+	int err = -EFSCORRUPTED;
 
-	if (minix_empty_dir(inode)) {
-		err = minix_unlink(dir, dentry);
-		if (!err) {
-			inode_dec_link_count(dir);
-			inode_dec_link_count(inode);
-		}
+	if (dir->i_nlink <= 2) {
+		minix_error_inode(dir, "inode has corrupted nlink");
+		goto out;
 	}
+
+	err = -ENOTEMPTY;
+	if (!minix_empty_dir(inode))
+		goto out;
+
+	err = minix_unlink(dir, dentry);
+	if (!err) {
+		inode_dec_link_count(dir);
+		inode_dec_link_count(inode);
+	}
+
+out:
 	return err;
 }
 
@@ -180,40 +194,51 @@ static int minix_rename(struct mnt_idmap *idmap,
 {
 	struct inode * old_inode = d_inode(old_dentry);
 	struct inode * new_inode = d_inode(new_dentry);
-	struct page * dir_page = NULL;
+	struct folio * dir_folio = NULL;
 	struct minix_dir_entry * dir_de = NULL;
-	struct page * old_page;
+	struct folio *old_folio;
 	struct minix_dir_entry * old_de;
 	int err = -ENOENT;
 
 	if (flags & ~RENAME_NOREPLACE)
 		return -EINVAL;
 
-	old_de = minix_find_entry(old_dentry, &old_page);
+	old_de = minix_find_entry(old_dentry, &old_folio);
 	if (!old_de)
 		goto out;
 
 	if (S_ISDIR(old_inode->i_mode)) {
 		err = -EIO;
-		dir_de = minix_dotdot(old_inode, &dir_page);
+		dir_de = minix_dotdot(old_inode, &dir_folio);
 		if (!dir_de)
 			goto out_old;
 	}
 
 	if (new_inode) {
-		struct page * new_page;
+		struct folio *new_folio;
 		struct minix_dir_entry * new_de;
 
 		err = -ENOTEMPTY;
 		if (dir_de && !minix_empty_dir(new_inode))
 			goto out_dir;
 
+		err = -EFSCORRUPTED;
+		if (new_inode->i_nlink == 0 || (dir_de && new_inode->i_nlink != 2)) {
+			minix_error_inode(new_inode, "inode has corrupted nlink");
+			goto out_dir;
+		}
+
+		if (dir_de && old_dir->i_nlink <= 2) {
+			minix_error_inode(old_dir, "inode has corrupted nlink");
+			goto out_dir;
+		}
+
 		err = -ENOENT;
-		new_de = minix_find_entry(new_dentry, &new_page);
+		new_de = minix_find_entry(new_dentry, &new_folio);
 		if (!new_de)
 			goto out_dir;
-		err = minix_set_link(new_de, new_page, old_inode);
-		unmap_and_put_page(new_page, new_de);
+		err = minix_set_link(new_de, new_folio, old_inode);
+		folio_release_kmap(new_folio, new_de);
 		if (err)
 			goto out_dir;
 		inode_set_ctime_current(new_inode);
@@ -228,22 +253,22 @@ static int minix_rename(struct mnt_idmap *idmap,
 			inode_inc_link_count(new_dir);
 	}
 
-	err = minix_delete_entry(old_de, old_page);
+	err = minix_delete_entry(old_de, old_folio);
 	if (err)
 		goto out_dir;
 
 	mark_inode_dirty(old_inode);
 
 	if (dir_de) {
-		err = minix_set_link(dir_de, dir_page, new_dir);
+		err = minix_set_link(dir_de, dir_folio, new_dir);
 		if (!err)
 			inode_dec_link_count(old_dir);
 	}
 out_dir:
 	if (dir_de)
-		unmap_and_put_page(dir_page, dir_de);
+		folio_release_kmap(dir_folio, dir_de);
 out_old:
-	unmap_and_put_page(old_page, old_de);
+	folio_release_kmap(old_folio, old_de);
 out:
 	return err;
 }

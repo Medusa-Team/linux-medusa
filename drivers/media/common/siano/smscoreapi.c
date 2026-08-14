@@ -439,7 +439,7 @@ static struct smscore_registry_entry_t *smscore_find_registry(char *devpath)
 			return entry;
 		}
 	}
-	entry = kmalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kmalloc_obj(*entry);
 	if (entry) {
 		entry->mode = default_mode;
 		strscpy(entry->devpath, devpath, sizeof(entry->devpath));
@@ -528,7 +528,7 @@ int smscore_register_hotplug(hotplug_t hotplug)
 	int rc = 0;
 
 	mutex_lock(&g_smscore_deviceslock);
-	notifyee = kmalloc(sizeof(*notifyee), GFP_KERNEL);
+	notifyee = kmalloc_obj(*notifyee);
 	if (notifyee) {
 		/* now notify callback about existing devices */
 		first = &g_smscore_devices;
@@ -617,7 +617,7 @@ smscore_buffer_t *smscore_createbuffer(u8 *buffer, void *common_buffer,
 {
 	struct smscore_buffer_t *cb;
 
-	cb = kzalloc(sizeof(*cb), GFP_KERNEL);
+	cb = kzalloc_obj(*cb);
 	if (!cb)
 		return NULL;
 
@@ -647,7 +647,7 @@ int smscore_register_device(struct smsdevice_params_t *params,
 	struct smscore_device_t *dev;
 	u8 *buffer;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (!dev)
 		return -ENOMEM;
 
@@ -1132,8 +1132,7 @@ static char *smscore_get_fw_filename(struct smscore_device_t *coredev,
  * return: 0 on success, <0 on error.
  */
 static int smscore_load_firmware_from_file(struct smscore_device_t *coredev,
-					   int mode,
-					   loadfirmware_t loadfirmware_handler)
+					   int mode)
 {
 	int rc = -ENOENT;
 	u8 *fw_buf;
@@ -1147,8 +1146,7 @@ static int smscore_load_firmware_from_file(struct smscore_device_t *coredev,
 	}
 	pr_debug("Firmware name: %s\n", fw_filename);
 
-	if (!loadfirmware_handler &&
-	    !(coredev->device_flags & SMS_DEVICE_FAMILY2))
+	if (!(coredev->device_flags & SMS_DEVICE_FAMILY2))
 		return -EINVAL;
 
 	rc = request_firmware(&fw, fw_filename, coredev->device);
@@ -1166,10 +1164,8 @@ static int smscore_load_firmware_from_file(struct smscore_device_t *coredev,
 		memcpy(fw_buf, fw->data, fw->size);
 		fw_buf_size = fw->size;
 
-		rc = (coredev->device_flags & SMS_DEVICE_FAMILY2) ?
-			smscore_load_firmware_family2(coredev, fw_buf, fw_buf_size)
-			: loadfirmware_handler(coredev->context, fw_buf,
-			fw_buf_size);
+		rc = smscore_load_firmware_family2(coredev, fw_buf,
+						   fw_buf_size);
 	}
 
 	kfree(fw_buf);
@@ -1353,8 +1349,7 @@ int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 		}
 
 		if (!(coredev->modes_supported & (1 << mode))) {
-			rc = smscore_load_firmware_from_file(coredev,
-							     mode, NULL);
+			rc = smscore_load_firmware_from_file(coredev, mode);
 			if (rc >= 0)
 				pr_debug("firmware download success\n");
 		} else {
@@ -1683,7 +1678,7 @@ static int smscore_validate_client(struct smscore_device_t *coredev,
 		pr_err("The msg ID already registered to another client.\n");
 		return -EEXIST;
 	}
-	listentry = kzalloc(sizeof(*listentry), GFP_KERNEL);
+	listentry = kzalloc_obj(*listentry);
 	if (!listentry)
 		return -ENOMEM;
 
@@ -1720,7 +1715,7 @@ int smscore_register_client(struct smscore_device_t *coredev,
 		return -EEXIST;
 	}
 
-	newclient = kzalloc(sizeof(*newclient), GFP_KERNEL);
+	newclient = kzalloc_obj(*newclient);
 	if (!newclient)
 		return -ENOMEM;
 

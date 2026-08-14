@@ -53,6 +53,11 @@ enum regulator_detection_severity {
 #define REGULATOR_LINEAR_RANGE(_min_uV, _min_sel, _max_sel, _step_uV)	\
 	LINEAR_RANGE(_min_uV, _min_sel, _max_sel, _step_uV)
 
+/* Initialize struct linear_range using voltages, not selectors */
+#define REGULATOR_LINEAR_VRANGE(_offs_uV, _min_uV, _max_uV, _step_uV)	\
+	LINEAR_RANGE(_min_uV, ((_min_uV) - (_offs_uV)) / (_step_uV),	\
+		     ((_max_uV) - (_offs_uV)) / (_step_uV), _step_uV)
+
 /**
  * struct regulator_ops - regulator operations.
  *
@@ -269,6 +274,11 @@ enum regulator_type {
  *               config but it cannot store it for later usage.
  *               Callback should return 0 on success or negative ERRNO
  *               indicating failure.
+ * @init_cb: Optional callback called after the parsing of init_data.
+ *           Allows the regulator to perform runtime init if necessary,
+ *           such as synching the regulator and the parsed constraints.
+ *           Callback should return 0 on success or negative ERRNO
+ *           indicating failure.
  * @id: Numerical identifier for the regulator.
  * @ops: Regulator operations table.
  * @irq: Interrupt number for the regulator.
@@ -365,6 +375,8 @@ struct regulator_desc {
 	int (*of_parse_cb)(struct device_node *,
 			    const struct regulator_desc *,
 			    struct regulator_config *);
+	int (*init_cb)(struct regulator_dev *,
+		       struct regulator_config *);
 	int id;
 	unsigned int continuous_voltage_range:1;
 	unsigned n_voltages;
@@ -628,6 +640,7 @@ struct regulator_dev {
 	int ref_cnt;
 	struct module *owner;
 	struct device dev;
+	struct device bdev;
 	struct regulation_constraints *constraints;
 	struct regulator *supply;	/* for tree */
 	const char *supply_name;
@@ -642,6 +655,7 @@ struct regulator_dev {
 	struct regulator_enable_gpio *ena_pin;
 	unsigned int ena_gpio_state:1;
 
+	unsigned int constraints_pending:1;
 	unsigned int is_switch:1;
 
 	/* time when this regulator was disabled last time */
@@ -649,6 +663,11 @@ struct regulator_dev {
 	int cached_err;
 	bool use_cached_err;
 	spinlock_t err_lock;
+
+	int pw_requested_mW;
+
+	/* regulator notification forwarding */
+	struct notifier_block supply_fwd_nb;
 };
 
 /*

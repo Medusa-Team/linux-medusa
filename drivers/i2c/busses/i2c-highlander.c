@@ -365,7 +365,7 @@ static int highlander_i2c_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	dev = kzalloc(sizeof(struct highlander_i2c_dev), GFP_KERNEL);
+	dev = kzalloc_obj(struct highlander_i2c_dev);
 	if (unlikely(!dev))
 		return -ENOMEM;
 
@@ -454,7 +454,7 @@ static struct platform_driver highlander_i2c_driver = {
 	},
 
 	.probe		= highlander_i2c_probe,
-	.remove_new	= highlander_i2c_remove,
+	.remove		= highlander_i2c_remove,
 };
 
 module_platform_driver(highlander_i2c_driver);

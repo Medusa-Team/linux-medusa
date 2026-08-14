@@ -8,7 +8,6 @@
  *
  ******************************************************************************/
 
-#include <crypto/hash.h>
 #include <linux/module.h>
 #include <linux/string.h>
 #include <linux/kthread.h>
@@ -39,7 +38,7 @@ static struct iscsi_login *iscsi_login_init_conn(struct iscsit_conn *conn)
 {
 	struct iscsi_login *login;
 
-	login = kzalloc(sizeof(struct iscsi_login), GFP_KERNEL);
+	login = kzalloc_obj(struct iscsi_login);
 	if (!login) {
 		pr_err("Unable to allocate memory for struct iscsi_login.\n");
 		return NULL;
@@ -69,46 +68,6 @@ out_req_buf:
 out_login:
 	kfree(login);
 	return NULL;
-}
-
-/*
- * Used by iscsi_target_nego.c:iscsi_target_locate_portal() to setup
- * per struct iscsit_conn libcrypto contexts for crc32c and crc32-intel
- */
-int iscsi_login_setup_crypto(struct iscsit_conn *conn)
-{
-	struct crypto_ahash *tfm;
-
-	/*
-	 * Setup slicing by CRC32C algorithm for RX and TX libcrypto contexts
-	 * which will default to crc32c_intel.ko for cpu_has_xmm4_2, or fallback
-	 * to software 1x8 byte slicing from crc32c.ko
-	 */
-	tfm = crypto_alloc_ahash("crc32c", 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(tfm)) {
-		pr_err("crypto_alloc_ahash() failed\n");
-		return -ENOMEM;
-	}
-
-	conn->conn_rx_hash = ahash_request_alloc(tfm, GFP_KERNEL);
-	if (!conn->conn_rx_hash) {
-		pr_err("ahash_request_alloc() failed for conn_rx_hash\n");
-		crypto_free_ahash(tfm);
-		return -ENOMEM;
-	}
-	ahash_request_set_callback(conn->conn_rx_hash, 0, NULL, NULL);
-
-	conn->conn_tx_hash = ahash_request_alloc(tfm, GFP_KERNEL);
-	if (!conn->conn_tx_hash) {
-		pr_err("ahash_request_alloc() failed for conn_tx_hash\n");
-		ahash_request_free(conn->conn_rx_hash);
-		conn->conn_rx_hash = NULL;
-		crypto_free_ahash(tfm);
-		return -ENOMEM;
-	}
-	ahash_request_set_callback(conn->conn_tx_hash, 0, NULL, NULL);
-
-	return 0;
 }
 
 static int iscsi_login_check_initiator_version(
@@ -260,7 +219,7 @@ static int iscsi_login_zero_tsih_s1(
 	struct iscsi_login_req *pdu = (struct iscsi_login_req *)buf;
 	int ret;
 
-	sess = kzalloc(sizeof(struct iscsit_session), GFP_KERNEL);
+	sess = kzalloc_obj(struct iscsit_session);
 	if (!sess) {
 		iscsit_tx_login_rsp(conn, ISCSI_STATUS_CLS_TARGET_ERR,
 				ISCSI_LOGIN_STATUS_NO_RESOURCES);
@@ -308,7 +267,7 @@ static int iscsi_login_zero_tsih_s1(
 	 */
 	atomic_set(&sess->max_cmd_sn, be32_to_cpu(pdu->cmdsn));
 
-	sess->sess_ops = kzalloc(sizeof(struct iscsi_sess_ops), GFP_KERNEL);
+	sess->sess_ops = kzalloc_obj(struct iscsi_sess_ops);
 	if (!sess->sess_ops) {
 		iscsit_tx_login_rsp(conn, ISCSI_STATUS_CLS_TARGET_ERR,
 				ISCSI_LOGIN_STATUS_NO_RESOURCES);
@@ -863,7 +822,7 @@ int iscsit_setup_np(
 	sock_set_reuseaddr(sock->sk);
 	ip_sock_set_freebind(sock->sk);
 
-	ret = kernel_bind(sock, (struct sockaddr *)&np->np_sockaddr, len);
+	ret = kernel_bind(sock, (struct sockaddr_unsized *)&np->np_sockaddr, len);
 	if (ret < 0) {
 		pr_err("kernel_bind() failed: %d\n", ret);
 		goto fail;
@@ -1043,7 +1002,7 @@ static struct iscsit_conn *iscsit_alloc_conn(struct iscsi_np *np)
 {
 	struct iscsit_conn *conn;
 
-	conn = kzalloc(sizeof(struct iscsit_conn), GFP_KERNEL);
+	conn = kzalloc_obj(struct iscsit_conn);
 	if (!conn) {
 		pr_err("Could not allocate memory for new connection\n");
 		return NULL;
@@ -1081,7 +1040,7 @@ static struct iscsit_conn *iscsit_alloc_conn(struct iscsi_np *np)
 	if (iscsit_conn_set_transport(conn, np->np_transport) < 0)
 		goto free_conn;
 
-	conn->conn_ops = kzalloc(sizeof(struct iscsi_conn_ops), GFP_KERNEL);
+	conn->conn_ops = kzalloc_obj(struct iscsi_conn_ops);
 	if (!conn->conn_ops) {
 		pr_err("Unable to allocate memory for struct iscsi_conn_ops.\n");
 		goto put_transport;
@@ -1163,15 +1122,6 @@ old_sess_out:
 		} else
 			spin_unlock_bh(&conn->sess->conn_lock);
 		iscsit_dec_session_usage_count(conn->sess);
-	}
-
-	ahash_request_free(conn->conn_tx_hash);
-	if (conn->conn_rx_hash) {
-		struct crypto_ahash *tfm;
-
-		tfm = crypto_ahash_reqtfm(conn->conn_rx_hash);
-		ahash_request_free(conn->conn_rx_hash);
-		crypto_free_ahash(tfm);
 	}
 
 	if (conn->param_list) {

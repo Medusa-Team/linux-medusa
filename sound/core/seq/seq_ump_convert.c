@@ -595,12 +595,13 @@ int snd_seq_deliver_from_ump(struct snd_seq_client *source,
 	type = ump_message_type(ump_ev->ump[0]);
 
 	if (snd_seq_client_is_ump(dest)) {
-		if (snd_seq_client_is_midi2(dest) &&
-		    type == UMP_MSG_TYPE_MIDI1_CHANNEL_VOICE)
+		bool is_midi2 = snd_seq_client_is_midi2(dest) &&
+			!dest_port->is_midi1;
+
+		if (is_midi2 && type == UMP_MSG_TYPE_MIDI1_CHANNEL_VOICE)
 			return cvt_ump_midi1_to_midi2(dest, dest_port,
 						      event, atomic, hop);
-		else if (!snd_seq_client_is_midi2(dest) &&
-			 type == UMP_MSG_TYPE_MIDI2_CHANNEL_VOICE)
+		else if (!is_midi2 && type == UMP_MSG_TYPE_MIDI2_CHANNEL_VOICE)
 			return cvt_ump_midi2_to_midi1(dest, dest_port,
 						      event, atomic, hop);
 		/* non-EP port and different group is set? */
@@ -840,7 +841,7 @@ static int cc_ev_to_ump_midi2(const struct snd_seq_event *event,
 	unsigned char index = event->data.control.param & 0x7f;
 	unsigned char val = event->data.control.value & 0x7f;
 	struct ump_cvt_to_ump_bank *cc = &dest_port->midi2_bank[channel];
-	int ret;
+	int ret = 0;
 
 	/* process special CC's (bank/rpn/nrpn) */
 	switch (index) {
@@ -850,47 +851,54 @@ static int cc_ev_to_ump_midi2(const struct snd_seq_event *event,
 		cc->cc_rpn_msb = val;
 		if (cc->cc_rpn_msb == 0x7f && cc->cc_rpn_lsb == 0x7f)
 			reset_rpn(cc);
-		return ret;
+		break;
 	case UMP_CC_RPN_LSB:
 		ret = fill_rpn(cc, data, channel, true);
 		cc->rpn_set = 1;
 		cc->cc_rpn_lsb = val;
 		if (cc->cc_rpn_msb == 0x7f && cc->cc_rpn_lsb == 0x7f)
 			reset_rpn(cc);
-		return ret;
+		break;
 	case UMP_CC_NRPN_MSB:
 		ret = fill_rpn(cc, data, channel, true);
 		cc->nrpn_set = 1;
 		cc->cc_nrpn_msb = val;
-		return ret;
+		break;
 	case UMP_CC_NRPN_LSB:
 		ret = fill_rpn(cc, data, channel, true);
 		cc->nrpn_set = 1;
 		cc->cc_nrpn_lsb = val;
-		return ret;
+		break;
 	case UMP_CC_DATA:
 		cc->cc_data_msb_set = 1;
 		cc->cc_data_msb = val;
-		return fill_rpn(cc, data, channel, false);
+		ret = fill_rpn(cc, data, channel, false);
+		break;
 	case UMP_CC_BANK_SELECT:
 		cc->bank_set = 1;
 		cc->cc_bank_msb = val;
-		return 0; // skip
+		ret = 0; // skip
+		break;
 	case UMP_CC_BANK_SELECT_LSB:
 		cc->bank_set = 1;
 		cc->cc_bank_lsb = val;
-		return 0; // skip
+		ret = 0; // skip
+		break;
 	case UMP_CC_DATA_LSB:
 		cc->cc_data_lsb_set = 1;
 		cc->cc_data_lsb = val;
-		return fill_rpn(cc, data, channel, false);
+		ret = fill_rpn(cc, data, channel, false);
+		break;
+	default:
+		data->cc.status = status;
+		data->cc.channel = channel;
+		data->cc.index = index;
+		data->cc.data = upscale_7_to_32bit(event->data.control.value & 0x7f);
+		ret = 1;
+		break;
 	}
 
-	data->cc.status = status;
-	data->cc.channel = channel;
-	data->cc.index = index;
-	data->cc.data = upscale_7_to_32bit(event->data.control.value & 0x7f);
-	return 1;
+	return ret;
 }
 
 /* convert one-parameter control event to MIDI 2.0 UMP */
@@ -1279,8 +1287,26 @@ int snd_seq_deliver_to_ump(struct snd_seq_client *source,
 		return 0; /* group filtered - skip the event */
 	if (event->type == SNDRV_SEQ_EVENT_SYSEX)
 		return cvt_sysex_to_ump(dest, dest_port, event, atomic, hop);
-	else if (snd_seq_client_is_midi2(dest))
+	else if (snd_seq_client_is_midi2(dest) && !dest_port->is_midi1)
 		return cvt_to_ump_midi2(dest, dest_port, event, atomic, hop);
 	else
 		return cvt_to_ump_midi1(dest, dest_port, event, atomic, hop);
+}
+
+/* return the UMP group-port number of the event;
+ * return -1 if groupless or non-UMP event
+ */
+int snd_seq_ump_group_port(const struct snd_seq_event *event)
+{
+	const struct snd_seq_ump_event *ump_ev =
+		(const struct snd_seq_ump_event *)event;
+	unsigned char type;
+
+	if (!snd_seq_ev_is_ump(event))
+		return -1;
+	type = ump_message_type(ump_ev->ump[0]);
+	if (ump_is_groupless_msg(type))
+		return -1;
+	/* group-port number starts from 1 */
+	return ump_message_group(ump_ev->ump[0]) + 1;
 }

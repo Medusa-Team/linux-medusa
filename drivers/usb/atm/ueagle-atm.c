@@ -15,6 +15,7 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/crc32.h>
+#include <linux/hex.h>
 #include <linux/usb.h>
 #include <linux/firmware.h>
 #include <linux/ctype.h>
@@ -25,7 +26,7 @@
 #include <linux/slab.h>
 #include <linux/kernel.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "usbatm.h"
 
@@ -808,7 +809,7 @@ static int check_dsp_e4(const u8 *dsp, int len)
 			if (l > len)
 				return 1;
 
-		/* zero is zero regardless endianes */
+		/* zero is zero regardless endianness */
 		} while (blockidx->NotLastBlock);
 	}
 
@@ -1276,7 +1277,7 @@ static void uea_set_bulk_timeout(struct uea_softc *sc, u32 dsrate)
 	    sc->stats.phy.dsrate == dsrate)
 		return;
 
-	/* Original timming (1Mbit/s) from ADI (used in windows driver) */
+	/* Original timing (1Mbit/s) from ADI (used in windows driver) */
 	timeout = (dsrate <= 1024*1024) ? 0 : 1;
 	ret = uea_request(sc, UEA_SET_TIMEOUT, timeout, 0, NULL);
 	uea_info(INS_TO_USBDEV(sc), "setting new timeout %d%s\n",
@@ -1972,7 +1973,7 @@ static void uea_dispatch_cmv_e1(struct uea_softc *sc, struct intr_pkt *intr)
 	if (cmv->bDirection != E1_MODEMTOHOST)
 		goto bad1;
 
-	/* FIXME : ADI930 reply wrong preambule (func = 2, sub = 2) to
+	/* FIXME : ADI930 reply wrong preamble (func = 2, sub = 2) to
 	 * the first MEMACCESS cmv. Ignore it...
 	 */
 	if (cmv->bFunction != dsc->function) {
@@ -2515,7 +2516,7 @@ static int uea_bind(struct usbatm_data *usbatm, struct usb_interface *intf,
 			return ret;
 	}
 
-	sc = kzalloc(sizeof(struct uea_softc), GFP_KERNEL);
+	sc = kzalloc_obj(struct uea_softc);
 	if (!sc)
 		return -ENOMEM;
 

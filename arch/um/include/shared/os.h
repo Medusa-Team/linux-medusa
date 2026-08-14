@@ -143,9 +143,7 @@ extern int os_access(const char *file, int mode);
 extern int os_set_exec_close(int fd);
 extern int os_ioctl_generic(int fd, unsigned int cmd, unsigned long arg);
 extern int os_get_ifname(int fd, char *namebuf);
-extern int os_set_slip(int fd);
 extern int os_mode_fd(int fd, int mode);
-extern int os_fsync_file(int fd);
 
 extern int os_seek_file(int fd, unsigned long long offset);
 extern int os_open_file(const char *file, struct openflags flags, int mode);
@@ -199,15 +197,12 @@ extern int create_mem_file(unsigned long long len);
 extern void report_enomem(void);
 
 /* process.c */
-extern unsigned long os_process_pc(int pid);
-extern int os_process_parent(int pid);
+pid_t os_reap_child(void);
 extern void os_alarm_process(int pid);
-extern void os_stop_process(int pid);
 extern void os_kill_process(int pid, int reap_child);
 extern void os_kill_ptraced_process(int pid, int reap_child);
 
 extern int os_getpid(void);
-extern int os_getpgrp(void);
 
 extern void init_new_thread_signals(void);
 
@@ -218,7 +213,11 @@ extern int os_protect_memory(void *addr, unsigned long len,
 extern int os_unmap_memory(void *addr, int len);
 extern int os_drop_memory(void *addr, int length);
 extern int can_drop_memory(void);
-extern int os_mincore(void *addr, unsigned long len);
+
+void os_set_pdeathsig(void);
+
+int os_futex_wait(void *uaddr, unsigned int val);
+int os_futex_wake(void *uaddr);
 
 /* execvp.c */
 extern int execvp_noalloc(char *buf, const char *file, char *const argv[]);
@@ -228,6 +227,11 @@ extern int run_helper_thread(int (*proc)(void *), void *arg,
 			     unsigned int flags, unsigned long *stack_out);
 extern int helper_wait(int pid);
 
+struct os_helper_thread;
+int os_run_helper_thread(struct os_helper_thread **td_out,
+			 void *(*routine)(void *), void *arg);
+void os_kill_helper_thread(struct os_helper_thread *td);
+void os_fix_helper_thread_signals(void);
 
 /* umid.c */
 extern int umid_file_name(char *name, char *buf, int len);
@@ -242,9 +246,9 @@ extern void send_sigio_to_self(void);
 extern int change_sig(int signal, int on);
 extern void block_signals(void);
 extern void unblock_signals(void);
+extern int um_get_signals(void);
 extern int um_set_signals(int enable);
 extern int um_set_signals_trace(int enable);
-extern int os_is_signal_stack(void);
 extern void deliver_alarm(void);
 extern void register_pm_wake_signal(void);
 extern void block_signals_hard(void);
@@ -266,11 +270,12 @@ extern void os_warn(const char *fmt, ...)
 	__attribute__ ((format (printf, 1, 2)));
 
 /* time.c */
+void os_idle_prepare(void);
 extern void os_idle_sleep(void);
 extern int os_timer_create(void);
-extern int os_timer_set_interval(unsigned long long nsecs);
-extern int os_timer_one_shot(unsigned long long nsecs);
-extern void os_timer_disable(void);
+extern int os_timer_set_interval(int cpu, unsigned long long nsecs);
+extern int os_timer_one_shot(int cpu, unsigned long long nsecs);
+extern void os_timer_disable(int cpu);
 extern long long os_persistent_clock_emulation(void);
 extern long long os_nsecs(void);
 
@@ -283,13 +288,11 @@ int map(struct mm_id *mm_idp, unsigned long virt,
 	unsigned long len, int prot, int phys_fd,
 	unsigned long long offset);
 int unmap(struct mm_id *mm_idp, unsigned long addr, unsigned long len);
-int protect(struct mm_id *mm_idp, unsigned long addr,
-	    unsigned long len, unsigned int prot);
 
 /* skas/process.c */
 extern int is_skas_winch(int pid, int fd, void *data);
-extern int start_userspace(unsigned long stub_stack);
-extern void userspace(struct uml_pt_regs *regs, unsigned long *aux_fp_regs);
+extern int start_userspace(struct mm_id *mm_id);
+extern void userspace(struct uml_pt_regs *regs);
 extern void new_thread(void *stack, jmp_buf *buf, void (*handler)(void));
 extern void switch_threads(jmp_buf *me, jmp_buf *you);
 extern int start_idle_thread(void *stack, jmp_buf *switch_buf);
@@ -316,7 +319,7 @@ extern void um_irqs_resume(void);
 extern int add_sigio_fd(int fd);
 extern int ignore_sigio_fd(int fd);
 extern void maybe_sigio_broken(int fd);
-extern void sigio_broken(int fd);
+extern void sigio_broken(void);
 /*
  * unlocked versions for IRQ controller code.
  *
@@ -329,9 +332,6 @@ extern int __ignore_sigio_fd(int fd);
 /* tty.c */
 extern int get_pty(void);
 
-/* sys-$ARCH/task_size.c */
-extern unsigned long os_get_top_address(void);
-
 long syscall(long number, ...);
 
 /* irqflags tracing */
@@ -342,5 +342,18 @@ extern void um_trace_signals_off(void);
 
 /* time-travel */
 extern void deliver_time_travel_irqs(void);
+
+/* smp.c */
+#if IS_ENABLED(CONFIG_SMP)
+void os_init_smp(void);
+int os_start_cpu_thread(int cpu);
+void os_start_secondary(void *arg, jmp_buf *switch_buf);
+int os_send_ipi(int cpu, int vector);
+void os_local_ipi_enable(void);
+void os_local_ipi_disable(void);
+#else /* !CONFIG_SMP */
+static inline void os_local_ipi_enable(void) { }
+static inline void os_local_ipi_disable(void) { }
+#endif /* CONFIG_SMP */
 
 #endif

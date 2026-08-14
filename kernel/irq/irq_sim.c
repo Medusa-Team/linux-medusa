@@ -13,7 +13,6 @@
 
 struct irq_sim_work_ctx {
 	struct irq_work		work;
-	int			irq_base;
 	unsigned int		irq_count;
 	unsigned long		*pending;
 	struct irq_domain	*domain;
@@ -149,7 +148,7 @@ static int irq_sim_domain_map(struct irq_domain *domain,
 	struct irq_sim_work_ctx *work_ctx = domain->host_data;
 	struct irq_sim_irq_ctx *irq_ctx;
 
-	irq_ctx = kzalloc(sizeof(*irq_ctx), GFP_KERNEL);
+	irq_ctx = kzalloc_obj(*irq_ctx);
 	if (!irq_ctx)
 		return -ENOMEM;
 
@@ -203,7 +202,7 @@ struct irq_domain *irq_domain_create_sim_full(struct fwnode_handle *fwnode,
 					      void *data)
 {
 	struct irq_sim_work_ctx *work_ctx __free(kfree) =
-				kmalloc(sizeof(*work_ctx), GFP_KERNEL);
+				kzalloc_obj(*work_ctx);
 
 	if (!work_ctx)
 		return ERR_PTR(-ENOMEM);

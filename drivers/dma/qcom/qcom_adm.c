@@ -390,19 +390,18 @@ static struct dma_async_tx_descriptor *adm_prep_slave_sg(struct dma_chan *chan,
 	}
 
 	/* iterate through sgs and compute allocation size of structures */
-	for_each_sg(sgl, sg, sg_len, i) {
-		if (achan->slave.device_fc) {
+	if (achan->slave.device_fc) {
+		for_each_sg(sgl, sg, sg_len, i) {
 			box_count += DIV_ROUND_UP(sg_dma_len(sg) / burst,
 						  ADM_MAX_ROWS);
 			if (sg_dma_len(sg) % burst)
 				single_count++;
-		} else {
-			single_count += DIV_ROUND_UP(sg_dma_len(sg),
-						     ADM_MAX_XFER);
 		}
+	} else {
+		single_count = sg_nents_for_dma(sgl, sg_len, ADM_MAX_XFER);
 	}
 
-	async_desc = kzalloc(sizeof(*async_desc), GFP_NOWAIT);
+	async_desc = kzalloc_obj(*async_desc, GFP_NOWAIT);
 	if (!async_desc) {
 		dev_err(adev->dev, "not enough memory for async_desc struct\n");
 		return NULL;
@@ -650,7 +649,7 @@ static enum dma_status adm_tx_status(struct dma_chan *chan, dma_cookie_t cookie,
 	/*
 	 * residue is either the full length if it is in the issued list, or 0
 	 * if it is in progress.  We have no reliable way of determining
-	 * anything inbetween
+	 * anything in between
 	 */
 	dma_set_residue(txstate, residue);
 
@@ -937,7 +936,7 @@ MODULE_DEVICE_TABLE(of, adm_of_match);
 
 static struct platform_driver adm_dma_driver = {
 	.probe = adm_dma_probe,
-	.remove_new = adm_dma_remove,
+	.remove = adm_dma_remove,
 	.driver = {
 		.name = "adm-dma-engine",
 		.of_match_table = adm_of_match,

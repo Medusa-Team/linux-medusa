@@ -3,27 +3,29 @@
  * Copyright © 2020-2021 Intel Corporation
  */
 
-#include "i915_drv.h"
-#include "i915_reg.h"
-#include "i915_trace.h"
-#include "intel_bios.h"
+#include <drm/drm_print.h>
+
 #include "intel_de.h"
+#include "intel_display_jiffies.h"
 #include "intel_display_types.h"
+#include "intel_display_utils.h"
 #include "intel_dp.h"
 #include "intel_dp_aux.h"
 #include "intel_dp_aux_regs.h"
+#include "intel_parent.h"
 #include "intel_pps.h"
 #include "intel_quirks.h"
 #include "intel_tc.h"
+#include "intel_uncore_trace.h"
 
 #define AUX_CH_NAME_BUFSIZE	6
 
-static const char *aux_ch_name(struct drm_i915_private *i915,
+static const char *aux_ch_name(struct intel_display *display,
 			       char *buf, int size, enum aux_ch aux_ch)
 {
-	if (DISPLAY_VER(i915) >= 13 && aux_ch >= AUX_CH_D_XELPD)
+	if (DISPLAY_VER(display) >= 13 && aux_ch >= AUX_CH_D_XELPD)
 		snprintf(buf, size, "%c", 'A' + aux_ch - AUX_CH_D_XELPD + AUX_CH_D);
-	else if (DISPLAY_VER(i915) >= 12 && aux_ch >= AUX_CH_USBC1)
+	else if (DISPLAY_VER(display) >= 12 && aux_ch >= AUX_CH_USBC1)
 		snprintf(buf, size, "USBC%c", '1' + aux_ch - AUX_CH_USBC1);
 	else
 		snprintf(buf, size, "%c", 'A' + aux_ch);
@@ -56,17 +58,30 @@ static void intel_dp_aux_unpack(u32 src, u8 *dst, int dst_bytes)
 static u32
 intel_dp_aux_wait_done(struct intel_dp *intel_dp)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	i915_reg_t ch_ctl = intel_dp->aux_ch_ctl_reg(intel_dp);
 	const unsigned int timeout_ms = 10;
+	bool done = true;
 	u32 status;
 	int ret;
 
-	ret = intel_de_wait_custom(i915, ch_ctl, DP_AUX_CH_CTL_SEND_BUSY, 0,
-				   2, timeout_ms, &status);
+	if (intel_parent_irq_enabled(display)) {
+#define C (((status = intel_de_read_notrace(display, ch_ctl)) & DP_AUX_CH_CTL_SEND_BUSY) == 0)
+		done = wait_event_timeout(display->gmbus.wait_queue, C,
+					  msecs_to_jiffies_timeout(timeout_ms));
 
-	if (ret == -ETIMEDOUT)
-		drm_err(&i915->drm,
+#undef C
+	} else {
+		ret = intel_de_wait_ms(display, ch_ctl,
+				       DP_AUX_CH_CTL_SEND_BUSY, 0,
+				       timeout_ms, &status);
+
+		if (ret == -ETIMEDOUT)
+			done = false;
+	}
+
+	if (!done)
+		drm_err(display->drm,
 			"%s: did not complete or timeout within %ums (status 0x%08x)\n",
 			intel_dp->aux.name, timeout_ms, status);
 
@@ -75,7 +90,7 @@ intel_dp_aux_wait_done(struct intel_dp *intel_dp)
 
 static u32 g4x_get_aux_clock_divider(struct intel_dp *intel_dp, int index)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 
 	if (index)
 		return 0;
@@ -84,12 +99,12 @@ static u32 g4x_get_aux_clock_divider(struct intel_dp *intel_dp, int index)
 	 * The clock divider is based off the hrawclk, and would like to run at
 	 * 2MHz.  So, take the hrawclk value and divide by 2000 and use that
 	 */
-	return DIV_ROUND_CLOSEST(RUNTIME_INFO(i915)->rawclk_freq, 2000);
+	return DIV_ROUND_CLOSEST(DISPLAY_RUNTIME_INFO(display)->rawclk_freq, 2000);
 }
 
 static u32 ilk_get_aux_clock_divider(struct intel_dp *intel_dp, int index)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
 	u32 freq;
 
@@ -102,18 +117,18 @@ static u32 ilk_get_aux_clock_divider(struct intel_dp *intel_dp, int index)
 	 * divide by 2000 and use that
 	 */
 	if (dig_port->aux_ch == AUX_CH_A)
-		freq = i915->display.cdclk.hw.cdclk;
+		freq = display->cdclk.hw.cdclk;
 	else
-		freq = RUNTIME_INFO(i915)->rawclk_freq;
+		freq = DISPLAY_RUNTIME_INFO(display)->rawclk_freq;
 	return DIV_ROUND_CLOSEST(freq, 2000);
 }
 
 static u32 hsw_get_aux_clock_divider(struct intel_dp *intel_dp, int index)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
 
-	if (dig_port->aux_ch != AUX_CH_A && HAS_PCH_LPT_H(i915)) {
+	if (dig_port->aux_ch != AUX_CH_A && HAS_PCH_LPT_H(display)) {
 		/* Workaround for non-ULT HSW */
 		switch (index) {
 		case 0: return 63;
@@ -176,12 +191,11 @@ static u32 g4x_get_aux_send_ctl(struct intel_dp *intel_dp,
 				int send_bytes,
 				u32 aux_clock_divider)
 {
-	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
-	struct drm_i915_private *i915 = to_i915(dig_port->base.base.dev);
+	struct intel_display *display = to_intel_display(intel_dp);
 	u32 timeout;
 
 	/* Max timeout value on G4x-BDW: 1.6ms */
-	if (IS_BROADWELL(i915))
+	if (display->platform.broadwell)
 		timeout = DP_AUX_CH_CTL_TIME_OUT_600us;
 	else
 		timeout = DP_AUX_CH_CTL_TIME_OUT_400us;
@@ -201,8 +215,8 @@ static u32 skl_get_aux_send_ctl(struct intel_dp *intel_dp,
 				int send_bytes,
 				u32 unused)
 {
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
-	struct drm_i915_private *i915 =	to_i915(dig_port->base.base.dev);
 	u32 ret;
 
 	/*
@@ -227,7 +241,7 @@ static u32 skl_get_aux_send_ctl(struct intel_dp *intel_dp,
 	 * Power request bit is already set during aux power well enable.
 	 * Preserve the bit across aux transactions.
 	 */
-	if (DISPLAY_VER(i915) >= 14)
+	if (DISPLAY_VER(display) >= 14)
 		ret |= XELPDP_DP_AUX_CH_CTL_POWER_REQUEST;
 
 	return ret;
@@ -239,14 +253,14 @@ intel_dp_aux_xfer(struct intel_dp *intel_dp,
 		  u8 *recv, int recv_size,
 		  u32 aux_send_ctl_flags)
 {
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
 	struct intel_encoder *encoder = &dig_port->base;
-	struct drm_i915_private *i915 = to_i915(dig_port->base.base.dev);
 	i915_reg_t ch_ctl, ch_data[5];
 	u32 aux_clock_divider;
 	enum intel_display_power_domain aux_domain;
-	intel_wakeref_t aux_wakeref;
-	intel_wakeref_t pps_wakeref;
+	struct ref_tracker *aux_wakeref;
+	struct ref_tracker *pps_wakeref = NULL;
 	int i, ret, recv_bytes;
 	int try, clock = 0;
 	u32 status;
@@ -270,8 +284,21 @@ intel_dp_aux_xfer(struct intel_dp *intel_dp,
 
 	aux_domain = intel_aux_power_domain(dig_port);
 
-	aux_wakeref = intel_display_power_get(i915, aux_domain);
-	pps_wakeref = intel_pps_lock(intel_dp);
+	aux_wakeref = intel_display_power_get(display, aux_domain);
+
+	/*
+	 * The PPS state needs to be locked for:
+	 * - eDP on all platforms, since AUX transfers on eDP need VDD power
+	 *   (either forced or via panel power) which depends on the PPS
+	 *   state.
+	 * - non-eDP on platforms where the PPS is a pipe instance (VLV/CHV),
+	 *   since changing the PPS state (via a parallel modeset for
+	 *   instance) may interfere with the AUX transfers on a non-eDP
+	 *   output as well.
+	 */
+	if (intel_dp_is_edp(intel_dp) ||
+	    display->platform.valleyview || display->platform.cherryview)
+		pps_wakeref = intel_pps_lock(intel_dp);
 
 	/*
 	 * We will be called with VDD already enabled for dpcd/edid/oui reads.
@@ -297,7 +324,7 @@ intel_dp_aux_xfer(struct intel_dp *intel_dp,
 
 	/* Try to wait for any previous AUX channel activity */
 	for (try = 0; try < 3; try++) {
-		status = intel_de_read_notrace(i915, ch_ctl);
+		status = intel_de_read_notrace(display, ch_ctl);
 		if ((status & DP_AUX_CH_CTL_SEND_BUSY) == 0)
 			break;
 		msleep(1);
@@ -306,10 +333,10 @@ intel_dp_aux_xfer(struct intel_dp *intel_dp,
 	trace_i915_reg_rw(false, ch_ctl, status, sizeof(status), true);
 
 	if (try == 3) {
-		const u32 status = intel_de_read(i915, ch_ctl);
+		const u32 status = intel_de_read(display, ch_ctl);
 
 		if (status != intel_dp->aux_busy_last_status) {
-			drm_WARN(&i915->drm, 1,
+			drm_WARN(display->drm, 1,
 				 "%s: not started (status 0x%08x)\n",
 				 intel_dp->aux.name, status);
 			intel_dp->aux_busy_last_status = status;
@@ -320,7 +347,7 @@ intel_dp_aux_xfer(struct intel_dp *intel_dp,
 	}
 
 	/* Only 5 data registers! */
-	if (drm_WARN_ON(&i915->drm, send_bytes > 20 || recv_size > 20)) {
+	if (drm_WARN_ON(display->drm, send_bytes > 20 || recv_size > 20)) {
 		ret = -E2BIG;
 		goto out;
 	}
@@ -336,17 +363,17 @@ intel_dp_aux_xfer(struct intel_dp *intel_dp,
 		for (try = 0; try < 5; try++) {
 			/* Load the send data into the aux channel data registers */
 			for (i = 0; i < send_bytes; i += 4)
-				intel_de_write(i915, ch_data[i >> 2],
+				intel_de_write(display, ch_data[i >> 2],
 					       intel_dp_aux_pack(send + i,
 								 send_bytes - i));
 
 			/* Send the command and wait for it to complete */
-			intel_de_write(i915, ch_ctl, send_ctl);
+			intel_de_write(display, ch_ctl, send_ctl);
 
 			status = intel_dp_aux_wait_done(intel_dp);
 
 			/* Clear done status and any errors */
-			intel_de_write(i915, ch_ctl,
+			intel_de_write(display, ch_ctl,
 				       status | DP_AUX_CH_CTL_DONE |
 				       DP_AUX_CH_CTL_TIME_OUT_ERROR |
 				       DP_AUX_CH_CTL_RECEIVE_ERROR);
@@ -370,7 +397,7 @@ intel_dp_aux_xfer(struct intel_dp *intel_dp,
 	}
 
 	if ((status & DP_AUX_CH_CTL_DONE) == 0) {
-		drm_err(&i915->drm, "%s: not done (status 0x%08x)\n",
+		drm_err(display->drm, "%s: not done (status 0x%08x)\n",
 			intel_dp->aux.name, status);
 		ret = -EBUSY;
 		goto out;
@@ -382,7 +409,7 @@ done:
 	 * not connected.
 	 */
 	if (status & DP_AUX_CH_CTL_RECEIVE_ERROR) {
-		drm_err(&i915->drm, "%s: receive error (status 0x%08x)\n",
+		drm_err(display->drm, "%s: receive error (status 0x%08x)\n",
 			intel_dp->aux.name, status);
 		ret = -EIO;
 		goto out;
@@ -393,7 +420,7 @@ done:
 	 * -- don't fill the kernel log with these
 	 */
 	if (status & DP_AUX_CH_CTL_TIME_OUT_ERROR) {
-		drm_dbg_kms(&i915->drm, "%s: timeout (status 0x%08x)\n",
+		drm_dbg_kms(display->drm, "%s: timeout (status 0x%08x)\n",
 			    intel_dp->aux.name, status);
 		ret = -ETIMEDOUT;
 		goto out;
@@ -408,7 +435,7 @@ done:
 	 * drm layer takes care for the necessary retries.
 	 */
 	if (recv_bytes == 0 || recv_bytes > 20) {
-		drm_dbg_kms(&i915->drm,
+		drm_dbg_kms(display->drm,
 			    "%s: Forbidden recv_bytes = %d on aux transaction\n",
 			    intel_dp->aux.name, recv_bytes);
 		ret = -EBUSY;
@@ -419,7 +446,7 @@ done:
 		recv_bytes = recv_size;
 
 	for (i = 0; i < recv_bytes; i += 4)
-		intel_dp_aux_unpack(intel_de_read(i915, ch_data[i >> 2]),
+		intel_dp_aux_unpack(intel_de_read(display, ch_data[i >> 2]),
 				    recv + i, recv_bytes - i);
 
 	ret = recv_bytes;
@@ -429,8 +456,10 @@ out:
 	if (vdd)
 		intel_pps_vdd_off_unlocked(intel_dp, false);
 
-	intel_pps_unlock(intel_dp, pps_wakeref);
-	intel_display_power_put_async(i915, aux_domain, aux_wakeref);
+	if (pps_wakeref)
+		intel_pps_unlock(intel_dp, pps_wakeref);
+
+	intel_display_power_put_async(display, aux_domain, aux_wakeref);
 out_unlock:
 	intel_digital_port_unlock(encoder);
 
@@ -468,7 +497,7 @@ static ssize_t
 intel_dp_aux_transfer(struct drm_dp_aux *aux, struct drm_dp_aux_msg *msg)
 {
 	struct intel_dp *intel_dp = container_of(aux, struct intel_dp, aux);
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	u8 txbuf[20], rxbuf[20];
 	size_t txsize, rxsize;
 	u32 flags = intel_dp_aux_xfer_flags(msg);
@@ -483,10 +512,10 @@ intel_dp_aux_transfer(struct drm_dp_aux *aux, struct drm_dp_aux_msg *msg)
 		txsize = msg->size ? HEADER_SIZE + msg->size : BARE_ADDRESS_SIZE;
 		rxsize = 2; /* 0 or 1 data bytes */
 
-		if (drm_WARN_ON(&i915->drm, txsize > 20))
+		if (drm_WARN_ON(display->drm, txsize > 20))
 			return -E2BIG;
 
-		drm_WARN_ON(&i915->drm, !msg->buffer != !msg->size);
+		drm_WARN_ON(display->drm, !msg->buffer != !msg->size);
 
 		if (msg->buffer)
 			memcpy(txbuf + HEADER_SIZE, msg->buffer, msg->size);
@@ -511,7 +540,7 @@ intel_dp_aux_transfer(struct drm_dp_aux *aux, struct drm_dp_aux_msg *msg)
 		txsize = msg->size ? HEADER_SIZE : BARE_ADDRESS_SIZE;
 		rxsize = msg->size + 1;
 
-		if (drm_WARN_ON(&i915->drm, rxsize > 20))
+		if (drm_WARN_ON(display->drm, rxsize > 20))
 			return -E2BIG;
 
 		ret = intel_dp_aux_xfer(intel_dp, txbuf, txsize,
@@ -721,7 +750,7 @@ static i915_reg_t tgl_aux_data_reg(struct intel_dp *intel_dp, int index)
 
 static i915_reg_t xelpdp_aux_ctl_reg(struct intel_dp *intel_dp)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
 	enum aux_ch aux_ch = dig_port->aux_ch;
 
@@ -732,16 +761,16 @@ static i915_reg_t xelpdp_aux_ctl_reg(struct intel_dp *intel_dp)
 	case AUX_CH_USBC2:
 	case AUX_CH_USBC3:
 	case AUX_CH_USBC4:
-		return XELPDP_DP_AUX_CH_CTL(i915, aux_ch);
+		return XELPDP_DP_AUX_CH_CTL(display, aux_ch);
 	default:
 		MISSING_CASE(aux_ch);
-		return XELPDP_DP_AUX_CH_CTL(i915, AUX_CH_A);
+		return XELPDP_DP_AUX_CH_CTL(display, AUX_CH_A);
 	}
 }
 
 static i915_reg_t xelpdp_aux_data_reg(struct intel_dp *intel_dp, int index)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
 	enum aux_ch aux_ch = dig_port->aux_ch;
 
@@ -752,10 +781,10 @@ static i915_reg_t xelpdp_aux_data_reg(struct intel_dp *intel_dp, int index)
 	case AUX_CH_USBC2:
 	case AUX_CH_USBC3:
 	case AUX_CH_USBC4:
-		return XELPDP_DP_AUX_CH_DATA(i915, aux_ch, index);
+		return XELPDP_DP_AUX_CH_DATA(display, aux_ch, index);
 	default:
 		MISSING_CASE(aux_ch);
-		return XELPDP_DP_AUX_CH_DATA(i915, AUX_CH_A, index);
+		return XELPDP_DP_AUX_CH_DATA(display, AUX_CH_A, index);
 	}
 }
 
@@ -769,25 +798,25 @@ void intel_dp_aux_fini(struct intel_dp *intel_dp)
 
 void intel_dp_aux_init(struct intel_dp *intel_dp)
 {
-	struct drm_i915_private *i915 = dp_to_i915(intel_dp);
+	struct intel_display *display = to_intel_display(intel_dp);
 	struct intel_digital_port *dig_port = dp_to_dig_port(intel_dp);
 	struct intel_encoder *encoder = &dig_port->base;
 	enum aux_ch aux_ch = dig_port->aux_ch;
 	char buf[AUX_CH_NAME_BUFSIZE];
 
-	if (DISPLAY_VER(i915) >= 14) {
+	if (DISPLAY_VER(display) >= 14) {
 		intel_dp->aux_ch_ctl_reg = xelpdp_aux_ctl_reg;
 		intel_dp->aux_ch_data_reg = xelpdp_aux_data_reg;
-	} else if (DISPLAY_VER(i915) >= 12) {
+	} else if (DISPLAY_VER(display) >= 12) {
 		intel_dp->aux_ch_ctl_reg = tgl_aux_ctl_reg;
 		intel_dp->aux_ch_data_reg = tgl_aux_data_reg;
-	} else if (DISPLAY_VER(i915) >= 9) {
+	} else if (DISPLAY_VER(display) >= 9) {
 		intel_dp->aux_ch_ctl_reg = skl_aux_ctl_reg;
 		intel_dp->aux_ch_data_reg = skl_aux_data_reg;
-	} else if (HAS_PCH_SPLIT(i915)) {
+	} else if (HAS_PCH_SPLIT(display)) {
 		intel_dp->aux_ch_ctl_reg = ilk_aux_ctl_reg;
 		intel_dp->aux_ch_data_reg = ilk_aux_data_reg;
-	} else if (IS_VALLEYVIEW(i915) || IS_CHERRYVIEW(i915)) {
+	} else if (display->platform.valleyview || display->platform.cherryview) {
 		intel_dp->aux_ch_ctl_reg = vlv_aux_ctl_reg;
 		intel_dp->aux_ch_data_reg = vlv_aux_data_reg;
 	} else {
@@ -795,38 +824,40 @@ void intel_dp_aux_init(struct intel_dp *intel_dp)
 		intel_dp->aux_ch_data_reg = g4x_aux_data_reg;
 	}
 
-	if (DISPLAY_VER(i915) >= 9)
+	if (DISPLAY_VER(display) >= 9)
 		intel_dp->get_aux_clock_divider = skl_get_aux_clock_divider;
-	else if (IS_BROADWELL(i915) || IS_HASWELL(i915))
+	else if (display->platform.broadwell || display->platform.haswell)
 		intel_dp->get_aux_clock_divider = hsw_get_aux_clock_divider;
-	else if (HAS_PCH_SPLIT(i915))
+	else if (HAS_PCH_SPLIT(display))
 		intel_dp->get_aux_clock_divider = ilk_get_aux_clock_divider;
 	else
 		intel_dp->get_aux_clock_divider = g4x_get_aux_clock_divider;
 
-	if (DISPLAY_VER(i915) >= 9)
+	if (DISPLAY_VER(display) >= 9)
 		intel_dp->get_aux_send_ctl = skl_get_aux_send_ctl;
 	else
 		intel_dp->get_aux_send_ctl = g4x_get_aux_send_ctl;
 
-	intel_dp->aux.drm_dev = &i915->drm;
+	intel_dp->aux.drm_dev = display->drm;
 	drm_dp_aux_init(&intel_dp->aux);
 
 	/* Failure to allocate our preferred name is not critical */
 	intel_dp->aux.name = kasprintf(GFP_KERNEL, "AUX %s/%s",
-				       aux_ch_name(i915, buf, sizeof(buf), aux_ch),
+				       aux_ch_name(display, buf, sizeof(buf), aux_ch),
 				       encoder->base.name);
 
 	intel_dp->aux.transfer = intel_dp_aux_transfer;
 	cpu_latency_qos_add_request(&intel_dp->pm_qos, PM_QOS_DEFAULT_VALUE);
+
+	intel_dp_dpcd_set_probe(intel_dp, true);
 }
 
 static enum aux_ch default_aux_ch(struct intel_encoder *encoder)
 {
-	struct drm_i915_private *i915 = to_i915(encoder->base.dev);
+	struct intel_display *display = to_intel_display(encoder);
 
 	/* SKL has DDI E but no AUX E */
-	if (DISPLAY_VER(i915) == 9 && encoder->port == PORT_E)
+	if (DISPLAY_VER(display) == 9 && encoder->port == PORT_E)
 		return AUX_CH_A;
 
 	return (enum aux_ch)encoder->port;
@@ -836,10 +867,10 @@ static struct intel_encoder *
 get_encoder_by_aux_ch(struct intel_encoder *encoder,
 		      enum aux_ch aux_ch)
 {
-	struct drm_i915_private *i915 = to_i915(encoder->base.dev);
+	struct intel_display *display = to_intel_display(encoder);
 	struct intel_encoder *other;
 
-	for_each_intel_encoder(&i915->drm, other) {
+	for_each_intel_encoder(display->drm, other) {
 		if (other == encoder)
 			continue;
 
@@ -855,7 +886,7 @@ get_encoder_by_aux_ch(struct intel_encoder *encoder,
 
 enum aux_ch intel_dp_aux_ch(struct intel_encoder *encoder)
 {
-	struct drm_i915_private *i915 = to_i915(encoder->base.dev);
+	struct intel_display *display = to_intel_display(encoder);
 	struct intel_encoder *other;
 	const char *source;
 	enum aux_ch aux_ch;
@@ -876,23 +907,23 @@ enum aux_ch intel_dp_aux_ch(struct intel_encoder *encoder)
 
 	other = get_encoder_by_aux_ch(encoder, aux_ch);
 	if (other) {
-		drm_dbg_kms(&i915->drm,
+		drm_dbg_kms(display->drm,
 			    "[ENCODER:%d:%s] AUX CH %s already claimed by [ENCODER:%d:%s]\n",
 			    encoder->base.base.id, encoder->base.name,
-			    aux_ch_name(i915, buf, sizeof(buf), aux_ch),
+			    aux_ch_name(display, buf, sizeof(buf), aux_ch),
 			    other->base.base.id, other->base.name);
 		return AUX_CH_NONE;
 	}
 
-	drm_dbg_kms(&i915->drm,
+	drm_dbg_kms(display->drm,
 		    "[ENCODER:%d:%s] Using AUX CH %s (%s)\n",
 		    encoder->base.base.id, encoder->base.name,
-		    aux_ch_name(i915, buf, sizeof(buf), aux_ch), source);
+		    aux_ch_name(display, buf, sizeof(buf), aux_ch), source);
 
 	return aux_ch;
 }
 
-void intel_dp_aux_irq_handler(struct drm_i915_private *i915)
+void intel_dp_aux_irq_handler(struct intel_display *display)
 {
-	wake_up_all(&i915->display.gmbus.wait_queue);
+	wake_up_all(&display->gmbus.wait_queue);
 }

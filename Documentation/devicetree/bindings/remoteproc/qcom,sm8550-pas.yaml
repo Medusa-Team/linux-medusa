@@ -15,15 +15,32 @@ description:
 
 properties:
   compatible:
-    enum:
-      - qcom,sm8550-adsp-pas
-      - qcom,sm8550-cdsp-pas
-      - qcom,sm8550-mpss-pas
-      - qcom,sm8650-adsp-pas
-      - qcom,sm8650-cdsp-pas
-      - qcom,sm8650-mpss-pas
-      - qcom,x1e80100-adsp-pas
-      - qcom,x1e80100-cdsp-pas
+    oneOf:
+      - enum:
+          - qcom,sdx75-mpss-pas
+          - qcom,sm8550-adsp-pas
+          - qcom,sm8550-cdsp-pas
+          - qcom,sm8550-mpss-pas
+          - qcom,sm8650-adsp-pas
+          - qcom,sm8650-cdsp-pas
+          - qcom,sm8650-mpss-pas
+          - qcom,sm8750-mpss-pas
+          - qcom,x1e80100-adsp-pas
+          - qcom,x1e80100-cdsp-pas
+      - items:
+          - enum:
+              - qcom,glymur-adsp-pas
+              - qcom,kaanapali-adsp-pas
+              - qcom,sm8750-adsp-pas
+          - const: qcom,sm8550-adsp-pas
+      - items:
+          - enum:
+              - qcom,glymur-cdsp-pas
+              - qcom,kaanapali-cdsp-pas
+          - const: qcom,sm8550-cdsp-pas
+      - items:
+          - const: qcom,sm8750-cdsp-pas
+          - const: qcom,sm8650-cdsp-pas
 
   reg:
     maxItems: 1
@@ -43,7 +60,6 @@ properties:
   smd-edge: false
 
   firmware-name:
-    $ref: /schemas/types.yaml#/definitions/string-array
     items:
       - description: Firmware name of the Hexagon core
       - description: Firmware name of the Hexagon Devicetree
@@ -84,6 +100,24 @@ allOf:
   - if:
       properties:
         compatible:
+          contains:
+            enum:
+              - qcom,glymur-adsp-pas
+              - qcom,glymur-cdsp-pas
+              - qcom,kaanapali-adsp-pas
+              - qcom,kaanapali-cdsp-pas
+              - qcom,sm8750-adsp-pas
+    then:
+      properties:
+        interrupts:
+          maxItems: 6
+        interrupt-names:
+          maxItems: 6
+        memory-region:
+          maxItems: 2
+  - if:
+      properties:
+        compatible:
           enum:
             - qcom,sm8650-cdsp-pas
     then:
@@ -95,6 +129,23 @@ allOf:
         memory-region:
           minItems: 3
           maxItems: 3
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - qcom,sm8750-cdsp-pas
+    then:
+      properties:
+        interrupts:
+          maxItems: 6
+        interrupt-names:
+          maxItems: 6
+        memory-region:
+          minItems: 3
+          maxItems: 3
+
   - if:
       properties:
         compatible:
@@ -113,6 +164,7 @@ allOf:
       properties:
         compatible:
           enum:
+            - qcom,sdx75-mpss-pas
             - qcom,sm8650-mpss-pas
     then:
       properties:
@@ -128,9 +180,25 @@ allOf:
       properties:
         compatible:
           enum:
-            - qcom,sm8550-adsp-pas
-            - qcom,sm8650-adsp-pas
-            - qcom,x1e80100-adsp-pas
+            - qcom,sm8750-mpss-pas
+    then:
+      properties:
+        interrupts:
+          minItems: 6
+        interrupt-names:
+          minItems: 6
+        memory-region:
+          minItems: 4
+          maxItems: 4
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - qcom,sm8550-adsp-pas
+              - qcom,sm8650-adsp-pas
+              - qcom,x1e80100-adsp-pas
     then:
       properties:
         power-domains:
@@ -146,8 +214,10 @@ allOf:
       properties:
         compatible:
           enum:
+            - qcom,sdx75-mpss-pas
             - qcom,sm8550-mpss-pas
             - qcom,sm8650-mpss-pas
+            - qcom,sm8750-mpss-pas
     then:
       properties:
         power-domains:
@@ -161,10 +231,11 @@ allOf:
   - if:
       properties:
         compatible:
-          enum:
-            - qcom,sm8550-cdsp-pas
-            - qcom,sm8650-cdsp-pas
-            - qcom,x1e80100-cdsp-pas
+          contains:
+            enum:
+              - qcom,sm8550-cdsp-pas
+              - qcom,sm8650-cdsp-pas
+              - qcom,x1e80100-cdsp-pas
     then:
       properties:
         power-domains:

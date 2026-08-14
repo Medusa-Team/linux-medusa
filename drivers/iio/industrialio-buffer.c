@@ -36,7 +36,7 @@
 
 #define DMABUF_ENQUEUE_TIMEOUT_MS 5000
 
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");
 
 struct iio_dmabuf_priv {
 	struct list_head entry;
@@ -228,8 +228,10 @@ static ssize_t iio_buffer_write(struct file *filp, const char __user *buf,
 	written = 0;
 	add_wait_queue(&rb->pollq, &wait);
 	do {
-		if (!indio_dev->info)
-			return -ENODEV;
+		if (!indio_dev->info) {
+			ret = -ENODEV;
+			break;
+		}
 
 		if (!iio_buffer_space_available(rb)) {
 			if (signal_pending(current)) {
@@ -508,18 +510,19 @@ static bool iio_validate_scan_mask(struct iio_dev *indio_dev,
 static int iio_scan_mask_set(struct iio_dev *indio_dev,
 			     struct iio_buffer *buffer, int bit)
 {
+	unsigned int masklength = iio_get_masklength(indio_dev);
 	const unsigned long *mask;
 	unsigned long *trialmask;
 
-	if (!indio_dev->masklength) {
+	if (!masklength) {
 		WARN(1, "Trying to set scanmask prior to registering buffer\n");
 		return -EINVAL;
 	}
 
-	trialmask = bitmap_alloc(indio_dev->masklength, GFP_KERNEL);
+	trialmask = bitmap_alloc(masklength, GFP_KERNEL);
 	if (!trialmask)
 		return -ENOMEM;
-	bitmap_copy(trialmask, buffer->scan_mask, indio_dev->masklength);
+	bitmap_copy(trialmask, buffer->scan_mask, masklength);
 	set_bit(bit, trialmask);
 
 	if (!iio_validate_scan_mask(indio_dev, trialmask))
@@ -527,12 +530,11 @@ static int iio_scan_mask_set(struct iio_dev *indio_dev,
 
 	if (indio_dev->available_scan_masks) {
 		mask = iio_scan_mask_match(indio_dev->available_scan_masks,
-					   indio_dev->masklength,
-					   trialmask, false);
+					   masklength, trialmask, false);
 		if (!mask)
 			goto err_invalid_mask;
 	}
-	bitmap_copy(buffer->scan_mask, trialmask, indio_dev->masklength);
+	bitmap_copy(buffer->scan_mask, trialmask, masklength);
 
 	bitmap_free(trialmask);
 
@@ -552,7 +554,7 @@ static int iio_scan_mask_clear(struct iio_buffer *buffer, int bit)
 static int iio_scan_mask_query(struct iio_dev *indio_dev,
 			       struct iio_buffer *buffer, int bit)
 {
-	if (bit > indio_dev->masklength)
+	if (bit > iio_get_masklength(indio_dev))
 		return -EINVAL;
 
 	if (!buffer->scan_mask)
@@ -768,8 +770,7 @@ static int iio_compute_scan_bytes(struct iio_dev *indio_dev,
 	int length, i, largest = 0;
 
 	/* How much space will the demuxed element take? */
-	for_each_set_bit(i, mask,
-			 indio_dev->masklength) {
+	for_each_set_bit(i, mask, iio_get_masklength(indio_dev)) {
 		length = iio_storage_bytes_for_si(indio_dev, i);
 		if (length < 0)
 			return length;
@@ -890,6 +891,7 @@ static int iio_verify_update(struct iio_dev *indio_dev,
 			     struct iio_device_config *config)
 {
 	struct iio_dev_opaque *iio_dev_opaque = to_iio_dev_opaque(indio_dev);
+	unsigned int masklength = iio_get_masklength(indio_dev);
 	unsigned long *compound_mask;
 	const unsigned long *scan_mask;
 	bool strict_scanmask = false;
@@ -898,7 +900,7 @@ static int iio_verify_update(struct iio_dev *indio_dev,
 	unsigned int modes;
 
 	if (insert_buffer &&
-	    bitmap_empty(insert_buffer->scan_mask, indio_dev->masklength)) {
+	    bitmap_empty(insert_buffer->scan_mask, masklength)) {
 		dev_dbg(&indio_dev->dev,
 			"At least one scan element must be enabled first\n");
 		return -EINVAL;
@@ -952,7 +954,7 @@ static int iio_verify_update(struct iio_dev *indio_dev,
 	}
 
 	/* What scan mask do we actually have? */
-	compound_mask = bitmap_zalloc(indio_dev->masklength, GFP_KERNEL);
+	compound_mask = bitmap_zalloc(masklength, GFP_KERNEL);
 	if (!compound_mask)
 		return -ENOMEM;
 
@@ -962,20 +964,19 @@ static int iio_verify_update(struct iio_dev *indio_dev,
 		if (buffer == remove_buffer)
 			continue;
 		bitmap_or(compound_mask, compound_mask, buffer->scan_mask,
-			  indio_dev->masklength);
+			  masklength);
 		scan_timestamp |= buffer->scan_timestamp;
 	}
 
 	if (insert_buffer) {
 		bitmap_or(compound_mask, compound_mask,
-			  insert_buffer->scan_mask, indio_dev->masklength);
+			  insert_buffer->scan_mask, masklength);
 		scan_timestamp |= insert_buffer->scan_timestamp;
 	}
 
 	if (indio_dev->available_scan_masks) {
 		scan_mask = iio_scan_mask_match(indio_dev->available_scan_masks,
-						indio_dev->masklength,
-						compound_mask,
+						masklength, compound_mask,
 						strict_scanmask);
 		bitmap_free(compound_mask);
 		if (!scan_mask)
@@ -1025,7 +1026,7 @@ static int iio_buffer_add_demux(struct iio_buffer *buffer,
 	    (*p)->to + (*p)->length == out_loc) {
 		(*p)->length += length;
 	} else {
-		*p = kmalloc(sizeof(**p), GFP_KERNEL);
+		*p = kmalloc_obj(**p);
 		if (!(*p))
 			return -ENOMEM;
 		(*p)->from = in_loc;
@@ -1040,6 +1041,7 @@ static int iio_buffer_add_demux(struct iio_buffer *buffer,
 static int iio_buffer_update_demux(struct iio_dev *indio_dev,
 				   struct iio_buffer *buffer)
 {
+	unsigned int masklength = iio_get_masklength(indio_dev);
 	int ret, in_ind = -1, out_ind, length;
 	unsigned int in_loc = 0, out_loc = 0;
 	struct iio_demux_table *p = NULL;
@@ -1051,17 +1053,13 @@ static int iio_buffer_update_demux(struct iio_dev *indio_dev,
 
 	/* First work out which scan mode we will actually have */
 	if (bitmap_equal(indio_dev->active_scan_mask,
-			 buffer->scan_mask,
-			 indio_dev->masklength))
+			 buffer->scan_mask, masklength))
 		return 0;
 
 	/* Now we have the two masks, work from least sig and build up sizes */
-	for_each_set_bit(out_ind,
-			 buffer->scan_mask,
-			 indio_dev->masklength) {
+	for_each_set_bit(out_ind, buffer->scan_mask, masklength) {
 		in_ind = find_next_bit(indio_dev->active_scan_mask,
-				       indio_dev->masklength,
-				       in_ind + 1);
+				       masklength, in_ind + 1);
 		while (in_ind != out_ind) {
 			ret = iio_storage_bytes_for_si(indio_dev, in_ind);
 			if (ret < 0)
@@ -1071,8 +1069,7 @@ static int iio_buffer_update_demux(struct iio_dev *indio_dev,
 			/* Make sure we are aligned */
 			in_loc = roundup(in_loc, length) + length;
 			in_ind = find_next_bit(indio_dev->active_scan_mask,
-					       indio_dev->masklength,
-					       in_ind + 1);
+					       masklength, in_ind + 1);
 		}
 		ret = iio_storage_bytes_for_si(indio_dev, in_ind);
 		if (ret < 0)
@@ -1142,7 +1139,7 @@ static int iio_enable_buffers(struct iio_dev *indio_dev,
 	int ret;
 
 	indio_dev->active_scan_mask = config->scan_mask;
-	indio_dev->scan_timestamp = config->scan_timestamp;
+	ACCESS_PRIVATE(indio_dev, scan_timestamp) = config->scan_timestamp;
 	indio_dev->scan_bytes = config->scan_bytes;
 	iio_dev_opaque->currentmode = config->mode;
 
@@ -1483,7 +1480,7 @@ static struct attribute *iio_buffer_wrap_attr(struct iio_buffer *buffer,
 	struct device_attribute *dattr = to_dev_attr(attr);
 	struct iio_dev_attr *iio_attr;
 
-	iio_attr = kzalloc(sizeof(*iio_attr), GFP_KERNEL);
+	iio_attr = kzalloc_obj(*iio_attr);
 	if (!iio_attr)
 		return NULL;
 
@@ -1512,7 +1509,7 @@ static int iio_buffer_register_legacy_sysfs_groups(struct iio_dev *indio_dev,
 	struct attribute **attrs;
 	int ret;
 
-	attrs = kcalloc(buffer_attrcount + 1, sizeof(*attrs), GFP_KERNEL);
+	attrs = kzalloc_objs(*attrs, buffer_attrcount + 1);
 	if (!attrs)
 		return -ENOMEM;
 
@@ -1526,7 +1523,7 @@ static int iio_buffer_register_legacy_sysfs_groups(struct iio_dev *indio_dev,
 	if (ret)
 		goto error_free_buffer_attrs;
 
-	attrs = kcalloc(scan_el_attrcount + 1, sizeof(*attrs), GFP_KERNEL);
+	attrs = kzalloc_objs(*attrs, scan_el_attrcount + 1);
 	if (!attrs) {
 		ret = -ENOMEM;
 		goto error_free_buffer_attrs;
@@ -1568,9 +1565,7 @@ static void iio_buffer_dmabuf_release(struct kref *ref)
 	struct iio_buffer *buffer = priv->buffer;
 	struct dma_buf *dmabuf = attach->dmabuf;
 
-	dma_resv_lock(dmabuf->resv, NULL);
-	dma_buf_unmap_attachment(attach, priv->sgt, priv->dir);
-	dma_resv_unlock(dmabuf->resv);
+	dma_buf_unmap_attachment_unlocked(attach, priv->sgt, priv->dir);
 
 	buffer->access->detach_dmabuf(buffer, priv->block);
 
@@ -1628,19 +1623,28 @@ static int iio_dma_resv_lock(struct dma_buf *dmabuf, bool nonblock)
 	return 0;
 }
 
+static struct device *iio_buffer_get_dma_dev(const struct iio_dev *indio_dev,
+					     struct iio_buffer *buffer)
+{
+	if (buffer->access->get_dma_dev)
+		return buffer->access->get_dma_dev(buffer);
+
+	return indio_dev->dev.parent;
+}
+
 static struct dma_buf_attachment *
 iio_buffer_find_attachment(struct iio_dev_buffer_pair *ib,
 			   struct dma_buf *dmabuf, bool nonblock)
 {
-	struct device *dev = ib->indio_dev->dev.parent;
 	struct iio_buffer *buffer = ib->buffer;
+	struct device *dma_dev = iio_buffer_get_dma_dev(ib->indio_dev, buffer);
 	struct dma_buf_attachment *attach = NULL;
 	struct iio_dmabuf_priv *priv;
 
 	guard(mutex)(&buffer->dmabufs_mutex);
 
 	list_for_each_entry(priv, &buffer->dmabufs, entry) {
-		if (priv->attach->dev == dev
+		if (priv->attach->dev == dma_dev
 		    && priv->attach->dmabuf == dmabuf) {
 			attach = priv->attach;
 			break;
@@ -1658,6 +1662,7 @@ static int iio_buffer_attach_dmabuf(struct iio_dev_buffer_pair *ib,
 {
 	struct iio_dev *indio_dev = ib->indio_dev;
 	struct iio_buffer *buffer = ib->buffer;
+	struct device *dma_dev = iio_buffer_get_dma_dev(indio_dev, buffer);
 	struct dma_buf_attachment *attach;
 	struct iio_dmabuf_priv *priv, *each;
 	struct dma_buf *dmabuf;
@@ -1671,7 +1676,7 @@ static int iio_buffer_attach_dmabuf(struct iio_dev_buffer_pair *ib,
 	if (copy_from_user(&fd, user_fd, sizeof(fd)))
 		return -EFAULT;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
@@ -1684,7 +1689,7 @@ static int iio_buffer_attach_dmabuf(struct iio_dev_buffer_pair *ib,
 		goto err_free_priv;
 	}
 
-	attach = dma_buf_attach(dmabuf, indio_dev->dev.parent);
+	attach = dma_buf_attach(dmabuf, dma_dev);
 	if (IS_ERR(attach)) {
 		err = PTR_ERR(attach);
 		goto err_dmabuf_put;
@@ -1724,7 +1729,7 @@ static int iio_buffer_attach_dmabuf(struct iio_dev_buffer_pair *ib,
 	 * combo. If we do, refuse to attach.
 	 */
 	list_for_each_entry(each, &buffer->dmabufs, entry) {
-		if (each->attach->dev == indio_dev->dev.parent
+		if (each->attach->dev == dma_dev
 		    && each->attach->dmabuf == dmabuf) {
 			/*
 			 * We unlocked the reservation object, so going through
@@ -1763,6 +1768,7 @@ static int iio_buffer_detach_dmabuf(struct iio_dev_buffer_pair *ib,
 {
 	struct iio_buffer *buffer = ib->buffer;
 	struct iio_dev *indio_dev = ib->indio_dev;
+	struct device *dma_dev = iio_buffer_get_dma_dev(indio_dev, buffer);
 	struct iio_dmabuf_priv *priv;
 	struct dma_buf *dmabuf;
 	int dmabuf_fd, ret = -EPERM;
@@ -1777,7 +1783,7 @@ static int iio_buffer_detach_dmabuf(struct iio_dev_buffer_pair *ib,
 	guard(mutex)(&buffer->dmabufs_mutex);
 
 	list_for_each_entry(priv, &buffer->dmabufs, entry) {
-		if (priv->attach->dev == indio_dev->dev.parent
+		if (priv->attach->dev == dma_dev
 		    && priv->attach->dmabuf == dmabuf) {
 			list_del(&priv->entry);
 
@@ -1858,7 +1864,7 @@ static int iio_buffer_enqueue_dmabuf(struct iio_dev_buffer_pair *ib,
 
 	priv = attach->importer_priv;
 
-	fence = kmalloc(sizeof(*fence), GFP_KERNEL);
+	fence = kmalloc_obj(*fence);
 	if (!fence) {
 		ret = -ENOMEM;
 		goto err_attachment_put;
@@ -1903,6 +1909,7 @@ static int iio_buffer_enqueue_dmabuf(struct iio_dev_buffer_pair *ib,
 
 	dma_resv_add_fence(dmabuf->resv, &fence->base,
 			   dma_to_ram ? DMA_RESV_USAGE_WRITE : DMA_RESV_USAGE_READ);
+	dma_fence_put(&fence->base);
 	dma_resv_unlock(dmabuf->resv);
 
 	cookie = dma_fence_begin_signalling();
@@ -2031,7 +2038,7 @@ static long iio_device_buffer_getfd(struct iio_dev *indio_dev, unsigned long arg
 		goto error_iio_dev_put;
 	}
 
-	ib = kzalloc(sizeof(*ib), GFP_KERNEL);
+	ib = kzalloc_obj(*ib);
 	if (!ib) {
 		ret = -ENOMEM;
 		goto error_clear_busy_bit;
@@ -2104,6 +2111,7 @@ static int __iio_buffer_alloc_sysfs_and_mask(struct iio_buffer *buffer,
 					     int index)
 {
 	struct iio_dev_opaque *iio_dev_opaque = to_iio_dev_opaque(indio_dev);
+	unsigned int masklength = iio_get_masklength(indio_dev);
 	struct iio_dev_attr *p;
 	const struct iio_dev_attr *id_attr;
 	struct attribute **attr;
@@ -2166,8 +2174,8 @@ static int __iio_buffer_alloc_sysfs_and_mask(struct iio_buffer *buffer,
 				iio_dev_opaque->scan_index_timestamp =
 					channels[i].scan_index;
 		}
-		if (indio_dev->masklength && !buffer->scan_mask) {
-			buffer->scan_mask = bitmap_zalloc(indio_dev->masklength,
+		if (masklength && !buffer->scan_mask) {
+			buffer->scan_mask = bitmap_zalloc(masklength,
 							  GFP_KERNEL);
 			if (!buffer->scan_mask) {
 				ret = -ENOMEM;
@@ -2177,7 +2185,7 @@ static int __iio_buffer_alloc_sysfs_and_mask(struct iio_buffer *buffer,
 	}
 
 	attrn = buffer_attrcount + scan_el_attrcount;
-	attr = kcalloc(attrn + 1, sizeof(*attr), GFP_KERNEL);
+	attr = kzalloc_objs(*attr, attrn + 1);
 	if (!attr) {
 		ret = -ENOMEM;
 		goto error_free_scan_mask;
@@ -2273,7 +2281,7 @@ int iio_buffers_alloc_sysfs_and_mask(struct iio_dev *indio_dev)
 
 		for (i = 0; i < indio_dev->num_channels; i++)
 			ml = max(ml, channels[i].scan_index + 1);
-		indio_dev->masklength = ml;
+		ACCESS_PRIVATE(indio_dev, masklength) = ml;
 	}
 
 	if (!iio_dev_opaque->attached_buffers_cnt)
@@ -2337,7 +2345,7 @@ void iio_buffers_free_sysfs_and_mask(struct iio_dev *indio_dev)
 bool iio_validate_scan_mask_onehot(struct iio_dev *indio_dev,
 				   const unsigned long *mask)
 {
-	return bitmap_weight(mask, indio_dev->masklength) == 1;
+	return bitmap_weight(mask, iio_get_masklength(indio_dev)) == 1;
 }
 EXPORT_SYMBOL_GPL(iio_validate_scan_mask_onehot);
 
@@ -2376,6 +2384,9 @@ static int iio_push_to_buffer(struct iio_buffer *buffer, const void *data)
  * iio_push_to_buffers() - push to a registered buffer.
  * @indio_dev:		iio_dev structure for device.
  * @data:		Full scan.
+ *
+ * Context: Any context.
+ * Return: 0 on success, negative error code on failure.
  */
 int iio_push_to_buffers(struct iio_dev *indio_dev, const void *data)
 {
@@ -2405,6 +2416,9 @@ EXPORT_SYMBOL_GPL(iio_push_to_buffers);
  * not require space for the timestamp, or 8 byte alignment of data.
  * It does however require an allocation on first call and additional
  * copies on all calls, so should be avoided if possible.
+ *
+ * Context: May sleep.
+ * Return: 0 on success, negative error code on failure.
  */
 int iio_push_to_buffers_with_ts_unaligned(struct iio_dev *indio_dev,
 					  const void *data,
@@ -2412,6 +2426,8 @@ int iio_push_to_buffers_with_ts_unaligned(struct iio_dev *indio_dev,
 					  int64_t timestamp)
 {
 	struct iio_dev_opaque *iio_dev_opaque = to_iio_dev_opaque(indio_dev);
+
+	might_sleep();
 
 	/*
 	 * Conservative estimate - we can always safely copy the minimum

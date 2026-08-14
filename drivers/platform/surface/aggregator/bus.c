@@ -6,6 +6,7 @@
  */
 
 #include <linux/device.h>
+#include <linux/of.h>
 #include <linux/property.h>
 #include <linux/slab.h>
 
@@ -82,7 +83,7 @@ struct ssam_device *ssam_device_alloc(struct ssam_controller *ctrl,
 {
 	struct ssam_device *sdev;
 
-	sdev = kzalloc(sizeof(*sdev), GFP_KERNEL);
+	sdev = kzalloc_obj(*sdev);
 	if (!sdev)
 		return NULL;
 
@@ -441,6 +442,7 @@ static int ssam_add_client_device(struct device *parent, struct ssam_controller 
 
 	sdev->dev.parent = parent;
 	sdev->dev.fwnode = fwnode_handle_get(node);
+	sdev->dev.of_node = to_of_node(node);
 
 	status = ssam_device_add(sdev);
 	if (status)

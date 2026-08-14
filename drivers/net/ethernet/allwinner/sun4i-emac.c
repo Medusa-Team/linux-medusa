@@ -223,7 +223,7 @@ emac_alloc_dma_req(struct emac_board_info *db,
 {
 	struct emac_dma_req *req;
 
-	req = kzalloc(sizeof(struct emac_dma_req), GFP_ATOMIC);
+	req = kzalloc_obj(struct emac_dma_req, GFP_ATOMIC);
 	if (!req)
 		return NULL;
 
@@ -1142,7 +1142,7 @@ static struct platform_driver emac_driver = {
 		.of_match_table = emac_of_match,
 	},
 	.probe = emac_probe,
-	.remove_new = emac_remove,
+	.remove = emac_remove,
 	.suspend = emac_suspend,
 	.resume = emac_resume,
 };

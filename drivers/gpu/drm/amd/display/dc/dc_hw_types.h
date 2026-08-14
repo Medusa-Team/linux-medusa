@@ -68,7 +68,7 @@ enum dc_plane_addr_type {
 
 struct dc_plane_address {
 	enum dc_plane_addr_type type;
-	bool tmz_surface;
+	uint8_t tmz_surface;
 	union {
 		struct{
 			PHYSICAL_ADDRESS_LOC addr;
@@ -218,7 +218,7 @@ enum surface_pixel_format {
 
 
 /* Pixel format */
-enum pixel_format {
+enum dc_pixel_format {
 	/*graph*/
 	PIXEL_FORMAT_UNINITIALIZED,
 	PIXEL_FORMAT_INDEX8,
@@ -269,6 +269,15 @@ enum tripleBuffer_enable {
 };
 enum tile_split_values_new {
 	DC_SURF_TILE_SPLIT_1KB = 0x4,
+};
+
+enum otg_pwa_sync_mode {
+	DC_OTG_PWA_FRAME_SYNC_MODE_VSYNC = 0x0,
+	DC_OTG_PWA_FRAME_SYNC_MODE_VSTARTUP = 0x1,
+};
+struct otc_pwa_frame_sync {
+	enum otg_pwa_sync_mode pwa_sync_mode;
+	uint32_t pwa_frame_sync_line_offset;
 };
 
 /* TODO: These values come from hardware spec. We need to readdress this
@@ -341,89 +350,105 @@ enum swizzle_mode_addr3_values {
 	DC_ADDR3_SW_UNKNOWN = DC_ADDR3_SW_MAX
 };
 
-union dc_tiling_info {
+enum dc_gfxversion {
+	DcGfxVersion7 = 0,
+	DcGfxVersion8,
+	DcGfxVersion9,
+	DcGfxVersion10,
+	DcGfxVersion11,
+	DcGfxAddr3,
+	DcGfxVersionUnknown
+};
+
+ struct dc_tiling_info {
+	unsigned int gfxversion;     // Specifies which part of the union to use. Must use DalGfxVersion enum
+	union {
+		struct {
+			/* Specifies the number of memory banks for tiling
+			 *	purposes.
+			 * Only applies to 2D and 3D tiling modes.
+			 *	POSSIBLE VALUES: 2,4,8,16
+			 */
+			unsigned int num_banks;
+			/* Specifies the number of tiles in the x direction
+			 *	to be incorporated into the same bank.
+			 * Only applies to 2D and 3D tiling modes.
+			 *	POSSIBLE VALUES: 1,2,4,8
+			 */
+			unsigned int bank_width;
+			unsigned int bank_width_c;
+			/* Specifies the number of tiles in the y direction to
+			 *	be incorporated into the same bank.
+			 * Only applies to 2D and 3D tiling modes.
+			 *	POSSIBLE VALUES: 1,2,4,8
+			 */
+			unsigned int bank_height;
+			unsigned int bank_height_c;
+			/* Specifies the macro tile aspect ratio. Only applies
+			 * to 2D and 3D tiling modes.
+			 */
+			unsigned int tile_aspect;
+			unsigned int tile_aspect_c;
+			/* Specifies the number of bytes that will be stored
+			 *	contiguously for each tile.
+			 * If the tile data requires more storage than this
+			 *	amount, it is split into multiple slices.
+			 * This field must not be larger than
+			 *	GB_ADDR_CONFIG.DRAM_ROW_SIZE.
+			 * Only applies to 2D and 3D tiling modes.
+			 * For color render targets, TILE_SPLIT >= 256B.
+			 */
+			enum tile_split_values tile_split;
+			enum tile_split_values tile_split_c;
+			/* Specifies the addressing within a tile.
+			 *	0x0 - DISPLAY_MICRO_TILING
+			 *	0x1 - THIN_MICRO_TILING
+			 *	0x2 - DEPTH_MICRO_TILING
+			 *	0x3 - ROTATED_MICRO_TILING
+			 */
+			enum tile_mode_values tile_mode;
+			enum tile_mode_values tile_mode_c;
+			/* Specifies the number of pipes and how they are
+			 *	interleaved in the surface.
+			 * Refer to memory addressing document for complete
+			 *	details and constraints.
+			 */
+			unsigned int pipe_config;
+			/* Specifies the tiling mode of the surface.
+			 * THIN tiles use an 8x8x1 tile size.
+			 * THICK tiles use an 8x8x4 tile size.
+			 * 2D tiling modes rotate banks for successive Z slices
+			 * 3D tiling modes rotate pipes and banks for Z slices
+			 * Refer to memory addressing document for complete
+			 *	details and constraints.
+			 */
+			enum array_mode_values array_mode;
+		} gfx8;
+
+		struct {
+			enum swizzle_mode_values swizzle;
+			unsigned int num_pipes;
+			unsigned int max_compressed_frags;
+			unsigned int pipe_interleave;
+
+			unsigned int num_banks;
+			unsigned int num_shader_engines;
+			unsigned int num_rb_per_se;
+			bool shaderEnable;
+
+			bool meta_linear;
+			bool rb_aligned;
+			bool pipe_aligned;
+			unsigned int num_pkrs;
+		} gfx9;/*gfx9, gfx10 and above*/
+		struct {
+			enum swizzle_mode_addr3_values swizzle;
+		} gfx_addr3;/*gfx with addr3 and above*/
+	};
 
 	struct {
-		/* Specifies the number of memory banks for tiling
-		 *	purposes.
-		 * Only applies to 2D and 3D tiling modes.
-		 *	POSSIBLE VALUES: 2,4,8,16
-		 */
-		unsigned int num_banks;
-		/* Specifies the number of tiles in the x direction
-		 *	to be incorporated into the same bank.
-		 * Only applies to 2D and 3D tiling modes.
-		 *	POSSIBLE VALUES: 1,2,4,8
-		 */
-		unsigned int bank_width;
-		unsigned int bank_width_c;
-		/* Specifies the number of tiles in the y direction to
-		 *	be incorporated into the same bank.
-		 * Only applies to 2D and 3D tiling modes.
-		 *	POSSIBLE VALUES: 1,2,4,8
-		 */
-		unsigned int bank_height;
-		unsigned int bank_height_c;
-		/* Specifies the macro tile aspect ratio. Only applies
-		 * to 2D and 3D tiling modes.
-		 */
-		unsigned int tile_aspect;
-		unsigned int tile_aspect_c;
-		/* Specifies the number of bytes that will be stored
-		 *	contiguously for each tile.
-		 * If the tile data requires more storage than this
-		 *	amount, it is split into multiple slices.
-		 * This field must not be larger than
-		 *	GB_ADDR_CONFIG.DRAM_ROW_SIZE.
-		 * Only applies to 2D and 3D tiling modes.
-		 * For color render targets, TILE_SPLIT >= 256B.
-		 */
-		enum tile_split_values tile_split;
-		enum tile_split_values tile_split_c;
-		/* Specifies the addressing within a tile.
-		 *	0x0 - DISPLAY_MICRO_TILING
-		 *	0x1 - THIN_MICRO_TILING
-		 *	0x2 - DEPTH_MICRO_TILING
-		 *	0x3 - ROTATED_MICRO_TILING
-		 */
-		enum tile_mode_values tile_mode;
-		enum tile_mode_values tile_mode_c;
-		/* Specifies the number of pipes and how they are
-		 *	interleaved in the surface.
-		 * Refer to memory addressing document for complete
-		 *	details and constraints.
-		 */
-		unsigned int pipe_config;
-		/* Specifies the tiling mode of the surface.
-		 * THIN tiles use an 8x8x1 tile size.
-		 * THICK tiles use an 8x8x4 tile size.
-		 * 2D tiling modes rotate banks for successive Z slices
-		 * 3D tiling modes rotate pipes and banks for Z slices
-		 * Refer to memory addressing document for complete
-		 *	details and constraints.
-		 */
-		enum array_mode_values array_mode;
-	} gfx8;
-
-	struct {
-		enum swizzle_mode_values swizzle;
-		unsigned int num_pipes;
-		unsigned int max_compressed_frags;
-		unsigned int pipe_interleave;
-
-		unsigned int num_banks;
-		unsigned int num_shader_engines;
-		unsigned int num_rb_per_se;
-		bool shaderEnable;
-
-		bool meta_linear;
-		bool rb_aligned;
-		bool pipe_aligned;
-		unsigned int num_pkrs;
-	} gfx9;/*gfx9, gfx10 and above*/
-	struct {
-		enum swizzle_mode_addr3_values swizzle;
-	} gfx_addr3;/*gfx with addr3 and above*/
+		bool avoid_full_update_on_tiling_change;
+	} flags;
 };
 
 /* Rotation angle */
@@ -479,6 +504,12 @@ struct dc_cursor_position {
 	 * for each plane.
 	 */
 	bool translate_by_source;
+
+	/**
+	 * @use_viewport_for_clip: Use viewport position for clip_x calculation
+	 * instead of clip_rect. Required to protect against clip being overwritten
+	 */
+	bool use_viewport_for_clip;
 };
 
 struct dc_cursor_mi_param {
@@ -641,7 +672,8 @@ enum dc_color_space {
 	COLOR_SPACE_YCBCR709_LIMITED,
 	COLOR_SPACE_2020_RGB_FULLRANGE,
 	COLOR_SPACE_2020_RGB_LIMITEDRANGE,
-	COLOR_SPACE_2020_YCBCR,
+	COLOR_SPACE_2020_YCBCR_LIMITED,
+	COLOR_SPACE_2020_YCBCR_FULL,
 	COLOR_SPACE_ADOBERGB,
 	COLOR_SPACE_DCIP3,
 	COLOR_SPACE_DISPLAYNATIVE,
@@ -649,6 +681,7 @@ enum dc_color_space {
 	COLOR_SPACE_APPCTRL,
 	COLOR_SPACE_CUSTOMPOINTS,
 	COLOR_SPACE_YCBCR709_BLACK,
+	COLOR_SPACE_2020_YCBCR = COLOR_SPACE_2020_YCBCR_LIMITED,
 };
 
 enum dc_dither_option {
@@ -761,13 +794,6 @@ enum scanning_type {
 	SCANNING_TYPE_UNDERSCAN,
 	SCANNING_TYPE_FUTURE,
 	SCANNING_TYPE_UNDEFINED
-};
-
-enum chroma_cositing {
-	CHROMA_COSITING_NONE,
-	CHROMA_COSITING_LEFT,
-	CHROMA_COSITING_TOPLEFT,
-	CHROMA_COSITING_COUNT
 };
 
 struct dc_crtc_timing_flags {
@@ -967,6 +993,7 @@ struct dc_crtc_timing {
 	uint32_t pix_clk_100hz;
 
 	uint32_t min_refresh_in_uhz;
+	uint32_t max_refresh_in_uhz;
 
 	uint32_t vic;
 	uint32_t hdmi_vic;
@@ -982,6 +1009,9 @@ struct dc_crtc_timing {
 	struct dc_crtc_timing_flags flags;
 	uint32_t dsc_fixed_bits_per_pixel_x16; /* DSC target bitrate in 1/16 of bpp (e.g. 128 -> 8bpp) */
 	struct dc_dsc_config dsc_cfg;
+
+	/* The number of pixels that HBlank has been expanded by from the original EDID timing. */
+	uint32_t expanded_hblank;
 };
 
 enum trigger_delay {
@@ -1007,6 +1037,7 @@ struct dc_crtc_timing_adjust {
 	uint32_t v_total_mid;
 	uint32_t v_total_mid_frame_num;
 	uint32_t allow_otg_v_count_halt;
+	uint8_t timing_adjust_pending;
 };
 
 
@@ -1092,7 +1123,8 @@ enum mpcc_gamut_remap_mode_select {
 enum mpcc_gamut_remap_id {
 	MPCC_OGAM_GAMUT_REMAP,
 	MPCC_MCM_FIRST_GAMUT_REMAP,
-	MPCC_MCM_SECOND_GAMUT_REMAP
+	MPCC_MCM_SECOND_GAMUT_REMAP,
+	MPCC_RMCM_GAMUT_REMAP,
 };
 
 enum cursor_matrix_mode {
@@ -1118,6 +1150,7 @@ struct mcif_buf_params {
 	unsigned int		warmup_pitch;
 	unsigned int		swlock;
 	unsigned int		p_vmid;
+	uint8_t				tmz_id;
 };
 
 
@@ -1143,5 +1176,68 @@ struct phy_state {
 	enum symclk_state symclk_state;
 };
 
+enum cm_hist_tap_point {
+	CM_HIST_TAP_POINT_1,
+	CM_HIST_TAP_POINT_2,
+	CM_HIST_TAP_POINT_3,
+	CM_HIST_TAP_POINT_4,
+};
+
+enum cm_hist_src {
+	CM_HIST_SRC1,
+	CM_HIST_SRC2,
+	CM_HIST_SRC3,
+};
+
+enum cm_hist_format {
+	CM_HIST_FORMAT_FIXED_POINT,
+	CM_HIST_FORMAT_FP16_POS,
+	CM_HIST_FORMAT_FP16_POS_AND_NEG,
+};
+
+enum cm_hist_read_channel_mask {
+	CM_HIST_READ_DISABLED,
+	CM_HIST_READ_CH1,
+	CM_HIST_READ_CH2,
+	CM_HIST_READ_CH1_CH2,
+	CM_HIST_READ_CH3,
+	CM_HIST_READ_CH1_CH3,
+	CM_HIST_READ_CH2_CH3,
+	CM_HIST_READ_ALL,
+};
+
+enum cm_hist_src1_mode {
+	CM_HIST_SRC1_MODE_R_OR_CR,
+	CM_HIST_SRC1_MODE_MAX_RGB,
+};
+
+enum cm_hist_src2_mode {
+	CM_HIST_SRC2_MODE_G_OR_Y,
+	CM_HIST_SRC2_MODE_RGB_TO_Y,
+};
+
+enum cm_hist_src3_mode {
+	CM_HIST_SRC3_MODE_B_OR_CB,
+	CM_HIST_SRC3_MODE_MIN_RGB,
+};
+
+struct cm_hist_control {
+	enum cm_hist_tap_point tap_point;
+	uint32_t channels_enabled;
+	enum cm_hist_src1_mode src_1_select;
+	enum cm_hist_src2_mode src_2_select;
+	enum cm_hist_src3_mode src_3_select;
+	enum cm_hist_src ch1_src;
+	enum cm_hist_src ch2_src;
+	enum cm_hist_src ch3_src;
+	enum cm_hist_format format;
+	enum cm_hist_read_channel_mask read_channel_mask;
+};
+
+struct cm_hist {
+	uint32_t ch1[256];
+	uint32_t ch2[256];
+	uint32_t ch3[256];
+};
 #endif /* DC_HW_TYPES_H */
 

@@ -38,7 +38,12 @@
 #include <linux/i2c.h>
 #include <linux/i2c-algo-bit.h>
 
+struct drm_fb_helper;
+struct drm_fb_helper_surface_size;
+struct drm_format_info;
+
 struct edid;
+struct drm_edid;
 struct radeon_bo;
 struct radeon_device;
 
@@ -262,8 +267,7 @@ struct radeon_mode_info {
 	/* Output CSC */
 	struct drm_property *output_csc_property;
 	/* hardcoded DFP edid from BIOS */
-	struct edid *bios_hardcoded_edid;
-	int bios_hardcoded_edid_size;
+	const struct drm_edid *bios_hardcoded_edid;
 
 	/* firmware flags */
 	u16 firmware_flags;
@@ -703,7 +707,7 @@ extern int radeon_get_monitor_bpc(struct drm_connector *connector);
 
 extern void radeon_connector_hotplug(struct drm_connector *connector);
 extern int radeon_dp_mode_valid_helper(struct drm_connector *connector,
-				       struct drm_display_mode *mode);
+				       const struct drm_display_mode *mode);
 extern void radeon_dp_set_link_config(struct drm_connector *connector,
 				      const struct drm_display_mode *mode);
 extern void radeon_dp_link_train(struct drm_encoder *encoder,
@@ -800,10 +804,6 @@ extern bool radeon_encoder_is_digital(struct drm_encoder *encoder);
 extern void radeon_crtc_load_lut(struct drm_crtc *crtc);
 extern int atombios_crtc_set_base(struct drm_crtc *crtc, int x, int y,
 				   struct drm_framebuffer *old_fb);
-extern int atombios_crtc_set_base_atomic(struct drm_crtc *crtc,
-					 struct drm_framebuffer *fb,
-					 int x, int y,
-					 enum mode_set_atomic state);
 extern int atombios_crtc_mode_set(struct drm_crtc *crtc,
 				   struct drm_display_mode *mode,
 				   struct drm_display_mode *adjusted_mode,
@@ -813,13 +813,9 @@ extern void atombios_crtc_dpms(struct drm_crtc *crtc, int mode);
 
 extern int radeon_crtc_set_base(struct drm_crtc *crtc, int x, int y,
 				 struct drm_framebuffer *old_fb);
-extern int radeon_crtc_set_base_atomic(struct drm_crtc *crtc,
-				       struct drm_framebuffer *fb,
-				       int x, int y,
-				       enum mode_set_atomic state);
 extern int radeon_crtc_do_set_base(struct drm_crtc *crtc,
 				   struct drm_framebuffer *fb,
-				   int x, int y, int atomic);
+				   int x, int y);
 extern int radeon_crtc_cursor_set2(struct drm_crtc *crtc,
 				   struct drm_file *file_priv,
 				   uint32_t handle,
@@ -887,6 +883,7 @@ extern void
 radeon_combios_encoder_dpms_scratch_regs(struct drm_encoder *encoder, bool on);
 int radeon_framebuffer_init(struct drm_device *dev,
 			     struct drm_framebuffer *rfb,
+			     const struct drm_format_info *info,
 			     const struct drm_mode_fb_cmd2 *mode_cmd,
 			     struct drm_gem_object *obj);
 
@@ -935,18 +932,13 @@ void dce8_program_fmt(struct drm_encoder *encoder);
 
 /* fbdev layer */
 #if defined(CONFIG_DRM_FBDEV_EMULATION)
-void radeon_fbdev_setup(struct radeon_device *rdev);
-void radeon_fbdev_set_suspend(struct radeon_device *rdev, int state);
-bool radeon_fbdev_robj_is_fb(struct radeon_device *rdev, struct radeon_bo *robj);
+int radeon_fbdev_driver_fbdev_probe(struct drm_fb_helper *fb_helper,
+				    struct drm_fb_helper_surface_size *sizes);
+#define RADEON_FBDEV_DRIVER_OPS \
+	.fbdev_probe = radeon_fbdev_driver_fbdev_probe
 #else
-static inline void radeon_fbdev_setup(struct radeon_device *rdev)
-{ }
-static inline void radeon_fbdev_set_suspend(struct radeon_device *rdev, int state)
-{ }
-static inline bool radeon_fbdev_robj_is_fb(struct radeon_device *rdev, struct radeon_bo *robj)
-{
-	return false;
-}
+#define RADEON_FBDEV_DRIVER_OPS \
+	.fbdev_probe = NULL
 #endif
 
 void radeon_crtc_handle_vblank(struct radeon_device *rdev, int crtc_id);

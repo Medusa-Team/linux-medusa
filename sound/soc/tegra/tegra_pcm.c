@@ -204,8 +204,8 @@ static int tegra_pcm_dma_allocate(struct device *dev, struct snd_soc_pcm_runtime
 	return snd_pcm_set_fixed_buffer_all(pcm, SNDRV_DMA_TYPE_DEV_WC, dev, size);
 }
 
-int tegra_pcm_construct(struct snd_soc_component *component,
-			struct snd_soc_pcm_runtime *rtd)
+int tegra_pcm_new(struct snd_soc_component *component,
+		  struct snd_soc_pcm_runtime *rtd)
 {
 	struct device *dev = component->dev;
 
@@ -213,12 +213,12 @@ int tegra_pcm_construct(struct snd_soc_component *component,
 	 * Fallback for backwards-compatibility with older device trees that
 	 * have the iommus property in the virtual, top-level "sound" node.
 	 */
-	if (!of_get_property(dev->of_node, "iommus", NULL))
+	if (!of_property_present(dev->of_node, "iommus"))
 		dev = rtd->card->snd_card->dev;
 
 	return tegra_pcm_dma_allocate(dev, rtd, tegra_pcm_hardware.buffer_bytes_max);
 }
-EXPORT_SYMBOL_GPL(tegra_pcm_construct);
+EXPORT_SYMBOL_GPL(tegra_pcm_new);
 
 MODULE_AUTHOR("Stephen Warren <swarren@nvidia.com>");
 MODULE_DESCRIPTION("Tegra PCM ASoC driver");

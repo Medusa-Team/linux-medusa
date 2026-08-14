@@ -523,8 +523,7 @@ void bcm_phy_get_strings(struct phy_device *phydev, u8 *data)
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(bcm_phy_hw_stats); i++)
-		strscpy(data + i * ETH_GSTRING_LEN,
-			bcm_phy_hw_stats[i].string, ETH_GSTRING_LEN);
+		ethtool_puts(&data, bcm_phy_hw_stats[i].string);
 }
 EXPORT_SYMBOL_GPL(bcm_phy_get_strings);
 
@@ -563,6 +562,15 @@ void bcm_phy_get_stats(struct phy_device *phydev, u64 *shadow,
 		data[i] = bcm_phy_get_stat(phydev, shadow, i);
 }
 EXPORT_SYMBOL_GPL(bcm_phy_get_stats);
+
+void bcm_phy_update_stats_shadow(struct phy_device *phydev, u64 *shadow)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(bcm_phy_hw_stats); i++)
+		bcm_phy_get_stat(phydev, shadow, i);
+}
+EXPORT_SYMBOL_GPL(bcm_phy_update_stats_shadow);
 
 void bcm_phy_r_rc_cal_reset(struct phy_device *phydev)
 {
@@ -1137,7 +1145,7 @@ int bcm_config_lre_aneg(struct phy_device *phydev, bool changed)
 {
 	int err;
 
-	if (genphy_config_eee_advert(phydev))
+	if (genphy_c45_an_config_eee_aneg(phydev) > 0)
 		changed = true;
 
 	err = bcm_setup_lre_master_slave(phydev);

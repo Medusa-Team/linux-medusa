@@ -485,7 +485,7 @@ hisi_dma_prep_dma_memcpy(struct dma_chan *c, dma_addr_t dst, dma_addr_t src,
 	struct hisi_dma_chan *chan = to_hisi_dma_chan(c);
 	struct hisi_dma_desc *desc;
 
-	desc = kzalloc(sizeof(*desc), GFP_NOWAIT);
+	desc = kzalloc_obj(*desc, GFP_NOWAIT);
 	if (!desc)
 		return NULL;
 
@@ -677,7 +677,7 @@ static void hisi_dma_init_hw_qp(struct hisi_dma_dev *hdma_dev, u32 index)
 		writel_relaxed(tmp, addr);
 
 		/*
-		 * 0 - dma should process FLR whith CPU.
+		 * 0 - dma should process FLR with CPU.
 		 * 1 - dma not process FLR, only cpu process FLR.
 		 */
 		addr = q_base + HISI_DMA_HIP09_DMA_FLR_DISABLE +

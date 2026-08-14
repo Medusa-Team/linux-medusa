@@ -48,8 +48,7 @@ static struct nfs_pgio_header *nfs_readhdr_alloc(void)
 
 static void nfs_readhdr_free(struct nfs_pgio_header *rhdr)
 {
-	if (rhdr->res.scratch != NULL)
-		kfree(rhdr->res.scratch);
+	kfree(rhdr->res.scratch);
 	kmem_cache_free(nfs_rdata_cachep, rhdr);
 }
 
@@ -57,7 +56,8 @@ static int nfs_return_empty_folio(struct folio *folio)
 {
 	folio_zero_segment(folio, 0, folio_size(folio));
 	folio_mark_uptodate(folio);
-	folio_unlock(folio);
+	if (nfs_netfs_folio_unlock(folio))
+		folio_unlock(folio);
 	return 0;
 }
 
@@ -68,10 +68,10 @@ void nfs_pageio_init_read(struct nfs_pageio_descriptor *pgio,
 	struct nfs_server *server = NFS_SERVER(inode);
 	const struct nfs_pageio_ops *pg_ops = &nfs_pgio_rw_ops;
 
-#ifdef CONFIG_NFS_V4_1
+#if IS_ENABLED(CONFIG_NFS_V4)
 	if (server->pnfs_curr_ld && !force_mds)
 		pg_ops = server->pnfs_curr_ld->pg_read_ops;
-#endif
+#endif /* CONFIG_NFS_V4 */
 	nfs_pageio_init(pgio, inode, pg_ops, compl_ops, &nfs_rw_read_ops,
 			server->rsize, 0);
 }

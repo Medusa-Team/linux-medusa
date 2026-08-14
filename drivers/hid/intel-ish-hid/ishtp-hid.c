@@ -214,7 +214,7 @@ int ishtp_hid_probe(unsigned int cur_hid_dev,
 	if (IS_ERR(hid))
 		return PTR_ERR(hid);
 
-	hid_data = kzalloc(sizeof(*hid_data), GFP_KERNEL);
+	hid_data = kzalloc_obj(*hid_data);
 	if (!hid_data) {
 		rv = -ENOMEM;
 		goto err_hid_data;
@@ -261,12 +261,14 @@ err_hid_data:
  */
 void ishtp_hid_remove(struct ishtp_cl_data *client_data)
 {
+	void *data;
 	int i;
 
 	for (i = 0; i < client_data->num_hid_devices; ++i) {
 		if (client_data->hid_sensor_hubs[i]) {
-			kfree(client_data->hid_sensor_hubs[i]->driver_data);
+			data = client_data->hid_sensor_hubs[i]->driver_data;
 			hid_destroy_device(client_data->hid_sensor_hubs[i]);
+			kfree(data);
 			client_data->hid_sensor_hubs[i] = NULL;
 		}
 	}

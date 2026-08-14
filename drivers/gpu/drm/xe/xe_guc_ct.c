@@ -8,6 +8,7 @@
 #include <linux/bitfield.h>
 #include <linux/circ_buf.h>
 #include <linux/delay.h>
+#include <linux/fault-inject.h>
 
 #include <kunit/static_stub.h>
 
@@ -17,19 +18,169 @@
 #include "abi/guc_actions_sriov_abi.h"
 #include "abi/guc_klvs_abi.h"
 #include "xe_bo.h"
+#include "xe_devcoredump.h"
 #include "xe_device.h"
 #include "xe_gt.h"
-#include "xe_gt_pagefault.h"
 #include "xe_gt_printk.h"
 #include "xe_gt_sriov_pf_control.h"
 #include "xe_gt_sriov_pf_monitor.h"
-#include "xe_gt_tlb_invalidation.h"
 #include "xe_guc.h"
+#include "xe_guc_log.h"
+#include "xe_guc_pagefault.h"
 #include "xe_guc_relay.h"
 #include "xe_guc_submit.h"
+#include "xe_guc_tlb_inval.h"
 #include "xe_map.h"
+#include "xe_page_reclaim.h"
 #include "xe_pm.h"
+#include "xe_sleep.h"
+#include "xe_sriov_vf.h"
 #include "xe_trace_guc.h"
+
+static void receive_g2h(struct xe_guc_ct *ct);
+static void g2h_worker_func(struct work_struct *w);
+static void safe_mode_worker_func(struct work_struct *w);
+static void ct_exit_safe_mode(struct xe_guc_ct *ct);
+static void guc_ct_change_state(struct xe_guc_ct *ct,
+				enum xe_guc_ct_state state);
+
+static struct xe_guc *ct_to_guc(struct xe_guc_ct *ct)
+{
+	return container_of(ct, struct xe_guc, ct);
+}
+
+static struct xe_gt *ct_to_gt(struct xe_guc_ct *ct)
+{
+	return container_of(ct, struct xe_gt, uc.guc.ct);
+}
+
+static struct xe_device *ct_to_xe(struct xe_guc_ct *ct)
+{
+	return gt_to_xe(ct_to_gt(ct));
+}
+
+#if IS_ENABLED(CONFIG_DRM_XE_DEBUG)
+enum {
+	/* Internal states, not error conditions */
+	CT_DEAD_STATE_REARM,			/* 0x0001 */
+	CT_DEAD_STATE_CAPTURE,			/* 0x0002 */
+
+	/* Error conditions */
+	CT_DEAD_SETUP,				/* 0x0004 */
+	CT_DEAD_H2G_WRITE,			/* 0x0008 */
+	CT_DEAD_H2G_HAS_ROOM,			/* 0x0010 */
+	CT_DEAD_G2H_READ,			/* 0x0020 */
+	CT_DEAD_G2H_RECV,			/* 0x0040 */
+	CT_DEAD_G2H_RELEASE,			/* 0x0080 */
+	CT_DEAD_DEADLOCK,			/* 0x0100 */
+	CT_DEAD_PROCESS_FAILED,			/* 0x0200 */
+	CT_DEAD_FAST_G2H,			/* 0x0400 */
+	CT_DEAD_PARSE_G2H_RESPONSE,		/* 0x0800 */
+	CT_DEAD_PARSE_G2H_UNKNOWN,		/* 0x1000 */
+	CT_DEAD_PARSE_G2H_ORIGIN,		/* 0x2000 */
+	CT_DEAD_PARSE_G2H_TYPE,			/* 0x4000 */
+	CT_DEAD_CRASH,				/* 0x8000 */
+};
+
+static void ct_dead_worker_func(struct work_struct *w);
+static void ct_dead_capture(struct xe_guc_ct *ct, struct guc_ctb *ctb, u32 reason_code);
+
+static void ct_dead_fini(struct xe_guc_ct *ct)
+{
+	cancel_work_sync(&ct->dead.worker);
+}
+
+static void ct_dead_init(struct xe_guc_ct *ct)
+{
+	spin_lock_init(&ct->dead.lock);
+	INIT_WORK(&ct->dead.worker, ct_dead_worker_func);
+
+#if IS_ENABLED(CONFIG_DRM_XE_DEBUG_GUC)
+	stack_depot_init();
+#endif
+}
+
+static void fast_req_stack_save(struct xe_guc_ct *ct, unsigned int slot)
+{
+#if IS_ENABLED(CONFIG_DRM_XE_DEBUG_GUC)
+	unsigned long entries[SZ_32];
+	unsigned int n;
+
+	n = stack_trace_save(entries, ARRAY_SIZE(entries), 1);
+	/* May be called under spinlock, so avoid sleeping */
+	ct->fast_req[slot].stack = stack_depot_save(entries, n, GFP_NOWAIT);
+#endif
+}
+
+static void fast_req_dump(struct xe_guc_ct *ct, u16 fence, unsigned int slot)
+{
+	struct xe_gt *gt = ct_to_gt(ct);
+#if IS_ENABLED(CONFIG_DRM_XE_DEBUG_GUC)
+	char *buf __cleanup(kfree) = kmalloc(SZ_4K, GFP_NOWAIT);
+
+	if (buf && stack_depot_snprint(ct->fast_req[slot].stack, buf, SZ_4K, 0))
+		xe_gt_err(gt, "Fence 0x%x was used by action %#04x sent at:\n%s\n",
+			  fence, ct->fast_req[slot].action, buf);
+	else
+		xe_gt_err(gt, "Fence 0x%x was used by action %#04x [failed to retrieve stack]\n",
+			  fence, ct->fast_req[slot].action);
+#else
+	xe_gt_err(gt, "Fence 0x%x was used by action %#04x\n",
+		  fence, ct->fast_req[slot].action);
+#endif
+}
+
+static void fast_req_report(struct xe_guc_ct *ct, u16 fence)
+{
+	u16 fence_min = U16_MAX, fence_max = 0;
+	struct xe_gt *gt = ct_to_gt(ct);
+	unsigned int n;
+
+	lockdep_assert_held(&ct->lock);
+
+	for (n = 0; n < ARRAY_SIZE(ct->fast_req); n++) {
+		if (ct->fast_req[n].fence < fence_min)
+			fence_min = ct->fast_req[n].fence;
+		if (ct->fast_req[n].fence > fence_max)
+			fence_max = ct->fast_req[n].fence;
+
+		if (ct->fast_req[n].fence != fence)
+			continue;
+
+		return fast_req_dump(ct, fence, n);
+	}
+
+	xe_gt_warn(gt, "Fence 0x%x not found - tracking buffer wrapped? [range = 0x%x -> 0x%x, next = 0x%X]\n",
+		   fence, fence_min, fence_max, ct->fence_seqno);
+}
+
+static void fast_req_track(struct xe_guc_ct *ct, u16 fence, u16 action)
+{
+	unsigned int slot = fence % ARRAY_SIZE(ct->fast_req);
+
+	fast_req_stack_save(ct, slot);
+	ct->fast_req[slot].fence = fence;
+	ct->fast_req[slot].action = action;
+}
+
+#define CT_DEAD(ct, ctb, reason_code)	ct_dead_capture((ct), (ctb), CT_DEAD_##reason_code)
+
+#else
+
+static void ct_dead_fini(struct xe_guc_ct *ct) { }
+static void ct_dead_init(struct xe_guc_ct *ct) { }
+
+static void fast_req_report(struct xe_guc_ct *ct, u16 fence) { }
+static void fast_req_track(struct xe_guc_ct *ct, u16 fence, u16 action) { }
+
+#define CT_DEAD(ct, ctb, reason)			\
+	do {						\
+		struct guc_ctb *_ctb = (ctb);		\
+		if (_ctb)				\
+			_ctb->info.broken = true;	\
+	} while (0)
+
+#endif
 
 /* Used when a CT send wants to block and / or receive data */
 struct g2h_fence {
@@ -40,6 +191,7 @@ struct g2h_fence {
 	u16 error;
 	u16 hint;
 	u16 reason;
+	bool cancel;
 	bool retry;
 	bool fail;
 	bool done;
@@ -47,36 +199,23 @@ struct g2h_fence {
 
 static void g2h_fence_init(struct g2h_fence *g2h_fence, u32 *response_buffer)
 {
+	memset(g2h_fence, 0, sizeof(*g2h_fence));
 	g2h_fence->response_buffer = response_buffer;
-	g2h_fence->response_data = 0;
-	g2h_fence->response_len = 0;
-	g2h_fence->fail = false;
-	g2h_fence->retry = false;
-	g2h_fence->done = false;
 	g2h_fence->seqno = ~0x0;
+}
+
+static void g2h_fence_cancel(struct g2h_fence *g2h_fence)
+{
+	g2h_fence->cancel = true;
+	g2h_fence->fail = true;
+
+	/* WRITE_ONCE pairs with READ_ONCEs in guc_ct_send_recv. */
+	WRITE_ONCE(g2h_fence->done, true);
 }
 
 static bool g2h_fence_needs_alloc(struct g2h_fence *g2h_fence)
 {
 	return g2h_fence->seqno == ~0x0;
-}
-
-static struct xe_guc *
-ct_to_guc(struct xe_guc_ct *ct)
-{
-	return container_of(ct, struct xe_guc, ct);
-}
-
-static struct xe_gt *
-ct_to_gt(struct xe_guc_ct *ct)
-{
-	return container_of(ct, struct xe_gt, uc.guc.ct);
-}
-
-static struct xe_device *
-ct_to_xe(struct xe_guc_ct *ct)
-{
-	return gt_to_xe(ct_to_gt(ct));
 }
 
 /**
@@ -105,12 +244,25 @@ ct_to_xe(struct xe_guc_ct *ct)
  * enough space to avoid backpressure on the driver. We increase the size
  * of the receive buffer (relative to the send) to ensure a G2H response
  * CTB has a landing spot.
+ *
+ * In addition to submissions, the G2H buffer needs to be able to hold
+ * enough space for recoverable page fault notifications. The number of
+ * page faults is interrupt driven and can be as much as the number of
+ * compute resources available. However, most of the actual work for these
+ * is in a separate page fault worker thread. Therefore we only need to
+ * make sure the queue has enough space to handle all of the submissions
+ * and responses and an extra buffer for incoming page faults.
  */
 
 #define CTB_DESC_SIZE		ALIGN(sizeof(struct guc_ct_buffer_desc), SZ_2K)
+#define CTB_H2G_BUFFER_OFFSET	(CTB_DESC_SIZE * 2)
+#define CTB_G2H_BUFFER_OFFSET	(CTB_DESC_SIZE * 2)
 #define CTB_H2G_BUFFER_SIZE	(SZ_4K)
-#define CTB_G2H_BUFFER_SIZE	(4 * CTB_H2G_BUFFER_SIZE)
-#define G2H_ROOM_BUFFER_SIZE	(CTB_G2H_BUFFER_SIZE / 4)
+#define CTB_H2G_BUFFER_DWORDS	(CTB_H2G_BUFFER_SIZE / sizeof(u32))
+#define CTB_G2H_BUFFER_SIZE	(SZ_128K)
+#define CTB_G2H_BUFFER_DWORDS	(CTB_G2H_BUFFER_SIZE / sizeof(u32))
+#define G2H_ROOM_BUFFER_SIZE	(CTB_G2H_BUFFER_SIZE / 2)
+#define G2H_ROOM_BUFFER_DWORDS	(CTB_G2H_BUFFER_DWORDS / 2)
 
 /**
  * xe_guc_ct_queue_proc_time_jiffies - Return maximum time to process a full
@@ -125,27 +277,29 @@ ct_to_xe(struct xe_guc_ct *ct)
  */
 long xe_guc_ct_queue_proc_time_jiffies(struct xe_guc_ct *ct)
 {
-	BUILD_BUG_ON(!IS_ALIGNED(CTB_H2G_BUFFER_SIZE, SZ_4));
+	BUILD_BUG_ON(!IS_ALIGNED(CTB_H2G_BUFFER_SIZE, SZ_4K));
 	return (CTB_H2G_BUFFER_SIZE / SZ_4K) * HZ;
 }
 
-static size_t guc_ct_size(void)
+static size_t guc_h2g_size(void)
 {
-	return 2 * CTB_DESC_SIZE + CTB_H2G_BUFFER_SIZE +
-		CTB_G2H_BUFFER_SIZE;
+	return CTB_H2G_BUFFER_OFFSET + CTB_H2G_BUFFER_SIZE;
+}
+
+static size_t guc_g2h_size(void)
+{
+	return CTB_G2H_BUFFER_OFFSET + CTB_G2H_BUFFER_SIZE;
 }
 
 static void guc_ct_fini(struct drm_device *drm, void *arg)
 {
 	struct xe_guc_ct *ct = arg;
 
+	ct_dead_fini(ct);
+	ct_exit_safe_mode(ct);
 	destroy_workqueue(ct->g2h_wq);
 	xa_destroy(&ct->fence_lookup);
 }
-
-static void receive_g2h(struct xe_guc_ct *ct);
-static void g2h_worker_func(struct work_struct *w);
-static void safe_mode_worker_func(struct work_struct *w);
 
 static void primelockdep(struct xe_guc_ct *ct)
 {
@@ -157,26 +311,14 @@ static void primelockdep(struct xe_guc_ct *ct)
 	fs_reclaim_release(GFP_KERNEL);
 }
 
-int xe_guc_ct_init(struct xe_guc_ct *ct)
+int xe_guc_ct_init_noalloc(struct xe_guc_ct *ct)
 {
 	struct xe_device *xe = ct_to_xe(ct);
 	struct xe_gt *gt = ct_to_gt(ct);
-	struct xe_tile *tile = gt_to_tile(gt);
-	struct xe_bo *bo;
 	int err;
 
-	xe_gt_assert(gt, !(guc_ct_size() % PAGE_SIZE));
-
-	ct->g2h_wq = alloc_ordered_workqueue("xe-g2h-wq", 0);
-	if (!ct->g2h_wq)
-		return -ENOMEM;
-
-	spin_lock_init(&ct->fast_lock);
-	xa_init(&ct->fence_lookup);
-	INIT_WORK(&ct->g2h_worker, g2h_worker_func);
-	INIT_DELAYED_WORK(&ct->safe_mode_worker,  safe_mode_worker_func);
-	init_waitqueue_head(&ct->wq);
-	init_waitqueue_head(&ct->g2h_fence_wq);
+	xe_gt_assert(gt, !(guc_h2g_size() % PAGE_SIZE));
+	xe_gt_assert(gt, !(guc_g2h_size() % PAGE_SIZE));
 
 	err = drmm_mutex_init(&xe->drm, &ct->lock);
 	if (err)
@@ -184,14 +326,18 @@ int xe_guc_ct_init(struct xe_guc_ct *ct)
 
 	primelockdep(ct);
 
-	bo = xe_managed_bo_create_pin_map(xe, tile, guc_ct_size(),
-					  XE_BO_FLAG_SYSTEM |
-					  XE_BO_FLAG_GGTT |
-					  XE_BO_FLAG_GGTT_INVALIDATE);
-	if (IS_ERR(bo))
-		return PTR_ERR(bo);
+	ct->g2h_wq = alloc_ordered_workqueue("xe-g2h-wq", WQ_MEM_RECLAIM);
+	if (!ct->g2h_wq)
+		return -ENOMEM;
 
-	ct->bo = bo;
+	spin_lock_init(&ct->fast_lock);
+	xa_init(&ct->fence_lookup);
+	INIT_WORK(&ct->g2h_worker, g2h_worker_func);
+	INIT_DELAYED_WORK(&ct->safe_mode_worker, safe_mode_worker_func);
+
+	ct_dead_init(ct);
+	init_waitqueue_head(&ct->wq);
+	init_waitqueue_head(&ct->g2h_fence_wq);
 
 	err = drmm_add_action_or_reset(&xe->drm, guc_ct_fini, ct);
 	if (err)
@@ -200,6 +346,74 @@ int xe_guc_ct_init(struct xe_guc_ct *ct)
 	xe_gt_assert(gt, ct->state == XE_GUC_CT_STATE_NOT_INITIALIZED);
 	ct->state = XE_GUC_CT_STATE_DISABLED;
 	return 0;
+}
+ALLOW_ERROR_INJECTION(xe_guc_ct_init_noalloc, ERRNO); /* See xe_pci_probe() */
+
+static void guc_action_disable_ct(void *arg)
+{
+	struct xe_guc_ct *ct = arg;
+
+	xe_guc_ct_stop(ct);
+	guc_ct_change_state(ct, XE_GUC_CT_STATE_DISABLED);
+}
+
+int xe_guc_ct_init(struct xe_guc_ct *ct)
+{
+	struct xe_device *xe = ct_to_xe(ct);
+	struct xe_gt *gt = ct_to_gt(ct);
+	struct xe_tile *tile = gt_to_tile(gt);
+	struct xe_bo *bo;
+
+	bo = xe_managed_bo_create_pin_map(xe, tile, guc_h2g_size(),
+					  XE_BO_FLAG_SYSTEM |
+					  XE_BO_FLAG_GGTT |
+					  XE_BO_FLAG_GGTT_INVALIDATE |
+					  XE_BO_FLAG_PINNED_NORESTORE);
+	if (IS_ERR(bo))
+		return PTR_ERR(bo);
+
+	ct->ctbs.h2g.bo = bo;
+
+	bo = xe_managed_bo_create_pin_map(xe, tile, guc_g2h_size(),
+					  XE_BO_FLAG_SYSTEM |
+					  XE_BO_FLAG_GGTT |
+					  XE_BO_FLAG_GGTT_INVALIDATE |
+					  XE_BO_FLAG_PINNED_NORESTORE);
+	if (IS_ERR(bo))
+		return PTR_ERR(bo);
+
+	ct->ctbs.g2h.bo = bo;
+
+	return devm_add_action_or_reset(xe->drm.dev, guc_action_disable_ct, ct);
+}
+ALLOW_ERROR_INJECTION(xe_guc_ct_init, ERRNO); /* See xe_pci_probe() */
+
+/**
+ * xe_guc_ct_init_post_hwconfig - Reinitialize the GuC CTB in VRAM
+ * @ct: the &xe_guc_ct
+ *
+ * Allocate a new BO in VRAM and free the previous BO that was allocated
+ * in system memory (SMEM). Applicable only for DGFX products.
+ *
+ * Return: 0 on success, or a negative errno on failure.
+ */
+int xe_guc_ct_init_post_hwconfig(struct xe_guc_ct *ct)
+{
+	struct xe_device *xe = ct_to_xe(ct);
+	struct xe_gt *gt = ct_to_gt(ct);
+	struct xe_tile *tile = gt_to_tile(gt);
+	int ret;
+
+	xe_assert(xe, !xe_guc_ct_enabled(ct));
+
+	if (IS_DGFX(xe)) {
+		ret = xe_managed_bo_reinit_in_vram(xe, tile, &ct->ctbs.h2g.bo);
+		if (ret)
+			return ret;
+	}
+
+	devm_remove_action(xe->drm.dev, guc_action_disable_ct, ct);
+	return devm_add_action_or_reset(xe->drm.dev, guc_action_disable_ct, ct);
 }
 
 #define desc_read(xe_, guc_ctb__, field_)			\
@@ -213,7 +427,7 @@ int xe_guc_ct_init(struct xe_guc_ct *ct)
 static void guc_ct_ctb_h2g_init(struct xe_device *xe, struct guc_ctb *h2g,
 				struct iosys_map *map)
 {
-	h2g->info.size = CTB_H2G_BUFFER_SIZE / sizeof(u32);
+	h2g->info.size = CTB_H2G_BUFFER_DWORDS;
 	h2g->info.resv_space = 0;
 	h2g->info.tail = 0;
 	h2g->info.head = 0;
@@ -225,14 +439,14 @@ static void guc_ct_ctb_h2g_init(struct xe_device *xe, struct guc_ctb *h2g,
 	h2g->desc = *map;
 	xe_map_memset(xe, &h2g->desc, 0, 0, sizeof(struct guc_ct_buffer_desc));
 
-	h2g->cmds = IOSYS_MAP_INIT_OFFSET(map, CTB_DESC_SIZE * 2);
+	h2g->cmds = IOSYS_MAP_INIT_OFFSET(map, CTB_H2G_BUFFER_OFFSET);
 }
 
 static void guc_ct_ctb_g2h_init(struct xe_device *xe, struct guc_ctb *g2h,
 				struct iosys_map *map)
 {
-	g2h->info.size = CTB_G2H_BUFFER_SIZE / sizeof(u32);
-	g2h->info.resv_space = G2H_ROOM_BUFFER_SIZE / sizeof(u32);
+	g2h->info.size = CTB_G2H_BUFFER_DWORDS;
+	g2h->info.resv_space = G2H_ROOM_BUFFER_DWORDS;
 	g2h->info.head = 0;
 	g2h->info.tail = 0;
 	g2h->info.space = CIRC_SPACE(g2h->info.tail, g2h->info.head,
@@ -243,8 +457,7 @@ static void guc_ct_ctb_g2h_init(struct xe_device *xe, struct guc_ctb *g2h,
 	g2h->desc = IOSYS_MAP_INIT_OFFSET(map, CTB_DESC_SIZE);
 	xe_map_memset(xe, &g2h->desc, 0, 0, sizeof(struct guc_ct_buffer_desc));
 
-	g2h->cmds = IOSYS_MAP_INIT_OFFSET(map, CTB_DESC_SIZE * 2 +
-					    CTB_H2G_BUFFER_SIZE);
+	g2h->cmds = IOSYS_MAP_INIT_OFFSET(map, CTB_G2H_BUFFER_OFFSET);
 }
 
 static int guc_ct_ctb_h2g_register(struct xe_guc_ct *ct)
@@ -253,8 +466,8 @@ static int guc_ct_ctb_h2g_register(struct xe_guc_ct *ct)
 	u32 desc_addr, ctb_addr, size;
 	int err;
 
-	desc_addr = xe_bo_ggtt_addr(ct->bo);
-	ctb_addr = xe_bo_ggtt_addr(ct->bo) + CTB_DESC_SIZE * 2;
+	desc_addr = xe_bo_ggtt_addr(ct->ctbs.h2g.bo);
+	ctb_addr = xe_bo_ggtt_addr(ct->ctbs.h2g.bo) + CTB_H2G_BUFFER_OFFSET;
 	size = ct->ctbs.h2g.info.size * sizeof(u32);
 
 	err = xe_guc_self_cfg64(guc,
@@ -280,9 +493,8 @@ static int guc_ct_ctb_g2h_register(struct xe_guc_ct *ct)
 	u32 desc_addr, ctb_addr, size;
 	int err;
 
-	desc_addr = xe_bo_ggtt_addr(ct->bo) + CTB_DESC_SIZE;
-	ctb_addr = xe_bo_ggtt_addr(ct->bo) + CTB_DESC_SIZE * 2 +
-		CTB_H2G_BUFFER_SIZE;
+	desc_addr = xe_bo_ggtt_addr(ct->ctbs.g2h.bo) + CTB_DESC_SIZE;
+	ctb_addr = xe_bo_ggtt_addr(ct->ctbs.g2h.bo) + CTB_G2H_BUFFER_OFFSET;
 	size = ct->ctbs.g2h.info.size * sizeof(u32);
 
 	err = xe_guc_self_cfg64(guc,
@@ -318,9 +530,13 @@ static int guc_ct_control_toggle(struct xe_guc_ct *ct, bool enable)
 	return ret > 0 ? -EPROTO : ret;
 }
 
-static void xe_guc_ct_set_state(struct xe_guc_ct *ct,
+static void guc_ct_change_state(struct xe_guc_ct *ct,
 				enum xe_guc_ct_state state)
 {
+	struct xe_gt *gt = ct_to_gt(ct);
+	struct g2h_fence *g2h_fence;
+	unsigned long idx;
+
 	mutex_lock(&ct->lock);		/* Serialise dequeue_one_g2h() */
 	spin_lock_irq(&ct->fast_lock);	/* Serialise CT fast-path */
 
@@ -330,9 +546,26 @@ static void xe_guc_ct_set_state(struct xe_guc_ct *ct,
 	if (ct->g2h_outstanding)
 		xe_pm_runtime_put(ct_to_xe(ct));
 	ct->g2h_outstanding = 0;
-	ct->state = state;
+
+	/*
+	 * WRITE_ONCE pairs with READ_ONCEs in xe_guc_ct_initialized and
+	 * xe_guc_ct_enabled.
+	 */
+	WRITE_ONCE(ct->state, state);
+
+	xe_gt_dbg(gt, "GuC CT communication channel %s\n",
+		  state == XE_GUC_CT_STATE_STOPPED ? "stopped" :
+		  str_enabled_disabled(state == XE_GUC_CT_STATE_ENABLED));
 
 	spin_unlock_irq(&ct->fast_lock);
+
+	/* cancel all in-flight send-recv requests */
+	xa_for_each(&ct->fence_lookup, idx, g2h_fence)
+		g2h_fence_cancel(g2h_fence);
+
+	/* make sure guc_ct_send_recv() will see g2h_fence changes */
+	smp_mb();
+	wake_up_all(&ct->g2h_fence_wq);
 
 	/*
 	 * Lockdep doesn't like this under the fast lock and he destroy only
@@ -379,7 +612,7 @@ static void ct_exit_safe_mode(struct xe_guc_ct *ct)
 		xe_gt_dbg(ct_to_gt(ct), "GuC CT safe-mode disabled\n");
 }
 
-int xe_guc_ct_enable(struct xe_guc_ct *ct)
+static int __xe_guc_ct_start(struct xe_guc_ct *ct, bool needs_register)
 {
 	struct xe_device *xe = ct_to_xe(ct);
 	struct xe_gt *gt = ct_to_gt(ct);
@@ -387,36 +620,87 @@ int xe_guc_ct_enable(struct xe_guc_ct *ct)
 
 	xe_gt_assert(gt, !xe_guc_ct_enabled(ct));
 
-	guc_ct_ctb_h2g_init(xe, &ct->ctbs.h2g, &ct->bo->vmap);
-	guc_ct_ctb_g2h_init(xe, &ct->ctbs.g2h, &ct->bo->vmap);
+	if (needs_register) {
+		xe_map_memset(xe, &ct->ctbs.h2g.bo->vmap, 0, 0,
+			      xe_bo_size(ct->ctbs.h2g.bo));
+		xe_map_memset(xe, &ct->ctbs.g2h.bo->vmap, 0, 0,
+			      xe_bo_size(ct->ctbs.g2h.bo));
+		guc_ct_ctb_h2g_init(xe, &ct->ctbs.h2g, &ct->ctbs.h2g.bo->vmap);
+		guc_ct_ctb_g2h_init(xe, &ct->ctbs.g2h, &ct->ctbs.g2h.bo->vmap);
 
-	err = guc_ct_ctb_h2g_register(ct);
-	if (err)
-		goto err_out;
+		err = guc_ct_ctb_h2g_register(ct);
+		if (err)
+			goto err_out;
 
-	err = guc_ct_ctb_g2h_register(ct);
-	if (err)
-		goto err_out;
+		err = guc_ct_ctb_g2h_register(ct);
+		if (err)
+			goto err_out;
 
-	err = guc_ct_control_toggle(ct, true);
-	if (err)
-		goto err_out;
+		err = guc_ct_control_toggle(ct, true);
+		if (err)
+			goto err_out;
+	} else {
+		ct->ctbs.h2g.info.broken = false;
+		ct->ctbs.g2h.info.broken = false;
+		/* Skip everything in H2G buffer */
+		xe_map_memset(xe, &ct->ctbs.h2g.bo->vmap, CTB_H2G_BUFFER_OFFSET, 0,
+			      CTB_H2G_BUFFER_SIZE);
+	}
 
-	xe_guc_ct_set_state(ct, XE_GUC_CT_STATE_ENABLED);
+	guc_ct_change_state(ct, XE_GUC_CT_STATE_ENABLED);
 
 	smp_mb();
 	wake_up_all(&ct->wq);
-	xe_gt_dbg(gt, "GuC CT communication channel enabled\n");
 
 	if (ct_needs_safe_mode(ct))
 		ct_enter_safe_mode(ct);
+
+#if IS_ENABLED(CONFIG_DRM_XE_DEBUG)
+	/*
+	 * The CT has now been reset so the dumper can be re-armed
+	 * after any existing dead state has been dumped.
+	 */
+	spin_lock_irq(&ct->dead.lock);
+	if (ct->dead.reason) {
+		ct->dead.reason |= (1 << CT_DEAD_STATE_REARM);
+		queue_work(system_dfl_wq, &ct->dead.worker);
+	}
+	spin_unlock_irq(&ct->dead.lock);
+#endif
 
 	return 0;
 
 err_out:
 	xe_gt_err(gt, "Failed to enable GuC CT (%pe)\n", ERR_PTR(err));
+	CT_DEAD(ct, NULL, SETUP);
 
 	return err;
+}
+
+/**
+ * xe_guc_ct_restart() - Restart GuC CT
+ * @ct: the &xe_guc_ct
+ *
+ * Restart GuC CT to an empty state without issuing a CT register MMIO command.
+ *
+ * Return: 0 on success, or a negative errno on failure.
+ */
+int xe_guc_ct_restart(struct xe_guc_ct *ct)
+{
+	return __xe_guc_ct_start(ct, false);
+}
+
+/**
+ * xe_guc_ct_enable() - Enable GuC CT
+ * @ct: the &xe_guc_ct
+ *
+ * Enable GuC CT to an empty state and issue a CT register MMIO command.
+ *
+ * Return: 0 on success, or a negative errno on failure.
+ */
+int xe_guc_ct_enable(struct xe_guc_ct *ct)
+{
+	return __xe_guc_ct_start(ct, true);
 }
 
 static void stop_g2h_handler(struct xe_guc_ct *ct)
@@ -433,9 +717,19 @@ static void stop_g2h_handler(struct xe_guc_ct *ct)
  */
 void xe_guc_ct_disable(struct xe_guc_ct *ct)
 {
-	xe_guc_ct_set_state(ct, XE_GUC_CT_STATE_DISABLED);
+	guc_ct_change_state(ct, XE_GUC_CT_STATE_DISABLED);
 	ct_exit_safe_mode(ct);
 	stop_g2h_handler(ct);
+}
+
+/**
+ * xe_guc_ct_flush_and_stop - Flush and stop all processing of G2H / H2G
+ * @ct: the &xe_guc_ct
+ */
+void xe_guc_ct_flush_and_stop(struct xe_guc_ct *ct)
+{
+	receive_g2h(ct);
+	xe_guc_ct_stop(ct);
 }
 
 /**
@@ -446,8 +740,44 @@ void xe_guc_ct_disable(struct xe_guc_ct *ct)
  */
 void xe_guc_ct_stop(struct xe_guc_ct *ct)
 {
-	xe_guc_ct_set_state(ct, XE_GUC_CT_STATE_STOPPED);
+	if (!xe_guc_ct_initialized(ct))
+		return;
+
+	guc_ct_change_state(ct, XE_GUC_CT_STATE_STOPPED);
 	stop_g2h_handler(ct);
+}
+
+/**
+ * xe_guc_ct_runtime_suspend() - GuC CT runtime suspend
+ * @ct: the &xe_guc_ct
+ *
+ * Set GuC CT to disabled state.
+ */
+void xe_guc_ct_runtime_suspend(struct xe_guc_ct *ct)
+{
+	struct guc_ctb *g2h = &ct->ctbs.g2h;
+	u32 credits = CIRC_SPACE(0, 0, CTB_G2H_BUFFER_DWORDS) - G2H_ROOM_BUFFER_DWORDS;
+
+	/* We should be back to guc_ct_ctb_g2h_init() values */
+	xe_gt_assert(ct_to_gt(ct), g2h->info.space == credits);
+
+	/*
+	 * Since we're already in runtime suspend path, we shouldn't have pending
+	 * messages. But if there happen to be any, we'd probably want them to be
+	 * thrown as errors for further investigation.
+	 */
+	xe_guc_ct_disable(ct);
+}
+
+/**
+ * xe_guc_ct_runtime_resume() - GuC CT runtime resume
+ * @ct: the &xe_guc_ct
+ *
+ * Restart GuC CT and set it to enabled state.
+ */
+void xe_guc_ct_runtime_resume(struct xe_guc_ct *ct)
+{
+	xe_guc_ct_restart(ct);
 }
 
 static bool h2g_has_room(struct xe_guc_ct *ct, u32 cmd_len)
@@ -458,6 +788,19 @@ static bool h2g_has_room(struct xe_guc_ct *ct, u32 cmd_len)
 
 	if (cmd_len > h2g->info.space) {
 		h2g->info.head = desc_read(ct_to_xe(ct), h2g, head);
+
+		if (h2g->info.head > h2g->info.size) {
+			struct xe_device *xe = ct_to_xe(ct);
+			u32 desc_status = desc_read(xe, h2g, status);
+
+			desc_write(xe, h2g, status, desc_status | GUC_CTB_STATUS_OVERFLOW);
+
+			xe_gt_err(ct_to_gt(ct), "CT: invalid head offset %u >= %u)\n",
+				  h2g->info.head, h2g->info.size);
+			CT_DEAD(ct, h2g, H2G_HAS_ROOM);
+			return false;
+		}
+
 		h2g->info.space = CIRC_SPACE(h2g->info.tail, h2g->info.head,
 					     h2g->info.size) -
 				  h2g->info.resv_space;
@@ -513,9 +856,24 @@ static void __g2h_reserve_space(struct xe_guc_ct *ct, u32 g2h_len, u32 num_g2h)
 
 static void __g2h_release_space(struct xe_guc_ct *ct, u32 g2h_len)
 {
+	bool bad = false;
+
 	lockdep_assert_held(&ct->fast_lock);
-	xe_gt_assert(ct_to_gt(ct), ct->ctbs.g2h.info.space + g2h_len <=
-		     ct->ctbs.g2h.info.size - ct->ctbs.g2h.info.resv_space);
+
+	bad = ct->ctbs.g2h.info.space + g2h_len >
+		     ct->ctbs.g2h.info.size - ct->ctbs.g2h.info.resv_space;
+	bad |= !ct->g2h_outstanding;
+
+	if (bad) {
+		xe_gt_err(ct_to_gt(ct), "Invalid G2H release: %d + %d vs %d - %d -> %d vs %d, outstanding = %d!\n",
+			  ct->ctbs.g2h.info.space, g2h_len,
+			  ct->ctbs.g2h.info.size, ct->ctbs.g2h.info.resv_space,
+			  ct->ctbs.g2h.info.space + g2h_len,
+			  ct->ctbs.g2h.info.size - ct->ctbs.g2h.info.resv_space,
+			  ct->g2h_outstanding);
+		CT_DEAD(ct, &ct->ctbs.g2h, G2H_RELEASE);
+		return;
+	}
 
 	ct->ctbs.g2h.info.space += g2h_len;
 	if (!--ct->g2h_outstanding)
@@ -527,79 +885,6 @@ static void g2h_release_space(struct xe_guc_ct *ct, u32 g2h_len)
 	spin_lock_irq(&ct->fast_lock);
 	__g2h_release_space(ct, g2h_len);
 	spin_unlock_irq(&ct->fast_lock);
-}
-
-#define H2G_CT_HEADERS (GUC_CTB_HDR_LEN + 1) /* one DW CTB header and one DW HxG header */
-
-static int h2g_write(struct xe_guc_ct *ct, const u32 *action, u32 len,
-		     u32 ct_fence_value, bool want_response)
-{
-	struct xe_device *xe = ct_to_xe(ct);
-	struct xe_gt *gt = ct_to_gt(ct);
-	struct guc_ctb *h2g = &ct->ctbs.h2g;
-	u32 cmd[H2G_CT_HEADERS];
-	u32 tail = h2g->info.tail;
-	u32 full_len;
-	struct iosys_map map = IOSYS_MAP_INIT_OFFSET(&h2g->cmds,
-							 tail * sizeof(u32));
-
-	full_len = len + GUC_CTB_HDR_LEN;
-
-	lockdep_assert_held(&ct->lock);
-	xe_gt_assert(gt, full_len <= GUC_CTB_MSG_MAX_LEN);
-	xe_gt_assert(gt, tail <= h2g->info.size);
-
-	/* Command will wrap, zero fill (NOPs), return and check credits again */
-	if (tail + full_len > h2g->info.size) {
-		xe_map_memset(xe, &map, 0, 0,
-			      (h2g->info.size - tail) * sizeof(u32));
-		h2g_reserve_space(ct, (h2g->info.size - tail));
-		h2g->info.tail = 0;
-		desc_write(xe, h2g, tail, h2g->info.tail);
-
-		return -EAGAIN;
-	}
-
-	/*
-	 * dw0: CT header (including fence)
-	 * dw1: HXG header (including action code)
-	 * dw2+: action data
-	 */
-	cmd[0] = FIELD_PREP(GUC_CTB_MSG_0_FORMAT, GUC_CTB_FORMAT_HXG) |
-		FIELD_PREP(GUC_CTB_MSG_0_NUM_DWORDS, len) |
-		FIELD_PREP(GUC_CTB_MSG_0_FENCE, ct_fence_value);
-	if (want_response) {
-		cmd[1] =
-			FIELD_PREP(GUC_HXG_MSG_0_TYPE, GUC_HXG_TYPE_REQUEST) |
-			FIELD_PREP(GUC_HXG_EVENT_MSG_0_ACTION |
-				   GUC_HXG_EVENT_MSG_0_DATA0, action[0]);
-	} else {
-		cmd[1] =
-			FIELD_PREP(GUC_HXG_MSG_0_TYPE, GUC_HXG_TYPE_FAST_REQUEST) |
-			FIELD_PREP(GUC_HXG_EVENT_MSG_0_ACTION |
-				   GUC_HXG_EVENT_MSG_0_DATA0, action[0]);
-	}
-
-	/* H2G header in cmd[1] replaces action[0] so: */
-	--len;
-	++action;
-
-	/* Write H2G ensuring visable before descriptor update */
-	xe_map_memcpy_to(xe, &map, 0, cmd, H2G_CT_HEADERS * sizeof(u32));
-	xe_map_memcpy_to(xe, &map, H2G_CT_HEADERS * sizeof(u32), action, len * sizeof(u32));
-	xe_device_wmb(xe);
-
-	/* Update local copies */
-	h2g->info.tail = (tail + full_len) % h2g->info.size;
-	h2g_reserve_space(ct, full_len);
-
-	/* Update descriptor */
-	desc_write(xe, h2g, tail, h2g->info.tail);
-
-	trace_xe_guc_ctb_h2g(xe, gt->info.id, *(action - 1), full_len,
-			     desc_read(xe, h2g, head), h2g->info.tail);
-
-	return 0;
 }
 
 /*
@@ -621,15 +906,151 @@ static u16 next_ct_seqno(struct xe_guc_ct *ct, bool is_g2h_fence)
 	return seqno;
 }
 
+#define MAKE_ACTION(type, __action)				\
+({								\
+	FIELD_PREP(GUC_HXG_MSG_0_TYPE, type) |			\
+	FIELD_PREP(GUC_HXG_EVENT_MSG_0_ACTION |			\
+		   GUC_HXG_EVENT_MSG_0_DATA0, __action);	\
+})
+
+static bool vf_action_can_safely_fail(struct xe_device *xe, u32 action)
+{
+	/*
+	 * When resuming a VF, we can't reliably track whether context
+	 * registration has completed in the GuC state machine. It is harmless
+	 * to resend the request, as it will fail silently if GUC_HXG_TYPE_EVENT
+	 * is used. Additionally, if there is an H2G protocol issue on a VF,
+	 * subsequent H2G messages sent as GUC_HXG_TYPE_FAST_REQUEST will likely
+	 * fail.
+	 */
+	return IS_SRIOV_VF(xe) && xe_sriov_vf_migration_supported(xe) &&
+		(action == XE_GUC_ACTION_REGISTER_CONTEXT_MULTI_LRC ||
+		 action == XE_GUC_ACTION_REGISTER_CONTEXT);
+}
+
+#define H2G_CT_HEADERS (GUC_CTB_HDR_LEN + 1) /* one DW CTB header and one DW HxG header */
+
+static int h2g_write(struct xe_guc_ct *ct, const u32 *action, u32 len,
+		     u32 ct_fence_value, bool want_response)
+{
+	struct xe_device *xe = ct_to_xe(ct);
+	struct xe_gt *gt = ct_to_gt(ct);
+	struct guc_ctb *h2g = &ct->ctbs.h2g;
+	u32 cmd[H2G_CT_HEADERS];
+	u32 tail = h2g->info.tail;
+	u32 full_len;
+	struct iosys_map map = IOSYS_MAP_INIT_OFFSET(&h2g->cmds,
+							 tail * sizeof(u32));
+
+	full_len = len + GUC_CTB_HDR_LEN;
+
+	lockdep_assert_held(&ct->lock);
+	xe_gt_assert(gt, full_len <= GUC_CTB_MSG_MAX_LEN);
+
+	if (IS_ENABLED(CONFIG_DRM_XE_DEBUG)) {
+		u32 desc_tail = desc_read(xe, h2g, tail);
+		u32 desc_head = desc_read(xe, h2g, head);
+		u32 desc_status;
+
+		desc_status = desc_read(xe, h2g, status);
+		if (desc_status) {
+			xe_gt_err(gt, "CT write: non-zero status: %u\n", desc_status);
+			goto corrupted;
+		}
+
+		if (tail != desc_tail) {
+			desc_write(xe, h2g, status, desc_status | GUC_CTB_STATUS_MISMATCH);
+			xe_gt_err(gt, "CT write: tail was modified %u != %u\n", desc_tail, tail);
+			goto corrupted;
+		}
+
+		if (tail > h2g->info.size) {
+			desc_write(xe, h2g, status, desc_status | GUC_CTB_STATUS_OVERFLOW);
+			xe_gt_err(gt, "CT write: tail out of range: %u vs %u\n",
+				  tail, h2g->info.size);
+			goto corrupted;
+		}
+
+		if (desc_head >= h2g->info.size) {
+			desc_write(xe, h2g, status, desc_status | GUC_CTB_STATUS_OVERFLOW);
+			xe_gt_err(gt, "CT write: invalid head offset %u >= %u)\n",
+				  desc_head, h2g->info.size);
+			goto corrupted;
+		}
+	}
+
+	/* Command will wrap, zero fill (NOPs), return and check credits again */
+	if (tail + full_len > h2g->info.size) {
+		xe_map_memset(xe, &map, 0, 0,
+			      (h2g->info.size - tail) * sizeof(u32));
+		h2g_reserve_space(ct, (h2g->info.size - tail));
+		h2g->info.tail = 0;
+		desc_write(xe, h2g, tail, h2g->info.tail);
+
+		return -EAGAIN;
+	}
+
+	/*
+	 * dw0: CT header (including fence)
+	 * dw1: HXG header (including action code)
+	 * dw2+: action data
+	 */
+	cmd[0] = FIELD_PREP(GUC_CTB_MSG_0_FORMAT, GUC_CTB_FORMAT_HXG) |
+		FIELD_PREP(GUC_CTB_MSG_0_NUM_DWORDS, len) |
+		FIELD_PREP(GUC_CTB_MSG_0_FENCE, ct_fence_value);
+	if (want_response) {
+		cmd[1] = MAKE_ACTION(GUC_HXG_TYPE_REQUEST, action[0]);
+	} else if (vf_action_can_safely_fail(xe, action[0])) {
+		cmd[1] = MAKE_ACTION(GUC_HXG_TYPE_EVENT, action[0]);
+	} else {
+		fast_req_track(ct, ct_fence_value,
+			       FIELD_GET(GUC_HXG_EVENT_MSG_0_ACTION, action[0]));
+
+		cmd[1] = MAKE_ACTION(GUC_HXG_TYPE_FAST_REQUEST, action[0]);
+	}
+
+	/* H2G header in cmd[1] replaces action[0] so: */
+	--len;
+	++action;
+
+	/* Write H2G ensuring visible before descriptor update */
+	xe_map_memcpy_to(xe, &map, 0, cmd, H2G_CT_HEADERS * sizeof(u32));
+	xe_map_memcpy_to(xe, &map, H2G_CT_HEADERS * sizeof(u32), action, len * sizeof(u32));
+	xe_device_wmb(xe);
+
+	/* Update local copies */
+	h2g->info.tail = (tail + full_len) % h2g->info.size;
+	h2g_reserve_space(ct, full_len);
+
+	/* Update descriptor */
+	desc_write(xe, h2g, tail, h2g->info.tail);
+
+	/*
+	 * desc_read() performs an VRAM read which serializes the CPU and drains
+	 * posted writes on dGPU platforms. Tracepoints evaluate arguments even
+	 * when disabled, so guard the event to avoid adding µs-scale latency to
+	 * the fast H2G submission path when tracing is not active.
+	 */
+	if (trace_xe_guc_ctb_h2g_enabled())
+		trace_xe_guc_ctb_h2g(xe, gt->info.id, *(action - 1), full_len,
+				     desc_read(xe, h2g, head), h2g->info.tail);
+
+	return 0;
+
+corrupted:
+	CT_DEAD(ct, &ct->ctbs.h2g, H2G_WRITE);
+	return -EPIPE;
+}
+
 static int __guc_ct_send_locked(struct xe_guc_ct *ct, const u32 *action,
 				u32 len, u32 g2h_len, u32 num_g2h,
 				struct g2h_fence *g2h_fence)
 {
-	struct xe_gt *gt __maybe_unused = ct_to_gt(ct);
+	struct xe_gt *gt = ct_to_gt(ct);
 	u16 seqno;
 	int ret;
 
-	xe_gt_assert(gt, ct->state != XE_GUC_CT_STATE_NOT_INITIALIZED);
+	xe_gt_assert(gt, xe_guc_ct_initialized(ct));
 	xe_gt_assert(gt, !g2h_len || !g2h_fence);
 	xe_gt_assert(gt, !num_g2h || !g2h_fence);
 	xe_gt_assert(gt, !g2h_len || num_g2h);
@@ -646,7 +1067,7 @@ static int __guc_ct_send_locked(struct xe_guc_ct *ct, const u32 *action,
 		goto out;
 	}
 
-	if (ct->state == XE_GUC_CT_STATE_STOPPED) {
+	if (ct->state == XE_GUC_CT_STATE_STOPPED || xe_gt_recovery_pending(gt)) {
 		ret = -ECANCELED;
 		goto out;
 	}
@@ -658,16 +1079,12 @@ static int __guc_ct_send_locked(struct xe_guc_ct *ct, const u32 *action,
 		num_g2h = 1;
 
 		if (g2h_fence_needs_alloc(g2h_fence)) {
-			void *ptr;
-
 			g2h_fence->seqno = next_ct_seqno(ct, true);
-			ptr = xa_store(&ct->fence_lookup,
-				       g2h_fence->seqno,
-				       g2h_fence, GFP_ATOMIC);
-			if (IS_ERR(ptr)) {
-				ret = PTR_ERR(ptr);
+			ret = xa_err(xa_store(&ct->fence_lookup,
+					      g2h_fence->seqno, g2h_fence,
+					      GFP_ATOMIC));
+			if (ret)
 				goto out;
-			}
 		}
 
 		seqno = g2h_fence->seqno;
@@ -705,23 +1122,16 @@ static void kick_reset(struct xe_guc_ct *ct)
 
 static int dequeue_one_g2h(struct xe_guc_ct *ct);
 
-static int guc_ct_send_locked(struct xe_guc_ct *ct, const u32 *action, u32 len,
-			      u32 g2h_len, u32 num_g2h,
-			      struct g2h_fence *g2h_fence)
+/*
+ * wait before retry of sending h2g message
+ * Return: true if ready for retry, false if the wait timeouted
+ */
+static bool guc_ct_send_wait_for_retry(struct xe_guc_ct *ct, u32 len,
+				       u32 g2h_len, struct g2h_fence *g2h_fence,
+				       unsigned int *sleep_period_ms,
+				       unsigned int *sleep_total_ms)
 {
 	struct xe_device *xe = ct_to_xe(ct);
-	struct xe_gt *gt = ct_to_gt(ct);
-	struct drm_printer p = xe_gt_info_printer(gt);
-	unsigned int sleep_period_ms = 1;
-	int ret;
-
-	xe_gt_assert(gt, !g2h_len || !g2h_fence);
-	lockdep_assert_held(&ct->lock);
-	xe_device_assert_mem_access(ct_to_xe(ct));
-
-try_again:
-	ret = __guc_ct_send_locked(ct, action, len, g2h_len, num_g2h,
-				   g2h_fence);
 
 	/*
 	 * We wait to try to restore credits for about 1 second before bailing.
@@ -730,24 +1140,20 @@ try_again:
 	 * the case of G2H we process any G2H in the channel, hopefully freeing
 	 * credits as we consume the G2H messages.
 	 */
-	if (unlikely(ret == -EBUSY &&
-		     !h2g_has_room(ct, len + GUC_CTB_HDR_LEN))) {
+	if (!h2g_has_room(ct, len + GUC_CTB_HDR_LEN)) {
 		struct guc_ctb *h2g = &ct->ctbs.h2g;
 
-		if (sleep_period_ms == 1024)
-			goto broken;
+		if (*sleep_total_ms > 1000)
+			return false;
 
 		trace_xe_guc_ct_h2g_flow_control(xe, h2g->info.head, h2g->info.tail,
 						 h2g->info.size,
 						 h2g->info.space,
 						 len + GUC_CTB_HDR_LEN);
-		msleep(sleep_period_ms);
-		sleep_period_ms <<= 1;
-
-		goto try_again;
-	} else if (unlikely(ret == -EBUSY)) {
-		struct xe_device *xe = ct_to_xe(ct);
+		*sleep_total_ms += xe_sleep_exponential_ms(sleep_period_ms, 64);
+	} else {
 		struct guc_ctb *g2h = &ct->ctbs.g2h;
+		int ret;
 
 		trace_xe_guc_ct_g2h_flow_control(xe, g2h->info.head,
 						 desc_read(xe, g2h, tail),
@@ -761,12 +1167,41 @@ try_again:
 	(desc_read(ct_to_xe(ct), (&ct->ctbs.g2h), tail) != ct->ctbs.g2h.info.head)
 		if (!wait_event_timeout(ct->wq, !ct->g2h_outstanding ||
 					g2h_avail(ct), HZ))
-			goto broken;
+			return false;
 #undef g2h_avail
 
-		if (dequeue_one_g2h(ct) < 0)
-			goto broken;
+		ret = dequeue_one_g2h(ct);
+		if (ret < 0) {
+			if (ret != -ECANCELED)
+				xe_gt_err(ct_to_gt(ct), "CTB receive failed (%pe)\n",
+					  ERR_PTR(ret));
+			return false;
+		}
+	}
+	return true;
+}
 
+static int guc_ct_send_locked(struct xe_guc_ct *ct, const u32 *action, u32 len,
+			      u32 g2h_len, u32 num_g2h,
+			      struct g2h_fence *g2h_fence)
+{
+	struct xe_gt *gt = ct_to_gt(ct);
+	unsigned int sleep_period_ms = 1;
+	unsigned int sleep_total_ms = 0;
+	int ret;
+
+	xe_gt_assert(gt, !g2h_len || !g2h_fence);
+	lockdep_assert_held(&ct->lock);
+	xe_device_assert_mem_access(ct_to_xe(ct));
+
+try_again:
+	ret = __guc_ct_send_locked(ct, action, len, g2h_len, num_g2h,
+				   g2h_fence);
+
+	if (unlikely(ret == -EBUSY)) {
+		if (!guc_ct_send_wait_for_retry(ct, len, g2h_len, g2h_fence,
+						&sleep_period_ms, &sleep_total_ms))
+			goto broken;
 		goto try_again;
 	}
 
@@ -774,8 +1209,7 @@ try_again:
 
 broken:
 	xe_gt_err(gt, "No forward process on H2G, reset required\n");
-	xe_guc_ct_print(ct, &p, true);
-	ct->ctbs.h2g.info.broken = true;
+	CT_DEAD(ct, &ct->ctbs.h2g, DEADLOCK);
 
 	return -EDEADLK;
 }
@@ -843,18 +1277,22 @@ static bool retry_failure(struct xe_guc_ct *ct, int ret)
 #define ct_alive(ct)	\
 	(xe_guc_ct_enabled(ct) && !ct->ctbs.h2g.info.broken && \
 	 !ct->ctbs.g2h.info.broken)
-	if (!wait_event_interruptible_timeout(ct->wq, ct_alive(ct),  HZ * 5))
+	if (!wait_event_interruptible_timeout(ct->wq, ct_alive(ct), HZ * 5))
 		return false;
 #undef ct_alive
 
 	return true;
 }
 
+#define GUC_SEND_RETRY_LIMIT	50
+#define GUC_SEND_RETRY_MSLEEP	5
+
 static int guc_ct_send_recv(struct xe_guc_ct *ct, const u32 *action, u32 len,
 			    u32 *response_buffer, bool no_fail)
 {
 	struct xe_gt *gt = ct_to_gt(ct);
 	struct g2h_fence g2h_fence;
+	unsigned int retries = 0;
 	int ret = 0;
 
 	/*
@@ -870,14 +1308,11 @@ retry:
 retry_same_fence:
 	ret = guc_ct_send(ct, action, len, 0, 0, &g2h_fence);
 	if (unlikely(ret == -ENOMEM)) {
-		void *ptr;
-
 		/* Retry allocation /w GFP_KERNEL */
-		ptr = xa_store(&ct->fence_lookup,
-			       g2h_fence.seqno,
-			       &g2h_fence, GFP_KERNEL);
-		if (IS_ERR(ptr))
-			return PTR_ERR(ptr);
+		ret = xa_err(xa_store(&ct->fence_lookup, g2h_fence.seqno,
+				      &g2h_fence, GFP_KERNEL));
+		if (ret)
+			return ret;
 
 		goto retry_same_fence;
 	} else if (unlikely(ret)) {
@@ -888,31 +1323,69 @@ retry_same_fence:
 			goto retry_same_fence;
 
 		if (!g2h_fence_needs_alloc(&g2h_fence))
-			xa_erase_irq(&ct->fence_lookup, g2h_fence.seqno);
+			xa_erase(&ct->fence_lookup, g2h_fence.seqno);
 
 		return ret;
 	}
 
-	ret = wait_event_timeout(ct->g2h_fence_wq, g2h_fence.done, HZ);
+	/* READ_ONCEs pairs with WRITE_ONCEs in parse_g2h_response
+	 * and g2h_fence_cancel.
+	 */
+	ret = wait_event_timeout(ct->g2h_fence_wq, READ_ONCE(g2h_fence.done), HZ);
 	if (!ret) {
-		xe_gt_err(gt, "Timed out wait for G2H, fence %u, action %04x",
-			  g2h_fence.seqno, action[0]);
-		xa_erase_irq(&ct->fence_lookup, g2h_fence.seqno);
+		LNL_FLUSH_WORK(&ct->g2h_worker);
+		if (READ_ONCE(g2h_fence.done)) {
+			xe_gt_warn(gt, "G2H fence %u, action %04x, done\n",
+				   g2h_fence.seqno, action[0]);
+			ret = 1;
+		}
+	}
+
+	/*
+	 * Ensure we serialize with completion side to prevent UAF with fence going out of scope on
+	 * the stack, since we have no clue if it will fire after the timeout before we can erase
+	 * from the xa. Also we have some dependent loads and stores below for which we need the
+	 * correct ordering, and we lack the needed barriers.
+	 */
+	mutex_lock(&ct->lock);
+	if (!ret) {
+		xe_gt_err(gt, "Timed out wait for G2H, fence %u, action %04x, done %s\n",
+			  g2h_fence.seqno, action[0], str_yes_no(g2h_fence.done));
+		xa_erase(&ct->fence_lookup, g2h_fence.seqno);
+		mutex_unlock(&ct->lock);
 		return -ETIME;
 	}
 
 	if (g2h_fence.retry) {
 		xe_gt_dbg(gt, "H2G action %#x retrying: reason %#x\n",
 			  action[0], g2h_fence.reason);
+		mutex_unlock(&ct->lock);
+		if (++retries > GUC_SEND_RETRY_LIMIT) {
+			xe_gt_err(gt, "H2G action %#x reached retry limit=%u, aborting\n",
+				  action[0], GUC_SEND_RETRY_LIMIT);
+			return -ELOOP;
+		}
+		msleep(GUC_SEND_RETRY_MSLEEP * retries);
 		goto retry;
 	}
 	if (g2h_fence.fail) {
+		if (g2h_fence.cancel) {
+			xe_gt_dbg(gt, "H2G request %#x canceled!\n", action[0]);
+			ret = -ECANCELED;
+			goto unlock;
+		}
 		xe_gt_err(gt, "H2G request %#x failed: error %#x hint %#x\n",
 			  action[0], g2h_fence.error, g2h_fence.hint);
 		ret = -EIO;
 	}
 
-	return ret > 0 ? response_buffer ? g2h_fence.response_len : g2h_fence.response_data : ret;
+	if (ret > 0)
+		ret = response_buffer ? g2h_fence.response_len : g2h_fence.response_data;
+
+unlock:
+	mutex_unlock(&ct->lock);
+
+	return ret;
 }
 
 /**
@@ -939,6 +1412,7 @@ int xe_guc_ct_send_recv(struct xe_guc_ct *ct, const u32 *action, u32 len,
 	KUNIT_STATIC_STUB_REDIRECT(xe_guc_ct_send_recv, ct, action, len, response_buffer);
 	return guc_ct_send_recv(ct, action, len, response_buffer, false);
 }
+ALLOW_ERROR_INJECTION(xe_guc_ct_send_recv, ERRNO);
 
 int xe_guc_ct_send_recv_no_fail(struct xe_guc_ct *ct, const u32 *action,
 				u32 len, u32 *response_buffer)
@@ -964,12 +1438,32 @@ static int parse_g2h_event(struct xe_guc_ct *ct, u32 *msg, u32 len)
 	lockdep_assert_held(&ct->lock);
 
 	switch (action) {
+	case XE_GUC_ACTION_NOTIFY_MULTI_QUEUE_CONTEXT_CGP_SYNC_DONE:
 	case XE_GUC_ACTION_SCHED_CONTEXT_MODE_DONE:
 	case XE_GUC_ACTION_DEREGISTER_CONTEXT_DONE:
 	case XE_GUC_ACTION_SCHED_ENGINE_MODE_DONE:
 	case XE_GUC_ACTION_TLB_INVALIDATION_DONE:
+	case XE_GUC_ACTION_PAGE_RECLAMATION_DONE:
 		g2h_release_space(ct, len);
 	}
+
+	return 0;
+}
+
+static int guc_crash_process_msg(struct xe_guc_ct *ct, u32 action)
+{
+	struct xe_gt *gt = ct_to_gt(ct);
+
+	if (action == XE_GUC_ACTION_NOTIFY_CRASH_DUMP_POSTED)
+		xe_gt_err(gt, "GuC Crash dump notification\n");
+	else if (action == XE_GUC_ACTION_NOTIFY_EXCEPTION)
+		xe_gt_err(gt, "GuC Exception notification\n");
+	else
+		xe_gt_err(gt, "Unknown GuC crash notification: 0x%04X\n", action);
+
+	CT_DEAD(ct, NULL, CRASH);
+
+	kick_reset(ct);
 
 	return 0;
 }
@@ -1003,12 +1497,21 @@ static int parse_g2h_response(struct xe_guc_ct *ct, u32 *msg, u32 len)
 			xe_gt_err(gt, "unexpected response %u for FAST_REQ H2G fence 0x%x!\n",
 				  type, fence);
 
+		fast_req_report(ct, fence);
+
+		/* FIXME: W/A race in the GuC, will get in firmware soon */
+		if (xe_gt_recovery_pending(gt))
+			return 0;
+
+		CT_DEAD(ct, NULL, PARSE_G2H_RESPONSE);
+
 		return -EPROTO;
 	}
 
 	g2h_fence = xa_erase(&ct->fence_lookup, fence);
 	if (unlikely(!g2h_fence)) {
 		/* Don't tear down channel, as send could've timed out */
+		/* CT_DEAD(ct, NULL, PARSE_G2H_UNKNOWN); */
 		xe_gt_warn(gt, "G2H fence (%u) not found!\n", fence);
 		g2h_release_space(ct, GUC_CTB_HXG_MSG_MAX_LEN);
 		return 0;
@@ -1032,7 +1535,8 @@ static int parse_g2h_response(struct xe_guc_ct *ct, u32 *msg, u32 len)
 
 	g2h_release_space(ct, GUC_CTB_HXG_MSG_MAX_LEN);
 
-	g2h_fence->done = true;
+	/* WRITE_ONCE pairs with READ_ONCEs in guc_ct_send_recv. */
+	WRITE_ONCE(g2h_fence->done, true);
 	smp_mb();
 
 	wake_up_all(&ct->g2h_fence_wq);
@@ -1053,7 +1557,7 @@ static int parse_g2h_msg(struct xe_guc_ct *ct, u32 *msg, u32 len)
 	if (unlikely(origin != GUC_HXG_ORIGIN_GUC)) {
 		xe_gt_err(gt, "G2H channel broken on read, origin=%u, reset required\n",
 			  origin);
-		ct->ctbs.g2h.info.broken = true;
+		CT_DEAD(ct, &ct->ctbs.g2h, PARSE_G2H_ORIGIN);
 
 		return -EPROTO;
 	}
@@ -1071,7 +1575,7 @@ static int parse_g2h_msg(struct xe_guc_ct *ct, u32 *msg, u32 len)
 	default:
 		xe_gt_err(gt, "G2H channel broken on read, type=%u, reset required\n",
 			  type);
-		ct->ctbs.g2h.info.broken = true;
+		CT_DEAD(ct, &ct->ctbs.g2h, PARSE_G2H_TYPE);
 
 		ret = -EOPNOTSUPP;
 	}
@@ -1114,6 +1618,8 @@ static int process_g2h_msg(struct xe_guc_ct *ct, u32 *msg, u32 len)
 		/* Selftest only at the moment */
 		break;
 	case XE_GUC_ACTION_STATE_CAPTURE_NOTIFICATION:
+		ret = xe_guc_error_capture_handler(guc, payload, adj_len);
+		break;
 	case XE_GUC_ACTION_NOTIFY_FLUSH_LOG_BUFFER_TO_FILE:
 		/* FIXME: Handle this */
 		break;
@@ -1125,12 +1631,10 @@ static int process_g2h_msg(struct xe_guc_ct *ct, u32 *msg, u32 len)
 		ret = xe_guc_pagefault_handler(guc, payload, adj_len);
 		break;
 	case XE_GUC_ACTION_TLB_INVALIDATION_DONE:
-		ret = xe_guc_tlb_invalidation_done_handler(guc, payload,
-							   adj_len);
+		ret = xe_guc_tlb_inval_done_handler(guc, payload, adj_len);
 		break;
-	case XE_GUC_ACTION_ACCESS_COUNTER_NOTIFY:
-		ret = xe_guc_access_counter_notify_handler(guc, payload,
-							   adj_len);
+	case XE_GUC_ACTION_PAGE_RECLAMATION_DONE:
+		ret = xe_guc_page_reclaim_done_handler(guc, payload, adj_len);
 		break;
 	case XE_GUC_ACTION_GUC2PF_RELAY_FROM_VF:
 		ret = xe_guc_relay_process_guc2pf(&guc->relay, hxg, hxg_len);
@@ -1144,13 +1648,31 @@ static int process_g2h_msg(struct xe_guc_ct *ct, u32 *msg, u32 len)
 	case GUC_ACTION_GUC2PF_ADVERSE_EVENT:
 		ret = xe_gt_sriov_pf_monitor_process_guc2pf(gt, hxg, hxg_len);
 		break;
+	case XE_GUC_ACTION_NOTIFY_CRASH_DUMP_POSTED:
+	case XE_GUC_ACTION_NOTIFY_EXCEPTION:
+		ret = guc_crash_process_msg(ct, action);
+		break;
+#if IS_ENABLED(CONFIG_DRM_XE_KUNIT_TEST)
+	case XE_GUC_ACTION_TEST_G2G_RECV:
+		ret = xe_guc_g2g_test_notification(guc, payload, adj_len);
+		break;
+#endif
+	case XE_GUC_ACTION_NOTIFY_MULTI_QUEUE_CONTEXT_CGP_SYNC_DONE:
+		ret = xe_guc_exec_queue_cgp_sync_done_handler(guc, payload, adj_len);
+		break;
+	case XE_GUC_ACTION_NOTIFY_MULTI_QUEUE_CGP_CONTEXT_ERROR:
+		ret = xe_guc_exec_queue_cgp_context_error_handler(guc, payload,
+								  adj_len);
+		break;
 	default:
 		xe_gt_err(gt, "unexpected G2H action 0x%04x\n", action);
 	}
 
-	if (ret)
-		xe_gt_err(gt, "G2H action 0x%04x failed (%pe)\n",
-			  action, ERR_PTR(ret));
+	if (ret) {
+		xe_gt_err(gt, "G2H action %#04x failed (%pe) len %u msg %*ph\n",
+			  action, ERR_PTR(ret), hxg_len, (int)sizeof(u32) * hxg_len, hxg);
+		CT_DEAD(ct, NULL, PROCESS_FAILED);
+	}
 
 	return 0;
 }
@@ -1160,12 +1682,12 @@ static int g2h_read(struct xe_guc_ct *ct, u32 *msg, bool fast_path)
 	struct xe_device *xe = ct_to_xe(ct);
 	struct xe_gt *gt = ct_to_gt(ct);
 	struct guc_ctb *g2h = &ct->ctbs.g2h;
-	u32 tail, head, len;
+	u32 tail, head, len, desc_status;
 	s32 avail;
 	u32 action;
 	u32 *hxg;
 
-	xe_gt_assert(gt, ct->state != XE_GUC_CT_STATE_NOT_INITIALIZED);
+	xe_gt_assert(gt, xe_guc_ct_initialized(ct));
 	lockdep_assert_held(&ct->fast_lock);
 
 	if (ct->state == XE_GUC_CT_STATE_DISABLED)
@@ -1178,6 +1700,63 @@ static int g2h_read(struct xe_guc_ct *ct, u32 *msg, bool fast_path)
 		return -EPIPE;
 
 	xe_gt_assert(gt, xe_guc_ct_enabled(ct));
+
+	desc_status = desc_read(xe, g2h, status);
+	if (desc_status) {
+		if (desc_status & GUC_CTB_STATUS_DISABLED) {
+			/*
+			 * Potentially valid if a CLIENT_RESET request resulted in
+			 * contexts/engines being reset. But should never happen as
+			 * no contexts should be active when CLIENT_RESET is sent.
+			 */
+			xe_gt_err(gt, "CT read: unexpected G2H after GuC has stopped!\n");
+			desc_status &= ~GUC_CTB_STATUS_DISABLED;
+		}
+
+		if (desc_status) {
+			xe_gt_err(gt, "CT read: non-zero status: %u\n", desc_status);
+			goto corrupted;
+		}
+	}
+
+	if (IS_ENABLED(CONFIG_DRM_XE_DEBUG)) {
+		u32 desc_tail = desc_read(xe, g2h, tail);
+		/*
+		u32 desc_head = desc_read(xe, g2h, head);
+
+		 * info.head and desc_head are updated back-to-back at the end of
+		 * this function and nowhere else. Hence, they cannot be different
+		 * unless two g2h_read calls are running concurrently. Which is not
+		 * possible because it is guarded by ct->fast_lock. And yet, some
+		 * discrete platforms are regularly hitting this error :(.
+		 *
+		 * desc_head rolling backwards shouldn't cause any noticeable
+		 * problems - just a delay in GuC being allowed to proceed past that
+		 * point in the queue. So for now, just disable the error until it
+		 * can be root caused.
+		 *
+		if (g2h->info.head != desc_head) {
+			desc_write(xe, g2h, status, desc_status | GUC_CTB_STATUS_MISMATCH);
+			xe_gt_err(gt, "CT read: head was modified %u != %u\n",
+				  desc_head, g2h->info.head);
+			goto corrupted;
+		}
+		 */
+
+		if (g2h->info.head > g2h->info.size) {
+			desc_write(xe, g2h, status, desc_status | GUC_CTB_STATUS_OVERFLOW);
+			xe_gt_err(gt, "CT read: head out of range: %u vs %u\n",
+				  g2h->info.head, g2h->info.size);
+			goto corrupted;
+		}
+
+		if (desc_tail >= g2h->info.size) {
+			desc_write(xe, g2h, status, desc_status | GUC_CTB_STATUS_OVERFLOW);
+			xe_gt_err(gt, "CT read: invalid tail offset %u >= %u)\n",
+				  desc_tail, g2h->info.size);
+			goto corrupted;
+		}
+	}
 
 	/* Calculate DW available to read */
 	tail = desc_read(xe, g2h, tail);
@@ -1195,9 +1774,7 @@ static int g2h_read(struct xe_guc_ct *ct, u32 *msg, bool fast_path)
 	if (len > avail) {
 		xe_gt_err(gt, "G2H channel broken on read, avail=%d, len=%d, reset required\n",
 			  avail, len);
-		g2h->info.broken = true;
-
-		return -EPROTO;
+		goto corrupted;
 	}
 
 	head = (g2h->info.head + 1) % g2h->info.size;
@@ -1229,6 +1806,7 @@ static int g2h_read(struct xe_guc_ct *ct, u32 *msg, bool fast_path)
 		switch (action) {
 		case XE_GUC_ACTION_REPORT_PAGE_FAULT_REQ_DESC:
 		case XE_GUC_ACTION_TLB_INVALIDATION_DONE:
+		case XE_GUC_ACTION_PAGE_RECLAMATION_DONE:
 			break;	/* Process these in fast-path */
 		default:
 			return 0;
@@ -1243,6 +1821,10 @@ static int g2h_read(struct xe_guc_ct *ct, u32 *msg, bool fast_path)
 			     action, len, g2h->info.head, tail);
 
 	return len;
+
+corrupted:
+	CT_DEAD(ct, &ct->ctbs.g2h, G2H_READ);
+	return -EPROTO;
 }
 
 static void g2h_fast_path(struct xe_guc_ct *ct, u32 *msg, u32 len)
@@ -1262,16 +1844,21 @@ static void g2h_fast_path(struct xe_guc_ct *ct, u32 *msg, u32 len)
 		break;
 	case XE_GUC_ACTION_TLB_INVALIDATION_DONE:
 		__g2h_release_space(ct, len);
-		ret = xe_guc_tlb_invalidation_done_handler(guc, payload,
-							   adj_len);
+		ret = xe_guc_tlb_inval_done_handler(guc, payload, adj_len);
+		break;
+	case XE_GUC_ACTION_PAGE_RECLAMATION_DONE:
+		__g2h_release_space(ct, len);
+		ret = xe_guc_page_reclaim_done_handler(guc, payload, adj_len);
 		break;
 	default:
-		xe_gt_warn(gt, "NOT_POSSIBLE");
+		xe_gt_warn(gt, "NOT_POSSIBLE\n");
 	}
 
-	if (ret)
+	if (ret) {
 		xe_gt_err(gt, "G2H action 0x%04x failed (%pe)\n",
 			  action, ERR_PTR(ret));
+		CT_DEAD(ct, NULL, FAST_G2H);
+	}
 }
 
 /**
@@ -1331,7 +1918,6 @@ static int dequeue_one_g2h(struct xe_guc_ct *ct)
 
 static void receive_g2h(struct xe_guc_ct *ct)
 {
-	struct xe_gt *gt = ct_to_gt(ct);
 	bool ongoing;
 	int ret;
 
@@ -1368,9 +1954,8 @@ static void receive_g2h(struct xe_guc_ct *ct)
 		mutex_unlock(&ct->lock);
 
 		if (unlikely(ret == -EPROTO || ret == -EOPNOTSUPP)) {
-			struct drm_printer p = xe_gt_info_printer(gt);
-
-			xe_guc_ct_print(ct, &p, false);
+			xe_gt_err(ct_to_gt(ct), "CT dequeue failed: %d\n", ret);
+			CT_DEAD(ct, NULL, G2H_RECV);
 			kick_reset(ct);
 		}
 	} while (ret == 1);
@@ -1386,49 +1971,35 @@ static void g2h_worker_func(struct work_struct *w)
 	receive_g2h(ct);
 }
 
-static void guc_ctb_snapshot_capture(struct xe_device *xe, struct guc_ctb *ctb,
-				     struct guc_ctb_snapshot *snapshot,
-				     bool atomic)
+static struct xe_guc_ct_snapshot *guc_ct_snapshot_alloc(struct xe_guc_ct *ct, bool atomic,
+							bool want_ctb)
 {
-	u32 head, tail;
+	struct xe_guc_ct_snapshot *snapshot;
 
+	snapshot = kzalloc_obj(*snapshot, atomic ? GFP_ATOMIC : GFP_KERNEL);
+	if (!snapshot)
+		return NULL;
+
+	if (ct->ctbs.h2g.bo && ct->ctbs.g2h.bo && want_ctb) {
+		snapshot->ctb_size = xe_bo_size(ct->ctbs.h2g.bo) +
+			xe_bo_size(ct->ctbs.g2h.bo);
+		snapshot->ctb = kmalloc(snapshot->ctb_size, atomic ? GFP_ATOMIC : GFP_KERNEL);
+	}
+
+	return snapshot;
+}
+
+static void guc_ctb_snapshot_capture(struct xe_device *xe, struct guc_ctb *ctb,
+				     struct guc_ctb_snapshot *snapshot)
+{
 	xe_map_memcpy_from(xe, &snapshot->desc, &ctb->desc, 0,
 			   sizeof(struct guc_ct_buffer_desc));
 	memcpy(&snapshot->info, &ctb->info, sizeof(struct guc_ctb_info));
-
-	snapshot->cmds = kmalloc_array(ctb->info.size, sizeof(u32),
-				       atomic ? GFP_ATOMIC : GFP_KERNEL);
-
-	if (!snapshot->cmds) {
-		drm_err(&xe->drm, "Skipping CTB commands snapshot. Only CTB info will be available.\n");
-		return;
-	}
-
-	head = snapshot->desc.head;
-	tail = snapshot->desc.tail;
-
-	if (head != tail) {
-		struct iosys_map map =
-			IOSYS_MAP_INIT_OFFSET(&ctb->cmds, head * sizeof(u32));
-
-		while (head != tail) {
-			snapshot->cmds[head] = xe_map_rd(xe, &map, 0, u32);
-			++head;
-			if (head == ctb->info.size) {
-				head = 0;
-				map = ctb->cmds;
-			} else {
-				iosys_map_incr(&map, sizeof(u32));
-			}
-		}
-	}
 }
 
 static void guc_ctb_snapshot_print(struct guc_ctb_snapshot *snapshot,
 				   struct drm_printer *p)
 {
-	u32 head, tail;
-
 	drm_printf(p, "\tsize: %d\n", snapshot->info.size);
 	drm_printf(p, "\tresv_space: %d\n", snapshot->info.resv_space);
 	drm_printf(p, "\thead: %d\n", snapshot->info.head);
@@ -1438,63 +2009,51 @@ static void guc_ctb_snapshot_print(struct guc_ctb_snapshot *snapshot,
 	drm_printf(p, "\thead (memory): %d\n", snapshot->desc.head);
 	drm_printf(p, "\ttail (memory): %d\n", snapshot->desc.tail);
 	drm_printf(p, "\tstatus (memory): 0x%x\n", snapshot->desc.status);
-
-	if (!snapshot->cmds)
-		return;
-
-	head = snapshot->desc.head;
-	tail = snapshot->desc.tail;
-
-	while (head != tail) {
-		drm_printf(p, "\tcmd[%d]: 0x%08x\n", head,
-			   snapshot->cmds[head]);
-		++head;
-		if (head == snapshot->info.size)
-			head = 0;
-	}
 }
 
-static void guc_ctb_snapshot_free(struct guc_ctb_snapshot *snapshot)
-{
-	kfree(snapshot->cmds);
-}
-
-/**
- * xe_guc_ct_snapshot_capture - Take a quick snapshot of the CT state.
- * @ct: GuC CT object.
- * @atomic: Boolean to indicate if this is called from atomic context like
- * reset or CTB handler or from some regular path like debugfs.
- *
- * This can be printed out in a later stage like during dev_coredump
- * analysis.
- *
- * Returns: a GuC CT snapshot object that must be freed by the caller
- * by using `xe_guc_ct_snapshot_free`.
- */
-struct xe_guc_ct_snapshot *xe_guc_ct_snapshot_capture(struct xe_guc_ct *ct,
-						      bool atomic)
+static struct xe_guc_ct_snapshot *guc_ct_snapshot_capture(struct xe_guc_ct *ct, bool atomic,
+							  bool want_ctb)
 {
 	struct xe_device *xe = ct_to_xe(ct);
 	struct xe_guc_ct_snapshot *snapshot;
 
-	snapshot = kzalloc(sizeof(*snapshot),
-			   atomic ? GFP_ATOMIC : GFP_KERNEL);
-
+	snapshot = guc_ct_snapshot_alloc(ct, atomic, want_ctb);
 	if (!snapshot) {
-		drm_err(&xe->drm, "Skipping CTB snapshot entirely.\n");
+		xe_gt_err(ct_to_gt(ct), "Skipping CTB snapshot entirely.\n");
 		return NULL;
 	}
 
 	if (xe_guc_ct_enabled(ct) || ct->state == XE_GUC_CT_STATE_STOPPED) {
 		snapshot->ct_enabled = true;
 		snapshot->g2h_outstanding = READ_ONCE(ct->g2h_outstanding);
-		guc_ctb_snapshot_capture(xe, &ct->ctbs.h2g,
-					 &snapshot->h2g, atomic);
-		guc_ctb_snapshot_capture(xe, &ct->ctbs.g2h,
-					 &snapshot->g2h, atomic);
+		guc_ctb_snapshot_capture(xe, &ct->ctbs.h2g, &snapshot->h2g);
+		guc_ctb_snapshot_capture(xe, &ct->ctbs.g2h, &snapshot->g2h);
+	}
+
+	if (ct->ctbs.h2g.bo && ct->ctbs.g2h.bo && snapshot->ctb) {
+		xe_map_memcpy_from(xe, snapshot->ctb, &ct->ctbs.h2g.bo->vmap, 0,
+				   xe_bo_size(ct->ctbs.h2g.bo));
+		xe_map_memcpy_from(xe, snapshot->ctb + xe_bo_size(ct->ctbs.h2g.bo),
+				   &ct->ctbs.g2h.bo->vmap, 0,
+				   xe_bo_size(ct->ctbs.g2h.bo));
 	}
 
 	return snapshot;
+}
+
+/**
+ * xe_guc_ct_snapshot_capture - Take a quick snapshot of the CT state.
+ * @ct: GuC CT object.
+ *
+ * This can be printed out in a later stage like during dev_coredump
+ * analysis. This is safe to be called during atomic context.
+ *
+ * Returns: a GuC CT snapshot object that must be freed by the caller
+ * by using `xe_guc_ct_snapshot_free`.
+ */
+struct xe_guc_ct_snapshot *xe_guc_ct_snapshot_capture(struct xe_guc_ct *ct)
+{
+	return guc_ct_snapshot_capture(ct, true, true);
 }
 
 /**
@@ -1514,11 +2073,16 @@ void xe_guc_ct_snapshot_print(struct xe_guc_ct_snapshot *snapshot,
 		drm_puts(p, "H2G CTB (all sizes in DW):\n");
 		guc_ctb_snapshot_print(&snapshot->h2g, p);
 
-		drm_puts(p, "\nG2H CTB (all sizes in DW):\n");
+		drm_puts(p, "G2H CTB (all sizes in DW):\n");
 		guc_ctb_snapshot_print(&snapshot->g2h, p);
-
 		drm_printf(p, "\tg2h outstanding: %d\n",
 			   snapshot->g2h_outstanding);
+
+		if (snapshot->ctb) {
+			drm_printf(p, "[CTB].length: 0x%zx\n", snapshot->ctb_size);
+			xe_print_blob_ascii85(p, "[CTB].data", '\n',
+					      snapshot->ctb, 0, snapshot->ctb_size);
+		}
 	} else {
 		drm_puts(p, "CT disabled\n");
 	}
@@ -1536,8 +2100,7 @@ void xe_guc_ct_snapshot_free(struct xe_guc_ct_snapshot *snapshot)
 	if (!snapshot)
 		return;
 
-	guc_ctb_snapshot_free(&snapshot->h2g);
-	guc_ctb_snapshot_free(&snapshot->g2h);
+	kfree(snapshot->ctb);
 	kfree(snapshot);
 }
 
@@ -1545,16 +2108,144 @@ void xe_guc_ct_snapshot_free(struct xe_guc_ct_snapshot *snapshot)
  * xe_guc_ct_print - GuC CT Print.
  * @ct: GuC CT.
  * @p: drm_printer where it will be printed out.
- * @atomic: Boolean to indicate if this is called from atomic context like
- * reset or CTB handler or from some regular path like debugfs.
+ * @want_ctb: Should the full CTB content be dumped (vs just the headers)
  *
- * This function quickly capture a snapshot and immediately print it out.
+ * This function will quickly capture a snapshot of the CT state
+ * and immediately print it out.
  */
-void xe_guc_ct_print(struct xe_guc_ct *ct, struct drm_printer *p, bool atomic)
+void xe_guc_ct_print(struct xe_guc_ct *ct, struct drm_printer *p, bool want_ctb)
 {
 	struct xe_guc_ct_snapshot *snapshot;
 
-	snapshot = xe_guc_ct_snapshot_capture(ct, atomic);
+	snapshot = guc_ct_snapshot_capture(ct, false, want_ctb);
 	xe_guc_ct_snapshot_print(snapshot, p);
 	xe_guc_ct_snapshot_free(snapshot);
 }
+
+#if IS_ENABLED(CONFIG_DRM_XE_DEBUG)
+
+#ifdef CONFIG_FUNCTION_ERROR_INJECTION
+/*
+ * This is a helper function which assists the driver in identifying if a fault
+ * injection test is currently active, allowing it to reduce unnecessary debug
+ * output. Typically, the function returns zero, but the fault injection
+ * framework can alter this to return an error. Since faults are injected
+ * through this function, it's important to ensure the compiler doesn't optimize
+ * it into an inline function. To avoid such optimization, the 'noinline'
+ * attribute is applied. Compiler optimizes the static function defined in the
+ * header file as an inline function.
+ */
+noinline int xe_is_injection_active(void) { return 0; }
+ALLOW_ERROR_INJECTION(xe_is_injection_active, ERRNO);
+#else
+int xe_is_injection_active(void) { return 0; }
+#endif
+
+static void ct_dead_capture(struct xe_guc_ct *ct, struct guc_ctb *ctb, u32 reason_code)
+{
+	struct xe_guc_log_snapshot *snapshot_log;
+	struct xe_guc_ct_snapshot *snapshot_ct;
+	struct xe_guc *guc = ct_to_guc(ct);
+	unsigned long flags;
+	bool have_capture;
+
+	if (ctb)
+		ctb->info.broken = true;
+	/*
+	 * Huge dump is getting generated when injecting error for guc CT/MMIO
+	 * functions. So, let us suppress the dump when fault is injected.
+	 */
+	if (xe_is_injection_active())
+		return;
+
+	/* Ignore further errors after the first dump until a reset */
+	if (ct->dead.reported)
+		return;
+
+	spin_lock_irqsave(&ct->dead.lock, flags);
+
+	/* And only capture one dump at a time */
+	have_capture = ct->dead.reason & (1 << CT_DEAD_STATE_CAPTURE);
+	ct->dead.reason |= (1 << reason_code) |
+			   (1 << CT_DEAD_STATE_CAPTURE);
+
+	spin_unlock_irqrestore(&ct->dead.lock, flags);
+
+	if (have_capture)
+		return;
+
+	snapshot_log = xe_guc_log_snapshot_capture(&guc->log, true);
+	snapshot_ct = xe_guc_ct_snapshot_capture((ct));
+
+	spin_lock_irqsave(&ct->dead.lock, flags);
+
+	if (ct->dead.snapshot_log || ct->dead.snapshot_ct) {
+		xe_gt_err(ct_to_gt(ct), "Got unexpected dead CT capture!\n");
+		xe_guc_log_snapshot_free(snapshot_log);
+		xe_guc_ct_snapshot_free(snapshot_ct);
+	} else {
+		ct->dead.snapshot_log = snapshot_log;
+		ct->dead.snapshot_ct = snapshot_ct;
+	}
+
+	spin_unlock_irqrestore(&ct->dead.lock, flags);
+
+	queue_work(system_dfl_wq, &(ct)->dead.worker);
+}
+
+static void ct_dead_print(struct xe_dead_ct *dead)
+{
+	struct xe_guc_ct *ct = container_of(dead, struct xe_guc_ct, dead);
+	struct xe_device *xe = ct_to_xe(ct);
+	struct xe_gt *gt = ct_to_gt(ct);
+	static int g_count;
+	struct drm_printer ip = xe_gt_info_printer(gt);
+	struct drm_printer lp = drm_line_printer(&ip, "Capture", ++g_count);
+
+	if (!dead->reason) {
+		xe_gt_err(gt, "CTB is dead for no reason!?\n");
+		return;
+	}
+
+	/* Can't generate a genuine core dump at this point, so just do the good bits */
+	drm_puts(&lp, "**** Xe Device Coredump ****\n");
+	drm_printf(&lp, "Reason: CTB is dead - 0x%X\n", dead->reason);
+	xe_device_snapshot_print(xe, &lp);
+
+	drm_printf(&lp, "**** GT #%d ****\n", gt->info.id);
+	drm_printf(&lp, "\tTile: %d\n", gt->tile->id);
+
+	drm_puts(&lp, "**** GuC Log ****\n");
+	xe_guc_log_snapshot_print(dead->snapshot_log, &lp);
+
+	drm_puts(&lp, "**** GuC CT ****\n");
+	xe_guc_ct_snapshot_print(dead->snapshot_ct, &lp);
+
+	drm_puts(&lp, "Done.\n");
+}
+
+static void ct_dead_worker_func(struct work_struct *w)
+{
+	struct xe_guc_ct *ct = container_of(w, struct xe_guc_ct, dead.worker);
+
+	if (!ct->dead.reported) {
+		ct->dead.reported = true;
+		ct_dead_print(&ct->dead);
+	}
+
+	spin_lock_irq(&ct->dead.lock);
+
+	xe_guc_log_snapshot_free(ct->dead.snapshot_log);
+	ct->dead.snapshot_log = NULL;
+	xe_guc_ct_snapshot_free(ct->dead.snapshot_ct);
+	ct->dead.snapshot_ct = NULL;
+
+	if (ct->dead.reason & (1 << CT_DEAD_STATE_REARM)) {
+		/* A reset has occurred so re-arm the error reporting */
+		ct->dead.reason = 0;
+		ct->dead.reported = false;
+	}
+
+	spin_unlock_irq(&ct->dead.lock);
+}
+#endif

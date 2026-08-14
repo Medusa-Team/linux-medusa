@@ -20,7 +20,7 @@
  * is within a range of supported VF numbers (up to maximum number of VFs that
  * driver can support, including VF0 that represents the PF itself).
  *
- * Note: Effective only on debug builds. See `Xe ASSERTs`_ for more information.
+ * Note: Effective only on debug builds. See `Xe Asserts`_ for more information.
  */
 #define xe_sriov_pf_assert_vfid(xe, vfid) \
 	xe_assert((xe), (vfid) <= xe_sriov_pf_get_totalvfs(xe))
@@ -37,10 +37,38 @@ static inline int xe_sriov_pf_get_totalvfs(struct xe_device *xe)
 	return xe->sriov.pf.driver_max_vfs;
 }
 
+/**
+ * xe_sriov_pf_num_vfs() - Number of enabled VFs on the PF.
+ * @xe: the PF &xe_device
+ *
+ * Return: Number of enabled VFs on the PF.
+ */
+static inline unsigned int xe_sriov_pf_num_vfs(const struct xe_device *xe)
+{
+	return pci_num_vf(to_pci_dev(xe->drm.dev));
+}
+
+/**
+ * xe_sriov_pf_admin_only() - Check if PF is mainly used for VFs administration.
+ * @xe: the PF &xe_device
+ *
+ * Return: True if PF is mainly used for VFs administration.
+ */
+static inline bool xe_sriov_pf_admin_only(const struct xe_device *xe)
+{
+	xe_assert(xe, IS_SRIOV_PF(xe));
+	return xe->sriov.pf.admin_only;
+}
+
 static inline struct mutex *xe_sriov_pf_master_mutex(struct xe_device *xe)
 {
 	xe_assert(xe, IS_SRIOV_PF(xe));
 	return &xe->sriov.pf.master_lock;
 }
+
+int xe_sriov_pf_arm_guard(struct xe_device *xe, struct xe_guard *guard,
+			  bool write, void *who);
+void xe_sriov_pf_disarm_guard(struct xe_device *xe, struct xe_guard *guard,
+			      bool write, void *who);
 
 #endif

@@ -30,6 +30,7 @@
 #include "basics/conversion.h"
 #include "dcn30/dcn30_cm_common.h"
 #include "dcn32/dcn32_dpp.h"
+#include "dcn35/dcn35_dpp.h"
 
 #define REG(reg)\
 	dpp->tf_regs->reg
@@ -205,10 +206,10 @@ void dpp401_dpp_setup(
 
 		tbl_entry.color_space = input_color_space;
 
-		if (color_space >= COLOR_SPACE_YCBCR601)
-			select = INPUT_CSC_SELECT_ICSC;
-		else
+		if (dpp3_should_bypass_post_csc_for_colorspace(color_space))
 			select = INPUT_CSC_SELECT_BYPASS;
+		else
+			select = INPUT_CSC_SELECT_ICSC;
 
 		dpp3_program_post_csc(dpp_base, color_space, select,
 			&tbl_entry);
@@ -230,7 +231,7 @@ static struct dpp_funcs dcn401_dpp_funcs = {
 	.dpp_program_regamma_pwl	= NULL,
 	.dpp_set_pre_degam			= dpp3_set_pre_degam,
 	.dpp_program_input_lut		= NULL,
-	.dpp_full_bypass			= dpp401_full_bypass,
+	.dpp_full_bypass			= NULL,
 	.dpp_setup					= dpp401_dpp_setup,
 	.dpp_program_degamma_pwl	= NULL,
 	.dpp_program_cm_dealpha		= dpp3_program_cm_dealpha,
@@ -240,13 +241,14 @@ static struct dpp_funcs dcn401_dpp_funcs = {
 	.dpp_program_shaper_lut		= NULL, // CM SHAPER block is removed in DCN3.2 DPP, (it is in MPCC, programmable before or after BLND)
 	.dpp_program_3dlut			= NULL, // CM 3DLUT block is removed in DCN3.2 DPP, (it is in MPCC, programmable before or after BLND)
 
-	.dpp_program_bias_and_scale	= NULL,
+	.dpp_program_bias_and_scale	= dpp35_program_bias_and_scale_fcnv,
 	.dpp_cnv_set_alpha_keyer	= dpp2_cnv_set_alpha_keyer,
 	.set_cursor_attributes		= dpp401_set_cursor_attributes,
 	.set_cursor_position		= dpp401_set_cursor_position,
 	.set_optional_cursor_attributes	= dpp401_set_optional_cursor_attributes,
 	.dpp_dppclk_control			= dpp1_dppclk_control,
 	.dpp_set_hdr_multiplier		= dpp3_set_hdr_multiplier,
+	.dpp_read_reg_state			= dpp30_read_reg_state,
 	.set_cursor_matrix			= dpp401_set_cursor_matrix,
 };
 

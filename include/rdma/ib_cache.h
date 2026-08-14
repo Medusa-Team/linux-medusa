@@ -34,7 +34,7 @@ struct net_device *rdma_read_gid_attr_ndev_rcu(const struct ib_gid_attr *attr);
 
 /**
  * ib_get_cached_pkey - Returns a cached PKey table entry
- * @device: The device to query.
+ * @device_handle: The device to query.
  * @port_num: The port number of the device to query.
  * @index: The index into the cached PKey table to query.
  * @pkey: The PKey value found at the specified index.
@@ -64,22 +64,6 @@ int ib_find_cached_pkey(struct ib_device    *device,
 			u16                 *index);
 
 /**
- * ib_find_exact_cached_pkey - Returns the PKey table index where a specified
- *   PKey value occurs. Comparison uses the FULL 16 bits (incl membership bit)
- * @device: The device to query.
- * @port_num: The port number of the device to search for the PKey.
- * @pkey: The PKey value to search for.
- * @index: The index into the cached PKey table where the PKey was found.
- *
- * ib_find_exact_cached_pkey() searches the specified PKey table in
- * the local software cache.
- */
-int ib_find_exact_cached_pkey(struct ib_device    *device,
-			      u32                  port_num,
-			      u16                  pkey,
-			      u16                 *index);
-
-/**
  * ib_get_cached_lmc - Returns a cached lmc table entry
  * @device: The device to query.
  * @port_num: The port number of the device to query.
@@ -96,7 +80,7 @@ int ib_get_cached_lmc(struct ib_device *device,
  * ib_get_cached_port_state - Returns a cached port state table entry
  * @device: The device to query.
  * @port_num: The port number of the device to query.
- * @port_state: port_state for the specified port for that device.
+ * @port_active: port_state for the specified port for that device.
  *
  * ib_get_cached_port_state() fetches the specified port_state table entry stored in
  * the local software cache.

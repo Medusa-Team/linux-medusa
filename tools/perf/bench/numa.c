@@ -27,14 +27,15 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <sys/prctl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <linux/kernel.h>
 #include <linux/time64.h>
 #include <linux/numa.h>
-#include <linux/zalloc.h>
 
 #include "../util/header.h"
 #include "../util/mutex.h"
+#include <api/fs/fs.h>
 #include <numa.h>
 #include <numaif.h>
 
@@ -164,7 +165,7 @@ static struct global_info	*g = NULL;
 static int parse_cpus_opt(const struct option *opt, const char *arg, int unset);
 static int parse_nodes_opt(const struct option *opt, const char *arg, int unset);
 
-struct params p0;
+static struct params p0;
 
 static const struct option options[] = {
 	OPT_INTEGER('p', "nr_proc"	, &p0.nr_proc,		"number of processes"),
@@ -531,6 +532,57 @@ static int parse_cpu_list(const char *arg)
 	dprintf("got CPU list: {%s}\n", p0.cpu_list_str);
 
 	return 0;
+}
+
+/*
+ * Check whether a CPU is online
+ *
+ * Returns:
+ *     1 -> if CPU is online
+ *     0 -> if CPU is offline
+ *    -1 -> error case
+ */
+static int is_cpu_online(unsigned int cpu)
+{
+	char *str;
+	size_t strlen;
+	char buf[256];
+	int status = -1;
+	struct stat statbuf;
+
+	snprintf(buf, sizeof(buf),
+		"/sys/devices/system/cpu/cpu%d", cpu);
+	if (stat(buf, &statbuf) != 0)
+		return 0;
+
+	/*
+	 * Check if /sys/devices/system/cpu/cpux/online file
+	 * exists. Some cases cpu0 won't have online file since
+	 * it is not expected to be turned off generally.
+	 * In kernels without CONFIG_HOTPLUG_CPU, this
+	 * file won't exist
+	 */
+	snprintf(buf, sizeof(buf),
+		"/sys/devices/system/cpu/cpu%d/online", cpu);
+	if (stat(buf, &statbuf) != 0)
+		return 1;
+
+	/*
+	 * Read online file using sysfs__read_str.
+	 * If read or open fails, return -1.
+	 * If read succeeds, return value from file
+	 * which gets stored in "str"
+	 */
+	snprintf(buf, sizeof(buf),
+		"devices/system/cpu/cpu%d/online", cpu);
+
+	if (sysfs__read_str(buf, &str, &strlen) < 0)
+		return status;
+
+	status = atoi(str);
+
+	free(str);
+	return status;
 }
 
 static int parse_setup_cpu_list(void)
@@ -927,10 +979,8 @@ static int count_process_nodes(int process_nr)
 	int nodes;
 	int n, t;
 
-	node_present = (char *)malloc(g->p.nr_nodes * sizeof(char));
+	node_present = calloc(g->p.nr_nodes, sizeof(char));
 	BUG_ON(!node_present);
-	for (nodes = 0; nodes < g->p.nr_nodes; nodes++)
-		node_present[nodes] = 0;
 
 	for (t = 0; t < g->p.nr_threads; t++) {
 		struct thread_data *td;
@@ -1037,10 +1087,8 @@ static void calc_convergence(double runtime_ns_max, double *convergence)
 	if (!g->p.show_convergence && !g->p.measure_convergence)
 		return;
 
-	nodes = (int *)malloc(g->p.nr_nodes * sizeof(int));
+	nodes = calloc(g->p.nr_nodes, sizeof(int));
 	BUG_ON(!nodes);
-	for (node = 0; node < g->p.nr_nodes; node++)
-		nodes[node] = 0;
 
 	loops_done_min = -1;
 	loops_done_max = 0;
@@ -1370,7 +1418,7 @@ static void worker_process(int process_nr)
 	bind_to_memnode(td->bind_node);
 	bind_to_cpumask(td->bind_cpumask);
 
-	pthreads = zalloc(g->p.nr_threads * sizeof(pthread_t));
+	pthreads = calloc(g->p.nr_threads, sizeof(pthread_t));
 	process_data = setup_private_data(g->p.bytes_process);
 
 	if (g->p.show_details >= 3) {
@@ -1576,7 +1624,7 @@ static int __bench_numa(const char *name)
 	if (init())
 		return -1;
 
-	pids = zalloc(g->p.nr_proc * sizeof(*pids));
+	pids = calloc(g->p.nr_proc, sizeof(*pids));
 	pid = -1;
 
 	if (g->p.serialize_startup) {

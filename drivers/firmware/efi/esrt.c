@@ -75,8 +75,6 @@ static LIST_HEAD(entry_list);
 struct esre_attribute {
 	struct attribute attr;
 	ssize_t (*show)(struct esre_entry *entry, char *buf);
-	ssize_t (*store)(struct esre_entry *entry,
-			 const char *buf, size_t count);
 };
 
 static struct esre_entry *to_entry(struct kobject *kobj)
@@ -166,7 +164,7 @@ static int esre_create_sysfs_entry(void *esre, int entry_num)
 {
 	struct esre_entry *entry;
 
-	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kzalloc_obj(*entry);
 	if (!entry)
 		return -ENOMEM;
 

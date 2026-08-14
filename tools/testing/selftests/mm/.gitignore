@@ -12,6 +12,7 @@ map_hugetlb
 map_populate
 thuge-gen
 compaction_test
+memory-failure
 migration
 mlock2-tests
 mrelease_test
@@ -20,6 +21,8 @@ mremap_test
 on-fault-limit
 transhuge-stress
 pagemap_ioctl
+pfnmap
+process_madv
 *.tmp*
 protection_keys
 protection_keys_32
@@ -27,6 +30,7 @@ protection_keys_64
 madv_populate
 uffd-stress
 uffd-unit-tests
+uffd-wp-mremap
 mlock-intersect-test
 mlock-random-test
 virtual_address_range
@@ -49,5 +53,12 @@ va_high_addr_switch
 hugetlb_fault_after_madv
 hugetlb_madv_vs_map
 mseal_test
-seal_elf
 droppable
+hugetlb_dio
+pkey_sighandler_tests_32
+pkey_sighandler_tests_64
+guard-regions
+merge
+prctl_thp_disable
+rmap
+folio_split_race_test

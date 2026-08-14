@@ -835,7 +835,7 @@ static irqreturn_t omap_dsi_irq_handler(int irq, void *arg)
 
 #ifdef DSI_CATCH_MISSING_TE
 	if (irqstatus & DSI_IRQ_TE_TRIGGER)
-		del_timer(&dsi->te_timer);
+		timer_delete(&dsi->te_timer);
 #endif
 
 	/* make a copy and unlock, so that isrs can unregister
@@ -1539,7 +1539,7 @@ static void dsi_dump_dsidev_irqs(struct platform_device *dsidev,
 	unsigned long flags;
 	struct dsi_irq_stats *stats;
 
-	stats = kzalloc(sizeof(*stats), GFP_KERNEL);
+	stats = kzalloc_obj(*stats);
 	if (!stats) {
 		seq_printf(s, "out of memory\n");
 		return;
@@ -5565,7 +5565,7 @@ static const struct of_device_id dsi_of_match[] = {
 
 static struct platform_driver omap_dsihw_driver = {
 	.probe		= dsi_probe,
-	.remove_new	= dsi_remove,
+	.remove		= dsi_remove,
 	.driver         = {
 		.name   = "omapdss_dsi",
 		.pm	= &dsi_pm_ops,

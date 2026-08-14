@@ -6,15 +6,18 @@
 #ifndef _XE_GT_TYPES_H_
 #define _XE_GT_TYPES_H_
 
+#include "xe_device_types.h"
 #include "xe_force_wake_types.h"
 #include "xe_gt_idle_types.h"
 #include "xe_gt_sriov_pf_types.h"
 #include "xe_gt_sriov_vf_types.h"
+#include "xe_gt_stats_types.h"
 #include "xe_hw_engine_types.h"
 #include "xe_hw_fence_types.h"
-#include "xe_oa.h"
+#include "xe_oa_types.h"
 #include "xe_reg_sr_types.h"
 #include "xe_sa_types.h"
+#include "xe_tlb_inval_types.h"
 #include "xe_uc_types.h"
 
 struct xe_exec_queue_ops;
@@ -27,7 +30,12 @@ enum xe_gt_type {
 	XE_GT_TYPE_MEDIA,
 };
 
-#define XE_MAX_DSS_FUSE_REGS		3
+enum xe_gt_eu_type {
+	XE_GT_EU_TYPE_SIMD8,
+	XE_GT_EU_TYPE_SIMD16,
+};
+
+#define XE_MAX_DSS_FUSE_REGS		4
 #define XE_MAX_DSS_FUSE_BITS		(32 * XE_MAX_DSS_FUSE_REGS)
 #define XE_MAX_EU_FUSE_REGS		1
 #define XE_MAX_EU_FUSE_BITS		(32 * XE_MAX_EU_FUSE_REGS)
@@ -36,11 +44,6 @@ enum xe_gt_type {
 typedef unsigned long xe_dss_mask_t[BITS_TO_LONGS(XE_MAX_DSS_FUSE_BITS)];
 typedef unsigned long xe_eu_mask_t[BITS_TO_LONGS(XE_MAX_EU_FUSE_BITS)];
 typedef unsigned long xe_l3_bank_mask_t[BITS_TO_LONGS(XE_MAX_L3_BANK_MASK_BITS)];
-
-struct xe_mmio_range {
-	u32 start;
-	u32 end;
-};
 
 /*
  * The hardware has multiple kinds of multicast register ranges that need
@@ -58,11 +61,19 @@ struct xe_mmio_range {
  */
 enum xe_steering_type {
 	L3BANK,
+	NODE,
 	MSLICE,
 	LNCF,
 	DSS,
 	OADDRM,
 	SQIDI_PSMI,
+
+	/*
+	 * Although most GAM ranges must be steered to (0,0) and thus use the
+	 * INSTANCE0 type farther down, some platforms have special rules
+	 * for specific subtypes that require steering to (1,0) instead.
+	 */
+	GAM1,
 
 	/*
 	 * On some platforms there are multiple types of MCR registers that
@@ -114,6 +125,8 @@ struct xe_gt {
 		enum xe_gt_type type;
 		/** @info.reference_clock: clock frequency */
 		u32 reference_clock;
+		/** @info.timestamp_base: GT timestamp base */
+		u32 timestamp_base;
 		/**
 		 * @info.engine_mask: mask of engines present on GT. Some of
 		 * them may be reserved in runtime and not available for user.
@@ -122,28 +135,56 @@ struct xe_gt {
 		u64 engine_mask;
 		/** @info.gmdid: raw GMD_ID value from hardware */
 		u32 gmdid;
+		/**
+		 * @multi_queue_engine_class_mask: Bitmask of engine classes with
+		 * multi queue support enabled.
+		 */
+		u16 multi_queue_engine_class_mask;
 		/** @info.id: Unique ID of this GT within the PCI Device */
 		u8 id;
 		/** @info.has_indirect_ring_state: GT has indirect ring state support */
 		u8 has_indirect_ring_state:1;
+		/**
+		 * @info.has_xe2_blt_instructions: GT supports Xe2-style MEM_SET
+		 * and MEM_COPY blitter functionality.  Note that despite the
+		 * name, some Xe1 platforms may also support this "Xe2-style"
+		 * feature.
+		 */
+		u8 has_xe2_blt_instructions:1;
+		/**
+		 * @info.num_geometry_xecore_fuse_regs: Number of 32b-bit fuse
+		 * registers the geometry XeCore mask spans.
+		 */
+		u8 num_geometry_xecore_fuse_regs;
+		/**
+		 * @info.num_compute_xecore_fuse_regs: Number of 32b-bit fuse
+		 * registers the compute XeCore mask spans.
+		 */
+		u8 num_compute_xecore_fuse_regs;
 	} info;
+
+#if IS_ENABLED(CONFIG_DEBUG_FS)
+	/** @stats: GT stats */
+	struct xe_gt_stats __percpu *stats;
+#endif
 
 	/**
 	 * @mmio: mmio info for GT.  All GTs within a tile share the same
 	 * register space, but have their own copy of GSI registers at a
-	 * specific offset, as well as their own forcewake handling.
+	 * specific offset.
+	 */
+	struct xe_mmio mmio;
+
+	/**
+	 * @pm: power management info for GT.  The driver uses the GT's
+	 * "force wake" interface to wake up specific parts of the GT hardware
+	 * from C6 sleep states and ensure the hardware remains awake while it
+	 * is being actively used.
 	 */
 	struct {
-		/** @mmio.fw: force wake for GT */
+		/** @pm.fw: force wake for GT */
 		struct xe_force_wake fw;
-		/**
-		 * @mmio.adj_limit: adjust MMIO address if address is below this
-		 * value
-		 */
-		u32 adj_limit;
-		/** @mmio.adj_offset: offect to add to MMIO address when adjusting */
-		u32 adj_offset;
-	} mmio;
+	} pm;
 
 	/** @sriov: virtualization data related to GT */
 	union {
@@ -167,34 +208,8 @@ struct xe_gt {
 		struct work_struct worker;
 	} reset;
 
-	/** @tlb_invalidation: TLB invalidation state */
-	struct {
-		/** @tlb_invalidation.seqno: TLB invalidation seqno, protected by CT lock */
-#define TLB_INVALIDATION_SEQNO_MAX	0x100000
-		int seqno;
-		/**
-		 * @tlb_invalidation.seqno_recv: last received TLB invalidation seqno,
-		 * protected by CT lock
-		 */
-		int seqno_recv;
-		/**
-		 * @tlb_invalidation.pending_fences: list of pending fences waiting TLB
-		 * invaliations, protected by CT lock
-		 */
-		struct list_head pending_fences;
-		/**
-		 * @tlb_invalidation.pending_lock: protects @tlb_invalidation.pending_fences
-		 * and updating @tlb_invalidation.seqno_recv.
-		 */
-		spinlock_t pending_lock;
-		/**
-		 * @tlb_invalidation.fence_tdr: schedules a delayed call to
-		 * xe_gt_tlb_fence_timeout after the timeut interval is over.
-		 */
-		struct delayed_work fence_tdr;
-		/** @tlb_invalidation.lock: protects TLB invalidation fences */
-		spinlock_t lock;
-	} tlb_invalidation;
+	/** @tlb_inval: TLB invalidation state */
+	struct xe_tlb_inval tlb_inval;
 
 	/**
 	 * @ccs_mode: Number of compute engines enabled.
@@ -209,76 +224,16 @@ struct xe_gt {
 		/**
 		 * @usm.bb_pool: Pool from which batchbuffers, for USM operations
 		 * (e.g. migrations, fixing page tables), are allocated.
-		 * Dedicated pool needed so USM operations to not get blocked
+		 * Dedicated pool needed so USM operations do not get blocked
 		 * behind any user operations which may have resulted in a
 		 * fault.
 		 */
 		struct xe_sa_manager *bb_pool;
 		/**
 		 * @usm.reserved_bcs_instance: reserved BCS instance used for USM
-		 * operations (e.g. mmigrations, fixing page tables)
+		 * operations (e.g. migrations, fixing page tables)
 		 */
 		u16 reserved_bcs_instance;
-		/** @usm.pf_wq: page fault work queue, unbound, high priority */
-		struct workqueue_struct *pf_wq;
-		/** @usm.acc_wq: access counter work queue, unbound, high priority */
-		struct workqueue_struct *acc_wq;
-		/**
-		 * @usm.pf_queue: Page fault queue used to sync faults so faults can
-		 * be processed not under the GuC CT lock. The queue is sized so
-		 * it can sync all possible faults (1 per physical engine).
-		 * Multiple queues exists for page faults from different VMs are
-		 * be processed in parallel.
-		 */
-		struct pf_queue {
-			/** @usm.pf_queue.gt: back pointer to GT */
-			struct xe_gt *gt;
-#define PF_QUEUE_NUM_DW	128
-			/** @usm.pf_queue.data: data in the page fault queue */
-			u32 data[PF_QUEUE_NUM_DW];
-			/**
-			 * @usm.pf_queue.tail: tail pointer in DWs for page fault queue,
-			 * moved by worker which processes faults (consumer).
-			 */
-			u16 tail;
-			/**
-			 * @usm.pf_queue.head: head pointer in DWs for page fault queue,
-			 * moved by G2H handler (producer).
-			 */
-			u16 head;
-			/** @usm.pf_queue.lock: protects page fault queue */
-			spinlock_t lock;
-			/** @usm.pf_queue.worker: to process page faults */
-			struct work_struct worker;
-#define NUM_PF_QUEUE	4
-		} pf_queue[NUM_PF_QUEUE];
-		/**
-		 * @usm.acc_queue: Same as page fault queue, cannot process access
-		 * counters under CT lock.
-		 */
-		struct acc_queue {
-			/** @usm.acc_queue.gt: back pointer to GT */
-			struct xe_gt *gt;
-#define ACC_QUEUE_NUM_DW	128
-			/** @usm.acc_queue.data: data in the page fault queue */
-			u32 data[ACC_QUEUE_NUM_DW];
-			/**
-			 * @usm.acc_queue.tail: tail pointer in DWs for access counter queue,
-			 * moved by worker which processes counters
-			 * (consumer).
-			 */
-			u16 tail;
-			/**
-			 * @usm.acc_queue.head: head pointer in DWs for access counter queue,
-			 * moved by G2H handler (producer).
-			 */
-			u16 head;
-			/** @usm.acc_queue.lock: protects page fault queue */
-			spinlock_t lock;
-			/** @usm.acc_queue.worker: to process access counters */
-			struct work_struct worker;
-#define NUM_ACC_QUEUE	4
-		} acc_queue[NUM_ACC_QUEUE];
 	} usm;
 
 	/** @ordered_wq: used to serialize GT resets and TDRs */
@@ -337,6 +292,12 @@ struct xe_gt {
 
 		/** @fuse_topo.l3_bank_mask: L3 bank mask */
 		xe_l3_bank_mask_t l3_bank_mask;
+
+		/**
+		 * @fuse_topo.eu_type: type/width of EU stored in
+		 * fuse_topo.eu_mask_per_dss
+		 */
+		enum xe_gt_eu_type eu_type;
 	} fuse_topo;
 
 	/** @steering: register steering for individual HW units */
@@ -348,7 +309,15 @@ struct xe_gt {
 		u16 group_target;
 		/** @steering.instance_target: instance to steer accesses to */
 		u16 instance_target;
+		/** @steering.initialized: Whether this steering range is initialized */
+		bool initialized;
 	} steering[NUM_STEERING_TYPES];
+
+	/**
+	 * @steering_dss_per_grp: number of DSS per steering group (gslice,
+	 *    cslice, etc.).
+	 */
+	unsigned int steering_dss_per_grp;
 
 	/**
 	 * @mcr_lock: protects the MCR_SELECTOR register for the duration
@@ -370,9 +339,25 @@ struct xe_gt {
 		unsigned long *engine;
 		/** @wa_active.lrc: bitmap with active LRC workarounds */
 		unsigned long *lrc;
-		/** @wa_active.oob: bitmap with active OOB workaroudns */
+		/** @wa_active.oob: bitmap with active OOB workarounds */
 		unsigned long *oob;
+		/**
+		 * @wa_active.oob_initialized: mark oob as initialized to help
+		 * detecting misuse of XE_GT_WA() - it can only be called on
+		 * initialization after OOB WAs have been processed
+		 */
+		bool oob_initialized;
 	} wa_active;
+
+	/** @tuning_active: keep track of active tunings */
+	struct {
+		/** @tuning_active.gt: bitmap with active GT tunings */
+		unsigned long *gt;
+		/** @tuning_active.engine: bitmap with active engine tunings */
+		unsigned long *engine;
+		/** @tuning_active.lrc: bitmap with active LRC tunings */
+		unsigned long *lrc;
+	} tuning_active;
 
 	/** @user_engines: engines present in GT and available to userspace */
 	struct {
@@ -391,6 +376,9 @@ struct xe_gt {
 
 	/** @oa: oa observation subsystem per gt info */
 	struct xe_oa_gt oa;
+
+	/** @eu_stall: EU stall counters subsystem per gt info */
+	struct xe_eu_stall_gt *eu_stall;
 };
 
 #endif

@@ -8,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/mailbox_controller.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/soc/mediatek/mtk-cmdq.h>
 
 #define CMDQ_WRITE_ENABLE_MASK	BIT(0)
@@ -60,26 +61,50 @@ int cmdq_dev_get_client_reg(struct device *dev,
 			    struct cmdq_client_reg *client_reg, int idx)
 {
 	struct of_phandle_args spec;
+	struct resource res;
 	int err;
 
 	if (!client_reg)
 		return -ENOENT;
 
+	err = of_address_to_resource(dev->of_node, 0, &res);
+	if (err) {
+		dev_err(dev, "Missing reg in %s node\n", dev->of_node->full_name);
+		return -EINVAL;
+	}
+	client_reg->pa_base = res.start;
+
 	err = of_parse_phandle_with_fixed_args(dev->of_node,
 					       "mediatek,gce-client-reg",
 					       3, idx, &spec);
 	if (err < 0) {
-		dev_warn(dev,
+		dev_dbg(dev,
 			"error %d can't parse gce-client-reg property (%d)",
 			err, idx);
 
-		return err;
+		/* make subsys invalid */
+		client_reg->subsys = CMDQ_SUBSYS_INVALID;
+
+		/*
+		 * All GCEs support writing register PA with mask without subsys,
+		 * but this requires extra GCE instructions to convert the PA into
+		 * a format that GCE can handle, which is less performance than
+		 * directly using subsys. Therefore, when subsys is available,
+		 * we prefer to use subsys for writing register PA.
+		 */
+		client_reg->pkt_write = cmdq_pkt_write_pa;
+		client_reg->pkt_write_mask = cmdq_pkt_write_mask_pa;
+
+		return 0;
 	}
 
 	client_reg->subsys = (u8)spec.args[0];
 	client_reg->offset = (u16)spec.args[1];
 	client_reg->size = (u16)spec.args[2];
 	of_node_put(spec.np);
+
+	client_reg->pkt_write = cmdq_pkt_write_subsys;
+	client_reg->pkt_write_mask = cmdq_pkt_write_mask_subsys;
 
 	return 0;
 }
@@ -89,7 +114,7 @@ struct cmdq_client *cmdq_mbox_create(struct device *dev, int index)
 {
 	struct cmdq_client *client;
 
-	client = kzalloc(sizeof(*client), GFP_KERNEL);
+	client = kzalloc_obj(*client);
 	if (!client)
 		return (struct cmdq_client *)-ENOMEM;
 
@@ -140,6 +165,7 @@ int cmdq_pkt_create(struct cmdq_client *client, struct cmdq_pkt *pkt, size_t siz
 	}
 
 	pkt->pa_base = dma_addr;
+	cmdq_get_mbox_priv(client->chan, &pkt->priv);
 
 	return 0;
 }
@@ -180,52 +206,95 @@ static int cmdq_pkt_append_command(struct cmdq_pkt *pkt,
 	return 0;
 }
 
+static int cmdq_pkt_mask(struct cmdq_pkt *pkt, u32 mask)
+{
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_MASK,
+		.mask = ~mask
+	};
+	return cmdq_pkt_append_command(pkt, inst);
+}
+
 int cmdq_pkt_write(struct cmdq_pkt *pkt, u8 subsys, u16 offset, u32 value)
 {
-	struct cmdq_instruction inst;
-
-	inst.op = CMDQ_CODE_WRITE;
-	inst.value = value;
-	inst.offset = offset;
-	inst.subsys = subsys;
-
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WRITE,
+		.value = value,
+		.offset = offset,
+		.subsys = subsys
+	};
 	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_write);
 
+int cmdq_pkt_write_pa(struct cmdq_pkt *pkt, u8 subsys /*unused*/, u32 pa_base,
+		      u16 offset, u32 value)
+{
+	int err;
+
+	err = cmdq_pkt_assign(pkt, CMDQ_THR_SPR_IDX0, CMDQ_ADDR_HIGH(pa_base));
+	if (err < 0)
+		return err;
+
+	return cmdq_pkt_write_s_value(pkt, CMDQ_THR_SPR_IDX0, CMDQ_ADDR_LOW(offset), value);
+}
+EXPORT_SYMBOL(cmdq_pkt_write_pa);
+
+int cmdq_pkt_write_subsys(struct cmdq_pkt *pkt, u8 subsys, u32 pa_base /*unused*/,
+			  u16 offset, u32 value)
+{
+	return cmdq_pkt_write(pkt, subsys, offset, value);
+}
+EXPORT_SYMBOL(cmdq_pkt_write_subsys);
+
 int cmdq_pkt_write_mask(struct cmdq_pkt *pkt, u8 subsys,
 			u16 offset, u32 value, u32 mask)
 {
-	struct cmdq_instruction inst = { {0} };
 	u16 offset_mask = offset;
 	int err;
 
-	if (mask != 0xffffffff) {
-		inst.op = CMDQ_CODE_MASK;
-		inst.mask = ~mask;
-		err = cmdq_pkt_append_command(pkt, inst);
+	if (mask != GENMASK(31, 0)) {
+		err = cmdq_pkt_mask(pkt, mask);
 		if (err < 0)
 			return err;
 
 		offset_mask |= CMDQ_WRITE_ENABLE_MASK;
 	}
-	err = cmdq_pkt_write(pkt, subsys, offset_mask, value);
-
-	return err;
+	return cmdq_pkt_write(pkt, subsys, offset_mask, value);
 }
 EXPORT_SYMBOL(cmdq_pkt_write_mask);
+
+int cmdq_pkt_write_mask_pa(struct cmdq_pkt *pkt, u8 subsys /*unused*/, u32 pa_base,
+			   u16 offset, u32 value, u32 mask)
+{
+	int err;
+
+	err = cmdq_pkt_assign(pkt, CMDQ_THR_SPR_IDX0, CMDQ_ADDR_HIGH(pa_base));
+	if (err < 0)
+		return err;
+
+	return cmdq_pkt_write_s_mask_value(pkt, CMDQ_THR_SPR_IDX0,
+					   CMDQ_ADDR_LOW(offset), value, mask);
+}
+EXPORT_SYMBOL(cmdq_pkt_write_mask_pa);
+
+int cmdq_pkt_write_mask_subsys(struct cmdq_pkt *pkt, u8 subsys, u32 pa_base /*unused*/,
+			       u16 offset, u32 value, u32 mask)
+{
+	return cmdq_pkt_write_mask(pkt, subsys, offset, value, mask);
+}
+EXPORT_SYMBOL(cmdq_pkt_write_mask_subsys);
 
 int cmdq_pkt_read_s(struct cmdq_pkt *pkt, u16 high_addr_reg_idx, u16 addr_low,
 		    u16 reg_idx)
 {
-	struct cmdq_instruction inst = {};
-
-	inst.op = CMDQ_CODE_READ_S;
-	inst.dst_t = CMDQ_REG_TYPE;
-	inst.sop = high_addr_reg_idx;
-	inst.reg_dst = reg_idx;
-	inst.src_reg = addr_low;
-
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_READ_S,
+		.dst_t = CMDQ_REG_TYPE,
+		.sop = high_addr_reg_idx,
+		.reg_dst = reg_idx,
+		.src_reg = addr_low
+	};
 	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_read_s);
@@ -233,14 +302,13 @@ EXPORT_SYMBOL(cmdq_pkt_read_s);
 int cmdq_pkt_write_s(struct cmdq_pkt *pkt, u16 high_addr_reg_idx,
 		     u16 addr_low, u16 src_reg_idx)
 {
-	struct cmdq_instruction inst = {};
-
-	inst.op = CMDQ_CODE_WRITE_S;
-	inst.src_t = CMDQ_REG_TYPE;
-	inst.sop = high_addr_reg_idx;
-	inst.offset = addr_low;
-	inst.src_reg = src_reg_idx;
-
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WRITE_S,
+		.src_t = CMDQ_REG_TYPE,
+		.sop = high_addr_reg_idx,
+		.offset = addr_low,
+		.src_reg = src_reg_idx
+	};
 	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_write_s);
@@ -248,21 +316,18 @@ EXPORT_SYMBOL(cmdq_pkt_write_s);
 int cmdq_pkt_write_s_mask(struct cmdq_pkt *pkt, u16 high_addr_reg_idx,
 			  u16 addr_low, u16 src_reg_idx, u32 mask)
 {
-	struct cmdq_instruction inst = {};
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WRITE_S_MASK,
+		.src_t = CMDQ_REG_TYPE,
+		.sop = high_addr_reg_idx,
+		.offset = addr_low,
+		.src_reg = src_reg_idx,
+	};
 	int err;
 
-	inst.op = CMDQ_CODE_MASK;
-	inst.mask = ~mask;
-	err = cmdq_pkt_append_command(pkt, inst);
+	err = cmdq_pkt_mask(pkt, mask);
 	if (err < 0)
 		return err;
-
-	inst.mask = 0;
-	inst.op = CMDQ_CODE_WRITE_S_MASK;
-	inst.src_t = CMDQ_REG_TYPE;
-	inst.sop = high_addr_reg_idx;
-	inst.offset = addr_low;
-	inst.src_reg = src_reg_idx;
 
 	return cmdq_pkt_append_command(pkt, inst);
 }
@@ -271,13 +336,12 @@ EXPORT_SYMBOL(cmdq_pkt_write_s_mask);
 int cmdq_pkt_write_s_value(struct cmdq_pkt *pkt, u8 high_addr_reg_idx,
 			   u16 addr_low, u32 value)
 {
-	struct cmdq_instruction inst = {};
-
-	inst.op = CMDQ_CODE_WRITE_S;
-	inst.sop = high_addr_reg_idx;
-	inst.offset = addr_low;
-	inst.value = value;
-
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WRITE_S,
+		.sop = high_addr_reg_idx,
+		.offset = addr_low,
+		.value = value
+	};
 	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_write_s_value);
@@ -285,19 +349,17 @@ EXPORT_SYMBOL(cmdq_pkt_write_s_value);
 int cmdq_pkt_write_s_mask_value(struct cmdq_pkt *pkt, u8 high_addr_reg_idx,
 				u16 addr_low, u32 value, u32 mask)
 {
-	struct cmdq_instruction inst = {};
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WRITE_S_MASK,
+		.sop = high_addr_reg_idx,
+		.offset = addr_low,
+		.value = value
+	};
 	int err;
 
-	inst.op = CMDQ_CODE_MASK;
-	inst.mask = ~mask;
-	err = cmdq_pkt_append_command(pkt, inst);
+	err = cmdq_pkt_mask(pkt, mask);
 	if (err < 0)
 		return err;
-
-	inst.op = CMDQ_CODE_WRITE_S_MASK;
-	inst.sop = high_addr_reg_idx;
-	inst.offset = addr_low;
-	inst.value = value;
 
 	return cmdq_pkt_append_command(pkt, inst);
 }
@@ -310,6 +372,7 @@ int cmdq_pkt_mem_move(struct cmdq_pkt *pkt, dma_addr_t src_addr, dma_addr_t dst_
 	int ret;
 
 	/* read the value of src_addr into high_addr_reg_idx */
+	src_addr += pkt->priv.mminfra_offset;
 	ret = cmdq_pkt_assign(pkt, high_addr_reg_idx, CMDQ_ADDR_HIGH(src_addr));
 	if (ret < 0)
 		return ret;
@@ -318,6 +381,7 @@ int cmdq_pkt_mem_move(struct cmdq_pkt *pkt, dma_addr_t src_addr, dma_addr_t dst_
 		return ret;
 
 	/* write the value of value_reg_idx into dst_addr */
+	dst_addr += pkt->priv.mminfra_offset;
 	ret = cmdq_pkt_assign(pkt, high_addr_reg_idx, CMDQ_ADDR_HIGH(dst_addr));
 	if (ret < 0)
 		return ret;
@@ -331,15 +395,15 @@ EXPORT_SYMBOL(cmdq_pkt_mem_move);
 
 int cmdq_pkt_wfe(struct cmdq_pkt *pkt, u16 event, bool clear)
 {
-	struct cmdq_instruction inst = { {0} };
 	u32 clear_option = clear ? CMDQ_WFE_UPDATE : 0;
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WFE,
+		.value = CMDQ_WFE_OPTION | clear_option,
+		.event = event
+	};
 
 	if (event >= CMDQ_MAX_EVENT)
 		return -EINVAL;
-
-	inst.op = CMDQ_CODE_WFE;
-	inst.value = CMDQ_WFE_OPTION | clear_option;
-	inst.event = event;
 
 	return cmdq_pkt_append_command(pkt, inst);
 }
@@ -347,14 +411,14 @@ EXPORT_SYMBOL(cmdq_pkt_wfe);
 
 int cmdq_pkt_acquire_event(struct cmdq_pkt *pkt, u16 event)
 {
-	struct cmdq_instruction inst = {};
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WFE,
+		.value = CMDQ_WFE_UPDATE | CMDQ_WFE_UPDATE_VALUE | CMDQ_WFE_WAIT,
+		.event = event
+	};
 
 	if (event >= CMDQ_MAX_EVENT)
 		return -EINVAL;
-
-	inst.op = CMDQ_CODE_WFE;
-	inst.value = CMDQ_WFE_UPDATE | CMDQ_WFE_UPDATE_VALUE | CMDQ_WFE_WAIT;
-	inst.event = event;
 
 	return cmdq_pkt_append_command(pkt, inst);
 }
@@ -362,14 +426,14 @@ EXPORT_SYMBOL(cmdq_pkt_acquire_event);
 
 int cmdq_pkt_clear_event(struct cmdq_pkt *pkt, u16 event)
 {
-	struct cmdq_instruction inst = { {0} };
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WFE,
+		.value = CMDQ_WFE_UPDATE,
+		.event = event
+	};
 
 	if (event >= CMDQ_MAX_EVENT)
 		return -EINVAL;
-
-	inst.op = CMDQ_CODE_WFE;
-	inst.value = CMDQ_WFE_UPDATE;
-	inst.event = event;
 
 	return cmdq_pkt_append_command(pkt, inst);
 }
@@ -377,14 +441,14 @@ EXPORT_SYMBOL(cmdq_pkt_clear_event);
 
 int cmdq_pkt_set_event(struct cmdq_pkt *pkt, u16 event)
 {
-	struct cmdq_instruction inst = {};
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_WFE,
+		.value = CMDQ_WFE_UPDATE | CMDQ_WFE_UPDATE_VALUE,
+		.event = event
+	};
 
 	if (event >= CMDQ_MAX_EVENT)
 		return -EINVAL;
-
-	inst.op = CMDQ_CODE_WFE;
-	inst.value = CMDQ_WFE_UPDATE | CMDQ_WFE_UPDATE_VALUE;
-	inst.event = event;
 
 	return cmdq_pkt_append_command(pkt, inst);
 }
@@ -393,35 +457,27 @@ EXPORT_SYMBOL(cmdq_pkt_set_event);
 int cmdq_pkt_poll(struct cmdq_pkt *pkt, u8 subsys,
 		  u16 offset, u32 value)
 {
-	struct cmdq_instruction inst = { {0} };
-	int err;
-
-	inst.op = CMDQ_CODE_POLL;
-	inst.value = value;
-	inst.offset = offset;
-	inst.subsys = subsys;
-	err = cmdq_pkt_append_command(pkt, inst);
-
-	return err;
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_POLL,
+		.value = value,
+		.offset = offset,
+		.subsys = subsys
+	};
+	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_poll);
 
 int cmdq_pkt_poll_mask(struct cmdq_pkt *pkt, u8 subsys,
 		       u16 offset, u32 value, u32 mask)
 {
-	struct cmdq_instruction inst = { {0} };
 	int err;
 
-	inst.op = CMDQ_CODE_MASK;
-	inst.mask = ~mask;
-	err = cmdq_pkt_append_command(pkt, inst);
+	err = cmdq_pkt_mask(pkt, mask);
 	if (err < 0)
 		return err;
 
 	offset = offset | CMDQ_POLL_ENABLE_MASK;
-	err = cmdq_pkt_poll(pkt, subsys, offset, value);
-
-	return err;
+	return cmdq_pkt_poll(pkt, subsys, offset, value);
 }
 EXPORT_SYMBOL(cmdq_pkt_poll_mask);
 
@@ -436,9 +492,7 @@ int cmdq_pkt_poll_addr(struct cmdq_pkt *pkt, dma_addr_t addr, u32 value, u32 mas
 	 * which enables use_mask bit.
 	 */
 	if (mask != GENMASK(31, 0)) {
-		inst.op = CMDQ_CODE_MASK;
-		inst.mask = ~mask;
-		ret = cmdq_pkt_append_command(pkt, inst);
+		ret = cmdq_pkt_mask(pkt, mask);
 		if (ret < 0)
 			return ret;
 		use_mask = CMDQ_POLL_ENABLE_MASK;
@@ -453,7 +507,7 @@ int cmdq_pkt_poll_addr(struct cmdq_pkt *pkt, dma_addr_t addr, u32 value, u32 mas
 	inst.op = CMDQ_CODE_MASK;
 	inst.dst_t = CMDQ_REG_TYPE;
 	inst.sop = CMDQ_POLL_ADDR_GPR;
-	inst.value = addr;
+	inst.value = addr + pkt->priv.mminfra_offset;
 	ret = cmdq_pkt_append_command(pkt, inst);
 	if (ret < 0)
 		return ret;
@@ -477,11 +531,12 @@ int cmdq_pkt_logic_command(struct cmdq_pkt *pkt, u16 result_reg_idx,
 			   enum cmdq_logic_op s_op,
 			   struct cmdq_operand *right_operand)
 {
-	struct cmdq_instruction inst = { {0} };
+	struct cmdq_instruction inst;
 
 	if (!left_operand || !right_operand || s_op >= CMDQ_LOGIC_MAX)
 		return -EINVAL;
 
+	inst.value = 0;
 	inst.op = CMDQ_CODE_LOGIC;
 	inst.dst_t = CMDQ_REG_TYPE;
 	inst.src_t = cmdq_operand_get_type(left_operand);
@@ -497,68 +552,46 @@ EXPORT_SYMBOL(cmdq_pkt_logic_command);
 
 int cmdq_pkt_assign(struct cmdq_pkt *pkt, u16 reg_idx, u32 value)
 {
-	struct cmdq_instruction inst = {};
-
-	inst.op = CMDQ_CODE_LOGIC;
-	inst.dst_t = CMDQ_REG_TYPE;
-	inst.reg_dst = reg_idx;
-	inst.value = value;
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_LOGIC,
+		.dst_t = CMDQ_REG_TYPE,
+		.reg_dst = reg_idx,
+		.value = value
+	};
 	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_assign);
 
 int cmdq_pkt_jump_abs(struct cmdq_pkt *pkt, dma_addr_t addr, u8 shift_pa)
 {
-	struct cmdq_instruction inst = {};
-
-	inst.op = CMDQ_CODE_JUMP;
-	inst.offset = CMDQ_JUMP_ABSOLUTE;
-	inst.value = addr >> shift_pa;
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_JUMP,
+		.offset = CMDQ_JUMP_ABSOLUTE,
+		.value = (addr +  pkt->priv.mminfra_offset) >> pkt->priv.shift_pa
+	};
 	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_jump_abs);
 
 int cmdq_pkt_jump_rel(struct cmdq_pkt *pkt, s32 offset, u8 shift_pa)
 {
-	struct cmdq_instruction inst = { {0} };
-
-	inst.op = CMDQ_CODE_JUMP;
-	inst.value = (u32)offset >> shift_pa;
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_JUMP,
+		.value = (u32)offset >> shift_pa
+	};
 	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_jump_rel);
 
 int cmdq_pkt_eoc(struct cmdq_pkt *pkt)
 {
-	struct cmdq_instruction inst = { {0} };
-
-	inst.op = CMDQ_CODE_EOC;
-	inst.value = CMDQ_EOC_IRQ_EN;
+	struct cmdq_instruction inst = {
+		.op = CMDQ_CODE_EOC,
+		.value = CMDQ_EOC_IRQ_EN
+	};
 	return cmdq_pkt_append_command(pkt, inst);
 }
 EXPORT_SYMBOL(cmdq_pkt_eoc);
-
-int cmdq_pkt_finalize(struct cmdq_pkt *pkt)
-{
-	struct cmdq_instruction inst = { {0} };
-	int err;
-
-	/* insert EOC and generate IRQ for each command iteration */
-	inst.op = CMDQ_CODE_EOC;
-	inst.value = CMDQ_EOC_IRQ_EN;
-	err = cmdq_pkt_append_command(pkt, inst);
-	if (err < 0)
-		return err;
-
-	/* JUMP to end */
-	inst.op = CMDQ_CODE_JUMP;
-	inst.value = CMDQ_JUMP_PASS >>
-		cmdq_get_shift_pa(((struct cmdq_client *)pkt->cl)->chan);
-	err = cmdq_pkt_append_command(pkt, inst);
-
-	return err;
-}
-EXPORT_SYMBOL(cmdq_pkt_finalize);
 
 MODULE_DESCRIPTION("MediaTek Command Queue (CMDQ) driver");
 MODULE_LICENSE("GPL v2");

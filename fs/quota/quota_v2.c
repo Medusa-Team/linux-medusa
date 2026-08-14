@@ -121,7 +121,7 @@ static int v2_read_file_info(struct super_block *sb, int type)
 			ret = -EIO;
 		goto out;
 	}
-	info->dqi_priv = kmalloc(sizeof(struct qtree_mem_dqinfo), GFP_KERNEL);
+	info->dqi_priv = kmalloc_obj(struct qtree_mem_dqinfo);
 	if (!info->dqi_priv) {
 		ret = -ENOMEM;
 		goto out;
@@ -440,12 +440,9 @@ static struct quota_format_type v2r1_quota_format = {
 
 static int __init init_v2_quota_format(void)
 {
-	int ret;
-
-	ret = register_quota_format(&v2r0_quota_format);
-	if (ret)
-		return ret;
-	return register_quota_format(&v2r1_quota_format);
+	register_quota_format(&v2r0_quota_format);
+	register_quota_format(&v2r1_quota_format);
+	return 0;
 }
 
 static void __exit exit_v2_quota_format(void)

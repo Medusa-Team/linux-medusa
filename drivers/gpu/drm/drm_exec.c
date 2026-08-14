@@ -2,7 +2,9 @@
 
 #include <drm/drm_exec.h>
 #include <drm/drm_gem.h>
+
 #include <linux/dma-resv.h>
+#include <linux/export.h>
 
 /**
  * DOC: Overview
@@ -145,8 +147,7 @@ static int drm_exec_obj_locked(struct drm_exec *exec,
 		size_t size = exec->max_objects * sizeof(void *);
 		void *tmp;
 
-		tmp = kvrealloc(exec->objects, size, size + PAGE_SIZE,
-				GFP_KERNEL);
+		tmp = kvrealloc(exec->objects, size + PAGE_SIZE, GFP_KERNEL);
 		if (!tmp)
 			return -ENOMEM;
 

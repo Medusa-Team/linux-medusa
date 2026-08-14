@@ -54,7 +54,7 @@ static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *i
 		 */
 		spin_lock(&d_inode(sb->s_root)->i_lock);
 		spin_lock(&sb->s_root->d_lock);
-		hlist_del_init(&sb->s_root->d_u.d_alias);
+		hlist_del_init(&sb->s_root->d_alias);
 		spin_unlock(&sb->s_root->d_lock);
 		spin_unlock(&d_inode(sb->s_root)->i_lock);
 	}
@@ -62,7 +62,7 @@ static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *i
 }
 
 /*
- * get an NFS2/NFS3 root dentry from the root filehandle
+ * get a root dentry from the root filehandle
  */
 int nfs_get_root(struct super_block *s, struct fs_context *fc)
 {

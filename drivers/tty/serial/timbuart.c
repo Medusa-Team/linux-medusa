@@ -412,7 +412,7 @@ static int timbuart_probe(struct platform_device *dev)
 
 	dev_dbg(&dev->dev, "%s\n", __func__);
 
-	uart = kzalloc(sizeof(*uart), GFP_KERNEL);
+	uart = kzalloc_obj(*uart);
 	if (!uart) {
 		err = -EINVAL;
 		goto err_mem;
@@ -485,7 +485,7 @@ static struct platform_driver timbuart_platform_driver = {
 		.name	= "timb-uart",
 	},
 	.probe		= timbuart_probe,
-	.remove_new	= timbuart_remove,
+	.remove		= timbuart_remove,
 };
 
 module_platform_driver(timbuart_platform_driver);

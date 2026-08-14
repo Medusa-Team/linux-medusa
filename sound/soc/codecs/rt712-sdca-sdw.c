@@ -374,7 +374,7 @@ static int rt712_sdca_sdw_probe(struct sdw_slave *slave,
 	return rt712_sdca_init(&slave->dev, regmap, mbq_regmap, slave);
 }
 
-static int rt712_sdca_sdw_remove(struct sdw_slave *slave)
+static void rt712_sdca_sdw_remove(struct sdw_slave *slave)
 {
 	struct rt712_sdca_priv *rt712 = dev_get_drvdata(&slave->dev);
 
@@ -387,8 +387,6 @@ static int rt712_sdca_sdw_remove(struct sdw_slave *slave)
 
 	mutex_destroy(&rt712->calibrate_mutex);
 	mutex_destroy(&rt712->disable_irq_lock);
-
-	return 0;
 }
 
 static const struct sdw_device_id rt712_sdca_id[] = {
@@ -400,7 +398,7 @@ static const struct sdw_device_id rt712_sdca_id[] = {
 };
 MODULE_DEVICE_TABLE(sdw, rt712_sdca_id);
 
-static int __maybe_unused rt712_sdca_dev_suspend(struct device *dev)
+static int rt712_sdca_dev_suspend(struct device *dev)
 {
 	struct rt712_sdca_priv *rt712 = dev_get_drvdata(dev);
 
@@ -416,7 +414,7 @@ static int __maybe_unused rt712_sdca_dev_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused rt712_sdca_dev_system_suspend(struct device *dev)
+static int rt712_sdca_dev_system_suspend(struct device *dev)
 {
 	struct rt712_sdca_priv *rt712_sdca = dev_get_drvdata(dev);
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
@@ -448,7 +446,7 @@ static int __maybe_unused rt712_sdca_dev_system_suspend(struct device *dev)
 
 #define RT712_PROBE_TIMEOUT 5000
 
-static int __maybe_unused rt712_sdca_dev_resume(struct device *dev)
+static int rt712_sdca_dev_resume(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 	struct rt712_sdca_priv *rt712 = dev_get_drvdata(dev);
@@ -488,14 +486,14 @@ regmap_sync:
 }
 
 static const struct dev_pm_ops rt712_sdca_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(rt712_sdca_dev_system_suspend, rt712_sdca_dev_resume)
-	SET_RUNTIME_PM_OPS(rt712_sdca_dev_suspend, rt712_sdca_dev_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(rt712_sdca_dev_system_suspend, rt712_sdca_dev_resume)
+	RUNTIME_PM_OPS(rt712_sdca_dev_suspend, rt712_sdca_dev_resume, NULL)
 };
 
 static struct sdw_driver rt712_sdca_sdw_driver = {
 	.driver = {
 		.name = "rt712-sdca",
-		.pm = &rt712_sdca_pm,
+		.pm = pm_ptr(&rt712_sdca_pm),
 	},
 	.probe = rt712_sdca_sdw_probe,
 	.remove = rt712_sdca_sdw_remove,
@@ -507,3 +505,4 @@ module_sdw_driver(rt712_sdca_sdw_driver);
 MODULE_DESCRIPTION("ASoC RT712 SDCA SDW driver");
 MODULE_AUTHOR("Shuming Fan <shumingf@realtek.com>");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("SND_SOC_SDCA");

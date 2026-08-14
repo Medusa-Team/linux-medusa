@@ -111,7 +111,7 @@ static int dpaa2_generic_console_open(struct inode *node, struct file *fp,
 	u64 base_addr;
 	int err;
 
-	cd = kmalloc(sizeof(*cd), GFP_KERNEL);
+	cd = kmalloc_obj(*cd);
 	if (!cd)
 		return -ENOMEM;
 
@@ -320,7 +320,7 @@ static struct platform_driver dpaa2_console_driver = {
 		   .of_match_table = dpaa2_console_match_table,
 		   },
 	.probe = dpaa2_console_probe,
-	.remove_new = dpaa2_console_remove,
+	.remove = dpaa2_console_remove,
 };
 module_platform_driver(dpaa2_console_driver);
 

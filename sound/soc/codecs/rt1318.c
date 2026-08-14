@@ -18,7 +18,6 @@
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
 #include <linux/firmware.h>
-#include <linux/gpio.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -30,7 +29,7 @@
 
 #include "rt1318.h"
 
-static struct reg_sequence init_list[] = {
+static const struct reg_sequence init_list[] = {
 	{ 0x0000C000, 0x01},
 	{ 0x0000F20D, 0x00},
 	{ 0x0000F212, 0x3E},
@@ -254,7 +253,6 @@ static struct reg_sequence init_list[] = {
 	{ 0x0000C320, 0x20},
 	{ 0x0000C203, 0x9C},
 };
-#define rt1318_INIT_REG_LEN ARRAY_SIZE(init_list)
 
 static const struct reg_default rt1318_reg[] = {
 	{ 0xc000, 0x00 },
@@ -506,7 +504,7 @@ static int rt1318_dac_event(struct snd_soc_dapm_widget *w,
 static int rt1318_dvol_put(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct rt1318_priv *rt1318 = snd_soc_component_get_drvdata(component);
 
 	rt1318->rt1318_dvol = ucontrol->value.integer.value[0];
@@ -529,7 +527,7 @@ static int rt1318_dvol_put(struct snd_kcontrol *kcontrol,
 static int rt1318_dvol_get(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct rt1318_priv *rt1318 = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.integer.value[0] = rt1318->rt1318_dvol;
@@ -1148,14 +1146,14 @@ MODULE_DEVICE_TABLE(i2c, rt1318_i2c_id);
 
 static const struct of_device_id rt1318_of_match[] = {
 	{ .compatible = "realtek,rt1318", },
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, rt1318_of_match);
 
 #ifdef CONFIG_ACPI
 static const struct acpi_device_id rt1318_acpi_match[] = {
-	{ "10EC1318", 0},
-	{ },
+	{ "10EC1318" },
+	{ }
 };
 MODULE_DEVICE_TABLE(acpi, rt1318_acpi_match);
 #endif

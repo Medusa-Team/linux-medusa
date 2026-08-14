@@ -9,6 +9,7 @@ mv88e6xxx-objs += global2.o
 mv88e6xxx-objs += global2_avb.o
 mv88e6xxx-objs += global2_scratch.o
 mv88e6xxx-$(CONFIG_NET_DSA_MV88E6XXX_PTP) += hwtstamp.o
+mv88e6xxx-$(CONFIG_NET_DSA_MV88E6XXX_LEDS) += leds.o
 mv88e6xxx-objs += pcs-6185.o
 mv88e6xxx-objs += pcs-6352.o
 mv88e6xxx-objs += pcs-639x.o
@@ -20,6 +21,8 @@ mv88e6xxx-objs += serdes.o
 mv88e6xxx-objs += smi.o
 mv88e6xxx-objs += switchdev.o
 mv88e6xxx-objs += trace.o
+mv88e6xxx-objs += tcflower.o
+mv88e6xxx-objs += tcam.o
 
 # for tracing framework to find trace.h
 CFLAGS_trace.o := -I$(src)

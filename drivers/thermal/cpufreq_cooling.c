@@ -57,8 +57,6 @@ struct time_in_idle {
  * @max_level: maximum cooling level. One less than total number of valid
  *	cpufreq frequencies.
  * @em: Reference on the Energy Model of the device
- * @cdev: thermal_cooling_device pointer to keep track of the
- *	registered cooling device.
  * @policy: cpufreq policy.
  * @cooling_ops: cpufreq callbacks to thermal cooling device ops
  * @idle_time: idle time stats
@@ -373,9 +371,8 @@ static int allocate_idle_time(struct cpufreq_cooling_device *cpufreq_cdev)
 {
 	unsigned int num_cpus = cpumask_weight(cpufreq_cdev->policy->related_cpus);
 
-	cpufreq_cdev->idle_time = kcalloc(num_cpus,
-					  sizeof(*cpufreq_cdev->idle_time),
-					  GFP_KERNEL);
+	cpufreq_cdev->idle_time = kzalloc_objs(*cpufreq_cdev->idle_time,
+					       num_cpus);
 	if (!cpufreq_cdev->idle_time)
 		return -ENOMEM;
 
@@ -545,7 +542,7 @@ __cpufreq_cooling_register(struct device_node *np,
 		return ERR_PTR(-ENODEV);
 	}
 
-	cpufreq_cdev = kzalloc(sizeof(*cpufreq_cdev), GFP_KERNEL);
+	cpufreq_cdev = kzalloc_obj(*cpufreq_cdev);
 	if (!cpufreq_cdev)
 		return ERR_PTR(-ENOMEM);
 

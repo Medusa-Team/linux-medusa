@@ -129,6 +129,15 @@ struct inet_diag_msg {
 	__u32	idiag_inode;
 };
 
+enum {
+	IDIAG_TIMER_OFF,
+	IDIAG_TIMER_ON,
+	IDIAG_TIMER_KEEPALIVE,
+	IDIAG_TIMER_TIMEWAIT,
+	IDIAG_TIMER_PROBE0,
+	IDIAG_TIMER_DELACK,
+};
+
 /* Extensions */
 
 enum {
@@ -143,7 +152,7 @@ enum {
 	INET_DIAG_SHUTDOWN,
 
 	/*
-	 * Next extenstions cannot be requested in struct inet_diag_req_v2:
+	 * Next extensions cannot be requested in struct inet_diag_req_v2:
 	 * its field idiag_ext has only 8 bits.
 	 */
 

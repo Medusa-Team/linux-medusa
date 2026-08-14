@@ -86,6 +86,7 @@
 
 #define CLOCK_TOO_SLOW_HZ	50000000
 #define SDHCI_AM654_AUTOSUSPEND_DELAY	-1
+#define RETRY_TUNING_MAX	10
 
 /* Command Queue Host Controller Interface Base address */
 #define SDHCI_AM654_CQE_BASE_ADDR 0x200
@@ -94,7 +95,6 @@ static const struct regmap_config sdhci_am654_regmap_config = {
 	.reg_bits = 32,
 	.val_bits = 32,
 	.reg_stride = 4,
-	.fast_io = true,
 };
 
 struct timing_data {
@@ -151,8 +151,11 @@ struct sdhci_am654_data {
 	u32 flags;
 	u32 quirks;
 	bool dll_enable;
+	u32 tuning_loop;
 
 #define SDHCI_AM654_QUIRK_FORCE_CDTEST BIT(0)
+#define SDHCI_AM654_QUIRK_SUPPRESS_V1P8_ENA BIT(1)
+#define SDHCI_AM654_QUIRK_DISABLE_HS400 BIT(2)
 };
 
 struct window {
@@ -164,6 +167,7 @@ struct window {
 struct sdhci_am654_driver_data {
 	const struct sdhci_pltfm_data *pdata;
 	u32 flags;
+	u32 quirks;
 #define IOMUX_PRESENT	(1 << 0)
 #define FREQSEL_2_BIT	(1 << 1)
 #define STRBSEL_4_BIT	(1 << 2)
@@ -354,6 +358,29 @@ static void sdhci_j721e_4bit_set_clock(struct sdhci_host *host,
 	sdhci_set_clock(host, clock);
 }
 
+static int sdhci_am654_start_signal_voltage_switch(struct mmc_host *mmc, struct mmc_ios *ios)
+{
+	struct sdhci_host *host = mmc_priv(mmc);
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_am654_data *sdhci_am654 = sdhci_pltfm_priv(pltfm_host);
+	int ret;
+
+	if ((sdhci_am654->quirks & SDHCI_AM654_QUIRK_SUPPRESS_V1P8_ENA) &&
+	    ios->signal_voltage == MMC_SIGNAL_VOLTAGE_180) {
+		if (!IS_ERR(mmc->supply.vqmmc)) {
+			ret = mmc_regulator_set_vqmmc(mmc, ios);
+			if (ret < 0) {
+				pr_err("%s: Switching to 1.8V signalling voltage failed,\n",
+				       mmc_hostname(mmc));
+				return -EIO;
+			}
+		}
+		return 0;
+	}
+
+	return sdhci_start_signal_voltage_switch(mmc, ios);
+}
+
 static u8 sdhci_am654_write_power_on(struct sdhci_host *host, u8 val, int reg)
 {
 	writeb(val, host->ioaddr + reg);
@@ -443,7 +470,7 @@ static u32 sdhci_am654_cqhci_irq(struct sdhci_host *host, u32 intmask)
 #define ITAPDLY_LENGTH 32
 #define ITAPDLY_LAST_INDEX (ITAPDLY_LENGTH - 1)
 
-static u32 sdhci_am654_calculate_itap(struct sdhci_host *host, struct window
+static int sdhci_am654_calculate_itap(struct sdhci_host *host, struct window
 			  *fail_window, u8 num_fails, bool circular_buffer)
 {
 	u8 itap = 0, start_fail = 0, end_fail = 0, pass_length = 0;
@@ -453,12 +480,16 @@ static u32 sdhci_am654_calculate_itap(struct sdhci_host *host, struct window
 	int prev_fail_end = -1;
 	u8 i;
 
-	if (!num_fails)
-		return ITAPDLY_LAST_INDEX >> 1;
+	if (!num_fails) {
+		/* Retry tuning */
+		dev_dbg(dev, "No failing region found, retry tuning\n");
+		return -1;
+	}
 
 	if (fail_window->length == ITAPDLY_LENGTH) {
-		dev_err(dev, "No passing ITAPDLY, return 0\n");
-		return 0;
+		/* Retry tuning */
+		dev_dbg(dev, "No passing itapdly, retry tuning\n");
+		return -1;
 	}
 
 	first_fail_start = fail_window->start;
@@ -494,13 +525,14 @@ static u32 sdhci_am654_calculate_itap(struct sdhci_host *host, struct window
 	return (itap > ITAPDLY_LAST_INDEX) ? ITAPDLY_LAST_INDEX >> 1 : itap;
 }
 
-static int sdhci_am654_platform_execute_tuning(struct sdhci_host *host,
-					       u32 opcode)
+static int sdhci_am654_do_tuning(struct sdhci_host *host,
+				 u32 opcode)
 {
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct sdhci_am654_data *sdhci_am654 = sdhci_pltfm_priv(pltfm_host);
 	unsigned char timing = host->mmc->ios.timing;
 	struct window fail_window[ITAPDLY_LENGTH];
+	struct device *dev = mmc_dev(host->mmc);
 	u8 curr_pass, itap;
 	u8 fail_index = 0;
 	u8 prev_pass = 1;
@@ -521,6 +553,7 @@ static int sdhci_am654_platform_execute_tuning(struct sdhci_host *host,
 		if (!curr_pass) {
 			fail_window[fail_index].end = itap;
 			fail_window[fail_index].length++;
+			dev_dbg(dev, "Failed itapdly=%d\n", itap);
 		}
 
 		if (curr_pass && !prev_pass)
@@ -532,13 +565,34 @@ static int sdhci_am654_platform_execute_tuning(struct sdhci_host *host,
 	if (fail_window[fail_index].length != 0)
 		fail_index++;
 
-	itap = sdhci_am654_calculate_itap(host, fail_window, fail_index,
-					  sdhci_am654->dll_enable);
+	return sdhci_am654_calculate_itap(host, fail_window, fail_index,
+					 sdhci_am654->dll_enable);
+}
 
-	sdhci_am654_write_itapdly(sdhci_am654, itap, sdhci_am654->itap_del_ena[timing]);
+static int sdhci_am654_platform_execute_tuning(struct sdhci_host *host,
+					       u32 opcode)
+{
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_am654_data *sdhci_am654 = sdhci_pltfm_priv(pltfm_host);
+	unsigned char timing = host->mmc->ios.timing;
+	struct device *dev = mmc_dev(host->mmc);
+	int itapdly;
 
+	do {
+		itapdly = sdhci_am654_do_tuning(host, opcode);
+		if (itapdly >= 0)
+			break;
+	} while (++sdhci_am654->tuning_loop < RETRY_TUNING_MAX);
+
+	if (itapdly < 0) {
+		dev_err(dev, "Failed to find itapdly, fail tuning\n");
+		return -1;
+	}
+
+	dev_dbg(dev, "Passed tuning, final itapdly=%d\n", itapdly);
+	sdhci_am654_write_itapdly(sdhci_am654, itapdly, sdhci_am654->itap_del_ena[timing]);
 	/* Save ITAPDLY */
-	sdhci_am654->itap_del_sel[timing] = itap;
+	sdhci_am654->itap_del_sel[timing] = itapdly;
 
 	return 0;
 }
@@ -559,7 +613,8 @@ static const struct sdhci_ops sdhci_am654_ops = {
 static const struct sdhci_pltfm_data sdhci_am654_pdata = {
 	.ops = &sdhci_am654_ops,
 	.quirks = SDHCI_QUIRK_MULTIBLOCK_READ_ACMD12,
-	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
+	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
+		   SDHCI_QUIRK2_DISABLE_HW_TIMEOUT,
 };
 
 static const struct sdhci_am654_driver_data sdhci_am654_sr1_drvdata = {
@@ -589,7 +644,8 @@ static const struct sdhci_ops sdhci_j721e_8bit_ops = {
 static const struct sdhci_pltfm_data sdhci_j721e_8bit_pdata = {
 	.ops = &sdhci_j721e_8bit_ops,
 	.quirks = SDHCI_QUIRK_MULTIBLOCK_READ_ACMD12,
-	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
+	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
+		   SDHCI_QUIRK2_DISABLE_HW_TIMEOUT,
 };
 
 static const struct sdhci_am654_driver_data sdhci_j721e_8bit_drvdata = {
@@ -613,12 +669,19 @@ static const struct sdhci_ops sdhci_j721e_4bit_ops = {
 static const struct sdhci_pltfm_data sdhci_j721e_4bit_pdata = {
 	.ops = &sdhci_j721e_4bit_ops,
 	.quirks = SDHCI_QUIRK_MULTIBLOCK_READ_ACMD12,
-	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
+	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
+		   SDHCI_QUIRK2_DISABLE_HW_TIMEOUT,
 };
 
 static const struct sdhci_am654_driver_data sdhci_j721e_4bit_drvdata = {
 	.pdata = &sdhci_j721e_4bit_pdata,
 	.flags = IOMUX_PRESENT,
+};
+
+static const struct sdhci_am654_driver_data sdhci_am62_4bit_drvdata = {
+	.pdata = &sdhci_j721e_4bit_pdata,
+	.flags = IOMUX_PRESENT,
+	.quirks = SDHCI_AM654_QUIRK_SUPPRESS_V1P8_ENA,
 };
 
 static const struct soc_device_attribute sdhci_am654_devices[] = {
@@ -702,6 +765,7 @@ static int sdhci_am654_init(struct sdhci_host *host)
 {
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	struct sdhci_am654_data *sdhci_am654 = sdhci_pltfm_priv(pltfm_host);
+	struct device *dev = mmc_dev(host->mmc);
 	u32 ctl_cfg_2 = 0;
 	u32 mask;
 	u32 val;
@@ -742,6 +806,9 @@ static int sdhci_am654_init(struct sdhci_host *host)
 	regmap_update_bits(sdhci_am654->base, CTL_CFG_3, TUNINGFORSDR50_MASK,
 			   TUNINGFORSDR50_MASK);
 
+	/* Use to re-execute tuning */
+	sdhci_am654->tuning_loop = 0;
+
 	ret = sdhci_setup_host(host);
 	if (ret)
 		return ret;
@@ -753,6 +820,12 @@ static int sdhci_am654_init(struct sdhci_host *host)
 	ret = sdhci_am654_get_otap_delay(host, sdhci_am654);
 	if (ret)
 		goto err_cleanup_host;
+
+	if (sdhci_am654->quirks & SDHCI_AM654_QUIRK_DISABLE_HS400 &&
+	    host->mmc->caps2 & (MMC_CAP2_HS400 | MMC_CAP2_HS400_ES)) {
+		dev_info(dev, "HS400 mode not supported on this silicon revision, disabling it\n");
+		host->mmc->caps2 &= ~(MMC_CAP2_HS400 | MMC_CAP2_HS400_ES);
+	}
 
 	ret = __sdhci_add_host(host);
 	if (ret)
@@ -817,6 +890,12 @@ static int sdhci_am654_get_of_property(struct platform_device *pdev,
 	return 0;
 }
 
+static const struct soc_device_attribute sdhci_am654_descope_hs400[] = {
+	{ .family = "AM62PX", .revision = "SR1.0" },
+	{ .family = "AM62PX", .revision = "SR1.1" },
+	{ /* sentinel */ }
+};
+
 static const struct of_device_id sdhci_am654_of_match[] = {
 	{
 		.compatible = "ti,am654-sdhci-5.1",
@@ -840,7 +919,7 @@ static const struct of_device_id sdhci_am654_of_match[] = {
 	},
 	{
 		.compatible = "ti,am62-sdhci",
-		.data = &sdhci_j721e_4bit_drvdata,
+		.data = &sdhci_am62_4bit_drvdata,
 	},
 	{ /* sentinel */ }
 };
@@ -874,40 +953,41 @@ static int sdhci_am654_probe(struct platform_device *pdev)
 	pltfm_host = sdhci_priv(host);
 	sdhci_am654 = sdhci_pltfm_priv(pltfm_host);
 	sdhci_am654->flags = drvdata->flags;
+	sdhci_am654->quirks = drvdata->quirks;
 
 	clk_xin = devm_clk_get(dev, "clk_xin");
 	if (IS_ERR(clk_xin)) {
 		dev_err(dev, "clk_xin clock not found.\n");
-		ret = PTR_ERR(clk_xin);
-		goto err_pltfm_free;
+		return PTR_ERR(clk_xin);
 	}
 
 	pltfm_host->clk = clk_xin;
 
 	base = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(base)) {
-		ret = PTR_ERR(base);
-		goto err_pltfm_free;
+		return PTR_ERR(base);
 	}
 
 	sdhci_am654->base = devm_regmap_init_mmio(dev, base,
 						  &sdhci_am654_regmap_config);
 	if (IS_ERR(sdhci_am654->base)) {
 		dev_err(dev, "Failed to initialize regmap\n");
-		ret = PTR_ERR(sdhci_am654->base);
-		goto err_pltfm_free;
+		return PTR_ERR(sdhci_am654->base);
 	}
 
 	ret = sdhci_am654_get_of_property(pdev, sdhci_am654);
 	if (ret)
-		goto err_pltfm_free;
+		return ret;
 
 	ret = mmc_of_parse(host->mmc);
-	if (ret) {
-		dev_err_probe(dev, ret, "parsing dt failed\n");
-		goto err_pltfm_free;
-	}
+	if (ret)
+		return dev_err_probe(dev, ret, "parsing dt failed\n");
 
+	soc = soc_device_match(sdhci_am654_descope_hs400);
+	if (soc)
+		sdhci_am654->quirks |= SDHCI_AM654_QUIRK_DISABLE_HS400;
+
+	host->mmc_host_ops.start_signal_voltage_switch = sdhci_am654_start_signal_voltage_switch;
 	host->mmc_host_ops.execute_tuning = sdhci_am654_execute_tuning;
 
 	pm_runtime_get_noresume(dev);
@@ -926,7 +1006,6 @@ static int sdhci_am654_probe(struct platform_device *pdev)
 	/* Setting up autosuspend */
 	pm_runtime_set_autosuspend_delay(dev, SDHCI_AM654_AUTOSUSPEND_DELAY);
 	pm_runtime_use_autosuspend(dev);
-	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 	return 0;
 
@@ -936,8 +1015,6 @@ pm_disable:
 	pm_runtime_disable(dev);
 pm_put:
 	pm_runtime_put_noidle(dev);
-err_pltfm_free:
-	sdhci_pltfm_free(pdev);
 	return ret;
 }
 
@@ -956,10 +1033,8 @@ static void sdhci_am654_remove(struct platform_device *pdev)
 	clk_disable_unprepare(pltfm_host->clk);
 	pm_runtime_disable(dev);
 	pm_runtime_put_noidle(dev);
-	sdhci_pltfm_free(pdev);
 }
 
-#ifdef CONFIG_PM
 static int sdhci_am654_restore(struct sdhci_host *host)
 {
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
@@ -1017,9 +1092,7 @@ static int sdhci_am654_runtime_suspend(struct device *dev)
 	if (ret)
 		return ret;
 
-	ret = sdhci_runtime_suspend_host(host);
-	if (ret)
-		return ret;
+	sdhci_runtime_suspend_host(host);
 
 	/* disable the clock */
 	clk_disable_unprepare(pltfm_host->clk);
@@ -1041,9 +1114,7 @@ static int sdhci_am654_runtime_resume(struct device *dev)
 	if (ret)
 		return ret;
 
-	ret = sdhci_runtime_resume_host(host, 0);
-	if (ret)
-		return ret;
+	sdhci_runtime_resume_host(host, 0);
 
 	ret = cqhci_resume(host->mmc);
 	if (ret)
@@ -1051,24 +1122,21 @@ static int sdhci_am654_runtime_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
 static const struct dev_pm_ops sdhci_am654_dev_pm_ops = {
-	SET_RUNTIME_PM_OPS(sdhci_am654_runtime_suspend,
-			   sdhci_am654_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	RUNTIME_PM_OPS(sdhci_am654_runtime_suspend, sdhci_am654_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static struct platform_driver sdhci_am654_driver = {
 	.driver = {
 		.name = "sdhci-am654",
 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
-		.pm = &sdhci_am654_dev_pm_ops,
+		.pm = pm_ptr(&sdhci_am654_dev_pm_ops),
 		.of_match_table = sdhci_am654_of_match,
 	},
 	.probe = sdhci_am654_probe,
-	.remove_new = sdhci_am654_remove,
+	.remove = sdhci_am654_remove,
 };
 
 module_platform_driver(sdhci_am654_driver);

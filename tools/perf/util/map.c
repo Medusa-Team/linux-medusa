@@ -102,21 +102,26 @@ static inline bool replace_android_lib(const char *filename, char *newfilename)
 	return false;
 }
 
-void map__init(struct map *map, u64 start, u64 end, u64 pgoff, struct dso *dso)
+static void map__init(struct map *map, u64 start, u64 end, u64 pgoff,
+		      struct dso *dso, u32 prot, u32 flags)
 {
 	map__set_start(map, start);
 	map__set_end(map, end);
 	map__set_pgoff(map, pgoff);
-	map__set_reloc(map, 0);
+	assert(map__reloc(map) == 0);
 	map__set_dso(map, dso__get(dso));
-	map__set_mapping_type(map, MAPPING_TYPE__DSO);
-	map__set_erange_warned(map, false);
 	refcount_set(map__refcnt(map), 1);
+	RC_CHK_ACCESS(map)->prot = prot;
+	RC_CHK_ACCESS(map)->flags = flags;
+	map__set_mapping_type(map, MAPPING_TYPE__DSO);
+	assert(map__erange_warned(map) == false);
+	assert(map__priv(map) == false);
+	assert(map__hit(map) == false);
 }
 
 struct map *map__new(struct machine *machine, u64 start, u64 len,
-		     u64 pgoff, struct dso_id *id,
-		     u32 prot, u32 flags, struct build_id *bid,
+		     u64 pgoff, const struct dso_id *id,
+		     u32 prot, u32 flags,
 		     char *filename, struct thread *thread)
 {
 	struct map *result;
@@ -124,18 +129,16 @@ struct map *map__new(struct machine *machine, u64 start, u64 len,
 	struct nsinfo *nsi = NULL;
 	struct nsinfo *nnsi;
 
-	map = malloc(sizeof(*map));
+	map = zalloc(sizeof(*map));
 	if (ADD_RC_CHK(result, map)) {
 		char newfilename[PATH_MAX];
-		struct dso *dso, *header_bid_dso;
+		struct dso *dso;
 		int anon, no_dso, vdso, android;
 
 		android = is_android_lib(filename);
 		anon = is_anon_memory(filename) || flags & MAP_HUGETLB;
 		vdso = is_vdso_map(filename);
 		no_dso = is_no_dso_memory(filename);
-		map->prot = prot;
-		map->flags = flags;
 		nsi = nsinfo__get(thread__nsinfo(thread));
 
 		if ((anon || no_dso) && nsi && (prot & PROT_EXEC)) {
@@ -169,7 +172,7 @@ struct map *map__new(struct machine *machine, u64 start, u64 len,
 			goto out_delete;
 
 		assert(!dso__kernel(dso));
-		map__init(result, start, start + len, pgoff, dso);
+		map__init(result, start, start + len, pgoff, dso, prot, flags);
 
 		if (anon || no_dso) {
 			map->mapping_type = MAPPING_TYPE__IDENTITY;
@@ -186,16 +189,15 @@ struct map *map__new(struct machine *machine, u64 start, u64 len,
 		dso__set_nsinfo(dso, nsi);
 		mutex_unlock(dso__lock(dso));
 
-		if (build_id__is_defined(bid)) {
-			dso__set_build_id(dso, bid);
-		} else {
+		if (!build_id__is_defined(&id->build_id)) {
 			/*
 			 * If the mmap event had no build ID, search for an existing dso from the
 			 * build ID header by name. Otherwise only the dso loaded at the time of
 			 * reading the header will have the build ID set and all future mmaps will
 			 * have it missing.
 			 */
-			header_bid_dso = dsos__find(&machine->dsos, filename, false);
+			struct dso *header_bid_dso = dsos__find(&machine->dsos, filename, false);
+
 			if (header_bid_dso && dso__header_build_id(header_bid_dso)) {
 				dso__set_build_id(dso, dso__bid(header_bid_dso));
 				dso__set_header_build_id(dso, 1);
@@ -223,10 +225,8 @@ struct map *map__new2(u64 start, struct dso *dso)
 
 	map = calloc(1, sizeof(*map) + (dso__kernel(dso) ? sizeof(struct kmap) : 0));
 	if (ADD_RC_CHK(result, map)) {
-		/*
-		 * ->end will be filled after we load all the symbols
-		 */
-		map__init(result, start, 0, 0, dso);
+		/* ->end will be filled after we load all the symbols. */
+		map__init(result, start, /*end=*/0, /*pgoff=*/0, dso, /*prot=*/0, /*flags=*/0);
 	}
 
 	return result;
@@ -353,7 +353,7 @@ int map__load(struct map *map)
 		if (dso__has_build_id(dso)) {
 			char sbuild_id[SBUILD_ID_SIZE];
 
-			build_id__sprintf(dso__bid(dso), sbuild_id);
+			build_id__snprintf(dso__bid(dso), sbuild_id, sizeof(sbuild_id));
 			pr_debug("%s with build id %s not found", name, sbuild_id);
 		} else
 			pr_debug("Failed to open %s", name);
@@ -513,6 +513,8 @@ void srccode_state_free(struct srccode_state *state)
 	state->line = 0;
 }
 
+static const struct kmap *__map__const_kmap(const struct map *map);
+
 /**
  * map__rip_2objdump - convert symbol start address to objdump address.
  * @map: memory map
@@ -524,9 +526,9 @@ void srccode_state_free(struct srccode_state *state)
  *
  * Return: Address suitable for passing to "objdump --start-address="
  */
-u64 map__rip_2objdump(struct map *map, u64 rip)
+u64 map__rip_2objdump(const struct map *map, u64 rip)
 {
-	struct kmap *kmap = __map__kmap(map);
+	const struct kmap *kmap = __map__const_kmap(map);
 	const struct dso *dso = map__dso(map);
 
 	/*
@@ -569,7 +571,7 @@ u64 map__rip_2objdump(struct map *map, u64 rip)
  *
  * Return: Memory address.
  */
-u64 map__objdump_2mem(struct map *map, u64 ip)
+u64 map__objdump_2mem(const struct map *map, u64 ip)
 {
 	const struct dso *dso = map__dso(map);
 
@@ -586,7 +588,7 @@ u64 map__objdump_2mem(struct map *map, u64 ip)
 }
 
 /* convert objdump address to relative address.  (To be removed) */
-u64 map__objdump_2rip(struct map *map, u64 ip)
+u64 map__objdump_2rip(const struct map *map, u64 ip)
 {
 	const struct dso *dso = map__dso(map);
 
@@ -610,6 +612,15 @@ bool map__contains_symbol(const struct map *map, const struct symbol *sym)
 }
 
 struct kmap *__map__kmap(struct map *map)
+{
+	const struct dso *dso = map__dso(map);
+
+	if (!dso || !dso__kernel(dso))
+		return NULL;
+	return (struct kmap *)(&RC_CHK_ACCESS(map)[1]);
+}
+
+static const struct kmap *__map__const_kmap(const struct map *map)
 {
 	const struct dso *dso = map__dso(map);
 

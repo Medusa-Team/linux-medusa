@@ -948,7 +948,6 @@ static long watchdog_ioctl(struct file *filp, unsigned int cmd,
 
 static const struct file_operations watchdog_fops = {
 	.owner = THIS_MODULE,
-	.llseek = no_llseek,
 	.open = watchdog_open,
 	.release = watchdog_release,
 	.write = watchdog_write,
@@ -1089,7 +1088,7 @@ static int fschmd_probe(struct i2c_client *client)
 	int i, err;
 	enum chips kind = (uintptr_t)i2c_get_match_data(client);
 
-	data = kzalloc(sizeof(struct fschmd_data), GFP_KERNEL);
+	data = kzalloc_obj(struct fschmd_data);
 	if (!data)
 		return -ENOMEM;
 

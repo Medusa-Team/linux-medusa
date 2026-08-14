@@ -5,6 +5,7 @@
 #include <linux/of.h>
 #include <linux/soundwire/sdw.h>
 #include <linux/soundwire/sdw_type.h>
+#include <sound/sdca.h>
 #include "bus.h"
 #include "sysfs_local.h"
 
@@ -12,6 +13,7 @@ static void sdw_slave_release(struct device *dev)
 {
 	struct sdw_slave *slave = dev_to_sdw_dev(dev);
 
+	of_node_put(slave->dev.of_node);
 	mutex_destroy(&slave->sdw_dev_lock);
 	kfree(slave);
 }
@@ -21,6 +23,7 @@ const struct device_type sdw_slave_type = {
 	.release =	sdw_slave_release,
 	.uevent =	sdw_slave_uevent,
 };
+EXPORT_SYMBOL_GPL(sdw_slave_type);
 
 int sdw_slave_add(struct sdw_bus *bus,
 		  struct sdw_slave_id *id, struct fwnode_handle *fwnode)
@@ -29,7 +32,7 @@ int sdw_slave_add(struct sdw_bus *bus,
 	int ret;
 	int i;
 
-	slave = kzalloc(sizeof(*slave), GFP_KERNEL);
+	slave = kzalloc_obj(*slave);
 	if (!slave)
 		return -ENOMEM;
 
@@ -70,6 +73,17 @@ int sdw_slave_add(struct sdw_bus *bus,
 	list_add_tail(&slave->node, &bus->slaves);
 	mutex_unlock(&bus->bus_lock);
 
+	/*
+	 * The Soundwire driver probe may optionally register SDCA
+	 * sub-devices, one per Function. This means the information
+	 * on the SDCA revision and the number/type of Functions need
+	 * to be extracted from platform firmware before the SoundWire
+	 * driver probe, and as a consequence before the SoundWire
+	 * device_register() below.
+	 */
+	sdca_lookup_interface_revision(slave);
+	sdca_lookup_functions(slave);
+
 	ret = device_register(&slave->dev);
 	if (ret) {
 		dev_err(bus->dev, "Failed to add slave: ret %d\n", ret);
@@ -100,6 +114,9 @@ static bool find_slave(struct sdw_bus *bus,
 	unsigned int link_id;
 	u64 addr;
 	int ret;
+
+	if (acpi_bus_get_status(adev) || !acpi_dev_ready_for_enumeration(adev))
+		return false;
 
 	ret = acpi_get_local_u64_address(adev->handle, &addr);
 	if (ret < 0)
@@ -259,3 +276,11 @@ int sdw_of_find_slaves(struct sdw_bus *bus)
 
 	return 0;
 }
+
+struct device *of_sdw_find_device_by_node(struct device_node *np)
+{
+	return bus_find_device_by_of_node(&sdw_bus_type, np);
+}
+EXPORT_SYMBOL_GPL(of_sdw_find_device_by_node);
+
+MODULE_IMPORT_NS("SND_SOC_SDCA");

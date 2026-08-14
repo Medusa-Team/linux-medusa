@@ -172,7 +172,7 @@ int adf_devmgr_add_dev(struct adf_accel_dev *accel_dev,
 			goto unlock;
 		}
 		num_devices++;
-		map = kzalloc(sizeof(*map), GFP_KERNEL);
+		map = kzalloc_obj(*map);
 		if (!map) {
 			ret = -ENOMEM;
 			goto unlock;
@@ -204,7 +204,7 @@ int adf_devmgr_add_dev(struct adf_accel_dev *accel_dev,
 			goto unlock;
 		}
 
-		map = kzalloc(sizeof(*map), GFP_KERNEL);
+		map = kzalloc_obj(*map);
 		if (!map) {
 			ret = -ENOMEM;
 			goto unlock;
@@ -275,16 +275,6 @@ unlock:
 	mutex_unlock(&table_lock);
 }
 EXPORT_SYMBOL_GPL(adf_devmgr_rm_dev);
-
-struct adf_accel_dev *adf_devmgr_get_first(void)
-{
-	struct adf_accel_dev *dev = NULL;
-
-	if (!list_empty(&accel_table))
-		dev = list_first_entry(&accel_table, struct adf_accel_dev,
-				       list);
-	return dev;
-}
 
 /**
  * adf_devmgr_pci_to_accel_dev() - Get accel_dev associated with the pci_dev.

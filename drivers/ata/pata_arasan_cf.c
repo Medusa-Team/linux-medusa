@@ -380,7 +380,7 @@ static inline int wait4buf(struct arasan_cf_dev *acdev)
 	if (!wait_for_completion_timeout(&acdev->cf_completion, TIMEOUT)) {
 		u32 rw = acdev->qc->tf.flags & ATA_TFLAG_WRITE;
 
-		dev_err(acdev->host->dev, "%s TimeOut", rw ? "write" : "read");
+		dev_err(acdev->host->dev, "%s TimeOut\n", rw ? "write" : "read");
 		return -ETIMEDOUT;
 	}
 
@@ -474,7 +474,7 @@ static int sg_xfer(struct arasan_cf_dev *acdev, struct scatterlist *sg)
 			dma_len = min(xfer_cnt, FIFO_SIZE);
 			ret = dma_xfer(acdev, src, dest, dma_len);
 			if (ret) {
-				dev_err(acdev->host->dev, "dma failed");
+				dev_err(acdev->host->dev, "dma failed\n");
 				goto fail;
 			}
 
@@ -964,7 +964,7 @@ MODULE_DEVICE_TABLE(of, arasan_cf_id_table);
 
 static struct platform_driver arasan_cf_driver = {
 	.probe		= arasan_cf_probe,
-	.remove_new	= arasan_cf_remove,
+	.remove		= arasan_cf_remove,
 	.driver		= {
 		.name	= DRIVER_NAME,
 		.pm	= &arasan_cf_pm_ops,

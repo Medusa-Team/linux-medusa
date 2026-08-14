@@ -119,8 +119,7 @@ static int dw_mipi_dsi_phy_init(void *priv_data)
 		dpi_data_format = DPI_COLOR_18BIT_CFG_2;
 		venc_data_width = VENC_IN_COLOR_18B;
 		break;
-	case MIPI_DSI_FMT_RGB666_PACKED:
-	case MIPI_DSI_FMT_RGB565:
+	default:
 		return -EINVAL;
 	}
 
@@ -232,8 +231,7 @@ static int meson_dw_mipi_dsi_host_attach(void *priv_data,
 		break;
 	case MIPI_DSI_FMT_RGB666:
 		break;
-	case MIPI_DSI_FMT_RGB666_PACKED:
-	case MIPI_DSI_FMT_RGB565:
+	default:
 		dev_err(mipi_dsi->dev, "invalid pixel format %d\n", device->format);
 		return -EINVAL;
 	}
@@ -345,7 +343,7 @@ MODULE_DEVICE_TABLE(of, meson_dw_mipi_dsi_of_table);
 
 static struct platform_driver meson_dw_mipi_dsi_platform_driver = {
 	.probe		= meson_dw_mipi_dsi_probe,
-	.remove_new	= meson_dw_mipi_dsi_remove,
+	.remove		= meson_dw_mipi_dsi_remove,
 	.driver		= {
 		.name		= DRIVER_NAME,
 		.of_match_table	= meson_dw_mipi_dsi_of_table,

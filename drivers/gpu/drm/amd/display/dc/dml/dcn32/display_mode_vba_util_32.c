@@ -457,10 +457,11 @@ void dml32_CalculateSwathAndDETConfiguration(
 		bool ViewportSizeSupportPerSurface[],
 		bool *ViewportSizeSupport)
 {
+	(void)HRatioChroma;
 	unsigned int MaximumSwathHeightY[DC__NUM_DPP__MAX];
 	unsigned int MaximumSwathHeightC[DC__NUM_DPP__MAX];
-	unsigned int RoundedUpMaxSwathSizeBytesY[DC__NUM_DPP__MAX];
-	unsigned int RoundedUpMaxSwathSizeBytesC[DC__NUM_DPP__MAX];
+	unsigned int RoundedUpMaxSwathSizeBytesY[DC__NUM_DPP__MAX] = { 0 };
+	unsigned int RoundedUpMaxSwathSizeBytesC[DC__NUM_DPP__MAX] = { 0 };
 	unsigned int RoundedUpSwathSizeBytesY;
 	unsigned int RoundedUpSwathSizeBytesC;
 	double SwathWidthdoubleDPP[DC__NUM_DPP__MAX];
@@ -716,6 +717,7 @@ void dml32_CalculateSwathWidth(
 		unsigned int			swath_width_luma_ub[], // per-pipe
 		unsigned int			swath_width_chroma_ub[]) // per-pipe
 {
+	(void)BytePerPixY;
 	unsigned int k, j;
 	enum odm_combine_mode MainSurfaceODMMode;
 
@@ -1595,6 +1597,7 @@ double dml32_TruncToValidBPP(
 	unsigned int   NonDSCBPP0;
 	unsigned int   NonDSCBPP1;
 	unsigned int   NonDSCBPP2;
+	unsigned int   NonDSCBPP3 = BPP_INVALID;
 
 	if (Format == dm_420) {
 		NonDSCBPP0 = 12;
@@ -1603,6 +1606,7 @@ double dml32_TruncToValidBPP(
 		MinDSCBPP = 6;
 		MaxDSCBPP = 1.5 * DSCInputBitPerComponent - 1.0 / 16;
 	} else if (Format == dm_444) {
+		NonDSCBPP3 = 18;
 		NonDSCBPP0 = 24;
 		NonDSCBPP1 = 30;
 		NonDSCBPP2 = 36;
@@ -1667,6 +1671,8 @@ double dml32_TruncToValidBPP(
 				return NonDSCBPP1;
 			else if (MaxLinkBPP >= NonDSCBPP0)
 				return 16.0;
+			else if ((Output == dm_dp2p0 || Output == dm_dp) && NonDSCBPP3 != BPP_INVALID &&  MaxLinkBPP >= NonDSCBPP3)
+				return NonDSCBPP3; // Special case to allow 6bpc RGB for DP connections.
 			else
 				return BPP_INVALID;
 		}
@@ -2300,6 +2306,7 @@ unsigned int dml32_CalculateVMAndRowBytes(
 		unsigned int    *DPDE0BytesFrame,
 		unsigned int    *MetaPTEBytesFrame)
 {
+	(void)SourcePixelFormat;
 	unsigned int MPDEBytesFrame;
 	unsigned int DCCMetaSurfaceBytes;
 	unsigned int ExtraDPDEBytesFrame;
@@ -2741,6 +2748,7 @@ void dml32_CalculateUrgentBurstFactor(
 		double *UrgentBurstFactorChroma,
 		bool   *NotEnoughUrgentLatencyHiding)
 {
+	(void)VRatioC;
 	double       LinesInDETLuma;
 	double       LinesInDETChroma;
 	unsigned int LinesInCursorBuffer;
@@ -2896,6 +2904,8 @@ double dml32_CalculateWriteBackDelay(
 		unsigned int         WritebackSourceHeight,
 		unsigned int HTotal)
 {
+	(void)WritebackPixelFormat;
+	(void)WritebackHRatio;
 	double CalculateWriteBackDelay;
 	double Line_length;
 	double Output_lines_last_notclamped;
@@ -2973,6 +2983,9 @@ void dml32_UseMinimumDCFCLK(
 		/* Output */
 		double DCFCLKState[][2])
 {
+	(void)MaxAveragePercentOfIdealSDPPortBWDisplayCanUseInNormalSystemOperation;
+	(void)ReadBandwidthLuma;
+	(void)ReadBandwidthChroma;
 	unsigned int i, j, k;
 	unsigned int     dummy1;
 	double dummy2, dummy3;
@@ -2984,7 +2997,7 @@ void dml32_UseMinimumDCFCLK(
 		for  (j = 0; j <= 1; ++j) {
 			double PixelDCFCLKCyclesRequiredInPrefetch[DC__NUM_DPP__MAX];
 			double PrefetchPixelLinesTime[DC__NUM_DPP__MAX];
-			double DCFCLKRequiredForPeakBandwidthPerSurface[DC__NUM_DPP__MAX];
+			double DCFCLKRequiredForPeakBandwidthPerSurface[DC__NUM_DPP__MAX] = { 0 };
 			double DynamicMetadataVMExtraLatency[DC__NUM_DPP__MAX];
 			double MinimumTWait = 0.0;
 			double DPTEBandwidth;
@@ -3443,6 +3456,8 @@ bool dml32_CalculatePrefetchSchedule(
 		double   *VUpdateWidthPix,
 		double   *VReadyOffsetPix)
 {
+	(void)SwathWidthY;
+	(void)SwathWidthC;
 	double DPPCLKDelaySubtotalPlusCNVCFormater = v->DPPCLKDelaySubtotal + v->DPPCLKDelayCNVCFormater;
 	bool MyError = false;
 	unsigned int DPPCycles, DISPCLKCycles;
@@ -4097,12 +4112,9 @@ bool dml32_CalculatePrefetchSchedule(
 
 	if (MyError) {
 		*PrefetchBandwidth = 0;
-		TimeForFetchingMetaPTE = 0;
-		TimeForFetchingRowInVBlank = 0;
 		*DestinationLinesToRequestVMInVBlank = 0;
 		*DestinationLinesToRequestRowInVBlank = 0;
 		*DestinationLinesForPrefetch = 0;
-		LinesToRequestPrefetchPixelData = 0;
 		*VRatioPrefetchY = 0;
 		*VRatioPrefetchC = 0;
 		*RequiredPrefetchPixDataBWLuma = 0;
@@ -4144,6 +4156,7 @@ void dml32_CalculateFlipSchedule(
 		double *final_flip_bw,
 		bool *ImmediateFlipSupportedForPipe)
 {
+	(void)HostVMMinPageSize;
 	double min_row_time = 0.0;
 	unsigned int HostVMDynamicLevelsTrips;
 	double TimeForFetchingMetaPTEImmediateFlip;
@@ -4286,6 +4299,8 @@ void dml32_CalculateWatermarksMALLUseAndDRAMSpeedChangeSupport(
 		bool *USRRetrainingSupport,
 		double ActiveDRAMClockChangeLatencyMargin[])
 {
+	(void)DCFCLK;
+	(void)ReturnBW;
 	unsigned int i, j, k;
 	unsigned int SurfaceWithMinActiveFCLKChangeMargin = 0;
 	unsigned int DRAMClockChangeSupportNumber = 0;
@@ -4654,6 +4669,8 @@ double dml32_CalculateWriteBackDISPCLK(
 		unsigned int WritebackLineBufferSize,
 		double DISPCLKDPPCLKVCOSpeed)
 {
+	(void)WritebackPixelFormat;
+	(void)WritebackVRatio;
 	double DISPCLK_H, DISPCLK_V, DISPCLK_HB;
 
 	DISPCLK_H = PixelClock * dml_ceil(WritebackHTaps / 8.0, 1) / WritebackHRatio;
@@ -5165,6 +5182,8 @@ void dml32_CalculateVMGroupAndRequestTimes(
 		double      TimePerVMRequestVBlank[],
 		double      TimePerVMRequestFlip[])
 {
+	(void)dpte_row_width_luma_ub;
+	(void)dpte_row_width_chroma_ub;
 	unsigned int k;
 	unsigned int   num_group_per_lower_vm_stage;
 	unsigned int   num_req_per_lower_vm_stage;
@@ -5320,6 +5339,11 @@ void dml32_CalculateDCCConfiguration(
 		unsigned int        *IndependentBlockLuma,
 		unsigned int        *IndependentBlockChroma)
 {
+	(void)SurfaceWidthChroma;
+	(void)SurfaceHeightChroma;
+	(void)TilingFormat;
+	(void)BytePerPixelDETY;
+	(void)BytePerPixelDETC;
 	typedef enum {
 		REQ_256Bytes,
 		REQ_128BytesNonContiguous,

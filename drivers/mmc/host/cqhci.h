@@ -93,6 +93,7 @@
 /* send status config 1 */
 #define CQHCI_SSC1			0x40
 #define CQHCI_SSC1_CBC_MASK		GENMASK(19, 16)
+#define CQHCI_SSC1_CIT_MASK		GENMASK(15, 0)
 
 /* send status config 2 */
 #define CQHCI_SSC2			0x44
@@ -289,13 +290,11 @@ struct cqhci_host_ops {
 				 u64 *data);
 	void (*pre_enable)(struct mmc_host *mmc);
 	void (*post_disable)(struct mmc_host *mmc);
-#ifdef CONFIG_MMC_CRYPTO
-	int (*program_key)(struct cqhci_host *cq_host,
-			   const union cqhci_crypto_cfg_entry *cfg, int slot);
-#endif
 	void (*set_tran_desc)(struct cqhci_host *cq_host, u8 **desc,
 			      dma_addr_t addr, int len, bool end, bool dma64);
-
+#ifdef CONFIG_MMC_CRYPTO
+	bool uses_custom_crypto_profile;
+#endif
 };
 
 static inline void cqhci_writel(struct cqhci_host *host, u32 val, int reg)

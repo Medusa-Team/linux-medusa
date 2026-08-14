@@ -2,7 +2,7 @@
 /*
  * Core driver for the S32 CC (Common Chassis) pin controller
  *
- * Copyright 2017-2022 NXP
+ * Copyright 2017-2022,2024 NXP
  * Copyright (C) 2022 SUSE LLC
  * Copyright 2015-2016 Freescale Semiconductor, Inc.
  */
@@ -38,6 +38,11 @@
 #define S32_MSCR_IBE		BIT(19)
 #define S32_MSCR_ODE		BIT(20)
 #define S32_MSCR_OBE		BIT(21)
+
+enum s32_write_type {
+	S32_PINCONF_UPDATE_ONLY,
+	S32_PINCONF_OVERWRITE,
+};
 
 static struct regmap_config s32_regmap_config = {
 	.reg_bits = 32,
@@ -381,12 +386,13 @@ static int s32_pmx_gpio_request_enable(struct pinctrl_dev *pctldev,
 		return ret;
 
 	/* Save current configuration */
-	gpio_pin = kmalloc(sizeof(*gpio_pin), GFP_KERNEL);
+	gpio_pin = kmalloc_obj(*gpio_pin);
 	if (!gpio_pin)
 		return -ENOMEM;
 
 	gpio_pin->pin_id = offset;
 	gpio_pin->config = config;
+	INIT_LIST_HEAD(&gpio_pin->list);
 
 	spin_lock_irqsave(&ipctl->gpio_configs_lock, flags);
 	list_add(&gpio_pin->list, &ipctl->gpio_configs);
@@ -431,16 +437,15 @@ static int s32_pmx_gpio_set_direction(struct pinctrl_dev *pctldev,
 				      unsigned int offset,
 				      bool input)
 {
-	unsigned int config;
+	/* Always enable IBE for GPIOs. This allows us to read the
+	 * actual line value and compare it with the one set.
+	 */
+	unsigned int config = S32_MSCR_IBE;
 	unsigned int mask = S32_MSCR_IBE | S32_MSCR_OBE;
 
-	if (input) {
-		/* Disable output buffer and enable input buffer */
-		config = S32_MSCR_IBE;
-	} else {
-		/* Disable input buffer and enable output buffer */
-		config = S32_MSCR_OBE;
-	}
+	/* Enable output buffer */
+	if (!input)
+		config |= S32_MSCR_OBE;
 
 	return s32_regmap_update(pctldev, offset, mask, config);
 }
@@ -511,6 +516,10 @@ static int s32_parse_pincfg(unsigned long pincfg, unsigned int *mask,
 		*config |= S32_MSCR_ODE;
 		*mask |= S32_MSCR_ODE;
 		break;
+	case PIN_CONFIG_DRIVE_PUSH_PULL:
+		*config &= ~S32_MSCR_ODE;
+		*mask |= S32_MSCR_ODE;
+		break;
 	case PIN_CONFIG_OUTPUT_ENABLE:
 		if (arg)
 			*config |= S32_MSCR_OBE;
@@ -549,10 +558,11 @@ static int s32_parse_pincfg(unsigned long pincfg, unsigned int *mask,
 	return 0;
 }
 
-static int s32_pinconf_mscr_update(struct pinctrl_dev *pctldev,
+static int s32_pinconf_mscr_write(struct pinctrl_dev *pctldev,
 				   unsigned int pin_id,
 				   unsigned long *configs,
-				   unsigned int num_configs)
+				   unsigned int num_configs,
+				   enum s32_write_type write_type)
 {
 	struct s32_pinctrl *ipctl = pinctrl_dev_get_drvdata(pctldev);
 	unsigned int config = 0, mask = 0;
@@ -571,10 +581,20 @@ static int s32_pinconf_mscr_update(struct pinctrl_dev *pctldev,
 			return ret;
 	}
 
+	/* If the MSCR configuration has to be written,
+	 * the SSS field should not be touched.
+	 */
+	if (write_type == S32_PINCONF_OVERWRITE)
+		mask = (unsigned int)~S32_MSCR_SSS_MASK;
+
 	if (!config && !mask)
 		return 0;
 
-	dev_dbg(ipctl->dev, "update: pin %u cfg 0x%x\n", pin_id, config);
+	if (write_type == S32_PINCONF_OVERWRITE)
+		dev_dbg(ipctl->dev, "set: pin %u cfg 0x%x\n", pin_id, config);
+	else
+		dev_dbg(ipctl->dev, "update: pin %u cfg 0x%x\n", pin_id,
+			config);
 
 	return s32_regmap_update(pctldev, pin_id, mask, config);
 }
@@ -590,8 +610,8 @@ static int s32_pinconf_set(struct pinctrl_dev *pctldev,
 			   unsigned int pin_id, unsigned long *configs,
 			   unsigned int num_configs)
 {
-	return s32_pinconf_mscr_update(pctldev, pin_id, configs,
-				       num_configs);
+	return s32_pinconf_mscr_write(pctldev, pin_id, configs,
+				       num_configs, S32_PINCONF_UPDATE_ONLY);
 }
 
 static int s32_pconf_group_set(struct pinctrl_dev *pctldev, unsigned int selector,
@@ -604,8 +624,8 @@ static int s32_pconf_group_set(struct pinctrl_dev *pctldev, unsigned int selecto
 
 	grp = &info->groups[selector];
 	for (i = 0; i < grp->data.npins; i++) {
-		ret = s32_pinconf_mscr_update(pctldev, grp->data.pins[i],
-					      configs, num_configs);
+		ret = s32_pinconf_mscr_write(pctldev, grp->data.pins[i],
+					      configs, num_configs, S32_PINCONF_OVERWRITE);
 		if (ret)
 			return ret;
 	}
@@ -932,7 +952,7 @@ int s32_pinctrl_probe(struct platform_device *pdev,
 	spin_lock_init(&ipctl->gpio_configs_lock);
 
 	s32_pinctrl_desc =
-		devm_kmalloc(&pdev->dev, sizeof(*s32_pinctrl_desc), GFP_KERNEL);
+		devm_kzalloc(&pdev->dev, sizeof(*s32_pinctrl_desc), GFP_KERNEL);
 	if (!s32_pinctrl_desc)
 		return -ENOMEM;
 

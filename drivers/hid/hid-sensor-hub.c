@@ -139,7 +139,7 @@ int sensor_hub_register_callback(struct hid_sensor_hub_device *hsdev,
 			spin_unlock_irqrestore(&pdata->dyn_callback_lock, flags);
 			return -EINVAL;
 		}
-	callback = kzalloc(sizeof(*callback), GFP_ATOMIC);
+	callback = kzalloc_obj(*callback, GFP_ATOMIC);
 	if (!callback) {
 		spin_unlock_irqrestore(&pdata->dyn_callback_lock, flags);
 		return -ENOMEM;
@@ -422,7 +422,6 @@ int sensor_hub_input_get_attribute_info(struct hid_sensor_hub_device *hsdev,
 }
 EXPORT_SYMBOL_GPL(sensor_hub_input_get_attribute_info);
 
-#ifdef CONFIG_PM
 static int sensor_hub_suspend(struct hid_device *hdev, pm_message_t message)
 {
 	struct sensor_hub_data *pdata = hid_get_drvdata(hdev);
@@ -463,7 +462,6 @@ static int sensor_hub_reset_resume(struct hid_device *hdev)
 {
 	return 0;
 }
-#endif
 
 /*
  * Handle raw report as sent by device
@@ -580,7 +578,7 @@ void sensor_hub_device_close(struct hid_sensor_hub_device *hsdev)
 }
 EXPORT_SYMBOL_GPL(sensor_hub_device_close);
 
-static __u8 *sensor_hub_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+static const __u8 *sensor_hub_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int *rsize)
 {
 	/*
@@ -730,23 +728,30 @@ err_stop_hw:
 	return ret;
 }
 
+static int sensor_hub_finalize_pending_fn(struct device *dev, void *data)
+{
+	struct hid_sensor_hub_device *hsdev = dev->platform_data;
+
+	if (hsdev->pending.status)
+		complete(&hsdev->pending.ready);
+
+	return 0;
+}
+
 static void sensor_hub_remove(struct hid_device *hdev)
 {
 	struct sensor_hub_data *data = hid_get_drvdata(hdev);
 	unsigned long flags;
-	int i;
 
 	hid_dbg(hdev, " hardware removed\n");
 	hid_hw_close(hdev);
 	hid_hw_stop(hdev);
+
 	spin_lock_irqsave(&data->lock, flags);
-	for (i = 0; i < data->hid_sensor_client_cnt; ++i) {
-		struct hid_sensor_hub_device *hsdev =
-			data->hid_sensor_hub_client_devs[i].platform_data;
-		if (hsdev->pending.status)
-			complete(&hsdev->pending.ready);
-	}
+	device_for_each_child(&hdev->dev, NULL,
+			      sensor_hub_finalize_pending_fn);
 	spin_unlock_irqrestore(&data->lock, flags);
+
 	mfd_remove_devices(&hdev->dev);
 	mutex_destroy(&data->mutex);
 }
@@ -765,11 +770,9 @@ static struct hid_driver sensor_hub_driver = {
 	.remove = sensor_hub_remove,
 	.raw_event = sensor_hub_raw_event,
 	.report_fixup = sensor_hub_report_fixup,
-#ifdef CONFIG_PM
-	.suspend = sensor_hub_suspend,
-	.resume = sensor_hub_resume,
-	.reset_resume = sensor_hub_reset_resume,
-#endif
+	.suspend = pm_ptr(sensor_hub_suspend),
+	.resume = pm_ptr(sensor_hub_resume),
+	.reset_resume = pm_ptr(sensor_hub_reset_resume),
 };
 module_hid_driver(sensor_hub_driver);
 

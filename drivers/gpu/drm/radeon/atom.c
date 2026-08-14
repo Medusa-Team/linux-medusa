@@ -27,7 +27,7 @@
 #include <linux/slab.h>
 #include <linux/string_helpers.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <drm/drm_device.h>
 #include <drm/drm_util.h>
@@ -1281,7 +1281,7 @@ struct atom_context *atom_parse(struct card_info *card, void *bios)
 {
 	int base;
 	struct atom_context *ctx =
-	    kzalloc(sizeof(struct atom_context), GFP_KERNEL);
+	    kzalloc_obj(struct atom_context);
 	char *str;
 	char name[512];
 	int i;

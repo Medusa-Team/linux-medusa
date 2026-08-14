@@ -133,7 +133,7 @@ static void cw1200_queue_gc(struct timer_list *t)
 {
 	LIST_HEAD(list);
 	struct cw1200_queue *queue =
-		from_timer(queue, t, gc);
+		timer_container_of(queue, t, gc);
 
 	spin_lock_bh(&queue->lock);
 	__cw1200_queue_gc(queue, &list, true);
@@ -153,8 +153,7 @@ int cw1200_queue_stats_init(struct cw1200_queue_stats *stats,
 	spin_lock_init(&stats->lock);
 	init_waitqueue_head(&stats->wait_link_id_empty);
 
-	stats->link_map_cache = kcalloc(map_capacity, sizeof(int),
-					GFP_KERNEL);
+	stats->link_map_cache = kzalloc_objs(int, map_capacity);
 	if (!stats->link_map_cache)
 		return -ENOMEM;
 
@@ -180,13 +179,11 @@ int cw1200_queue_init(struct cw1200_queue *queue,
 	spin_lock_init(&queue->lock);
 	timer_setup(&queue->gc, cw1200_queue_gc, 0);
 
-	queue->pool = kcalloc(capacity, sizeof(struct cw1200_queue_item),
-			      GFP_KERNEL);
+	queue->pool = kzalloc_objs(struct cw1200_queue_item, capacity);
 	if (!queue->pool)
 		return -ENOMEM;
 
-	queue->link_map_cache = kcalloc(stats->map_capacity, sizeof(int),
-					GFP_KERNEL);
+	queue->link_map_cache = kzalloc_objs(int, stats->map_capacity);
 	if (!queue->link_map_cache) {
 		kfree(queue->pool);
 		queue->pool = NULL;
@@ -244,7 +241,7 @@ void cw1200_queue_stats_deinit(struct cw1200_queue_stats *stats)
 void cw1200_queue_deinit(struct cw1200_queue *queue)
 {
 	cw1200_queue_clear(queue);
-	del_timer_sync(&queue->gc);
+	timer_delete_sync(&queue->gc);
 	INIT_LIST_HEAD(&queue->free_pool);
 	kfree(queue->pool);
 	kfree(queue->link_map_cache);
@@ -409,33 +406,6 @@ int cw1200_queue_requeue(struct cw1200_queue *queue, u32 packet_id)
 	}
 	spin_unlock_bh(&queue->lock);
 	return ret;
-}
-
-int cw1200_queue_requeue_all(struct cw1200_queue *queue)
-{
-	struct cw1200_queue_item *item, *tmp;
-	struct cw1200_queue_stats *stats = queue->stats;
-	spin_lock_bh(&queue->lock);
-
-	list_for_each_entry_safe_reverse(item, tmp, &queue->pending, head) {
-		--queue->num_pending;
-		++queue->link_map_cache[item->txpriv.link_id];
-
-		spin_lock_bh(&stats->lock);
-		++stats->num_queued;
-		++stats->link_map_cache[item->txpriv.link_id];
-		spin_unlock_bh(&stats->lock);
-
-		++item->generation;
-		item->packet_id = cw1200_queue_mk_packet_id(queue->generation,
-							    queue->queue_id,
-							    item->generation,
-							    item - queue->pool);
-		list_move(&item->head, &queue->queue);
-	}
-	spin_unlock_bh(&queue->lock);
-
-	return 0;
 }
 
 int cw1200_queue_remove(struct cw1200_queue *queue, u32 packet_id)

@@ -64,7 +64,7 @@ static int update_liodn_stash(int liodn, struct fsl_dma_domain *dma_domain,
 	spin_lock_irqsave(&iommu_lock, flags);
 	ret = pamu_update_paace_stash(liodn, val);
 	if (ret) {
-		pr_debug("Failed to update SPAACE for liodn %d\n ", liodn);
+		pr_debug("Failed to update SPAACE for liodn %d\n", liodn);
 		spin_unlock_irqrestore(&iommu_lock, flags);
 		return ret;
 	}
@@ -238,7 +238,7 @@ static int update_domain_stash(struct fsl_dma_domain *dma_domain, u32 val)
 }
 
 static int fsl_pamu_attach_device(struct iommu_domain *domain,
-				  struct device *dev)
+				  struct device *dev, struct iommu_domain *old)
 {
 	struct fsl_dma_domain *dma_domain = to_fsl_dma_domain(domain);
 	unsigned long flags;
@@ -298,9 +298,9 @@ static int fsl_pamu_attach_device(struct iommu_domain *domain,
  * switches to what looks like BLOCKING.
  */
 static int fsl_pamu_platform_attach(struct iommu_domain *platform_domain,
-				    struct device *dev)
+				    struct device *dev,
+				    struct iommu_domain *old)
 {
-	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
 	struct fsl_dma_domain *dma_domain;
 	const u32 *prop;
 	int len;
@@ -311,11 +311,11 @@ static int fsl_pamu_platform_attach(struct iommu_domain *platform_domain,
 	 * Hack to keep things working as they always have, only leaving an
 	 * UNMANAGED domain makes it BLOCKING.
 	 */
-	if (domain == platform_domain || !domain ||
-	    domain->type != IOMMU_DOMAIN_UNMANAGED)
+	if (old == platform_domain || !old ||
+	    old->type != IOMMU_DOMAIN_UNMANAGED)
 		return 0;
 
-	dma_domain = to_fsl_dma_domain(domain);
+	dma_domain = to_fsl_dma_domain(old);
 
 	/*
 	 * Use LIODN of the PCI controller while detaching a
@@ -416,14 +416,12 @@ static struct iommu_group *fsl_pamu_device_group(struct device *dev)
 
 static struct iommu_device *fsl_pamu_probe_device(struct device *dev)
 {
-	int len;
-
 	/*
 	 * uboot must fill the fsl,liodn for platform devices to be supported by
 	 * the iommu.
 	 */
 	if (!dev_is_pci(dev) &&
-	    !of_get_property(dev->of_node, "fsl,liodn", &len))
+	    !of_property_present(dev->of_node, "fsl,liodn"))
 		return ERR_PTR(-ENODEV);
 
 	return &pamu_iommu;

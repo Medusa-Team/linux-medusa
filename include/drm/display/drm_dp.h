@@ -115,6 +115,7 @@
 
 #define DP_MAX_LANE_COUNT                   0x002
 # define DP_MAX_LANE_COUNT_MASK		    0x1f
+# define DP_POST_LT_ADJ_REQ_SUPPORTED	    (1 << 5) /* 1.3 */
 # define DP_TPS3_SUPPORTED		    (1 << 6) /* 1.2 */
 # define DP_ENHANCED_FRAME_CAP		    (1 << 7)
 
@@ -257,6 +258,8 @@
 # define DP_DSC_RC_BUF_BLK_SIZE_4           0x1
 # define DP_DSC_RC_BUF_BLK_SIZE_16          0x2
 # define DP_DSC_RC_BUF_BLK_SIZE_64          0x3
+# define DP_DSC_THROUGHPUT_MODE_0_DELTA_SHIFT 3 /* DP 2.1a, in units of 2 MPixels/sec */
+# define DP_DSC_THROUGHPUT_MODE_0_DELTA_MASK  (0x1f << DP_DSC_THROUGHPUT_MODE_0_DELTA_SHIFT)
 
 #define DP_DSC_RC_BUF_SIZE                  0x063
 
@@ -359,6 +362,7 @@
 # define DP_DSC_BITS_PER_PIXEL_1_4          0x2
 # define DP_DSC_BITS_PER_PIXEL_1_2          0x3
 # define DP_DSC_BITS_PER_PIXEL_1_1          0x4
+# define DP_DSC_BITS_PER_PIXEL_MASK         0x7
 
 #define DP_PSR_SUPPORT                      0x070   /* XXX 1.2? */
 # define DP_PSR_IS_SUPPORTED                1
@@ -546,16 +550,30 @@
 /* DFP Capability Extension */
 #define DP_DFP_CAPABILITY_EXTENSION_SUPPORT	0x0a3	/* 2.0 */
 
-#define DP_PANEL_REPLAY_CAP				0x0b0  /* DP 2.0 */
+#define DP_PANEL_REPLAY_CAP_SUPPORT			0x0b0  /* DP 2.0 */
 # define DP_PANEL_REPLAY_SUPPORT			(1 << 0)
 # define DP_PANEL_REPLAY_SU_SUPPORT			(1 << 1)
 # define DP_PANEL_REPLAY_EARLY_TRANSPORT_SUPPORT	(1 << 2) /* eDP 1.5 */
 
-#define DP_PANEL_PANEL_REPLAY_CAPABILITY		0xb1
-# define DP_PANEL_PANEL_REPLAY_SU_GRANULARITY_REQUIRED	(1 << 5)
+#define DP_PANEL_REPLAY_CAP_SIZE	7
 
-#define DP_PANEL_PANEL_REPLAY_X_GRANULARITY		0xb2
-#define DP_PANEL_PANEL_REPLAY_Y_GRANULARITY		0xb4
+#define DP_PANEL_REPLAY_CAP_CAPABILITY					0xb1
+# define DP_PANEL_REPLAY_DSC_DECODE_CAPABILITY_IN_PR_SHIFT			1 /* DP 2.1a */
+# define DP_PANEL_REPLAY_DSC_DECODE_CAPABILITY_IN_PR_MASK			(3 << DP_PANEL_REPLAY_DSC_DECODE_CAPABILITY_IN_PR_SHIFT)
+# define DP_DSC_DECODE_CAPABILITY_IN_PR_SUPPORTED				0x00
+# define DP_DSC_DECODE_CAPABILITY_IN_PR_FULL_FRAME_ONLY				0x01
+# define DP_DSC_DECODE_CAPABILITY_IN_PR_NOT_SUPPORTED				0x02
+# define DP_DSC_DECODE_CAPABILITY_IN_PR_RESERVED				0x03
+# define DP_PANEL_REPLAY_ASYNC_VIDEO_TIMING_NOT_SUPPORTED_IN_PR			(1 << 3)
+# define DP_PANEL_REPLAY_DSC_CRC_OF_MULTIPLE_SUS_SUPPORTED			(1 << 4)
+# define DP_PANEL_REPLAY_SU_GRANULARITY_REQUIRED				(1 << 5)
+# define DP_PANEL_REPLAY_SU_Y_GRANULARITY_EXTENDED_CAPABILITY_SUPPORTED		(1 << 6)
+# define DP_PANEL_REPLAY_LINK_OFF_SUPPORTED_IN_PR_AFTER_ADAPTIVE_SYNC_SDP	(1 << 7)
+
+#define DP_PANEL_REPLAY_CAP_X_GRANULARITY		0xb2
+# define DP_PANEL_REPLAY_FULL_LINE_GRANULARITY		0xffff
+
+#define DP_PANEL_REPLAY_CAP_Y_GRANULARITY		0xb4
 
 /* Link Configuration */
 #define	DP_LINK_BW_SET		            0x100
@@ -570,6 +588,7 @@
 
 #define DP_LANE_COUNT_SET	            0x101
 # define DP_LANE_COUNT_MASK		    0x0f
+# define DP_POST_LT_ADJ_REQ_GRANTED         (1 << 5) /* 1.3 */
 # define DP_LANE_COUNT_ENHANCED_FRAME_EN    (1 << 7)
 
 #define DP_TRAINING_PATTERN_SET	            0x102
@@ -696,6 +715,9 @@
 #define DP_UPSTREAM_DEVICE_DP_PWR_NEED	    0x118   /* 1.2 */
 # define DP_PWR_NOT_NEEDED		    (1 << 0)
 
+#define DP_EXTENDED_DPRX_SLEEP_WAKE_TIMEOUT_GRANT	    0x119   /* 1.4a */
+# define DP_DPRX_SLEEP_WAKE_TIMEOUT_PERIOD_GRANTED	    (1 << 0)
+
 #define DP_FEC_CONFIGURATION		    0x120    /* 1.4 */
 # define DP_FEC_READY			    (1 << 0)
 # define DP_FEC_ERR_COUNT_SEL_MASK	    (7 << 1)
@@ -784,6 +806,7 @@
 
 #define DP_LANE_ALIGN_STATUS_UPDATED                    0x204
 #define  DP_INTERLANE_ALIGN_DONE                        (1 << 0)
+#define  DP_POST_LT_ADJ_REQ_IN_PROGRESS                 (1 << 1) /* 1.3 */
 #define  DP_128B132B_DPRX_EQ_INTERLANE_ALIGN_DONE       (1 << 2) /* 2.0 E11 */
 #define  DP_128B132B_DPRX_CDS_INTERLANE_ALIGN_DONE      (1 << 3) /* 2.0 E11 */
 #define  DP_128B132B_LT_FAILED                          (1 << 4) /* 2.0 E11 */
@@ -996,6 +1019,7 @@
 # define DP_EDP_14			    0x03
 # define DP_EDP_14a                         0x04    /* eDP 1.4a */
 # define DP_EDP_14b                         0x05    /* eDP 1.4b */
+# define DP_EDP_15			    0x06    /* eDP 1.5 */
 
 #define DP_EDP_GENERAL_CAP_1		    0x701
 # define DP_EDP_TCON_BACKLIGHT_ADJUSTMENT_CAP		(1 << 0)
@@ -1020,6 +1044,7 @@
 #define DP_EDP_GENERAL_CAP_2		    0x703
 # define DP_EDP_OVERDRIVE_ENGINE_ENABLED		(1 << 0)
 # define DP_EDP_PANEL_LUMINANCE_CONTROL_CAPABLE		(1 << 4)
+# define DP_EDP_SMOOTH_BRIGHTNESS_CAPABLE		(1 << 6) /* eDP 2.0 */
 
 #define DP_EDP_GENERAL_CAP_3		    0x704    /* eDP 1.4 */
 # define DP_EDP_X_REGION_CAP_MASK			(0xf << 0)
@@ -1167,6 +1192,15 @@
 # define DP_VSC_EXT_VESA_SDP_CHAINING_SUPPORTED		(1 << 5)  /* DP 1.4 */
 # define DP_VSC_EXT_CEA_SDP_SUPPORTED			(1 << 6)  /* DP 1.4 */
 # define DP_VSC_EXT_CEA_SDP_CHAINING_SUPPORTED		(1 << 7)  /* DP 1.4 */
+
+#define DP_EXTENDED_DPRX_SLEEP_WAKE_TIMEOUT_REQUEST	0x2211  /* 1.4a */
+# define DP_DPRX_SLEEP_WAKE_TIMEOUT_PERIOD_MASK		0xff
+# define DP_DPRX_SLEEP_WAKE_TIMEOUT_PERIOD_1_MS		0x00
+# define DP_DPRX_SLEEP_WAKE_TIMEOUT_PERIOD_20_MS	0x01
+# define DP_DPRX_SLEEP_WAKE_TIMEOUT_PERIOD_40_MS	0x02
+# define DP_DPRX_SLEEP_WAKE_TIMEOUT_PERIOD_60_MS	0x03
+# define DP_DPRX_SLEEP_WAKE_TIMEOUT_PERIOD_80_MS	0x04
+# define DP_DPRX_SLEEP_WAKE_TIMEOUT_PERIOD_100_MS	0x05
 
 #define DP_DPRX_FEATURE_ENUMERATION_LIST_CONT_1         0x2214 /* 2.0 E11 */
 # define DP_ADAPTIVE_SYNC_SDP_SUPPORTED    (1 << 0)
@@ -1473,6 +1507,8 @@
 #define DP_MAX_LANE_COUNT_PHY_REPEATER			    0xf0004 /* 1.4a */
 #define DP_Repeater_FEC_CAPABILITY			    0xf0004 /* 1.4 */
 #define DP_PHY_REPEATER_EXTENDED_WAIT_TIMEOUT		    0xf0005 /* 1.4a */
+# define DP_EXTENDED_WAKE_TIMEOUT_REQUEST_MASK		0x7f
+# define DP_EXTENDED_WAKE_TIMEOUT_GRANT			(1 << 7)
 #define DP_MAIN_LINK_CHANNEL_CODING_PHY_REPEATER	    0xf0006 /* 2.0 */
 # define DP_PHY_REPEATER_128B132B_SUPPORTED		    (1 << 0)
 /* See DP_128B132B_SUPPORTED_LINK_RATES for values */
@@ -1542,6 +1578,10 @@ enum drm_dp_phy {
 #define DP_SYMBOL_ERROR_COUNT_LANE1_PHY_REPEATER1	    0xf0037 /* 1.3 */
 #define DP_SYMBOL_ERROR_COUNT_LANE2_PHY_REPEATER1	    0xf0039 /* 1.3 */
 #define DP_SYMBOL_ERROR_COUNT_LANE3_PHY_REPEATER1	    0xf003b /* 1.3 */
+
+#define DP_OUI_PHY_REPEATER1				    0xf003d /* 1.3 */
+#define DP_OUI_PHY_REPEATER(dp_phy) \
+	DP_LTTPR_REG(dp_phy, DP_OUI_PHY_REPEATER1)
 
 #define __DP_FEC1_BASE					    0xf0290 /* 1.4 */
 #define __DP_FEC2_BASE					    0xf0298 /* 1.4 */
@@ -1650,8 +1690,9 @@ enum drm_dp_phy {
 #define DP_BRANCH_OUI_HEADER_SIZE	0xc
 #define DP_RECEIVER_CAP_SIZE		0xf
 #define DP_DSC_RECEIVER_CAP_SIZE        0x10 /* DSC Capabilities 0x60 through 0x6F */
+#define DP_DSC_BRANCH_CAP_SIZE		3
 #define EDP_PSR_RECEIVER_CAP_SIZE	2
-#define EDP_DISPLAY_CTL_CAP_SIZE	3
+#define EDP_DISPLAY_CTL_CAP_SIZE	5
 #define DP_LTTPR_COMMON_CAP_SIZE	8
 #define DP_LTTPR_PHY_CAP_SIZE		3
 

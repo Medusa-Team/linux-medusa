@@ -156,7 +156,7 @@
 #define AST_EP_DMA_DESC_PID_DATA1	(2 << 14)
 #define AST_EP_DMA_DESC_PID_MDATA	(3 << 14)
 #define EP_DESC1_IN_LEN(x)		((x) & 0x1fff)
-#define AST_EP_DMA_DESC_MAX_LEN		(7680) /* Max packet length for trasmit in 1 desc */
+#define AST_EP_DMA_DESC_MAX_LEN		(7680) /* Max packet length for transmit in 1 desc */
 
 struct ast_udc_request {
 	struct usb_request	req;
@@ -452,7 +452,7 @@ static struct usb_request *ast_udc_ep_alloc_request(struct usb_ep *_ep,
 	struct ast_udc_ep *ep = to_ast_ep(_ep);
 	struct ast_udc_request *req;
 
-	req = kzalloc(sizeof(struct ast_udc_request), gfp_flags);
+	req = kzalloc_obj(struct ast_udc_request, gfp_flags);
 	if (!req) {
 		EP_DBG(ep, "request allocation failed\n");
 		return NULL;
@@ -1590,7 +1590,7 @@ MODULE_DEVICE_TABLE(of, ast_udc_of_dt_ids);
 
 static struct platform_driver ast_udc_driver = {
 	.probe			= ast_udc_probe,
-	.remove_new		= ast_udc_remove,
+	.remove			= ast_udc_remove,
 	.driver			= {
 		.name			= KBUILD_MODNAME,
 		.of_match_table		= ast_udc_of_dt_ids,

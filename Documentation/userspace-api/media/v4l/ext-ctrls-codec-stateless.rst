@@ -1,4 +1,5 @@
 .. SPDX-License-Identifier: GFDL-1.1-no-invariants-or-later
+.. c:namespace:: V4L
 
 .. _codec-stateless-controls:
 
@@ -2958,6 +2959,126 @@ This structure contains all loop filter related parameters. See sections
       - 0x00000004
       -
 
+``V4L2_CID_STATELESS_HEVC_EXT_SPS_LT_RPS (struct)``
+    Subset of the :c:type:`v4l2_ctrl_hevc_sps` control.
+    It extends it with the list of Long-term reference sets parameters.
+    These parameters are defined according to :ref:`hevc`.
+    They are described in section 7.4.3.2.1 "General sequence parameter set
+    RBSP semantics" of the specification.
+    This control is a dynamically sized 1-dimensional array.
+    The values in the array should be ignored when either
+    num_long_term_ref_pics_sps is 0 or the
+    V4L2_HEVC_SPS_FLAG_LONG_TERM_REF_PICS_PRESENT flag is not set in
+    :c:type:`v4l2_ctrl_hevc_sps`.
+
+.. c:type:: v4l2_ctrl_hevc_ext_sps_lt_rps
+
+.. cssclass:: longtable
+
+.. flat-table:: struct v4l2_ctrl_hevc_ext_sps_lt_rps
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - __u16
+      - ``lt_ref_pic_poc_lsb_sps``
+      - Long term reference picture order count as described in section 7.4.3.2.1
+        "General sequence parameter set RBSP semantics" of the specification.
+    * - __u16
+      - ``flags``
+      - See :ref:`Extended Long-Term RPS Flags <hevc_ext_sps_lt_rps_flags>`
+
+.. _hevc_ext_sps_lt_rps_flags:
+
+``Extended SPS Long-Term RPS Flags``
+
+.. cssclass:: longtable
+
+.. flat-table::
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - ``V4L2_HEVC_EXT_SPS_LT_RPS_FLAG_USED_LT``
+      - 0x00000001
+      - Specifies if the long-term reference picture is used 7.4.3.2.1 "General sequence parameter
+        set RBSP semantics" of the specification.
+
+``V4L2_CID_STATELESS_HEVC_EXT_SPS_ST_RPS (struct)``
+    Subset of the :c:type:`v4l2_ctrl_hevc_sps` control.
+    It extends it with the list of Short-term reference sets parameters.
+    These parameters are defined according to :ref:`hevc`.
+    They are described in section 7.4.8 "Short-term reference picture set
+    semantics" of the specification.
+    This control is a dynamically sized 1-dimensional array.
+    The values in the array should be ignored when
+    num_short_term_ref_pic_sets is 0.
+
+.. c:type:: v4l2_ctrl_hevc_ext_sps_st_rps
+
+.. cssclass:: longtable
+
+.. flat-table:: struct v4l2_ctrl_hevc_ext_sps_st_rps
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - __u8
+      - ``delta_idx_minus1``
+      - Specifies the delta compare to the index. See details in section 7.4.8 "Short-term
+        reference picture set semantics" of the specification.
+    * - __u8
+      - ``delta_rps_sign``
+      - Sign of the delta as specified in section 7.4.8 "Short-term reference picture set
+        semantics" of the specification.
+    * - __u8
+      - ``num_negative_pics``
+      - Number of short-term RPS entries that have picture order count values less than the
+        picture order count value of the current picture.
+    * - __u8
+      - ``num_positive_pics``
+      - Number of short-term RPS entries that have picture order count values greater than the
+        picture order count value of the current picture.
+    * - __u32
+      - ``used_by_curr_pic``
+      - Bit i specifies if short-term RPS i is used by the current picture.
+    * - __u32
+      - ``use_delta_flag``
+      - Bit i specifies if short-term RPS i is included in the short-term RPS entries.
+    * - __u16
+      - ``abs_delta_rps_minus1``
+      - Absolute delta RPS as specified in section 7.4.8 "Short-term reference picture set
+        semantics" of the specification.
+    * - __u16
+      - ``delta_poc_s0_minus1[16]``
+      - Specifies the negative picture order count delta for the i-th entry in the short-term RPS.
+        See details in section 7.4.8 "Short-term reference picture set semantics" of the
+        specification.
+    * - __u16
+      - ``delta_poc_s1_minus1[16]``
+      - Specifies the positive picture order count delta for the i-th entry in the short-term RPS.
+        See details in section 7.4.8 "Short-term reference picture set semantics" of the
+        specification.
+    * - __u16
+      - ``flags``
+      - See :ref:`Extended Short-Term RPS Flags <hevc_ext_sps_st_rps_flags>`
+
+.. _hevc_ext_sps_st_rps_flags:
+
+``Extended SPS Short-Term RPS Flags``
+
+.. cssclass:: longtable
+
+.. flat-table::
+    :header-rows:  0
+    :stub-columns: 0
+    :widths:       1 1 2
+
+    * - ``V4L2_HEVC_EXT_SPS_ST_RPS_FLAG_INTER_REF_PIC_SET_PRED``
+      - 0x00000001
+      - Specifies if the short-term RPS is predicted from another short term RPS. See details in
+        section 7.4.8 "Short-term reference picture set semantics" of the specification.
+
 .. _v4l2-codec-stateless-av1:
 
 ``V4L2_CID_STATELESS_AV1_SEQUENCE (struct)``
@@ -2993,7 +3114,11 @@ This structure contains all loop filter related parameters. See sections
       - Applications and drivers must set this to zero.
     * - __u16
       - ``max_frame_width_minus_1``
-      - specifies the maximum frame width minus 1 for the frames represented by
+      - Specifies the maximum frame width minus 1 for the frames represented by
+        this sequence header.
+    * - __u16
+      - ``max_frame_height_minus_1``
+      - Specifies the maximum frame height minus 1 for the frames represented by
         this sequence header.
 
 .. _av1_sequence_flags:
@@ -3374,7 +3499,7 @@ semantics" of :ref:`av1`.
       - ``uv_pri_strength[V4L2_AV1_CDEF_MAX]``
       -  Specifies the strength of the primary filter.
     * - __u8
-      - ``uv_secondary_strength[V4L2_AV1_CDEF_MAX]``
+      - ``uv_sec_strength[V4L2_AV1_CDEF_MAX]``
       -  Specifies the strength of the secondary filter.
 
 .. c:type:: v4l2_av1_segment_feature
@@ -3439,7 +3564,7 @@ semantics" of :ref:`av1`.
       - Bitmask defining which features are enabled in each segment. Use
         V4L2_AV1_SEGMENT_FEATURE_ENABLED to build a suitable mask.
     * - __u16
-      - `feature_data[V4L2_AV1_MAX_SEGMENTS][V4L2_AV1_SEG_LVL_MAX]``
+      - ``feature_data[V4L2_AV1_MAX_SEGMENTS][V4L2_AV1_SEG_LVL_MAX]``
       -  Data attached to each feature. Data entry is only valid if the feature
          is enabled.
 
@@ -3490,7 +3615,7 @@ AV1 Loop filter params as defined in section 6.8.10 "Loop filter semantics" of
 
 .. tabularcolumns:: |p{1.5cm}|p{5.8cm}|p{10.0cm}|
 
-.. flat-table:: struct v4l2_av1_global_motion
+.. flat-table:: struct v4l2_av1_loop_filter
     :header-rows:  0
     :stub-columns: 0
     :widths:       1 1 2
@@ -3806,12 +3931,12 @@ AV1 Tx mode as described in section 6.8.21 "TX mode semantics" of :ref:`av1`.
     * - struct :c:type:`v4l2_av1_quantization`
       - ``quantization``
       - Quantization parameters.
-    * - struct :c:type:`v4l2_av1_segmentation`
-      - ``segmentation``
-      - Segmentation parameters.
     * - __u8
       - ``superres_denom``
       - The denominator for the upscaling ratio.
+    * - struct :c:type:`v4l2_av1_segmentation`
+      - ``segmentation``
+      - Segmentation parameters.
     * - struct :c:type:`v4l2_av1_loop_filter`
       - ``loop_filter``
       - Loop filter params
@@ -3829,7 +3954,7 @@ AV1 Tx mode as described in section 6.8.21 "TX mode semantics" of :ref:`av1`.
     * - struct :c:type:`v4l2_av1_loop_restoration`
       - ``loop_restoration``
       - Loop restoration parameters.
-    * - struct :c:type:`v4l2_av1_loop_global_motion`
+    * - struct :c:type:`v4l2_av1_global_motion`
       - ``global_motion``
       - Global motion parameters.
     * - __u32

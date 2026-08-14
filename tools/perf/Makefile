@@ -51,8 +51,14 @@ else
   override DEBUG = 0
 endif
 
+ifeq ($(JOBS),1)
+  BUILD_TYPE := sequential
+else
+  BUILD_TYPE := parallel
+endif
+
 define print_msg
-  @printf '  BUILD:   Doing '\''make \033[33m-j'$(JOBS)'\033[m'\'' parallel build\n'
+  @printf '  BUILD:   Doing '\''make \033[33m-j'$(JOBS)'\033[m'\'' $(BUILD_TYPE) build\n'
 endef
 
 define make
@@ -105,6 +111,9 @@ build-test:
 build-test-tarball:
 	@$(MAKE) -f tests/make REUSE_FEATURES_DUMP=1 MK=Makefile SET_PARALLEL=1 --no-print-directory out
 
+check-headers:
+	@./check-headers.sh
+
 #
 # All other targets get passed through:
 #
@@ -112,4 +121,4 @@ build-test-tarball:
 	$(print_msg)
 	$(make)
 
-.PHONY: tags TAGS FORCE Makefile
+.PHONY: tags TAGS FORCE Makefile build-test build-test-tarball check-headers

@@ -133,15 +133,15 @@ TRACE_EVENT(io_uring_file_get,
  * io_uring_queue_async_work - called before submitting a new async work
  *
  * @req:	pointer to a submitted request
- * @rw:		type of workqueue, hashed or normal
+ * @hashed:	whether async work is hashed
  *
  * Allows to trace asynchronous work submission.
  */
 TRACE_EVENT(io_uring_queue_async_work,
 
-	TP_PROTO(struct io_kiocb *req, int rw),
+	TP_PROTO(struct io_kiocb *req, bool hashed),
 
-	TP_ARGS(req, rw),
+	TP_ARGS(req, hashed),
 
 	TP_STRUCT__entry (
 		__field(  void *,			ctx		)
@@ -150,7 +150,7 @@ TRACE_EVENT(io_uring_queue_async_work,
 		__field(  u8,				opcode		)
 		__field(  unsigned long long,		flags		)
 		__field(  struct io_wq_work *,		work		)
-		__field(  int,				rw		)
+		__field(  bool,				hashed		)
 
 		__string( op_str, io_uring_get_opcode(req->opcode)	)
 	),
@@ -162,7 +162,7 @@ TRACE_EVENT(io_uring_queue_async_work,
 		__entry->flags		= (__force unsigned long long) req->flags;
 		__entry->opcode		= req->opcode;
 		__entry->work		= &req->work;
-		__entry->rw		= rw;
+		__entry->hashed		= hashed;
 
 		__assign_str(op_str);
 	),
@@ -170,7 +170,7 @@ TRACE_EVENT(io_uring_queue_async_work,
 	TP_printk("ring %p, request %p, user_data 0x%llx, opcode %s, flags 0x%llx, %s queue, work %p",
 		__entry->ctx, __entry->req, __entry->user_data,
 		__get_str(op_str), __entry->flags,
-		__entry->rw ? "hashed" : "normal", __entry->work)
+		__entry->hashed ? "hashed" : "normal", __entry->work)
 );
 
 /**
@@ -315,20 +315,14 @@ TRACE_EVENT(io_uring_fail_link,
  * io_uring_complete - called when completing an SQE
  *
  * @ctx:		pointer to a ring context structure
- * @req:		pointer to a submitted request
- * @user_data:		user data associated with the request
- * @res:		result of the request
- * @cflags:		completion flags
- * @extra1:		extra 64-bit data for CQE32
- * @extra2:		extra 64-bit data for CQE32
- *
+ * @req:		(optional) pointer to a submitted request
+ * @cqe:		pointer to the filled in CQE being posted
  */
 TRACE_EVENT(io_uring_complete,
 
-	TP_PROTO(void *ctx, void *req, u64 user_data, int res, unsigned cflags,
-		 u64 extra1, u64 extra2),
+TP_PROTO(struct io_ring_ctx *ctx, void *req, struct io_uring_cqe *cqe),
 
-	TP_ARGS(ctx, req, user_data, res, cflags, extra1, extra2),
+	TP_ARGS(ctx, req, cqe),
 
 	TP_STRUCT__entry (
 		__field(  void *,	ctx		)
@@ -343,11 +337,11 @@ TRACE_EVENT(io_uring_complete,
 	TP_fast_assign(
 		__entry->ctx		= ctx;
 		__entry->req		= req;
-		__entry->user_data	= user_data;
-		__entry->res		= res;
-		__entry->cflags		= cflags;
-		__entry->extra1		= extra1;
-		__entry->extra2		= extra2;
+		__entry->user_data	= cqe->user_data;
+		__entry->res		= cqe->res;
+		__entry->cflags		= cqe->flags;
+		__entry->extra1		= ctx->flags & IORING_SETUP_CQE32 || cqe->flags & IORING_CQE_F_32 ? cqe->big_cqe[0] : 0;
+		__entry->extra2		= ctx->flags & IORING_SETUP_CQE32 || cqe->flags & IORING_CQE_F_32 ? cqe->big_cqe[1] : 0;
 	),
 
 	TP_printk("ring %p, req %p, user_data 0x%llx, result %d, cflags 0x%x "
@@ -651,7 +645,7 @@ TRACE_EVENT(io_uring_short_write,
 /*
  * io_uring_local_work_run - ran ring local task work
  *
- * @tctx:		pointer to a io_uring_ctx
+ * @ctx:		pointer to an io_ring_ctx
  * @count:		how many functions it ran
  * @loops:		how many loops it ran
  *

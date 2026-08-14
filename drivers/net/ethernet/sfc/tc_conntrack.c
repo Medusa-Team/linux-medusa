@@ -16,7 +16,7 @@ static int efx_tc_flow_block(enum tc_setup_type type, void *type_data,
 			     void *cb_priv);
 
 static const struct rhashtable_params efx_tc_ct_zone_ht_params = {
-	.key_len	= offsetof(struct efx_tc_ct_zone, linkage),
+	.key_len	= sizeof_field(struct efx_tc_ct_zone, zone),
 	.key_offset	= 0,
 	.head_offset	= offsetof(struct efx_tc_ct_zone, linkage),
 };
@@ -365,7 +365,7 @@ static int efx_tc_ct_replace(struct efx_tc_ct_zone *ct_zone,
 	if (WARN_ON(!efx->tc->up))
 		return -ENETDOWN;
 
-	conn = kzalloc(sizeof(*conn), GFP_USER);
+	conn = kzalloc_obj(*conn, GFP_USER);
 	if (!conn)
 		return -ENOMEM;
 	conn->cookie = tc->cookie;
@@ -562,7 +562,7 @@ struct efx_tc_ct_zone *efx_tc_ct_register_zone(struct efx_nic *efx, u16 zone,
 	struct efx_tc_ct_zone *ct_zone, *old;
 	int rc;
 
-	ct_zone = kzalloc(sizeof(*ct_zone), GFP_USER);
+	ct_zone = kzalloc_obj(*ct_zone, GFP_USER);
 	if (!ct_zone)
 		return ERR_PTR(-ENOMEM);
 	ct_zone->zone = zone;

@@ -104,7 +104,7 @@ exit_up:
 }
 
 static ssize_t max6875_read(struct file *filp, struct kobject *kobj,
-			    struct bin_attribute *bin_attr,
+			    const struct bin_attribute *bin_attr,
 			    char *buf, loff_t off, size_t count)
 {
 	struct i2c_client *client = kobj_to_i2c_client(kobj);
@@ -144,7 +144,7 @@ static int max6875_probe(struct i2c_client *client)
 	if (client->addr & 1)
 		return -ENODEV;
 
-	data = kzalloc(sizeof(struct max6875_data), GFP_KERNEL);
+	data = kzalloc_obj(struct max6875_data);
 	if (!data)
 		return -ENOMEM;
 

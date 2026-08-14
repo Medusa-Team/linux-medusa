@@ -287,16 +287,12 @@ static inline int
 snd_sof_dsp_set_power_state(struct snd_sof_dev *sdev,
 			    const struct sof_dsp_power_state *target_state)
 {
-	int ret = 0;
-
-	mutex_lock(&sdev->power_state_access);
+	guard(mutex)(&sdev->power_state_access);
 
 	if (sof_ops(sdev)->set_power_state)
-		ret = sof_ops(sdev)->set_power_state(sdev, target_state);
+		return sof_ops(sdev)->set_power_state(sdev, target_state);
 
-	mutex_unlock(&sdev->power_state_access);
-
-	return ret;
+	return 0;
 }
 
 /* debug */
@@ -597,12 +593,12 @@ snd_sof_is_chain_dma_supported(struct snd_sof_dev *sdev, u32 dai_type)
  * @addr: Address to poll
  * @val: Variable to read the value into
  * @cond: Break condition (usually involving @val)
- * @sleep_us: Maximum time to sleep between reads in us (0
- *            tight-loops).  Should be less than ~20ms since usleep_range
- *            is used (see Documentation/timers/timers-howto.rst).
+ * @sleep_us: Maximum time to sleep between reads in us (0 tight-loops). Please
+ *            read usleep_range() function description for details and
+ *            limitations.
  * @timeout_us: Timeout in us, 0 means never timeout
  *
- * Returns 0 on success and -ETIMEDOUT upon a timeout. In either
+ * Returns: 0 on success and -ETIMEDOUT upon a timeout. In either
  * case, the last read value at @addr is stored in @val. Must not
  * be called from atomic context if sleep_us or timeout_us are used.
  *

@@ -469,7 +469,7 @@ int hinic_set_vlan_fliter(struct hinic_dev *nic_dev, u32 en)
 		err = HINIC_MGMT_CMD_UNSUPPORTED;
 	} else if (err || !out_size || vlan_filter.status) {
 		dev_err(&pdev->dev,
-			"Failed to set vlan fliter, err: %d, status: 0x%x, out size: 0x%x\n",
+			"Failed to set vlan filter, err: %d, status: 0x%x, out size: 0x%x\n",
 			err, vlan_filter.status, out_size);
 		err = -EINVAL;
 	}
@@ -1032,7 +1032,7 @@ int hinic_get_phy_port_stats(struct hinic_dev *nic_dev,
 	struct pci_dev *pdev = hwif->pdev;
 	int err;
 
-	port_stats = kzalloc(sizeof(*port_stats), GFP_KERNEL);
+	port_stats = kzalloc_obj(*port_stats);
 	if (!port_stats)
 		return -ENOMEM;
 

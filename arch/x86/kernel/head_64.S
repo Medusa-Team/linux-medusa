@@ -32,15 +32,8 @@
  * We are not able to switch in one step to the final KERNEL ADDRESS SPACE
  * because we need identity-mapped pages.
  */
-#define l4_index(x)	(((x) >> 39) & 511)
-#define pud_index(x)	(((x) >> PUD_SHIFT) & (PTRS_PER_PUD-1))
 
-L4_PAGE_OFFSET = l4_index(__PAGE_OFFSET_BASE_L4)
-L4_START_KERNEL = l4_index(__START_KERNEL_map)
-
-L3_START_KERNEL = pud_index(__START_KERNEL_map)
-
-	__HEAD
+	__INIT
 	.code64
 SYM_CODE_START_NOALIGN(startup_64)
 	UNWIND_HINT_END_OF_STACK
@@ -68,14 +61,17 @@ SYM_CODE_START_NOALIGN(startup_64)
 	/* Set up the stack for verify_cpu() */
 	leaq	__top_init_kernel_stack(%rip), %rsp
 
-	/* Setup GSBASE to allow stack canary access for C code */
+	/*
+	 * Set up GSBASE.
+	 * Note that on SMP the boot CPU uses the init data section until
+	 * the per-CPU areas are set up.
+	 */
 	movl	$MSR_GS_BASE, %ecx
-	leaq	INIT_PER_CPU_VAR(fixed_percpu_data)(%rip), %rdx
-	movl	%edx, %eax
-	shrq	$32,  %rdx
+	xorl	%eax, %eax
+	xorl	%edx, %edx
 	wrmsr
 
-	call	startup_64_setup_gdt_idt
+	call	__pi_startup_64_setup_gdt_idt
 
 	/* Now switch to __KERNEL_CS so IRET works reliably */
 	pushq	$__KERNEL_CS
@@ -84,6 +80,7 @@ SYM_CODE_START_NOALIGN(startup_64)
 	lretq
 
 .Lon_kernel_cs:
+	ANNOTATE_NOENDBR
 	UNWIND_HINT_END_OF_STACK
 
 #ifdef CONFIG_AMD_MEM_ENCRYPT
@@ -94,11 +91,18 @@ SYM_CODE_START_NOALIGN(startup_64)
 	 * subsequent code. Pass the boot_params pointer as the first argument.
 	 */
 	movq	%r15, %rdi
-	call	sme_enable
+	call	__pi_sme_enable
 #endif
 
 	/* Sanitize CPU configuration */
 	call verify_cpu
+
+	/*
+	 * Derive the kernel's physical-to-virtual offset from the physical and
+	 * virtual addresses of common_startup_64().
+	 */
+	leaq	common_startup_64(%rip), %rdi
+	subq	.Lcommon_startup_64(%rip), %rdi
 
 	/*
 	 * Perform pagetable fixups. Additionally, if SME is active, encrypt
@@ -106,9 +110,8 @@ SYM_CODE_START_NOALIGN(startup_64)
 	 * is active) to be added to the initial pgdir entry that will be
 	 * programmed into CR3.
 	 */
-	leaq	_text(%rip), %rdi
 	movq	%r15, %rsi
-	call	__startup_64
+	call	__pi___startup_64
 
 	/* Form the CR3 value being sure to include the CR3 modifier */
 	leaq	early_top_pgt(%rip), %rcx
@@ -134,11 +137,11 @@ SYM_CODE_START_NOALIGN(startup_64)
 
 	/* Branch to the common startup code at its kernel virtual address */
 	ANNOTATE_RETPOLINE_SAFE
-	jmp	*0f(%rip)
+	jmp	*.Lcommon_startup_64(%rip)
 SYM_CODE_END(startup_64)
 
 	__INITRODATA
-0:	.quad	common_startup_64
+SYM_DATA_LOCAL(.Lcommon_startup_64, .quad common_startup_64)
 
 	.text
 SYM_CODE_START(secondary_startup_64)
@@ -319,7 +322,7 @@ SYM_INNER_LABEL(common_startup_64, SYM_L_LOCAL)
 	 *
 	 * RDX contains the per-cpu offset
 	 */
-	movq	pcpu_hot + X86_current_task(%rdx), %rax
+	movq	current_task(%rdx), %rax
 	movq	TASK_threadsp(%rax), %rsp
 
 	/*
@@ -359,17 +362,12 @@ SYM_INNER_LABEL(common_startup_64, SYM_L_LOCAL)
 	movl %eax,%fs
 	movl %eax,%gs
 
-	/* Set up %gs.
-	 *
-	 * The base of %gs always points to fixed_percpu_data. If the
-	 * stack protector canary is enabled, it is located at %gs:40.
+	/*
+	 * Set up GSBASE.
 	 * Note that, on SMP, the boot cpu uses init data section until
 	 * the per cpu areas are set up.
 	 */
 	movl	$MSR_GS_BASE,%ecx
-#ifndef CONFIG_SMP
-	leaq	INIT_PER_CPU_VAR(fixed_percpu_data)(%rip), %rdx
-#endif
 	movl	%edx, %eax
 	shrq	$32, %rdx
 	wrmsr
@@ -435,7 +433,7 @@ SYM_CODE_START(soft_restart_cpu)
 	UNWIND_HINT_END_OF_STACK
 
 	/* Find the idle task stack */
-	movq	PER_CPU_VAR(pcpu_hot + X86_current_task), %rcx
+	movq	PER_CPU_VAR(current_task), %rcx
 	movq	TASK_threadsp(%rcx), %rsp
 
 	jmp	.Ljump_to_C_code
@@ -564,7 +562,7 @@ SYM_CODE_START_NOALIGN(vc_no_ghcb)
 	/* Call C handler */
 	movq    %rsp, %rdi
 	movq	ORIG_RAX(%rsp), %rsi
-	call    do_vc_no_ghcb
+	call    __pi_do_vc_no_ghcb
 
 	/* Unwind pt_regs */
 	POP_REGS
@@ -575,10 +573,8 @@ SYM_CODE_START_NOALIGN(vc_no_ghcb)
 	/* Pure iret required here - don't use INTERRUPT_RETURN */
 	iretq
 SYM_CODE_END(vc_no_ghcb)
+SYM_PIC_ALIAS(vc_no_ghcb);
 #endif
-
-#define SYM_DATA_START_PAGE_ALIGNED(name)			\
-	SYM_START(name, SYM_L_GLOBAL, .balign PAGE_SIZE)
 
 #ifdef CONFIG_MITIGATION_PAGE_TABLE_ISOLATION
 /*
@@ -601,14 +597,6 @@ SYM_CODE_END(vc_no_ghcb)
 #define PTI_USER_PGD_FILL	0
 #endif
 
-/* Automate the creation of 1 to 1 mapping pmd entries */
-#define PMDS(START, PERM, COUNT)			\
-	i = 0 ;						\
-	.rept (COUNT) ;					\
-	.quad	(START) + (i << PMD_SHIFT) + (PERM) ;	\
-	i = i + 1 ;					\
-	.endr
-
 	__INITDATA
 	.balign 4
 
@@ -617,54 +605,27 @@ SYM_DATA_START_PTI_ALIGNED(early_top_pgt)
 	.quad	level3_kernel_pgt - __START_KERNEL_map + _PAGE_TABLE_NOENC
 	.fill	PTI_USER_PGD_FILL,8,0
 SYM_DATA_END(early_top_pgt)
+SYM_PIC_ALIAS(early_top_pgt)
 
 SYM_DATA_START_PAGE_ALIGNED(early_dynamic_pgts)
 	.fill	512*EARLY_DYNAMIC_PAGE_TABLES,8,0
 SYM_DATA_END(early_dynamic_pgts)
+SYM_PIC_ALIAS(early_dynamic_pgts);
 
 SYM_DATA(early_recursion_flag, .long 0)
 
 	.data
 
-#if defined(CONFIG_XEN_PV) || defined(CONFIG_PVH)
-SYM_DATA_START_PTI_ALIGNED(init_top_pgt)
-	.quad   level3_ident_pgt - __START_KERNEL_map + _KERNPG_TABLE_NOENC
-	.org    init_top_pgt + L4_PAGE_OFFSET*8, 0
-	.quad   level3_ident_pgt - __START_KERNEL_map + _KERNPG_TABLE_NOENC
-	.org    init_top_pgt + L4_START_KERNEL*8, 0
-	/* (2^48-(2*1024*1024*1024))/(2^39) = 511 */
-	.quad   level3_kernel_pgt - __START_KERNEL_map + _PAGE_TABLE_NOENC
-	.fill	PTI_USER_PGD_FILL,8,0
-SYM_DATA_END(init_top_pgt)
-
-SYM_DATA_START_PAGE_ALIGNED(level3_ident_pgt)
-	.quad	level2_ident_pgt - __START_KERNEL_map + _KERNPG_TABLE_NOENC
-	.fill	511, 8, 0
-SYM_DATA_END(level3_ident_pgt)
-SYM_DATA_START_PAGE_ALIGNED(level2_ident_pgt)
-	/*
-	 * Since I easily can, map the first 1G.
-	 * Don't set NX because code runs from these pages.
-	 *
-	 * Note: This sets _PAGE_GLOBAL despite whether
-	 * the CPU supports it or it is enabled.  But,
-	 * the CPU should ignore the bit.
-	 */
-	PMDS(0, __PAGE_KERNEL_IDENT_LARGE_EXEC, PTRS_PER_PMD)
-SYM_DATA_END(level2_ident_pgt)
-#else
 SYM_DATA_START_PTI_ALIGNED(init_top_pgt)
 	.fill	512,8,0
 	.fill	PTI_USER_PGD_FILL,8,0
 SYM_DATA_END(init_top_pgt)
-#endif
 
-#ifdef CONFIG_X86_5LEVEL
 SYM_DATA_START_PAGE_ALIGNED(level4_kernel_pgt)
 	.fill	511,8,0
 	.quad	level3_kernel_pgt - __START_KERNEL_map + _PAGE_TABLE_NOENC
 SYM_DATA_END(level4_kernel_pgt)
-#endif
+SYM_PIC_ALIAS(level4_kernel_pgt)
 
 SYM_DATA_START_PAGE_ALIGNED(level3_kernel_pgt)
 	.fill	L3_START_KERNEL,8,0
@@ -672,6 +633,7 @@ SYM_DATA_START_PAGE_ALIGNED(level3_kernel_pgt)
 	.quad	level2_kernel_pgt - __START_KERNEL_map + _KERNPG_TABLE_NOENC
 	.quad	level2_fixmap_pgt - __START_KERNEL_map + _PAGE_TABLE_NOENC
 SYM_DATA_END(level3_kernel_pgt)
+SYM_PIC_ALIAS(level3_kernel_pgt)
 
 SYM_DATA_START_PAGE_ALIGNED(level2_kernel_pgt)
 	/*
@@ -689,6 +651,7 @@ SYM_DATA_START_PAGE_ALIGNED(level2_kernel_pgt)
 	 */
 	PMDS(0, __PAGE_KERNEL_LARGE_EXEC, KERNEL_IMAGE_SIZE/PMD_SIZE)
 SYM_DATA_END(level2_kernel_pgt)
+SYM_PIC_ALIAS(level2_kernel_pgt)
 
 SYM_DATA_START_PAGE_ALIGNED(level2_fixmap_pgt)
 	.fill	(512 - 4 - FIXMAP_PMD_NUM),8,0
@@ -701,14 +664,13 @@ SYM_DATA_START_PAGE_ALIGNED(level2_fixmap_pgt)
 	/* 6 MB reserved space + a 2MB hole */
 	.fill	4,8,0
 SYM_DATA_END(level2_fixmap_pgt)
+SYM_PIC_ALIAS(level2_fixmap_pgt)
 
 SYM_DATA_START_PAGE_ALIGNED(level1_fixmap_pgt)
 	.rept (FIXMAP_PMD_NUM)
 	.fill	512,8,0
 	.endr
 SYM_DATA_END(level1_fixmap_pgt)
-
-#undef PMDS
 
 	.data
 	.align 16
@@ -718,13 +680,7 @@ SYM_DATA(smpboot_control,		.long 0)
 	.align 16
 /* This must match the first entry in level2_kernel_pgt */
 SYM_DATA(phys_base, .quad 0x0)
+SYM_PIC_ALIAS(phys_base);
 EXPORT_SYMBOL(phys_base)
 
 #include "../xen/xen-head.S"
-
-	__PAGE_ALIGNED_BSS
-SYM_DATA_START_PAGE_ALIGNED(empty_zero_page)
-	.skip PAGE_SIZE
-SYM_DATA_END(empty_zero_page)
-EXPORT_SYMBOL(empty_zero_page)
-

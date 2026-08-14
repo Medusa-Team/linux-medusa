@@ -162,7 +162,7 @@ static int clk_mt8192_apmixed_probe(struct platform_device *pdev)
 
 	fhctl_parse_dt(fhctl_node, pllfhs, ARRAY_SIZE(pllfhs));
 
-	r = mtk_clk_register_pllfhs(node, plls, ARRAY_SIZE(plls),
+	r = mtk_clk_register_pllfhs(&pdev->dev, plls, ARRAY_SIZE(plls),
 				    pllfhs, ARRAY_SIZE(pllfhs), clk_data);
 	if (r)
 		goto free_clk_data;
@@ -206,7 +206,7 @@ static struct platform_driver clk_mt8192_apmixed_drv = {
 		.of_match_table = of_match_clk_mt8192_apmixed,
 	},
 	.probe = clk_mt8192_apmixed_probe,
-	.remove_new = clk_mt8192_apmixed_remove,
+	.remove = clk_mt8192_apmixed_remove,
 };
 module_platform_driver(clk_mt8192_apmixed_drv);
 MODULE_DESCRIPTION("MediaTek MT8192 apmixed clocks driver");

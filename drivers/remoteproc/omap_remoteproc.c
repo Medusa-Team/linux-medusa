@@ -37,6 +37,10 @@
 
 #include <linux/platform_data/dmtimer-omap.h>
 
+#ifdef CONFIG_ARM_DMA_USE_IOMMU
+#include <asm/dma-iommu.h>
+#endif
+
 #include "omap_remoteproc.h"
 #include "remoteproc_internal.h"
 
@@ -551,7 +555,6 @@ static void omap_rproc_kick(struct rproc *rproc, int vqid)
 		dev_err(dev, "failed to send mailbox message, status = %d\n",
 			ret);
 
-	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 }
 
@@ -652,7 +655,6 @@ static int omap_rproc_start(struct rproc *rproc)
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_get_noresume(dev);
 	pm_runtime_enable(dev);
-	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 
 	return 0;
@@ -710,7 +712,6 @@ enable_device:
 	reset_control_deassert(oproc->reset);
 out:
 	/* schedule the next auto-suspend */
-	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 	return ret;
 }
@@ -720,6 +721,7 @@ out:
  * @rproc: remote processor to apply the address translation for
  * @da: device address to translate
  * @len: length of the memory buffer
+ * @is_iomem: pointer filled in to indicate if @da is iomapped memory
  *
  * Custom function implementing the rproc .da_to_va ops to provide address
  * translation (device address to kernel virtual address) for internal RAMs
@@ -1133,7 +1135,6 @@ static int omap_rproc_get_boot_data(struct platform_device *pdev,
 	struct device_node *np = pdev->dev.of_node;
 	struct omap_rproc *oproc = rproc->priv;
 	const struct omap_rproc_dev_data *data;
-	int ret;
 
 	data = of_device_get_match_data(&pdev->dev);
 	if (!data)
@@ -1149,10 +1150,8 @@ static int omap_rproc_get_boot_data(struct platform_device *pdev,
 
 	oproc->boot_data->syscon =
 			syscon_regmap_lookup_by_phandle(np, "ti,bootreg");
-	if (IS_ERR(oproc->boot_data->syscon)) {
-		ret = PTR_ERR(oproc->boot_data->syscon);
-		return ret;
-	}
+	if (IS_ERR(oproc->boot_data->syscon))
+		return PTR_ERR(oproc->boot_data->syscon);
 
 	if (of_property_read_u32_index(np, "ti,bootreg", 1,
 				       &oproc->boot_data->boot_reg)) {
@@ -1209,7 +1208,7 @@ static int omap_rproc_of_get_internal_memories(struct platform_device *pdev,
 		oproc->mem[i].dev_addr = data->mems[i].dev_addr;
 		oproc->mem[i].size = resource_size(res);
 
-		dev_dbg(dev, "memory %8s: bus addr %pa size 0x%x va %pK da 0x%x\n",
+		dev_dbg(dev, "memory %8s: bus addr %pa size 0x%x va %p da 0x%x\n",
 			data->mems[i].name, &oproc->mem[i].bus_addr,
 			oproc->mem[i].size, oproc->mem[i].cpu_addr,
 			oproc->mem[i].dev_addr);
@@ -1322,6 +1321,19 @@ static int omap_rproc_probe(struct platform_device *pdev)
 	oproc->reset = reset;
 	/* All existing OMAP IPU and DSP processors have an MMU */
 	rproc->has_iommu = true;
+
+#ifdef CONFIG_ARM_DMA_USE_IOMMU
+	/*
+	 * Throw away the ARM DMA mapping that we'll never use, so it doesn't
+	 * interfere with the core rproc->domain and we get the right DMA ops.
+	 */
+	if (pdev->dev.archdata.mapping) {
+		struct dma_iommu_mapping *mapping = to_dma_iommu_mapping(&pdev->dev);
+
+		arm_iommu_detach_device(&pdev->dev);
+		arm_iommu_release_mapping(mapping);
+	}
+#endif
 
 	ret = omap_rproc_of_get_internal_memories(pdev, rproc);
 	if (ret)

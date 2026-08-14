@@ -44,6 +44,7 @@ struct typec_thunderbolt_data {
 
 #define   TBT_GEN3_NON_ROUNDED                 0
 #define   TBT_GEN3_GEN4_ROUNDED_NON_ROUNDED    1
+#define TBT_CABLE_ROUNDED		BIT(19)
 #define TBT_CABLE_OPTICAL		BIT(21)
 #define TBT_CABLE_RETIMER		BIT(22)
 #define TBT_CABLE_LINK_TRAINING		BIT(23)
@@ -54,6 +55,7 @@ struct typec_thunderbolt_data {
 
 /* TBT3 Device Enter Mode VDO bits */
 #define TBT_ENTER_MODE_CABLE_SPEED(s)	TBT_SET_CABLE_SPEED(s)
+#define TBT_ENTER_MODE_UNI_DIR_LSRX	BIT(23)
 #define TBT_ENTER_MODE_ACTIVE_CABLE	BIT(24)
 
 #endif /* __USB_TYPEC_TBT_H */

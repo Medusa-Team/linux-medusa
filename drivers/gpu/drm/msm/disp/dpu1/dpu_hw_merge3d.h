@@ -12,7 +12,6 @@
 struct dpu_hw_merge_3d;
 
 /**
- *
  * struct dpu_hw_merge_3d_ops : Interface to the merge_3d Hw driver functions
  *  Assumption is these functions will be called after clocks are enabled
  *  @setup_3d_mode : enable 3D merge
@@ -45,14 +44,6 @@ static inline struct dpu_hw_merge_3d *to_dpu_hw_merge_3d(struct dpu_hw_blk *hw)
 	return container_of(hw, struct dpu_hw_merge_3d, base);
 }
 
-/**
- * dpu_hw_merge_3d_init() - Initializes the merge_3d driver for the passed
- * merge3d catalog entry.
- * @dev:  Corresponding device for devres management
- * @cfg:  Pingpong catalog entry for which driver object is required
- * @addr: Mapped register io address of MDP
- * Return: Error code or allocated dpu_hw_merge_3d context
- */
 struct dpu_hw_merge_3d *dpu_hw_merge_3d_init(struct drm_device *dev,
 					     const struct dpu_merge_3d_cfg *cfg,
 					     void __iomem *addr);

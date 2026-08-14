@@ -22,7 +22,7 @@
 #include <linux/spinlock.h>
 #include <linux/types.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #define PROTOCOL_REV_MINOR_MASK	GENMASK(15, 0)
 #define PROTOCOL_REV_MAJOR_MASK	GENMASK(31, 16)
@@ -30,6 +30,8 @@
 #define PROTOCOL_REV_MINOR(x)	((u16)(FIELD_GET(PROTOCOL_REV_MINOR_MASK, (x))))
 
 #define SCMI_PROTOCOL_VENDOR_BASE	0x80
+
+#define MSG_SUPPORTS_FASTCHANNEL(x)	((x) & BIT(0))
 
 enum scmi_common_cmd {
 	PROTOCOL_VERSION = 0x0,
@@ -157,6 +159,9 @@ struct scmi_proto_helpers_ops;
  * struct scmi_protocol_handle  - Reference to an initialized protocol instance
  *
  * @dev: A reference to the associated SCMI instance device (handle->dev).
+ * @version: The protocol version currently effectively in use by this
+ *	     initialized instance of the protocol as determined at the end of
+ *	     any possibly needed negotiations performed by the core.
  * @xops: A reference to a struct holding refs to the core xfer operations that
  *	  can be used by the protocol implementation to generate SCMI messages.
  * @set_priv: A method to set protocol private data for this instance.
@@ -175,22 +180,22 @@ struct scmi_proto_helpers_ops;
  */
 struct scmi_protocol_handle {
 	struct device *dev;
+	unsigned int version;
 	const struct scmi_xfer_ops *xops;
 	const struct scmi_proto_helpers_ops *hops;
-	int (*set_priv)(const struct scmi_protocol_handle *ph, void *priv,
-			u32 version);
+	int (*set_priv)(const struct scmi_protocol_handle *ph, void *priv);
 	void *(*get_priv)(const struct scmi_protocol_handle *ph);
 };
 
 /**
  * struct scmi_iterator_state  - Iterator current state descriptor
- * @desc_index: Starting index for the current mulit-part request.
+ * @desc_index: Starting index for the current multi-part request.
  * @num_returned: Number of returned items in the last multi-part reply.
  * @num_remaining: Number of remaining items in the multi-part message.
  * @max_resources: Maximum acceptable number of items, configured by the caller
  *		   depending on the underlying resources that it is querying.
  * @loop_idx: The iterator loop index in the current multi-part reply.
- * @rx_len: Size in bytes of the currenly processed message; it can be used by
+ * @rx_len: Size in bytes of the currently processed message; it can be used by
  *	    the user of the iterator to verify a reply size.
  * @priv: Optional pointer to some additional state-related private data setup
  *	  by the caller during the iterations.
@@ -285,7 +290,6 @@ struct scmi_proto_helpers_ops {
 
 /**
  * struct scmi_xfer_ops  - References to the core SCMI xfer operations.
- * @version_get: Get this version protocol.
  * @xfer_get_init: Initialize one struct xfer if any xfer slot is free.
  * @reset_rx_to_maxsz: Reset rx size to max transport size.
  * @do_xfer: Do the SCMI transfer.
@@ -298,7 +302,6 @@ struct scmi_proto_helpers_ops {
  * another protocol.
  */
 struct scmi_xfer_ops {
-	int (*version_get)(const struct scmi_protocol_handle *ph, u32 *version);
 	int (*xfer_get_init)(const struct scmi_protocol_handle *ph, u8 msg_id,
 			     size_t tx_size, size_t rx_size,
 			     struct scmi_xfer **p);

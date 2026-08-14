@@ -86,7 +86,7 @@
 #define SMEM_GLOBAL_HOST	0xfffe
 
 /* Max number of processors/hosts in a system */
-#define SMEM_HOST_COUNT		20
+#define SMEM_HOST_COUNT		25
 
 /**
   * struct smem_proc_comm - proc_comm communication struct (legacy)
@@ -353,8 +353,12 @@ static void *cached_entry_to_item(struct smem_private_entry *e)
 	return p - le32_to_cpu(e->size);
 }
 
-/* Pointer to the one and only smem handle */
-static struct qcom_smem *__smem;
+/*
+ * Pointer to the one and only smem handle.
+ * Init to -EPROBE_DEFER to signal SMEM still has to be probed.
+ * Can be set to -ENODEV if SMEM is not initialized by SBL.
+ */
+static struct qcom_smem *__smem = INIT_ERR_PTR(-EPROBE_DEFER);
 
 /* Timeout (ms) for the trylock of remote spinlocks */
 #define HWSPINLOCK_TIMEOUT	1000
@@ -392,7 +396,7 @@ EXPORT_SYMBOL_GPL(qcom_smem_bust_hwspin_lock_by_host);
  */
 bool qcom_smem_is_available(void)
 {
-	return !!__smem;
+	return !IS_ERR(__smem);
 }
 EXPORT_SYMBOL_GPL(qcom_smem_is_available);
 
@@ -499,6 +503,8 @@ static int qcom_smem_alloc_global(struct qcom_smem *smem,
  *
  * Allocate space for a given smem item of size @size, given that the item is
  * not yet allocated.
+ *
+ * Return: 0 on success, negative errno on failure.
  */
 int qcom_smem_alloc(unsigned host, unsigned item, size_t size)
 {
@@ -506,8 +512,8 @@ int qcom_smem_alloc(unsigned host, unsigned item, size_t size)
 	unsigned long flags;
 	int ret;
 
-	if (!__smem)
-		return -EPROBE_DEFER;
+	if (IS_ERR(__smem))
+		return PTR_ERR(__smem);
 
 	if (item < SMEM_ITEM_LAST_FIXED) {
 		dev_err(__smem->dev,
@@ -515,7 +521,7 @@ int qcom_smem_alloc(unsigned host, unsigned item, size_t size)
 		return -EINVAL;
 	}
 
-	if (WARN_ON(item >= __smem->item_count))
+	if (item >= __smem->item_count)
 		return -EINVAL;
 
 	ret = hwspin_lock_timeout_irqsave(__smem->hwlock,
@@ -677,16 +683,18 @@ invalid_canary:
  *
  * Looks up smem item and returns pointer to it. Size of smem
  * item is returned in @size.
+ *
+ * Return: a pointer to an SMEM item on success, ERR_PTR() on failure.
  */
 void *qcom_smem_get(unsigned host, unsigned item, size_t *size)
 {
 	struct smem_partition *part;
-	void *ptr = ERR_PTR(-EPROBE_DEFER);
+	void *ptr;
 
-	if (!__smem)
-		return ptr;
+	if (IS_ERR(__smem))
+		return __smem;
 
-	if (WARN_ON(item >= __smem->item_count))
+	if (item >= __smem->item_count)
 		return ERR_PTR(-EINVAL);
 
 	if (host < SMEM_HOST_COUNT && __smem->partitions[host].virt_base) {
@@ -709,6 +717,8 @@ EXPORT_SYMBOL_GPL(qcom_smem_get);
  *
  * To be used by smem clients as a quick way to determine if any new
  * allocations has been made.
+ *
+ * Return: number of available bytes on success, negative errno on failure.
  */
 int qcom_smem_get_free_space(unsigned host)
 {
@@ -717,8 +727,8 @@ int qcom_smem_get_free_space(unsigned host)
 	struct smem_header *header;
 	unsigned ret;
 
-	if (!__smem)
-		return -EPROBE_DEFER;
+	if (IS_ERR(__smem))
+		return PTR_ERR(__smem);
 
 	if (host < SMEM_HOST_COUNT && __smem->partitions[host].virt_base) {
 		part = &__smem->partitions[host];
@@ -758,7 +768,7 @@ static bool addr_in_range(void __iomem *base, size_t size, void *addr)
  * with an smem item pointer (previously returned by qcom_smem_get()
  * @p:	the virtual address to convert
  *
- * Returns 0 if the pointer provided is not within any smem region.
+ * Return: physical address of the SMEM item (if found), 0 otherwise
  */
 phys_addr_t qcom_smem_virt_to_phys(void *p)
 {
@@ -892,7 +902,7 @@ static u32 qcom_smem_get_item_count(struct qcom_smem *smem)
 	if (IS_ERR_OR_NULL(ptable))
 		return SMEM_ITEM_COUNT;
 
-	info = (struct smem_info *)&ptable->entry[ptable->num_entries];
+	info = (struct smem_info *)&ptable->entry[le32_to_cpu(ptable->num_entries)];
 	if (memcmp(info->magic, SMEM_INFO_MAGIC, sizeof(info->magic)))
 		return SMEM_ITEM_COUNT;
 
@@ -1175,18 +1185,16 @@ static int qcom_smem_probe(struct platform_device *pdev)
 	header = smem->regions[0].virt_base;
 	if (le32_to_cpu(header->initialized) != 1 ||
 	    le32_to_cpu(header->reserved)) {
-		dev_err(&pdev->dev, "SMEM is not initialized by SBL\n");
-		return -EINVAL;
+		__smem = ERR_PTR(-ENODEV);
+		return dev_err_probe(&pdev->dev, PTR_ERR(__smem), "SMEM is not initialized by SBL\n");
 	}
 
 	hwlock_id = of_hwspin_lock_get_id(pdev->dev.of_node, 0);
-	if (hwlock_id < 0) {
-		if (hwlock_id != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "failed to retrieve hwlock\n");
-		return hwlock_id;
-	}
+	if (hwlock_id < 0)
+		return dev_err_probe(&pdev->dev, hwlock_id,
+				     "failed to retrieve hwlock\n");
 
-	smem->hwlock = hwspin_lock_request_specific(hwlock_id);
+	smem->hwlock = devm_hwspin_lock_request_specific(&pdev->dev, hwlock_id);
 	if (!smem->hwlock)
 		return -ENXIO;
 
@@ -1211,7 +1219,9 @@ static int qcom_smem_probe(struct platform_device *pdev)
 		smem->item_count = qcom_smem_get_item_count(smem);
 		break;
 	case SMEM_GLOBAL_HEAP_VERSION:
-		qcom_smem_map_global(smem, size);
+		ret = qcom_smem_map_global(smem, size);
+		if (ret < 0)
+			return ret;
 		smem->item_count = SMEM_ITEM_COUNT;
 		break;
 	default:
@@ -1239,8 +1249,8 @@ static void qcom_smem_remove(struct platform_device *pdev)
 {
 	platform_device_unregister(__smem->socinfo);
 
-	hwspin_lock_free(__smem->hwlock);
-	__smem = NULL;
+	/* Set to -EPROBE_DEFER to signal unprobed state */
+	__smem = ERR_PTR(-EPROBE_DEFER);
 }
 
 static const struct of_device_id qcom_smem_of_match[] = {
@@ -1251,7 +1261,7 @@ MODULE_DEVICE_TABLE(of, qcom_smem_of_match);
 
 static struct platform_driver qcom_smem_driver = {
 	.probe = qcom_smem_probe,
-	.remove_new = qcom_smem_remove,
+	.remove = qcom_smem_remove,
 	.driver  = {
 		.name = "qcom-smem",
 		.of_match_table = qcom_smem_of_match,

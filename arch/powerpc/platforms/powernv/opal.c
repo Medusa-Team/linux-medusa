@@ -180,10 +180,7 @@ int __init early_init_dt_scan_recoverable_ranges(unsigned long node,
 	/*
 	 * Allocate a buffer to hold the MC recoverable ranges.
 	 */
-	mc_recoverable_range = memblock_alloc(size, __alignof__(u64));
-	if (!mc_recoverable_range)
-		panic("%s: Failed to allocate %u bytes align=0x%lx\n",
-		      __func__, size, __alignof__(u64));
+	mc_recoverable_range = memblock_alloc_or_panic(size, __alignof__(u64));
 
 	for (i = 0; i < mc_recoverable_range_len; i++) {
 		mc_recoverable_range[i].start_addr =
@@ -254,7 +251,7 @@ static void queue_replay_msg(void *msg)
 	struct opal_msg_node *msg_node;
 
 	if (msg_list_size < OPAL_MSG_QUEUE_MAX) {
-		msg_node = kzalloc(sizeof(*msg_node), GFP_ATOMIC);
+		msg_node = kzalloc_obj(*msg_node, GFP_ATOMIC);
 		if (msg_node) {
 			INIT_LIST_HEAD(&msg_node->list);
 			memcpy(&msg_node->msg, msg, sizeof(struct opal_msg));
@@ -804,7 +801,7 @@ static int opal_add_one_export(struct kobject *parent, const char *export_name,
 	if (rc)
 		goto out;
 
-	attr = kzalloc(sizeof(*attr), GFP_KERNEL);
+	attr = kzalloc_obj(*attr);
 	if (!attr) {
 		rc = -ENOMEM;
 		goto out;

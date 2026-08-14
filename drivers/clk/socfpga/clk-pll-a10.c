@@ -35,7 +35,7 @@ static unsigned long clk_pll_recalc_rate(struct clk_hw *hwclk,
 					 unsigned long parent_rate)
 {
 	struct socfpga_pll *socfpgaclk = to_socfpga_clk(hwclk);
-	unsigned long divf, divq, reg;
+	u32 divf, divq, reg;
 	unsigned long long vco_freq;
 
 	/* read VCO1 reg for numerator and denominator */
@@ -78,7 +78,7 @@ static void __init __socfpga_pll_init(struct device_node *node,
 
 	of_property_read_u32(node, "reg", &reg);
 
-	pll_clk = kzalloc(sizeof(*pll_clk), GFP_KERNEL);
+	pll_clk = kzalloc_obj(*pll_clk);
 	if (WARN_ON(!pll_clk))
 		return;
 

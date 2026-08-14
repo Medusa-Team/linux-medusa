@@ -303,14 +303,22 @@ static void __vb2_plane_dmabuf_put(struct vb2_buffer *vb, struct vb2_plane *p)
 	if (!p->mem_priv)
 		return;
 
-	if (p->dbuf_mapped)
-		call_void_memop(vb, unmap_dmabuf, p->mem_priv);
+	if (!p->dbuf_duplicated) {
+		if (p->dbuf_mapped)
+			call_void_memop(vb, unmap_dmabuf, p->mem_priv);
 
-	call_void_memop(vb, detach_dmabuf, p->mem_priv);
+		call_void_memop(vb, detach_dmabuf, p->mem_priv);
+	}
+
 	dma_buf_put(p->dbuf);
 	p->mem_priv = NULL;
 	p->dbuf = NULL;
 	p->dbuf_mapped = 0;
+	p->bytesused = 0;
+	p->length = 0;
+	p->m.fd = 0;
+	p->data_offset = 0;
+	p->dbuf_duplicated = false;
 }
 
 /*
@@ -319,9 +327,15 @@ static void __vb2_plane_dmabuf_put(struct vb2_buffer *vb, struct vb2_plane *p)
  */
 static void __vb2_buf_dmabuf_put(struct vb2_buffer *vb)
 {
-	unsigned int plane;
+	int plane;
 
-	for (plane = 0; plane < vb->num_planes; ++plane)
+	/*
+	 * When multiple planes share the same DMA buffer attachment, the plane
+	 * with the lowest index owns the mem_priv.
+	 * Put planes in the reversed order so that we don't leave invalid
+	 * mem_priv behind.
+	 */
+	for (plane = vb->num_planes - 1; plane >= 0; --plane)
 		__vb2_plane_dmabuf_put(vb, &vb->planes[plane]);
 }
 
@@ -591,8 +605,7 @@ static void __vb2_queue_free(struct vb2_queue *q, unsigned int start, unsigned i
 	 */
 	if (vb2_get_num_buffers(q)) {
 		bool unbalanced = q->cnt_start_streaming != q->cnt_stop_streaming ||
-				  q->cnt_prepare_streaming != q->cnt_unprepare_streaming ||
-				  q->cnt_wait_prepare != q->cnt_wait_finish;
+				  q->cnt_prepare_streaming != q->cnt_unprepare_streaming;
 
 		if (unbalanced) {
 			pr_info("unbalanced counters for queue %p:\n", q);
@@ -603,13 +616,8 @@ static void __vb2_queue_free(struct vb2_queue *q, unsigned int start, unsigned i
 			if (q->cnt_prepare_streaming != q->cnt_unprepare_streaming)
 				pr_info("     prepare_streaming: %u unprepare_streaming: %u\n",
 					q->cnt_prepare_streaming, q->cnt_unprepare_streaming);
-			if (q->cnt_wait_prepare != q->cnt_wait_finish)
-				pr_info("     wait_prepare: %u wait_finish: %u\n",
-					q->cnt_wait_prepare, q->cnt_wait_finish);
 		}
 		q->cnt_queue_setup = 0;
-		q->cnt_wait_prepare = 0;
-		q->cnt_wait_finish = 0;
 		q->cnt_prepare_streaming = 0;
 		q->cnt_start_streaming = 0;
 		q->cnt_stop_streaming = 0;
@@ -833,7 +841,7 @@ static bool verify_coherency_flags(struct vb2_queue *q, bool non_coherent_mem)
 static int vb2_core_allocated_buffers_storage(struct vb2_queue *q)
 {
 	if (!q->bufs)
-		q->bufs = kcalloc(q->max_num_buffers, sizeof(*q->bufs), GFP_KERNEL);
+		q->bufs = kzalloc_objs(*q->bufs, q->max_num_buffers);
 	if (!q->bufs)
 		return -ENOMEM;
 
@@ -1369,7 +1377,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 	struct vb2_plane planes[VB2_MAX_PLANES];
 	struct vb2_queue *q = vb->vb2_queue;
 	void *mem_priv;
-	unsigned int plane;
+	unsigned int plane, i;
 	int ret = 0;
 	bool reacquired = vb->planes[0].mem_priv == NULL;
 
@@ -1383,11 +1391,13 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 	for (plane = 0; plane < vb->num_planes; ++plane) {
 		struct dma_buf *dbuf = dma_buf_get(planes[plane].m.fd);
 
+		planes[plane].dbuf = dbuf;
+
 		if (IS_ERR_OR_NULL(dbuf)) {
 			dprintk(q, 1, "invalid dmabuf fd for plane %d\n",
 				plane);
 			ret = -EINVAL;
-			goto err;
+			goto err_put_planes;
 		}
 
 		/* use DMABUF size if length is not provided */
@@ -1398,66 +1408,77 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 			dprintk(q, 1, "invalid dmabuf length %u for plane %d, minimum length %u\n",
 				planes[plane].length, plane,
 				vb->planes[plane].min_length);
-			dma_buf_put(dbuf);
 			ret = -EINVAL;
-			goto err;
+			goto err_put_planes;
 		}
 
 		/* Skip the plane if already verified */
 		if (dbuf == vb->planes[plane].dbuf &&
-			vb->planes[plane].length == planes[plane].length) {
-			dma_buf_put(dbuf);
+		    vb->planes[plane].length == planes[plane].length)
 			continue;
-		}
 
 		dprintk(q, 3, "buffer for plane %d changed\n", plane);
 
-		if (!reacquired) {
-			reacquired = true;
-			vb->copied_timestamp = 0;
-			call_void_vb_qop(vb, buf_cleanup, vb);
-		}
-
-		/* Release previously acquired memory if present */
-		__vb2_plane_dmabuf_put(vb, &vb->planes[plane]);
-		vb->planes[plane].bytesused = 0;
-		vb->planes[plane].length = 0;
-		vb->planes[plane].m.fd = 0;
-		vb->planes[plane].data_offset = 0;
-
-		/* Acquire each plane's memory */
-		mem_priv = call_ptr_memop(attach_dmabuf,
-					  vb,
-					  q->alloc_devs[plane] ? : q->dev,
-					  dbuf,
-					  planes[plane].length);
-		if (IS_ERR(mem_priv)) {
-			dprintk(q, 1, "failed to attach dmabuf\n");
-			ret = PTR_ERR(mem_priv);
-			dma_buf_put(dbuf);
-			goto err;
-		}
-
-		vb->planes[plane].dbuf = dbuf;
-		vb->planes[plane].mem_priv = mem_priv;
+		reacquired = true;
 	}
 
-	/*
-	 * This pins the buffer(s) with dma_buf_map_attachment()). It's done
-	 * here instead just before the DMA, while queueing the buffer(s) so
-	 * userspace knows sooner rather than later if the dma-buf map fails.
-	 */
-	for (plane = 0; plane < vb->num_planes; ++plane) {
-		if (vb->planes[plane].dbuf_mapped)
-			continue;
-
-		ret = call_memop(vb, map_dmabuf, vb->planes[plane].mem_priv);
-		if (ret) {
-			dprintk(q, 1, "failed to map dmabuf for plane %d\n",
-				plane);
-			goto err;
+	if (reacquired) {
+		if (vb->planes[0].mem_priv) {
+			vb->copied_timestamp = 0;
+			call_void_vb_qop(vb, buf_cleanup, vb);
+			__vb2_buf_dmabuf_put(vb);
 		}
-		vb->planes[plane].dbuf_mapped = 1;
+
+		for (plane = 0; plane < vb->num_planes; ++plane) {
+			/*
+			 * This is an optimization to reduce dma_buf attachment/mapping.
+			 * When the same dma_buf is used for multiple planes, there is no need
+			 * to create duplicated attachments.
+			 */
+			for (i = 0; i < plane; ++i) {
+				if (planes[plane].dbuf == vb->planes[i].dbuf &&
+				    q->alloc_devs[plane] == q->alloc_devs[i]) {
+					vb->planes[plane].dbuf_duplicated = true;
+					vb->planes[plane].dbuf = vb->planes[i].dbuf;
+					vb->planes[plane].mem_priv = vb->planes[i].mem_priv;
+					break;
+				}
+			}
+
+			if (vb->planes[plane].dbuf_duplicated)
+				continue;
+
+			/* Acquire each plane's memory */
+			mem_priv = call_ptr_memop(attach_dmabuf,
+						  vb,
+						  q->alloc_devs[plane] ? : q->dev,
+						  planes[plane].dbuf,
+						  planes[plane].length);
+			if (IS_ERR(mem_priv)) {
+				dprintk(q, 1, "failed to attach dmabuf\n");
+				ret = PTR_ERR(mem_priv);
+				goto err_put_vb2_buf;
+			}
+
+			vb->planes[plane].dbuf = planes[plane].dbuf;
+			vb->planes[plane].mem_priv = mem_priv;
+
+			/*
+			 * This pins the buffer(s) with dma_buf_map_attachment()). It's done
+			 * here instead just before the DMA, while queueing the buffer(s) so
+			 * userspace knows sooner rather than later if the dma-buf map fails.
+			 */
+			ret = call_memop(vb, map_dmabuf, vb->planes[plane].mem_priv);
+			if (ret) {
+				dprintk(q, 1, "failed to map dmabuf for plane %d\n",
+					plane);
+				goto err_put_vb2_buf;
+			}
+			vb->planes[plane].dbuf_mapped = 1;
+		}
+	} else {
+		for (plane = 0; plane < vb->num_planes; ++plane)
+			dma_buf_put(planes[plane].dbuf);
 	}
 
 	/*
@@ -1479,7 +1500,7 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 		ret = call_vb_qop(vb, buf_init, vb);
 		if (ret) {
 			dprintk(q, 1, "buffer initialization failed\n");
-			goto err;
+			goto err_put_vb2_buf;
 		}
 	}
 
@@ -1487,11 +1508,17 @@ static int __prepare_dmabuf(struct vb2_buffer *vb)
 	if (ret) {
 		dprintk(q, 1, "buffer preparation failed\n");
 		call_void_vb_qop(vb, buf_cleanup, vb);
-		goto err;
+		goto err_put_vb2_buf;
 	}
 
 	return 0;
-err:
+
+err_put_planes:
+	for (plane = 0; plane < vb->num_planes; ++plane) {
+		if (!IS_ERR_OR_NULL(planes[plane].dbuf))
+			dma_buf_put(planes[plane].dbuf);
+	}
+err_put_vb2_buf:
 	/* In case of errors, release planes that were already acquired */
 	__vb2_buf_dmabuf_put(vb);
 
@@ -2004,7 +2031,7 @@ static int __vb2_wait_for_done_vb(struct vb2_queue *q, int nonblocking)
 		 * become ready or for streamoff. Driver's lock is released to
 		 * allow streamoff or qbuf to be called while waiting.
 		 */
-		call_void_qop(q, wait_prepare, q);
+		mutex_unlock(q->lock);
 
 		/*
 		 * All locks have been released, it is safe to sleep now.
@@ -2014,12 +2041,13 @@ static int __vb2_wait_for_done_vb(struct vb2_queue *q, int nonblocking)
 				!list_empty(&q->done_list) || !q->streaming ||
 				q->error);
 
+		mutex_lock(q->lock);
+
+		q->waiting_in_dqbuf = 0;
 		/*
 		 * We need to reevaluate both conditions again after reacquiring
 		 * the locks or return an error if one occurred.
 		 */
-		call_void_qop(q, wait_finish, q);
-		q->waiting_in_dqbuf = 0;
 		if (ret) {
 			dprintk(q, 1, "sleep was interrupted\n");
 			return ret;
@@ -2291,7 +2319,7 @@ int vb2_core_streamon(struct vb2_queue *q, unsigned int type)
 	}
 
 	if (q_num_bufs < q->min_queued_buffers) {
-		dprintk(q, 1, "need at least %u queued buffers\n",
+		dprintk(q, 1, "need at least %u allocated buffers\n",
 			q->min_queued_buffers);
 		return -EINVAL;
 	}
@@ -2602,13 +2630,6 @@ int vb2_core_queue_init(struct vb2_queue *q)
 		return -EINVAL;
 
 	/*
-	 * The minimum requirement is 2: one buffer is used
-	 * by the hardware while the other is being processed by userspace.
-	 */
-	if (q->min_reqbufs_allocation < 2)
-		q->min_reqbufs_allocation = 2;
-
-	/*
 	 * If the driver needs 'min_queued_buffers' in the queue before
 	 * calling start_streaming() then the minimum requirement is
 	 * 'min_queued_buffers + 1' to keep at least one buffer available
@@ -2618,6 +2639,10 @@ int vb2_core_queue_init(struct vb2_queue *q)
 		q->min_reqbufs_allocation = q->min_queued_buffers + 1;
 
 	if (WARN_ON(q->min_reqbufs_allocation > q->max_num_buffers))
+		return -EINVAL;
+
+	/* Warn if q->lock is NULL */
+	if (WARN_ON(!q->lock))
 		return -EINVAL;
 
 	INIT_LIST_HEAD(&q->queued_list);
@@ -2836,7 +2861,7 @@ static int __vb2_init_fileio(struct vb2_queue *q, int read)
 		(read) ? "read" : "write", q->min_reqbufs_allocation, q->fileio_read_once,
 		q->fileio_write_immediately);
 
-	fileio = kzalloc(sizeof(*fileio), GFP_KERNEL);
+	fileio = kzalloc_obj(*fileio);
 	if (fileio == NULL)
 		return -ENOMEM;
 
@@ -3179,10 +3204,10 @@ static int vb2_thread(void *data)
 				continue;
 			prequeue--;
 		} else {
-			call_void_qop(q, wait_finish, q);
+			mutex_lock(q->lock);
 			if (!threadio->stop)
 				ret = vb2_core_dqbuf(q, &index, NULL, 0);
-			call_void_qop(q, wait_prepare, q);
+			mutex_unlock(q->lock);
 			dprintk(q, 5, "file io: vb2_dqbuf result: %d\n", ret);
 			if (!ret)
 				vb = vb2_get_buffer(q, index);
@@ -3194,12 +3219,13 @@ static int vb2_thread(void *data)
 		if (vb->state != VB2_BUF_STATE_ERROR)
 			if (threadio->fnc(vb, threadio->priv))
 				break;
-		call_void_qop(q, wait_finish, q);
 		if (copy_timestamp)
 			vb->timestamp = ktime_get_ns();
-		if (!threadio->stop)
+		if (!threadio->stop) {
+			mutex_lock(q->lock);
 			ret = vb2_core_qbuf(q, vb, NULL, NULL);
-		call_void_qop(q, wait_prepare, q);
+			mutex_unlock(q->lock);
+		}
 		if (ret || threadio->stop)
 			break;
 	}
@@ -3230,7 +3256,7 @@ int vb2_thread_start(struct vb2_queue *q, vb2_thread_fnc fnc, void *priv,
 	if (WARN_ON(q->fileio))
 		return -EBUSY;
 
-	threadio = kzalloc(sizeof(*threadio), GFP_KERNEL);
+	threadio = kzalloc_obj(*threadio);
 	if (threadio == NULL)
 		return -ENOMEM;
 	threadio->fnc = fnc;
@@ -3279,4 +3305,4 @@ EXPORT_SYMBOL_GPL(vb2_thread_stop);
 MODULE_DESCRIPTION("Media buffer core framework");
 MODULE_AUTHOR("Pawel Osciak <pawel@osciak.com>, Marek Szyprowski");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(DMA_BUF);
+MODULE_IMPORT_NS("DMA_BUF");

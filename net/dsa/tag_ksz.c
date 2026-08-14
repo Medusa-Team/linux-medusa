@@ -62,11 +62,11 @@ static int ksz_connect(struct dsa_switch *ds)
 	struct ksz_tagger_private *priv;
 	int ret;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
-	xmit_worker = kthread_create_worker(0, "dsa%d:%d_xmit",
+	xmit_worker = kthread_run_worker(0, "dsa%d:%d_xmit",
 					    ds->dst->index, ds->index);
 	if (IS_ERR(xmit_worker)) {
 		ret = PTR_ERR(xmit_worker);
@@ -111,15 +111,15 @@ static struct sk_buff *ksz_common_rcv(struct sk_buff *skb,
  * DA(6bytes)|SA(6bytes)|....|Data(nbytes)|tag0(1byte)|FCS(4bytes)
  * ---------------------------------------------------------------------------
  * tag0 : zero-based value represents port
- *	  (eg, 0x00=port1, 0x02=port3, 0x06=port7)
+ *	  (eg, 0x0=port1, 0x2=port3, 0x3=port4)
  */
 
+#define KSZ8795_TAIL_TAG_EG_PORT_M	GENMASK(1, 0)
 #define KSZ8795_TAIL_TAG_OVERRIDE	BIT(6)
 #define KSZ8795_TAIL_TAG_LOOKUP		BIT(7)
 
 static struct sk_buff *ksz8795_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	struct dsa_port *dp = dsa_user_to_port(dev);
 	struct ethhdr *hdr;
 	u8 *tag;
 
@@ -130,7 +130,7 @@ static struct sk_buff *ksz8795_xmit(struct sk_buff *skb, struct net_device *dev)
 	tag = skb_put(skb, KSZ_INGRESS_TAG_LEN);
 	hdr = skb_eth_hdr(skb);
 
-	*tag = 1 << dp->index;
+	*tag = dsa_xmit_port_mask(skb, dev);
 	if (is_link_local_ether_addr(hdr->h_dest))
 		*tag |= KSZ8795_TAIL_TAG_OVERRIDE;
 
@@ -139,9 +139,15 @@ static struct sk_buff *ksz8795_xmit(struct sk_buff *skb, struct net_device *dev)
 
 static struct sk_buff *ksz8795_rcv(struct sk_buff *skb, struct net_device *dev)
 {
-	u8 *tag = skb_tail_pointer(skb) - KSZ_EGRESS_TAG_LEN;
+	u8 *tag;
 
-	return ksz_common_rcv(skb, dev, tag[0] & 7, KSZ_EGRESS_TAG_LEN);
+	if (skb_linearize(skb))
+		return NULL;
+
+	tag = skb_tail_pointer(skb) - KSZ_EGRESS_TAG_LEN;
+
+	return ksz_common_rcv(skb, dev, tag[0] & KSZ8795_TAIL_TAG_EG_PORT_M,
+			      KSZ_EGRESS_TAG_LEN);
 }
 
 static const struct dsa_device_ops ksz8795_netdev_ops = {
@@ -176,8 +182,9 @@ MODULE_ALIAS_DSA_TAG_DRIVER(DSA_TAG_PROTO_KSZ8795, KSZ8795_NAME);
 
 #define KSZ9477_INGRESS_TAG_LEN		2
 #define KSZ9477_PTP_TAG_LEN		4
-#define KSZ9477_PTP_TAG_INDICATION	0x80
+#define KSZ9477_PTP_TAG_INDICATION	BIT(7)
 
+#define KSZ9477_TAIL_TAG_EG_PORT_M	GENMASK(2, 0)
 #define KSZ9477_TAIL_TAG_PRIO		GENMASK(8, 7)
 #define KSZ9477_TAIL_TAG_OVERRIDE	BIT(9)
 #define KSZ9477_TAIL_TAG_LOOKUP		BIT(10)
@@ -251,7 +258,7 @@ static struct sk_buff *ksz_defer_xmit(struct dsa_port *dp, struct sk_buff *skb)
 	if (!xmit_work_fn || !xmit_worker)
 		return NULL;
 
-	xmit_work = kzalloc(sizeof(*xmit_work), GFP_ATOMIC);
+	xmit_work = kzalloc_obj(*xmit_work, GFP_ATOMIC);
 	if (!xmit_work)
 		return NULL;
 
@@ -286,20 +293,11 @@ static struct sk_buff *ksz9477_xmit(struct sk_buff *skb,
 	tag = skb_put(skb, KSZ9477_INGRESS_TAG_LEN);
 	hdr = skb_eth_hdr(skb);
 
-	val = BIT(dp->index);
-
+	val = dsa_xmit_port_mask(skb, dev);
 	val |= FIELD_PREP(KSZ9477_TAIL_TAG_PRIO, prio);
 
 	if (is_link_local_ether_addr(hdr->h_dest))
 		val |= KSZ9477_TAIL_TAG_OVERRIDE;
-
-	if (dev->features & NETIF_F_HW_HSR_DUP) {
-		struct net_device *hsr_dev = dp->hsr_dev;
-		struct dsa_port *other_dp;
-
-		dsa_hsr_foreach_port(other_dp, dp->ds, hsr_dev)
-			val |= BIT(other_dp->index);
-	}
 
 	*tag = cpu_to_be16(val);
 
@@ -308,10 +306,16 @@ static struct sk_buff *ksz9477_xmit(struct sk_buff *skb,
 
 static struct sk_buff *ksz9477_rcv(struct sk_buff *skb, struct net_device *dev)
 {
-	/* Tag decoding */
-	u8 *tag = skb_tail_pointer(skb) - KSZ_EGRESS_TAG_LEN;
-	unsigned int port = tag[0] & 7;
 	unsigned int len = KSZ_EGRESS_TAG_LEN;
+	unsigned int port;
+	u8 *tag;
+
+	if (skb_linearize(skb))
+		return NULL;
+
+	/* Tag decoding */
+	tag = skb_tail_pointer(skb) - KSZ_EGRESS_TAG_LEN;
+	port = tag[0] & KSZ9477_TAIL_TAG_EG_PORT_M;
 
 	/* Extra 4-bytes PTP timestamp */
 	if (tag[0] & KSZ9477_PTP_TAG_INDICATION) {
@@ -357,8 +361,7 @@ static struct sk_buff *ksz9893_xmit(struct sk_buff *skb,
 	tag = skb_put(skb, KSZ_INGRESS_TAG_LEN);
 	hdr = skb_eth_hdr(skb);
 
-	*tag = BIT(dp->index);
-
+	*tag = dsa_xmit_port_mask(skb, dev);
 	*tag |= FIELD_PREP(KSZ9893_TAIL_TAG_PRIO, prio);
 
 	if (is_link_local_ether_addr(hdr->h_dest))
@@ -422,8 +425,7 @@ static struct sk_buff *lan937x_xmit(struct sk_buff *skb,
 
 	tag = skb_put(skb, LAN937X_EGRESS_TAG_LEN);
 
-	val = BIT(dp->index);
-
+	val = dsa_xmit_port_mask(skb, dev);
 	val |= FIELD_PREP(LAN937X_TAIL_TAG_PRIO, prio);
 
 	if (is_link_local_ether_addr(hdr->h_dest))

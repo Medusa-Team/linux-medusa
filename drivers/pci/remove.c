@@ -17,38 +17,32 @@ static void pci_free_resources(struct pci_dev *dev)
 	}
 }
 
-static int pci_pwrctl_unregister(struct device *dev, void *data)
-{
-	struct device_node *pci_node = data, *plat_node = dev_of_node(dev);
-
-	if (dev_is_platform(dev) && plat_node && plat_node == pci_node) {
-		of_device_unregister(to_platform_device(dev));
-		of_node_clear_flag(plat_node, OF_POPULATED);
-	}
-
-	return 0;
-}
-
 static void pci_stop_dev(struct pci_dev *dev)
 {
 	pci_pme_active(dev, false);
 
-	if (pci_dev_is_added(dev)) {
-		device_for_each_child(dev->dev.parent, dev_of_node(&dev->dev),
-				      pci_pwrctl_unregister);
-		device_release_driver(&dev->dev);
-		pci_proc_detach_device(dev);
-		pci_remove_sysfs_dev_files(dev);
-		of_pci_remove_node(dev);
+	if (!pci_dev_test_and_clear_added(dev))
+		return;
 
-		pci_dev_assign_added(dev, false);
-	}
+	device_release_driver(&dev->dev);
+	pci_proc_detach_device(dev);
+	pci_remove_sysfs_dev_files(dev);
+	of_pci_remove_node(dev);
 }
 
 static void pci_destroy_dev(struct pci_dev *dev)
 {
-	if (!dev->dev.kobj.parent)
+	if (pci_dev_test_and_set_removed(dev))
 		return;
+
+	pci_doe_sysfs_teardown(dev);
+	pci_npem_remove(dev);
+
+	/*
+	 * While device is in D0 drop the device from TSM link operations
+	 * including unbind and disconnect (IDE + SPDM teardown).
+	 */
+	pci_tsm_destroy(dev);
 
 	device_del(&dev->dev);
 
@@ -57,6 +51,7 @@ static void pci_destroy_dev(struct pci_dev *dev)
 	up_write(&pci_bus_sem);
 
 	pci_doe_destroy(dev);
+	pci_ide_destroy(dev);
 	pcie_aspm_exit_link_state(dev);
 	pci_bridge_d3_update(dev);
 	pci_free_resources(dev);
@@ -132,6 +127,7 @@ static void pci_remove_bus_device(struct pci_dev *dev)
  */
 void pci_stop_and_remove_bus_device(struct pci_dev *dev)
 {
+	lockdep_assert_held(&pci_rescan_remove_lock);
 	pci_stop_bus_device(dev);
 	pci_remove_bus_device(dev);
 }
@@ -158,6 +154,8 @@ void pci_stop_root_bus(struct pci_bus *bus)
 					 &bus->devices, bus_list)
 		pci_stop_bus_device(child);
 
+	of_pci_remove_host_bridge_node(host_bridge);
+
 	/* stop the host bridge */
 	device_release_driver(&host_bridge->dev);
 }
@@ -179,7 +177,7 @@ void pci_remove_root_bus(struct pci_bus *bus)
 #ifdef CONFIG_PCI_DOMAINS_GENERIC
 	/* Release domain_nr if it was dynamically allocated */
 	if (host_bridge->domain_nr == PCI_DOMAIN_NR_NOT_SET)
-		pci_bus_release_domain_nr(bus, host_bridge->dev.parent);
+		pci_bus_release_domain_nr(host_bridge->dev.parent, bus->domain_nr);
 #endif
 
 	pci_remove_bus(bus);

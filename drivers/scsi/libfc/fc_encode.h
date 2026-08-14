@@ -7,7 +7,7 @@
 
 #ifndef _FC_ENCODE_H_
 #define _FC_ENCODE_H_
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/utsname.h>
 #include <scsi/fc/fc_ms.h>
 
@@ -356,7 +356,7 @@ static inline int fc_ct_ms_fill(struct fc_lport *lport,
 		put_unaligned_be16(len, &entry->len);
 		snprintf((char *)&entry->value,
 			FC_FDMI_HBA_ATTR_OSNAMEVERSION_LEN,
-			"%s v%s",
+			"%.62s v%.62s",
 			init_utsname()->sysname,
 			init_utsname()->release);
 

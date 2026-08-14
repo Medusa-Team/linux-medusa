@@ -32,7 +32,7 @@ static void task_kfunc_load_test(void)
 }
 
 SEC("raw_tp")
-__failure __msg("calling kernel function")
+__success
 int BPF_PROG(task_kfunc_raw_tp)
 {
 	task_kfunc_load_test();
@@ -42,6 +42,22 @@ int BPF_PROG(task_kfunc_raw_tp)
 SEC("syscall")
 __success
 int BPF_PROG(task_kfunc_syscall)
+{
+	task_kfunc_load_test();
+	return 0;
+}
+
+SEC("tracepoint")
+__success
+int BPF_PROG(task_kfunc_tracepoint)
+{
+	task_kfunc_load_test();
+	return 0;
+}
+
+SEC("perf_event")
+__success
+int BPF_PROG(task_kfunc_perf_event)
 {
 	task_kfunc_load_test();
 	return 0;
@@ -70,7 +86,7 @@ static void cgrp_kfunc_load_test(void)
 }
 
 SEC("raw_tp")
-__failure __msg("calling kernel function")
+__success
 int BPF_PROG(cgrp_kfunc_raw_tp)
 {
 	cgrp_kfunc_load_test();
@@ -80,6 +96,22 @@ int BPF_PROG(cgrp_kfunc_raw_tp)
 SEC("syscall")
 __success
 int BPF_PROG(cgrp_kfunc_syscall)
+{
+	cgrp_kfunc_load_test();
+	return 0;
+}
+
+SEC("tracepoint")
+__success
+int BPF_PROG(cgrp_kfunc_tracepoint)
+{
+	cgrp_kfunc_load_test();
+	return 0;
+}
+
+SEC("perf_event")
+__success
+int BPF_PROG(cgrp_kfunc_perf_event)
 {
 	cgrp_kfunc_load_test();
 	return 0;
@@ -106,7 +138,7 @@ static void cpumask_kfunc_load_test(void)
 }
 
 SEC("raw_tp")
-__failure __msg("calling kernel function")
+__success
 int BPF_PROG(cpumask_kfunc_raw_tp)
 {
 	cpumask_kfunc_load_test();
@@ -116,6 +148,22 @@ int BPF_PROG(cpumask_kfunc_raw_tp)
 SEC("syscall")
 __success
 int BPF_PROG(cpumask_kfunc_syscall)
+{
+	cpumask_kfunc_load_test();
+	return 0;
+}
+
+SEC("tracepoint")
+__success
+int BPF_PROG(cpumask_kfunc_tracepoint)
+{
+	cpumask_kfunc_load_test();
+	return 0;
+}
+
+SEC("perf_event")
+__success
+int BPF_PROG(cpumask_kfunc_perf_event)
 {
 	cpumask_kfunc_load_test();
 	return 0;

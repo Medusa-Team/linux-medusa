@@ -207,7 +207,7 @@ SYSCALL_DEFINE2(settimeofday, struct __kernel_old_timeval __user *, tv,
 		    get_user(new_ts.tv_nsec, &tv->tv_usec))
 			return -EFAULT;
 
-		if (new_ts.tv_nsec > USEC_PER_SEC || new_ts.tv_nsec < 0)
+		if (new_ts.tv_nsec >= USEC_PER_SEC || new_ts.tv_nsec < 0)
 			return -EINVAL;
 
 		new_ts.tv_nsec *= NSEC_PER_USEC;
@@ -365,20 +365,16 @@ SYSCALL_DEFINE1(adjtimex_time32, struct old_timex32 __user *, utp)
 }
 #endif
 
+#if HZ > MSEC_PER_SEC || (MSEC_PER_SEC % HZ)
 /**
  * jiffies_to_msecs - Convert jiffies to milliseconds
  * @j: jiffies value
- *
- * Avoid unnecessary multiplications/divisions in the
- * two most common HZ cases.
  *
  * Return: milliseconds value
  */
 unsigned int jiffies_to_msecs(const unsigned long j)
 {
-#if HZ <= MSEC_PER_SEC && !(MSEC_PER_SEC % HZ)
-	return (MSEC_PER_SEC / HZ) * j;
-#elif HZ > MSEC_PER_SEC && !(HZ % MSEC_PER_SEC)
+#if HZ > MSEC_PER_SEC && !(HZ % MSEC_PER_SEC)
 	return (j + (HZ / MSEC_PER_SEC) - 1)/(HZ / MSEC_PER_SEC);
 #else
 # if BITS_PER_LONG == 32
@@ -390,7 +386,9 @@ unsigned int jiffies_to_msecs(const unsigned long j)
 #endif
 }
 EXPORT_SYMBOL(jiffies_to_msecs);
+#endif
 
+#if (USEC_PER_SEC % HZ)
 /**
  * jiffies_to_usecs - Convert jiffies to microseconds
  * @j: jiffies value
@@ -405,17 +403,14 @@ unsigned int jiffies_to_usecs(const unsigned long j)
 	 */
 	BUILD_BUG_ON(HZ > USEC_PER_SEC);
 
-#if !(USEC_PER_SEC % HZ)
-	return (USEC_PER_SEC / HZ) * j;
-#else
-# if BITS_PER_LONG == 32
+#if BITS_PER_LONG == 32
 	return (HZ_TO_USEC_MUL32 * j) >> HZ_TO_USEC_SHR32;
-# else
+#else
 	return (j * HZ_TO_USEC_NUM) / HZ_TO_USEC_DEN;
-# endif
 #endif
 }
 EXPORT_SYMBOL(jiffies_to_usecs);
+#endif
 
 /**
  * mktime64 - Converts date to seconds.
@@ -556,9 +551,9 @@ EXPORT_SYMBOL(ns_to_timespec64);
  * - all other values are converted to jiffies by either multiplying
  *   the input value by a factor or dividing it with a factor and
  *   handling any 32-bit overflows.
- *   for the details see __msecs_to_jiffies()
+ *   for the details see _msecs_to_jiffies()
  *
- * __msecs_to_jiffies() checks for the passed in value being a constant
+ * msecs_to_jiffies() checks for the passed in value being a constant
  * via __builtin_constant_p() allowing gcc to eliminate most of the
  * code, __msecs_to_jiffies() is called if the value passed does not
  * allow constant folding and the actual conversion must be done at
@@ -702,7 +697,7 @@ EXPORT_SYMBOL(clock_t_to_jiffies);
  *
  * Return: jiffies_64 value converted to 64-bit "clock_t" (CLOCKS_PER_SEC)
  */
-u64 jiffies_64_to_clock_t(u64 x)
+notrace u64 jiffies_64_to_clock_t(u64 x)
 {
 #if (TICK_NSEC % (NSEC_PER_SEC / USER_HZ)) == 0
 # if HZ < USER_HZ
@@ -858,6 +853,7 @@ struct timespec64 timespec64_add_safe(const struct timespec64 lhs,
 
 	return res;
 }
+EXPORT_SYMBOL_GPL(timespec64_add_safe);
 
 /**
  * get_timespec64 - get user's time value into kernel space
@@ -866,7 +862,7 @@ struct timespec64 timespec64_add_safe(const struct timespec64 lhs,
  *
  * Handles compat or 32-bit modes.
  *
- * Return: %0 on success or negative errno on error
+ * Return: 0 on success or negative errno on error
  */
 int get_timespec64(struct timespec64 *ts,
 		   const struct __kernel_timespec __user *uts)
@@ -897,7 +893,7 @@ EXPORT_SYMBOL_GPL(get_timespec64);
  * @ts: input &struct timespec64
  * @uts: user's &struct __kernel_timespec
  *
- * Return: %0 on success or negative errno on error
+ * Return: 0 on success or negative errno on error
  */
 int put_timespec64(const struct timespec64 *ts,
 		   struct __kernel_timespec __user *uts)
@@ -944,7 +940,7 @@ static int __put_old_timespec32(const struct timespec64 *ts64,
  *
  * Handles X86_X32_ABI compatibility conversion.
  *
- * Return: %0 on success or negative errno on error
+ * Return: 0 on success or negative errno on error
  */
 int get_old_timespec32(struct timespec64 *ts, const void __user *uts)
 {
@@ -963,7 +959,7 @@ EXPORT_SYMBOL_GPL(get_old_timespec32);
  *
  * Handles X86_X32_ABI compatibility conversion.
  *
- * Return: %0 on success or negative errno on error
+ * Return: 0 on success or negative errno on error
  */
 int put_old_timespec32(const struct timespec64 *ts, void __user *uts)
 {
@@ -979,7 +975,7 @@ EXPORT_SYMBOL_GPL(put_old_timespec32);
  * @it: destination &struct itimerspec64
  * @uit: user's &struct __kernel_itimerspec
  *
- * Return: %0 on success or negative errno on error
+ * Return: 0 on success or negative errno on error
  */
 int get_itimerspec64(struct itimerspec64 *it,
 			const struct __kernel_itimerspec __user *uit)
@@ -1002,7 +998,7 @@ EXPORT_SYMBOL_GPL(get_itimerspec64);
  * @it: input &struct itimerspec64
  * @uit: user's &struct __kernel_itimerspec
  *
- * Return: %0 on success or negative errno on error
+ * Return: 0 on success or negative errno on error
  */
 int put_itimerspec64(const struct itimerspec64 *it,
 			struct __kernel_itimerspec __user *uit)
@@ -1024,7 +1020,7 @@ EXPORT_SYMBOL_GPL(put_itimerspec64);
  * @its: destination &struct itimerspec64
  * @uits: user's &struct old_itimerspec32
  *
- * Return: %0 on success or negative errno on error
+ * Return: 0 on success or negative errno on error
  */
 int get_old_itimerspec32(struct itimerspec64 *its,
 			const struct old_itimerspec32 __user *uits)
@@ -1043,7 +1039,7 @@ EXPORT_SYMBOL_GPL(get_old_itimerspec32);
  * @its: input &struct itimerspec64
  * @uits: user's &struct old_itimerspec32
  *
- * Return: %0 on success or negative errno on error
+ * Return: 0 on success or negative errno on error
  */
 int put_old_itimerspec32(const struct itimerspec64 *its,
 			struct old_itimerspec32 __user *uits)

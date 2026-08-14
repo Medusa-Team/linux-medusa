@@ -316,17 +316,18 @@ static int vivid_received(struct cec_adapter *adap, struct cec_msg *msg)
 	struct vivid_dev *dev = cec_get_drvdata(adap);
 	struct cec_msg reply;
 	u8 dest = cec_msg_destination(msg);
-	u8 disp_ctl;
-	char osd[14];
 
 	if (cec_msg_is_broadcast(msg))
 		dest = adap->log_addrs.log_addr[0];
 	cec_msg_init(&reply, dest, cec_msg_initiator(msg));
 
 	switch (cec_msg_opcode(msg)) {
-	case CEC_MSG_SET_OSD_STRING:
+	case CEC_MSG_SET_OSD_STRING: {
+		u8 disp_ctl;
+		char osd[14];
+
 		if (!cec_is_sink(adap))
-			return -ENOMSG;
+			break;
 		cec_ops_set_osd_string(msg, &disp_ctl, osd);
 		switch (disp_ctl) {
 		case CEC_OP_DISP_CTL_DEFAULT:
@@ -347,11 +348,50 @@ static int vivid_received(struct cec_adapter *adap, struct cec_msg *msg)
 			cec_transmit_msg(adap, &reply, false);
 			break;
 		}
-		break;
-	default:
-		return -ENOMSG;
+		return 0;
 	}
-	return 0;
+	case CEC_MSG_VENDOR_COMMAND_WITH_ID: {
+		u32 vendor_id;
+		u8 size;
+		const u8 *vendor_cmd;
+
+		/*
+		 * If we receive <Vendor Command With ID> with our vendor ID
+		 * and with a payload of size 1, and the payload value is odd,
+		 * then we reply with the same message, but with the payload
+		 * byte incremented by 1.
+		 *
+		 * If the size is 1 and the payload value is even, then we
+		 * ignore the message.
+		 *
+		 * The reason we reply to odd instead of even payload values
+		 * is that it allows for testing of the corner case where the
+		 * reply value is 0 (0xff + 1 % 256).
+		 *
+		 * For other sizes we Feature Abort.
+		 *
+		 * This is added for the specific purpose of testing the
+		 * CEC_MSG_FL_REPLY_VENDOR_ID flag using vivid.
+		 */
+		cec_ops_vendor_command_with_id(msg, &vendor_id, &size, &vendor_cmd);
+		if (vendor_id != adap->log_addrs.vendor_id)
+			break;
+		if (size == 1) {
+			// Ignore even op values
+			if (!(vendor_cmd[0] & 1))
+				return 0;
+			reply.len = msg->len;
+			memcpy(reply.msg + 1, msg->msg + 1, msg->len - 1);
+			reply.msg[msg->len - 1]++;
+		} else {
+			cec_msg_feature_abort(&reply, cec_msg_opcode(msg),
+					      CEC_OP_ABORT_INVALID_OP);
+		}
+		cec_transmit_msg(adap, &reply, false);
+		return 0;
+	}
+	}
+	return -ENOMSG;
 }
 
 static const struct cec_adap_ops vivid_cec_adap_ops = {

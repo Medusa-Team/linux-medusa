@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/ioport.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/ndctl.h>
 #include <linux/sched.h>
@@ -19,7 +20,7 @@
 #include <uapi/linux/papr_pdsm.h>
 #include <linux/papr_scm.h>
 #include <asm/mce.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/perf_event.h>
 
 #define BIND_ANY_ADDR (~0ul)
@@ -444,7 +445,7 @@ static void papr_scm_pmu_register(struct papr_scm_priv *p)
 	struct nvdimm_pmu *nd_pmu;
 	int rc, nodeid;
 
-	nd_pmu = kzalloc(sizeof(*nd_pmu), GFP_KERNEL);
+	nd_pmu = kzalloc_obj(*nd_pmu);
 	if (!nd_pmu) {
 		rc = -ENOMEM;
 		goto pmu_err_print;
@@ -543,7 +544,7 @@ static int drc_pmem_query_health(struct papr_scm_priv *p)
 
 	/* Jiffies offset for which the health data is assumed to be same */
 	cache_timeout = p->lasthealth_jiffies +
-		msecs_to_jiffies(MIN_HEALTH_QUERY_INTERVAL * 1000);
+		secs_to_jiffies(MIN_HEALTH_QUERY_INTERVAL);
 
 	/* Fetch new health info is its older than MIN_HEALTH_QUERY_INTERVAL */
 	if (time_after(jiffies, cache_timeout))
@@ -1397,7 +1398,7 @@ static int papr_scm_probe(struct platform_device *pdev)
 	 */
 	update_numa_distance(dn);
 
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kzalloc_obj(*p);
 	if (!p)
 		return -ENOMEM;
 
@@ -1509,7 +1510,7 @@ static const struct of_device_id papr_scm_match[] = {
 
 static struct platform_driver papr_scm_driver = {
 	.probe = papr_scm_probe,
-	.remove_new = papr_scm_remove,
+	.remove = papr_scm_remove,
 	.driver = {
 		.name = "papr_scm",
 		.of_match_table = papr_scm_match,

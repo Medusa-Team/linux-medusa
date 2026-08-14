@@ -232,7 +232,7 @@ nouveau_conn_atomic_duplicate_state(struct drm_connector *connector)
 {
 	struct nouveau_conn_atom *armc = nouveau_conn_atom(connector->state);
 	struct nouveau_conn_atom *asyc;
-	if (!(asyc = kmalloc(sizeof(*asyc), GFP_KERNEL)))
+	if (!(asyc = kmalloc_obj(*asyc)))
 		return NULL;
 	__drm_atomic_helper_connector_duplicate_state(connector, &asyc->state);
 	asyc->dither = armc->dither;
@@ -249,7 +249,7 @@ nouveau_conn_reset(struct drm_connector *connector)
 	struct nouveau_conn_atom *asyc;
 
 	if (drm_drv_uses_atomic_modeset(connector->dev)) {
-		if (WARN_ON(!(asyc = kzalloc(sizeof(*asyc), GFP_KERNEL))))
+		if (WARN_ON(!(asyc = kzalloc_obj(*asyc))))
 			return;
 
 		if (connector->state)
@@ -477,14 +477,14 @@ nouveau_connector_of_detect(struct drm_connector *connector)
 	struct nouveau_connector *nv_connector = nouveau_connector(connector);
 	struct nouveau_encoder *nv_encoder;
 	struct pci_dev *pdev = to_pci_dev(dev->dev);
-	struct device_node *cn, *dn = pci_device_to_OF_node(pdev);
+	struct device_node *dn = pci_device_to_OF_node(pdev);
 
 	if (!dn ||
 	    !((nv_encoder = find_encoder(connector, DCB_OUTPUT_TMDS)) ||
 	      (nv_encoder = find_encoder(connector, DCB_OUTPUT_ANALOG))))
 		return NULL;
 
-	for_each_child_of_node(dn, cn) {
+	for_each_child_of_node_scoped(dn, cn) {
 		const char *name = of_get_property(cn, "name", NULL);
 		const void *edid = of_get_property(cn, "EDID", NULL);
 		int idx = name ? name[strlen(name) - 1] - 'A' : 0;
@@ -492,7 +492,6 @@ nouveau_connector_of_detect(struct drm_connector *connector)
 		if (nv_encoder->dcb->i2c_index == idx && edid) {
 			nv_connector->edid =
 				kmemdup(edid, EDID_LENGTH, GFP_KERNEL);
-			of_node_put(cn);
 			return nv_encoder;
 		}
 	}
@@ -776,7 +775,6 @@ nouveau_connector_force(struct drm_connector *connector)
 	if (!nv_encoder) {
 		NV_ERROR(drm, "can't find encoder to force %s on!\n",
 			 connector->name);
-		connector->status = connector_status_disconnected;
 		return;
 	}
 
@@ -798,8 +796,10 @@ nouveau_connector_set_property(struct drm_connector *connector,
 						    property, value);
 	if (ret) {
 		if (nv_encoder && nv_encoder->dcb->type == DCB_OUTPUT_TV)
-			return get_slave_funcs(encoder)->set_property(
-				encoder, connector, property, value);
+			return get_encoder_i2c_funcs(encoder)->set_property(encoder,
+									    connector,
+									    property,
+									    value);
 		return ret;
 	}
 
@@ -1016,7 +1016,7 @@ nouveau_connector_get_modes(struct drm_connector *connector)
 		nouveau_connector_detect_depth(connector);
 
 	if (nv_encoder->dcb->type == DCB_OUTPUT_TV)
-		ret = get_slave_funcs(encoder)->get_modes(encoder, connector);
+		ret = get_encoder_i2c_funcs(encoder)->get_modes(encoder, connector);
 
 	if (nv_connector->type == DCB_CONNECTOR_LVDS ||
 	    nv_connector->type == DCB_CONNECTOR_LVDS_SPWG ||
@@ -1075,7 +1075,7 @@ get_tmds_link_bandwidth(struct drm_connector *connector)
 
 static enum drm_mode_status
 nouveau_connector_mode_valid(struct drm_connector *connector,
-			     struct drm_display_mode *mode)
+			     const struct drm_display_mode *mode)
 {
 	struct nouveau_connector *nv_connector = nouveau_connector(connector);
 	struct nouveau_encoder *nv_encoder = nv_connector->detected_encoder;
@@ -1101,7 +1101,7 @@ nouveau_connector_mode_valid(struct drm_connector *connector,
 			max_clock = 350000;
 		break;
 	case DCB_OUTPUT_TV:
-		return get_slave_funcs(encoder)->mode_valid(encoder, mode);
+		return get_encoder_i2c_funcs(encoder)->mode_valid(encoder, mode);
 	case DCB_OUTPUT_DP:
 		return nv50_dp_mode_valid(nv_encoder, mode, NULL);
 	default:
@@ -1230,6 +1230,9 @@ nouveau_connector_aux_xfer(struct drm_dp_aux *obj, struct drm_dp_aux_msg *msg)
 	u8 size = msg->size;
 	int ret;
 
+	if (pm_runtime_suspended(nv_connector->base.dev->dev))
+		return -EBUSY;
+
 	nv_encoder = find_encoder(&nv_connector->base, DCB_OUTPUT_DP);
 	if (!nv_encoder)
 		return -ENODEV;
@@ -1298,7 +1301,7 @@ nouveau_connector_create(struct drm_device *dev, int index)
 	}
 	drm_connector_list_iter_end(&conn_iter);
 
-	nv_connector = kzalloc(sizeof(*nv_connector), GFP_KERNEL);
+	nv_connector = kzalloc_obj(*nv_connector);
 	if (!nv_connector)
 		return ERR_PTR(-ENOMEM);
 
@@ -1401,6 +1404,8 @@ nouveau_connector_create(struct drm_device *dev, int index)
 		nv_connector->aux.drm_dev = dev;
 		nv_connector->aux.transfer = nouveau_connector_aux_xfer;
 		nv_connector->aux.name = connector->name;
+		if (disp->disp.object.oclass >= GB202_DISP)
+			nv_connector->aux.no_zero_sized = true;
 		drm_dp_aux_init(&nv_connector->aux);
 		break;
 	default:

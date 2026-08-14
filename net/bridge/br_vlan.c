@@ -109,6 +109,11 @@ static int __vlan_vid_add(struct net_device *dev, struct net_bridge *br,
 	/* Try switchdev op first. In case it is not supported, fallback to
 	 * 8021q add.
 	 */
+	err = br_switchdev_port_vlan_no_foreign_add(dev, v->vid, flags, false, extack);
+	if (err != -EOPNOTSUPP) {
+		v->priv_flags |= BR_VLFLAG_ADDED_BY_SWITCHDEV | BR_VLFLAG_TAGGING_BY_SWITCHDEV;
+		return err;
+	}
 	err = br_switchdev_port_vlan_add(dev, v->vid, flags, false, extack);
 	if (err == -EOPNOTSUPP)
 		return vlan_vid_add(dev, br->vlan_proto, v->vid);
@@ -331,10 +336,12 @@ static int __vlan_add(struct net_bridge_vlan *v, u16 flags,
 
 	/* Add the dev mac and count the vlan only if it's usable */
 	if (br_vlan_should_use(v)) {
-		err = br_fdb_add_local(br, p, dev->dev_addr, v->vid);
-		if (err) {
-			br_err(br, "failed insert local address into bridge forwarding table\n");
-			goto out_filt;
+		if (!br_opt_get(br, BROPT_FDB_LOCAL_VLAN_0)) {
+			err = br_fdb_add_local(br, p, dev->dev_addr, v->vid);
+			if (err) {
+				br_err(br, "failed insert local address into bridge forwarding table\n");
+				goto out_filt;
+			}
 		}
 		vg->num_vlans++;
 	}
@@ -715,8 +722,8 @@ static int br_vlan_add_existing(struct net_bridge *br,
 				u16 flags, bool *changed,
 				struct netlink_ext_ack *extack)
 {
-	bool would_change = __vlan_flags_would_change(vlan, flags);
 	bool becomes_brentry = false;
+	bool would_change = false;
 	int err;
 
 	if (!br_vlan_is_brentry(vlan)) {
@@ -725,6 +732,8 @@ static int br_vlan_add_existing(struct net_bridge *br,
 			return -EINVAL;
 
 		becomes_brentry = true;
+	} else {
+		would_change = __vlan_flags_would_change(vlan, flags);
 	}
 
 	/* Master VLANs that aren't brentries weren't notified before,
@@ -783,7 +792,7 @@ int br_vlan_add(struct net_bridge *br, u16 vid, u16 flags, bool *changed,
 		return br_vlan_add_existing(br, vg, vlan, flags, changed,
 					    extack);
 
-	vlan = kzalloc(sizeof(*vlan), GFP_KERNEL);
+	vlan = kzalloc_obj(*vlan);
 	if (!vlan)
 		return -ENOMEM;
 
@@ -1220,7 +1229,7 @@ int br_vlan_init(struct net_bridge *br)
 	struct net_bridge_vlan_group *vg;
 	int ret = -ENOMEM;
 
-	vg = kzalloc(sizeof(*vg), GFP_KERNEL);
+	vg = kzalloc_obj(*vg);
 	if (!vg)
 		goto out;
 	ret = rhashtable_init(&vg->vlan_hash, &br_vlan_rht_params);
@@ -1256,7 +1265,7 @@ int nbp_vlan_init(struct net_bridge_port *p, struct netlink_ext_ack *extack)
 	struct net_bridge_vlan_group *vg;
 	int ret = -ENOMEM;
 
-	vg = kzalloc(sizeof(struct net_bridge_vlan_group), GFP_KERNEL);
+	vg = kzalloc_obj(struct net_bridge_vlan_group);
 	if (!vg)
 		goto out;
 
@@ -1330,7 +1339,7 @@ int nbp_vlan_add(struct net_bridge_port *port, u16 vid, u16 flags,
 		return 0;
 	}
 
-	vlan = kzalloc(sizeof(*vlan), GFP_KERNEL);
+	vlan = kzalloc_obj(*vlan);
 	if (!vlan)
 		return -ENOMEM;
 
@@ -1453,7 +1462,7 @@ void br_vlan_fill_forward_path_pvid(struct net_bridge *br,
 	if (!br_opt_get(br, BROPT_VLAN_ENABLED))
 		return;
 
-	vg = br_vlan_group(br);
+	vg = br_vlan_group_rcu(br);
 
 	if (idx >= 0 &&
 	    ctx->vlan[idx].proto == br->vlan_proto) {
@@ -1487,7 +1496,7 @@ int br_vlan_fill_forward_path_mode(struct net_bridge *br,
 
 	if (path->bridge.vlan_mode == DEV_PATH_BR_VLAN_TAG)
 		path->bridge.vlan_mode = DEV_PATH_BR_VLAN_KEEP;
-	else if (v->priv_flags & BR_VLFLAG_ADDED_BY_SWITCHDEV)
+	else if (v->priv_flags & BR_VLFLAG_TAGGING_BY_SWITCHDEV)
 		path->bridge.vlan_mode = DEV_PATH_BR_VLAN_UNTAG_HW;
 	else
 		path->bridge.vlan_mode = DEV_PATH_BR_VLAN_UNTAG;
@@ -1664,6 +1673,18 @@ static void br_vlan_set_all_vlan_dev_state(struct net_bridge_port *p)
 	}
 }
 
+static void br_vlan_toggle_bridge_binding(struct net_device *br_dev,
+					  bool enable)
+{
+	struct net_bridge *br = netdev_priv(br_dev);
+
+	if (enable)
+		br_opt_toggle(br, BROPT_VLAN_BRIDGE_BINDING, true);
+	else
+		br_opt_toggle(br, BROPT_VLAN_BRIDGE_BINDING,
+			      br_vlan_has_upper_bind_vlan_dev(br_dev));
+}
+
 static void br_vlan_upper_change(struct net_device *dev,
 				 struct net_device *upper_dev,
 				 bool linking)
@@ -1673,13 +1694,9 @@ static void br_vlan_upper_change(struct net_device *dev,
 	if (!br_vlan_is_bind_vlan_dev(upper_dev))
 		return;
 
-	if (linking) {
+	br_vlan_toggle_bridge_binding(dev, linking);
+	if (linking)
 		br_vlan_set_vlan_dev_state(br, upper_dev);
-		br_opt_toggle(br, BROPT_VLAN_BRIDGE_BINDING, true);
-	} else {
-		br_opt_toggle(br, BROPT_VLAN_BRIDGE_BINDING,
-			      br_vlan_has_upper_bind_vlan_dev(dev));
-	}
 }
 
 struct br_vlan_link_state_walk_data {
@@ -1762,6 +1779,30 @@ int br_vlan_bridge_event(struct net_device *dev, unsigned long event, void *ptr)
 		br_vlan_notify(br, NULL, br->default_pvid, 0, vlcmd);
 
 	return ret;
+}
+
+void br_vlan_vlan_upper_event(struct net_device *br_dev,
+			      struct net_device *vlan_dev,
+			      unsigned long event)
+{
+	struct vlan_dev_priv *vlan = vlan_dev_priv(vlan_dev);
+	struct net_bridge *br = netdev_priv(br_dev);
+	bool bridge_binding;
+
+	switch (event) {
+	case NETDEV_CHANGE:
+	case NETDEV_UP:
+		break;
+	default:
+		return;
+	}
+
+	bridge_binding = vlan->flags & VLAN_FLAG_BRIDGE_BINDING;
+	br_vlan_toggle_bridge_binding(br_dev, bridge_binding);
+	if (bridge_binding)
+		br_vlan_set_vlan_dev_state(br, vlan_dev);
+	else if (!bridge_binding && netif_carrier_ok(br_dev))
+		netif_carrier_on(vlan_dev);
 }
 
 /* Must be protected by RTNL. */
@@ -2296,19 +2337,18 @@ static int br_vlan_rtm_process(struct sk_buff *skb, struct nlmsghdr *nlh,
 	return err;
 }
 
-void br_vlan_rtnl_init(void)
+static const struct rtnl_msg_handler br_vlan_rtnl_msg_handlers[] = {
+	{THIS_MODULE, PF_BRIDGE, RTM_NEWVLAN, br_vlan_rtm_process, NULL, 0},
+	{THIS_MODULE, PF_BRIDGE, RTM_DELVLAN, br_vlan_rtm_process, NULL, 0},
+	{THIS_MODULE, PF_BRIDGE, RTM_GETVLAN, NULL, br_vlan_rtm_dump, 0},
+};
+
+int br_vlan_rtnl_init(void)
 {
-	rtnl_register_module(THIS_MODULE, PF_BRIDGE, RTM_GETVLAN, NULL,
-			     br_vlan_rtm_dump, 0);
-	rtnl_register_module(THIS_MODULE, PF_BRIDGE, RTM_NEWVLAN,
-			     br_vlan_rtm_process, NULL, 0);
-	rtnl_register_module(THIS_MODULE, PF_BRIDGE, RTM_DELVLAN,
-			     br_vlan_rtm_process, NULL, 0);
+	return rtnl_register_many(br_vlan_rtnl_msg_handlers);
 }
 
 void br_vlan_rtnl_uninit(void)
 {
-	rtnl_unregister(PF_BRIDGE, RTM_GETVLAN);
-	rtnl_unregister(PF_BRIDGE, RTM_NEWVLAN);
-	rtnl_unregister(PF_BRIDGE, RTM_DELVLAN);
+	rtnl_unregister_many(br_vlan_rtnl_msg_handlers);
 }

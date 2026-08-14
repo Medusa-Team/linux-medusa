@@ -15,7 +15,7 @@
 #include <linux/slab.h>
 #include <linux/stringify.h>
 #include <linux/types.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #define DRV_NAME		"cros-ec-pchg"
 #define PCHG_DIR_PREFIX		"peripheral"
@@ -64,7 +64,7 @@ static int cros_pchg_ec_command(const struct charger_data *charger,
 	struct cros_ec_command *msg;
 	int ret;
 
-	msg = kzalloc(struct_size(msg, data, max(outsize, insize)), GFP_KERNEL);
+	msg = kzalloc_flex(*msg, data, max(outsize, insize));
 	if (!msg)
 		return -ENOMEM;
 

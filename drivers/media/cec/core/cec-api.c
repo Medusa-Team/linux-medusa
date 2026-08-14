@@ -222,7 +222,7 @@ static long cec_transmit(struct cec_adapter *adap, struct cec_fh *fh,
 	mutex_lock(&adap->lock);
 	if (adap->log_addrs.num_log_addrs == 0)
 		err = -EPERM;
-	else if (adap->is_configuring)
+	else if (adap->is_configuring && !msg_is_raw(&msg))
 		err = -ENONET;
 	else if (cec_is_busy(adap, fh))
 		err = -EBUSY;
@@ -555,7 +555,7 @@ static int cec_open(struct inode *inode, struct file *filp)
 	struct cec_devnode *devnode =
 		container_of(inode->i_cdev, struct cec_devnode, cdev);
 	struct cec_adapter *adap = to_cec_adapter(devnode);
-	struct cec_fh *fh = kzalloc(sizeof(*fh), GFP_KERNEL);
+	struct cec_fh *fh = kzalloc_obj(*fh);
 	/*
 	 * Initial events that are automatically sent when the cec device is
 	 * opened.
@@ -580,7 +580,7 @@ static int cec_open(struct inode *inode, struct file *filp)
 	fh->mode_initiator = CEC_MODE_INITIATOR;
 	fh->adap = adap;
 
-	err = cec_get_device(devnode);
+	err = cec_get_device(adap);
 	if (err) {
 		kfree(fh);
 		return err;
@@ -686,7 +686,7 @@ static int cec_release(struct inode *inode, struct file *filp)
 	mutex_unlock(&fh->lock);
 	kfree(fh);
 
-	cec_put_device(devnode);
+	cec_put_device(adap);
 	filp->private_data = NULL;
 	return 0;
 }
@@ -698,5 +698,4 @@ const struct file_operations cec_devnode_fops = {
 	.compat_ioctl = cec_ioctl,
 	.release = cec_release,
 	.poll = cec_poll,
-	.llseek = no_llseek,
 };

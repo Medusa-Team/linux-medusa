@@ -18,6 +18,7 @@
 
 #include "mdsmap.h"
 #include "metric.h"
+#include "subvolume_metrics.h"
 #include "super.h"
 
 /* The first 8 bits are reserved for old ceph releases */
@@ -36,8 +37,9 @@ enum ceph_feature_type {
 	CEPHFS_FEATURE_NEW_SNAPREALM_INFO,
 	CEPHFS_FEATURE_HAS_OWNER_UIDGID,
 	CEPHFS_FEATURE_MDS_AUTH_CAPS_CHECK,
+	CEPHFS_FEATURE_SUBVOLUME_METRICS,
 
-	CEPHFS_FEATURE_MAX = CEPHFS_FEATURE_MDS_AUTH_CAPS_CHECK,
+	CEPHFS_FEATURE_MAX = CEPHFS_FEATURE_SUBVOLUME_METRICS,
 };
 
 #define CEPHFS_FEATURES_CLIENT_SUPPORTED {	\
@@ -54,6 +56,7 @@ enum ceph_feature_type {
 	CEPHFS_FEATURE_32BITS_RETRY_FWD,	\
 	CEPHFS_FEATURE_HAS_OWNER_UIDGID,	\
 	CEPHFS_FEATURE_MDS_AUTH_CAPS_CHECK,	\
+	CEPHFS_FEATURE_SUBVOLUME_METRICS,	\
 }
 
 /*
@@ -118,6 +121,7 @@ struct ceph_mds_reply_info_in {
 	u32 fscrypt_file_len;
 	u64 rsnaps;
 	u64 change_attr;
+	u64 subvolume_id;
 };
 
 struct ceph_mds_reply_dir_entry {
@@ -299,6 +303,8 @@ struct ceph_mds_request {
 	struct inode *r_target_inode;       /* resulting inode */
 	struct inode *r_new_inode;	    /* new inode (for creates) */
 
+	const struct qstr *r_dname;	    /* stable name (for ->d_revalidate) */
+
 #define CEPH_MDS_R_DIRECT_IS_HASH	(1) /* r_direct_hash is valid */
 #define CEPH_MDS_R_ABORTED		(2) /* call was aborted */
 #define CEPH_MDS_R_GOT_UNSAFE		(3) /* got an unsafe reply */
@@ -456,6 +462,9 @@ struct ceph_mds_client {
 	atomic_t                stopping_blockers;
 	struct completion	stopping_waiter;
 
+	atomic64_t		dirty_folios;
+	wait_queue_head_t	flush_end_wq;
+
 	atomic64_t		quotarealms_count; /* # realms with quota */
 	/*
 	 * We keep a list of inodes we don't see in the mountpoint but that we
@@ -531,6 +540,14 @@ struct ceph_mds_client {
 	struct list_head  dentry_dir_leases; /* lru list */
 
 	struct ceph_client_metric metric;
+	struct ceph_subvolume_metrics_tracker subvol_metrics;
+
+	/* Subvolume metrics send tracking */
+	struct mutex		subvol_metrics_last_mutex;
+	struct ceph_subvol_metric_snapshot *subvol_metrics_last;
+	u32			subvol_metrics_last_nr;
+	u64			subvol_metrics_sent;
+	u64			subvol_metrics_nonzero_sends;
 
 	spinlock_t		snapid_map_lock;
 	struct rb_root		snapid_map_tree;
@@ -558,9 +575,6 @@ extern const char *ceph_session_state_name(int s);
 extern struct ceph_mds_session *
 ceph_get_mds_session(struct ceph_mds_session *s);
 extern void ceph_put_mds_session(struct ceph_mds_session *s);
-
-extern int ceph_send_msg_mds(struct ceph_mds_client *mdsc,
-			     struct ceph_msg *msg, int mds);
 
 extern int ceph_mdsc_init(struct ceph_fs_client *fsc);
 extern void ceph_mdsc_close_sessions(struct ceph_mds_client *mdsc);
@@ -602,8 +616,8 @@ extern void ceph_mdsc_iterate_sessions(struct ceph_mds_client *mdsc,
 extern struct ceph_msg *ceph_create_session_msg(u32 op, u64 seq);
 extern void __ceph_queue_cap_release(struct ceph_mds_session *session,
 				    struct ceph_cap *cap);
-extern void ceph_flush_cap_releases(struct ceph_mds_client *mdsc,
-				    struct ceph_mds_session *session);
+extern void ceph_flush_session_cap_releases(struct ceph_mds_client *mdsc,
+					    struct ceph_mds_session *session);
 extern void ceph_queue_cap_reclaim_work(struct ceph_mds_client *mdsc);
 extern void ceph_reclaim_caps_nr(struct ceph_mds_client *mdsc, int nr);
 extern void ceph_queue_cap_unlink_work(struct ceph_mds_client *mdsc);
@@ -615,14 +629,24 @@ extern int ceph_mds_check_access(struct ceph_mds_client *mdsc, char *tpath,
 
 extern void ceph_mdsc_pre_umount(struct ceph_mds_client *mdsc);
 
-static inline void ceph_mdsc_free_path(char *path, int len)
+/*
+ * Structure to group path-related output parameters for build_*_path functions
+ */
+struct ceph_path_info {
+	const char *path;
+	int pathlen;
+	struct ceph_vino vino;
+	bool freepath;
+};
+
+static inline void ceph_mdsc_free_path_info(const struct ceph_path_info *path_info)
 {
-	if (!IS_ERR_OR_NULL(path))
-		__putname(path - (PATH_MAX - 1 - len));
+	if (path_info && path_info->freepath && !IS_ERR_OR_NULL(path_info->path))
+		__putname((char *)path_info->path - (PATH_MAX - 1 - path_info->pathlen));
 }
 
 extern char *ceph_mdsc_build_path(struct ceph_mds_client *mdsc,
-				  struct dentry *dentry, int *plen, u64 *base,
+				  struct dentry *dentry, struct ceph_path_info *path_info,
 				  int for_wire);
 
 extern void __ceph_mdsc_drop_dentry_lease(struct dentry *dentry);
@@ -637,8 +661,6 @@ extern void ceph_mdsc_handle_fsmap(struct ceph_mds_client *mdsc,
 
 extern struct ceph_mds_session *
 ceph_mdsc_open_export_target_session(struct ceph_mds_client *mdsc, int target);
-extern void ceph_mdsc_open_export_target_sessions(struct ceph_mds_client *mdsc,
-					  struct ceph_mds_session *session);
 
 extern int ceph_trim_caps(struct ceph_mds_client *mdsc,
 			  struct ceph_mds_session *session,

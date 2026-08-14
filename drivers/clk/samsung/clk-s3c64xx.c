@@ -3,12 +3,11 @@
  * Copyright (c) 2013 Tomasz Figa <tomasz.figa at gmail.com>
  *
  * Common Clock Framework support for all S3C64xx SoCs.
-*/
+ */
 
 #include <linux/slab.h>
 #include <linux/clk-provider.h>
 #include <linux/clk/samsung.h>
-#include <linux/of.h>
 #include <linux/of_address.h>
 
 #include <dt-bindings/clock/samsung,s3c64xx-clock.h>
@@ -450,10 +449,10 @@ void __init s3c64xx_clk_init(struct device_node *np, unsigned long xtal_f,
 	samsung_clk_register_alias(ctx, s3c64xx_clock_aliases,
 					ARRAY_SIZE(s3c64xx_clock_aliases));
 
-	samsung_clk_sleep_init(reg_base, s3c64xx_clk_regs,
+	samsung_clk_sleep_init(reg_base, NULL, s3c64xx_clk_regs,
 			       ARRAY_SIZE(s3c64xx_clk_regs));
 	if (!is_s3c6400)
-		samsung_clk_sleep_init(reg_base, s3c6410_clk_regs,
+		samsung_clk_sleep_init(reg_base, NULL, s3c6410_clk_regs,
 				       ARRAY_SIZE(s3c6410_clk_regs));
 
 	samsung_clk_of_add_provider(np, ctx);

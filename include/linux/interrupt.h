@@ -109,6 +109,7 @@ typedef irqreturn_t (*irq_handler_t)(int, void *);
  * @name:	name of the device
  * @dev_id:	cookie to identify the device
  * @percpu_dev_id:	cookie to identify the device
+ * @affinity:	CPUs this irqaction is allowed to run on
  * @next:	pointer to the next irqaction for shared interrupts
  * @irq:	interrupt number
  * @flags:	flags (see IRQF_* above)
@@ -121,8 +122,11 @@ typedef irqreturn_t (*irq_handler_t)(int, void *);
  */
 struct irqaction {
 	irq_handler_t		handler;
-	void			*dev_id;
-	void __percpu		*percpu_dev_id;
+	union {
+		void		*dev_id;
+		void __percpu	*percpu_dev_id;
+	};
+	const struct cpumask	*affinity;
 	struct irqaction	*next;
 	irq_handler_t		thread_fn;
 	struct task_struct	*thread;
@@ -140,7 +144,7 @@ extern irqreturn_t no_action(int cpl, void *dev_id);
 /*
  * If a (PCI) device interrupt is not connected we set dev->irq to
  * IRQ_NOTCONNECTED. This causes request_irq() to fail with -ENOTCONN, so we
- * can distingiush that case from other error returns.
+ * can distinguish that case from other error returns.
  *
  * 0x80000000 is guaranteed to be outside the available range of interrupts
  * and easy to distinguish from other possible incorrect values.
@@ -177,9 +181,8 @@ request_any_context_irq(unsigned int irq, irq_handler_t handler,
 			unsigned long flags, const char *name, void *dev_id);
 
 extern int __must_check
-__request_percpu_irq(unsigned int irq, irq_handler_t handler,
-		     unsigned long flags, const char *devname,
-		     void __percpu *percpu_dev_id);
+request_percpu_irq_affinity(unsigned int irq, irq_handler_t handler, const char *devname,
+			    const cpumask_t *affinity, void __percpu *percpu_dev_id);
 
 extern int __must_check
 request_nmi(unsigned int irq, irq_handler_t handler, unsigned long flags,
@@ -189,13 +192,13 @@ static inline int __must_check
 request_percpu_irq(unsigned int irq, irq_handler_t handler,
 		   const char *devname, void __percpu *percpu_dev_id)
 {
-	return __request_percpu_irq(irq, handler, 0,
-				    devname, percpu_dev_id);
+	return request_percpu_irq_affinity(irq, handler, devname,
+					   NULL, percpu_dev_id);
 }
 
 extern int __must_check
-request_percpu_nmi(unsigned int irq, irq_handler_t handler,
-		   const char *devname, void __percpu *dev);
+request_percpu_nmi(unsigned int irq, irq_handler_t handler, const char *name,
+		   const struct cpumask *affinity, void __percpu *dev_id);
 
 extern const void *free_irq(unsigned int, void *);
 extern void free_percpu_irq(unsigned int, void __percpu *);
@@ -215,7 +218,7 @@ static inline int __must_check
 devm_request_irq(struct device *dev, unsigned int irq, irq_handler_t handler,
 		 unsigned long irqflags, const char *devname, void *dev_id)
 {
-	return devm_request_threaded_irq(dev, irq, handler, NULL, irqflags,
+	return devm_request_threaded_irq(dev, irq, handler, NULL, irqflags | IRQF_COND_ONESHOT,
 					 devname, dev_id);
 }
 
@@ -276,7 +279,7 @@ struct irq_affinity_notify {
 #define	IRQ_AFFINITY_MAX_SETS  4
 
 /**
- * struct irq_affinity - Description for automatic irq affinity assignements
+ * struct irq_affinity - Description for automatic irq affinity assignments
  * @pre_vectors:	Don't apply affinity to @pre_vectors at beginning of
  *			the MSI(-X) vector space
  * @post_vectors:	Don't apply affinity to @post_vectors at end of
@@ -448,7 +451,7 @@ irq_calc_affinity_vectors(unsigned int minvec, unsigned int maxvec,
 static inline void disable_irq_nosync_lockdep(unsigned int irq)
 {
 	disable_irq_nosync(irq);
-#ifdef CONFIG_LOCKDEP
+#if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PREEMPT_RT)
 	local_irq_disable();
 #endif
 }
@@ -456,22 +459,14 @@ static inline void disable_irq_nosync_lockdep(unsigned int irq)
 static inline void disable_irq_nosync_lockdep_irqsave(unsigned int irq, unsigned long *flags)
 {
 	disable_irq_nosync(irq);
-#ifdef CONFIG_LOCKDEP
+#if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PREEMPT_RT)
 	local_irq_save(*flags);
-#endif
-}
-
-static inline void disable_irq_lockdep(unsigned int irq)
-{
-	disable_irq(irq);
-#ifdef CONFIG_LOCKDEP
-	local_irq_disable();
 #endif
 }
 
 static inline void enable_irq_lockdep(unsigned int irq)
 {
-#ifdef CONFIG_LOCKDEP
+#if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PREEMPT_RT)
 	local_irq_enable();
 #endif
 	enable_irq(irq);
@@ -479,7 +474,7 @@ static inline void enable_irq_lockdep(unsigned int irq)
 
 static inline void enable_irq_lockdep_irqrestore(unsigned int irq, unsigned long *flags)
 {
-#ifdef CONFIG_LOCKDEP
+#if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PREEMPT_RT)
 	local_irq_restore(*flags);
 #endif
 	enable_irq(irq);
@@ -594,7 +589,7 @@ extern const char * const softirq_to_name[NR_SOFTIRQS];
 
 struct softirq_action
 {
-	void	(*action)(struct softirq_action *);
+	void	(*action)(void);
 };
 
 asmlinkage void do_softirq(void);
@@ -609,12 +604,59 @@ static inline void do_softirq_post_smp_call_flush(unsigned int unused)
 }
 #endif
 
-extern void open_softirq(int nr, void (*action)(struct softirq_action *));
+extern void open_softirq(int nr, void (*action)(void));
 extern void softirq_init(void);
 extern void __raise_softirq_irqoff(unsigned int nr);
 
 extern void raise_softirq_irqoff(unsigned int nr);
 extern void raise_softirq(unsigned int nr);
+
+/*
+ * With forced-threaded interrupts enabled a raised softirq is deferred to
+ * ksoftirqd unless it can be handled within the threaded interrupt. This
+ * affects timer_list timers and hrtimers which are explicitly marked with
+ * HRTIMER_MODE_SOFT.
+ * With PREEMPT_RT enabled more hrtimers are moved to softirq for processing
+ * which includes all timers which are not explicitly marked HRTIMER_MODE_HARD.
+ * Userspace controlled timers (like the clock_nanosleep() interface) is divided
+ * into two categories: Tasks with elevated scheduling policy including
+ * SCHED_{FIFO|RR|DL} and the remaining scheduling policy. The tasks with the
+ * elevated scheduling policy are woken up directly from the HARDIRQ while all
+ * other wake ups are delayed to softirq and so to ksoftirqd.
+ *
+ * The ksoftirqd runs at SCHED_OTHER policy at which it should remain since it
+ * handles the softirq in an overloaded situation (not handled everything
+ * within its last run).
+ * If the timers are handled at SCHED_OTHER priority then they competes with all
+ * other SCHED_OTHER tasks for CPU resources are possibly delayed.
+ * Moving timers softirqs to a low priority SCHED_FIFO thread instead ensures
+ * that timer are performed before scheduling any SCHED_OTHER thread.
+ */
+DECLARE_PER_CPU(struct task_struct *, ktimerd);
+DECLARE_PER_CPU(unsigned long, pending_timer_softirq);
+void raise_ktimers_thread(unsigned int nr);
+
+static inline unsigned int local_timers_pending_force_th(void)
+{
+	return __this_cpu_read(pending_timer_softirq);
+}
+
+static inline void raise_timer_softirq(unsigned int nr)
+{
+	lockdep_assert_in_irq();
+	if (force_irqthreads())
+		raise_ktimers_thread(nr);
+	else
+		__raise_softirq_irqoff(nr);
+}
+
+static inline unsigned int local_timers_pending(void)
+{
+	if (force_irqthreads())
+		return local_timers_pending_force_th();
+	else
+		return local_softirq_pending();
+}
 
 DECLARE_PER_CPU(struct task_struct *, ksoftirqd);
 
@@ -817,12 +859,6 @@ extern void init_irq_proc(void);
 static inline void init_irq_proc(void)
 {
 }
-#endif
-
-#ifdef CONFIG_IRQ_TIMINGS
-void irq_timings_enable(void);
-void irq_timings_disable(void);
-u64 irq_timings_next_event(u64 now);
 #endif
 
 struct seq_file;

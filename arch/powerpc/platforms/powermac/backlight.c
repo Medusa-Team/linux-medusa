@@ -11,6 +11,7 @@
 #include <linux/kernel.h>
 #include <linux/backlight.h>
 #include <linux/adb.h>
+#include <linux/of.h>
 #include <linux/pmu.h>
 #include <linux/atomic.h>
 #include <linux/export.h>
@@ -57,18 +58,10 @@ struct backlight_device *pmac_backlight;
 int pmac_has_backlight_type(const char *type)
 {
 	struct device_node* bk_node = of_find_node_by_name(NULL, "backlight");
+	int i = of_property_match_string(bk_node, "backlight-control", type);
 
-	if (bk_node) {
-		const char *prop = of_get_property(bk_node,
-				"backlight-control", NULL);
-		if (prop && strncmp(prop, type, strlen(type)) == 0) {
-			of_node_put(bk_node);
-			return 1;
-		}
-		of_node_put(bk_node);
-	}
-
-	return 0;
+	of_node_put(bk_node);
+	return i >= 0;
 }
 
 static void pmac_backlight_key_worker(struct work_struct *work)

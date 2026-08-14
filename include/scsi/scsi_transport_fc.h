@@ -12,7 +12,7 @@
 
 #include <linux/sched.h>
 #include <linux/bsg-lib.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_netlink.h>
 #include <scsi/scsi_host.h>
@@ -317,6 +317,15 @@ struct fc_fpin_stats {
 	u64 cn_device_specific;
 };
 
+#define FC_RPORT_ENCRYPTION_STATUS_MAX_LEN      14
+/*
+ * Encryption Information
+ */
+struct fc_encryption_info {
+	/* Encryption Status */
+	u8 status;
+};
+
 /* Macro for use in defining Remote Port attributes */
 #define FC_RPORT_ATTR(_name,_mode,_show,_store)				\
 struct device_attribute dev_attr_rport_##_name = 	\
@@ -364,6 +373,7 @@ struct fc_rport {	/* aka fc_starget_attrs */
 	u64 port_name;
 	u32 port_id;
 	u32 roles;
+	struct fc_encryption_info enc_info;
 	enum fc_port_state port_state;	/* Will only be ONLINE or UNKNOWN */
 	u32 scsi_target_id;
 	u32 fast_io_fail_tmo;
@@ -383,6 +393,8 @@ struct fc_rport {	/* aka fc_starget_attrs */
  	struct work_struct stgt_delete_work;
 	struct work_struct rport_delete_work;
 	struct request_queue *rqst_q;	/* bsg support */
+
+	struct workqueue_struct *devloss_work_q;
 } __attribute__((aligned(sizeof(unsigned long))));
 
 /* bit field values for struct fc_rport "flags" field: */
@@ -575,10 +587,7 @@ struct fc_host_attrs {
 	u16 npiv_vports_inuse;
 
 	/* work queues for rport state manipulation */
-	char work_q_name[20];
 	struct workqueue_struct *work_q;
-	char devloss_work_q_name[20];
-	struct workqueue_struct *devloss_work_q;
 
 	/* bsg support */
 	struct request_queue *rqst_q;
@@ -654,14 +663,8 @@ struct fc_host_attrs {
 	(((struct fc_host_attrs *)(x)->shost_data)->next_vport_number)
 #define fc_host_npiv_vports_inuse(x)	\
 	(((struct fc_host_attrs *)(x)->shost_data)->npiv_vports_inuse)
-#define fc_host_work_q_name(x) \
-	(((struct fc_host_attrs *)(x)->shost_data)->work_q_name)
 #define fc_host_work_q(x) \
 	(((struct fc_host_attrs *)(x)->shost_data)->work_q)
-#define fc_host_devloss_work_q_name(x) \
-	(((struct fc_host_attrs *)(x)->shost_data)->devloss_work_q_name)
-#define fc_host_devloss_work_q(x) \
-	(((struct fc_host_attrs *)(x)->shost_data)->devloss_work_q)
 #define fc_host_dev_loss_tmo(x) \
 	(((struct fc_host_attrs *)(x)->shost_data)->dev_loss_tmo)
 #define fc_host_max_ct_payload(x)  \
@@ -697,6 +700,8 @@ struct fc_function_template {
 
 	struct fc_host_statistics * (*get_fc_host_stats)(struct Scsi_Host *);
 	void	(*reset_fc_host_stats)(struct Scsi_Host *);
+
+	struct fc_encryption_info * (*get_fc_rport_enc_info)(struct fc_rport *);
 
 	int	(*issue_fc_host_lip)(struct Scsi_Host *);
 

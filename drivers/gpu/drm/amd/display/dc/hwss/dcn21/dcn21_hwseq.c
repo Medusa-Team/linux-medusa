@@ -33,9 +33,10 @@
 #include "vmid.h"
 #include "reg_helper.h"
 #include "hw/clk_mgr.h"
+#include "hw/dccg.h"
 #include "dc_dmub_srv.h"
 #include "abm.h"
-#include "link.h"
+#include "link_service.h"
 
 #define DC_LOGGER_INIT(logger)
 
@@ -87,12 +88,10 @@ int dcn21_init_sys_ctx(struct dce_hwseq *hws, struct dc *dc, struct dc_phy_addr_
 
 bool dcn21_s0i3_golden_init_wa(struct dc *dc)
 {
-	struct dce_hwseq *hws = dc->hwseq;
-	uint32_t value = 0;
+	if (dc->res_pool->dccg && dc->res_pool->dccg->funcs && dc->res_pool->dccg->funcs->is_s0i3_golden_init_wa_done)
+		return !dc->res_pool->dccg->funcs->is_s0i3_golden_init_wa_done(dc->res_pool->dccg);
 
-	value = REG_READ(MICROSECOND_TIME_BASE_DIV);
-
-	return value != 0x00120464;
+	return false;
 }
 
 void dcn21_exit_optimized_pwr_state(
@@ -137,7 +136,7 @@ void dcn21_PLAT_58856_wa(struct dc_state *context, struct pipe_ctx *pipe_ctx)
 	pipe_ctx->stream->dpms_off = true;
 }
 
-static bool dmub_abm_set_pipe(struct abm *abm, uint32_t otg_inst,
+bool dcn21_dmub_abm_set_pipe(struct abm *abm, uint32_t otg_inst,
 		uint32_t option, uint32_t panel_inst, uint32_t pwrseq_inst)
 {
 	union dmub_rb_cmd cmd;
@@ -199,7 +198,7 @@ void dcn21_set_abm_immediate_disable(struct pipe_ctx *pipe_ctx)
 			abm->funcs->set_pipe_ex(abm, otg_inst, SET_ABM_PIPE_IMMEDIATELY_DISABLE,
 					panel_cntl->inst, panel_cntl->pwrseq_inst);
 		} else {
-				dmub_abm_set_pipe(abm,
+			dcn21_dmub_abm_set_pipe(abm,
 						otg_inst,
 						SET_ABM_PIPE_IMMEDIATELY_DISABLE,
 						panel_cntl->inst,
@@ -234,7 +233,7 @@ void dcn21_set_pipe(struct pipe_ctx *pipe_ctx)
 					panel_cntl->inst,
 					panel_cntl->pwrseq_inst);
 	} else {
-		dmub_abm_set_pipe(abm, otg_inst,
+			dcn21_dmub_abm_set_pipe(abm, otg_inst,
 				  SET_ABM_PIPE_NORMAL,
 				  panel_cntl->inst,
 				  panel_cntl->pwrseq_inst);
@@ -242,14 +241,15 @@ void dcn21_set_pipe(struct pipe_ctx *pipe_ctx)
 }
 
 bool dcn21_set_backlight_level(struct pipe_ctx *pipe_ctx,
-		uint32_t backlight_pwm_u16_16,
-		uint32_t frame_ramp)
+	struct set_backlight_level_params *backlight_level_params)
 {
 	struct dc_context *dc = pipe_ctx->stream->ctx;
 	struct abm *abm = pipe_ctx->stream_res.abm;
 	struct timing_generator *tg = pipe_ctx->stream_res.tg;
 	struct panel_cntl *panel_cntl = pipe_ctx->stream->link->panel_cntl;
 	uint32_t otg_inst;
+	uint32_t backlight_pwm_u16_16 = backlight_level_params->backlight_pwm_u16_16;
+	uint32_t frame_ramp = backlight_level_params->frame_ramp;
 
 	if (!abm || !tg || !panel_cntl)
 		return false;
@@ -257,7 +257,7 @@ bool dcn21_set_backlight_level(struct pipe_ctx *pipe_ctx,
 	otg_inst = tg->inst;
 
 	if (dc->dc->res_pool->dmcu) {
-		dce110_set_backlight_level(pipe_ctx, backlight_pwm_u16_16, frame_ramp);
+		dce110_set_backlight_level(pipe_ctx, backlight_level_params);
 		return true;
 	}
 
@@ -268,7 +268,7 @@ bool dcn21_set_backlight_level(struct pipe_ctx *pipe_ctx,
 					panel_cntl->inst,
 					panel_cntl->pwrseq_inst);
 	} else {
-		dmub_abm_set_pipe(abm,
+			dcn21_dmub_abm_set_pipe(abm,
 				  otg_inst,
 				  SET_ABM_PIPE_NORMAL,
 				  panel_cntl->inst,

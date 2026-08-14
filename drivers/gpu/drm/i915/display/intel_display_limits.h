@@ -50,6 +50,16 @@ enum transcoder {
 };
 
 /*
+ * Global legacy plane identifier. Valid only for primary/sprite
+ * planes on pre-g4x, and only for primary planes on g4x-bdw.
+ */
+enum i9xx_plane_id {
+	PLANE_A,
+	PLANE_B,
+	PLANE_C,
+};
+
+/*
  * Per-pipe plane identifier.
  * I915_MAX_PLANES in the enum below is the maximum (across all platforms)
  * number of planes per CRTC.  Not all platforms really have this many planes,
@@ -126,6 +136,41 @@ enum hpd_pin {
 	HPD_PORT_TC6,
 
 	HPD_NUM_PINS
+};
+
+enum aux_ch {
+	AUX_CH_NONE = -1,
+
+	AUX_CH_A,
+	AUX_CH_B,
+	AUX_CH_C,
+	AUX_CH_D,
+	AUX_CH_E, /* ICL+ */
+	AUX_CH_F,
+	AUX_CH_G,
+	AUX_CH_H,
+	AUX_CH_I,
+
+	/* tgl+ */
+	AUX_CH_USBC1 = AUX_CH_D,
+	AUX_CH_USBC2,
+	AUX_CH_USBC3,
+	AUX_CH_USBC4,
+	AUX_CH_USBC5,
+	AUX_CH_USBC6,
+
+	/* XE_LPD repositions D/E offsets and bitfields */
+	AUX_CH_D_XELPD = AUX_CH_USBC5,
+	AUX_CH_E_XELPD,
+};
+
+enum intel_color_block {
+	INTEL_PLANE_CB_PRE_CSC_LUT,
+	INTEL_PLANE_CB_CSC,
+	INTEL_PLANE_CB_POST_CSC_LUT,
+	INTEL_PLANE_CB_3DLUT,
+
+	INTEL_CB_MAX
 };
 
 #endif /* __INTEL_DISPLAY_LIMITS_H__ */

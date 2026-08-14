@@ -176,7 +176,7 @@ static DEFINE_PER_CPU(struct loongson3_freq_data *, freq_data);
 static inline int do_service_request(u32 id, u32 info, u32 cmd, u32 val, u32 extra)
 {
 	int retries;
-	unsigned int cpu = smp_processor_id();
+	unsigned int cpu = raw_smp_processor_id();
 	unsigned int package = cpu_data[cpu].package;
 	union smc_message msg, last;
 
@@ -299,15 +299,6 @@ static int loongson3_cpufreq_cpu_init(struct cpufreq_policy *policy)
 			per_cpu(freq_data, i) = per_cpu(freq_data, cpu);
 	}
 
-	if (policy_has_boost_freq(policy)) {
-		ret = cpufreq_enable_boost_support();
-		if (ret < 0) {
-			pr_warn("cpufreq: Failed to enable boost: %d\n", ret);
-			return ret;
-		}
-		loongson3_cpufreq_driver.boost_enabled = true;
-	}
-
 	return 0;
 }
 
@@ -337,8 +328,8 @@ static struct cpufreq_driver loongson3_cpufreq_driver = {
 	.offline = loongson3_cpufreq_cpu_offline,
 	.get = loongson3_cpufreq_get,
 	.target_index = loongson3_cpufreq_target,
-	.attr = cpufreq_generic_attr,
 	.verify = cpufreq_generic_frequency_table_verify,
+	.set_boost = cpufreq_boost_set_sw,
 	.suspend = cpufreq_generic_suspend,
 };
 
@@ -346,8 +337,11 @@ static int loongson3_cpufreq_probe(struct platform_device *pdev)
 {
 	int i, ret;
 
-	for (i = 0; i < MAX_PACKAGES; i++)
-		devm_mutex_init(&pdev->dev, &cpufreq_mutex[i]);
+	for (i = 0; i < MAX_PACKAGES; i++) {
+		ret = devm_mutex_init(&pdev->dev, &cpufreq_mutex[i]);
+		if (ret)
+			return ret;
+	}
 
 	ret = do_service_request(0, 0, CMD_GET_VERSION, 0, 0);
 	if (ret <= 0)
@@ -386,7 +380,7 @@ static struct platform_driver loongson3_platform_driver = {
 	},
 	.id_table = cpufreq_id_table,
 	.probe = loongson3_cpufreq_probe,
-	.remove_new = loongson3_cpufreq_remove,
+	.remove = loongson3_cpufreq_remove,
 };
 module_platform_driver(loongson3_platform_driver);
 

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: ISC */
+/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 /* Copyright (C) 2020 MediaTek Inc. */
 
 #ifndef __MT7921_MCU_H
@@ -72,6 +72,11 @@ struct mt7921_txpwr_event {
 	u8 action;
 	__le16 len;
 	struct mt7921_txpwr txpwr;
+} __packed;
+
+struct mt7921_wf_rf_pin_ctrl_event {
+	u8 result;
+	u8 value;
 } __packed;
 
 enum {

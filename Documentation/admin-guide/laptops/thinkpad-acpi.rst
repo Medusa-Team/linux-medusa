@@ -54,6 +54,7 @@ detailed description):
 	- Setting keyboard language
 	- WWAN Antenna type
 	- Auxmac
+	- Hardware damage detection capability
 
 A compatibility table by model and feature is maintained on the web
 site, http://ibm-acpi.sf.net/. I appreciate any success or failure
@@ -445,8 +446,10 @@ event	code	Key		Notes
 0x1008	0x07	FN+F8		IBM: toggle screen expand
 				Lenovo: configure UltraNav,
 				or toggle screen expand.
-				On newer platforms (2024+)
-				replaced by 0x131f (see below)
+				On 2024 platforms replaced by
+				0x131f (see below) and on newer
+				platforms (2025 +) keycode is
+				replaced by 0x1401 (see below).
 
 0x1009	0x08	FN+F9		-
 
@@ -506,9 +509,11 @@ event	code	Key		Notes
 
 0x1019	0x18	unknown
 
-0x131f	...	FN+F8	        Platform Mode change.
+0x131f	...	FN+F8		Platform Mode change (2024 systems).
 				Implemented in driver.
 
+0x1401	...	FN+F8		Platform Mode change (2025 + systems).
+				Implemented in driver.
 ...	...	...
 
 0x1020	0x1F	unknown
@@ -1517,6 +1522,27 @@ Currently 2 antenna types are supported as mentioned below:
 The property is read-only. If the platform doesn't have support the sysfs
 class is not created.
 
+doubletap_enable
+----------------
+
+sysfs: doubletap_enable
+
+Controls whether TrackPoint doubletap events are filtered out. Doubletap is a
+feature where quickly tapping the TrackPoint twice triggers a special function key event.
+
+The available commands are::
+
+                cat /sys/devices/platform/thinkpad_acpi/doubletap_enable
+                echo 1 | sudo tee /sys/devices/platform/thinkpad_acpi/doubletap_enable
+                echo 0 | sudo tee /sys/devices/platform/thinkpad_acpi/doubletap_enable
+
+Values:
+
+	* 1 - doubletap events are processed (default)
+	* 0 - doubletap events are filtered out (ignored)
+
+	This setting can also be toggled via the Fn+doubletap hotkey.
+
 Auxmac
 ------
 
@@ -1571,6 +1597,42 @@ percentage level, above which charging will stop.
 
 The exact semantics of the attributes may be found in
 Documentation/ABI/testing/sysfs-class-power.
+
+Hardware damage detection capability
+------------------------------------
+
+sysfs attributes: hwdd_status, hwdd_detail
+
+Thinkpads are adding the ability to detect and report hardware damage.
+Add new sysfs interface to identify the damaged device status.
+Initial support is available for the USB-C replaceable connector.
+
+The command to check device damaged status is::
+
+        cat /sys/devices/platform/thinkpad_acpi/hwdd_status
+
+This value displays status of device damaged.
+
+- 0 = Not Damaged
+- 1 = Damaged
+
+The command to check location of damaged device is::
+
+        cat /sys/devices/platform/thinkpad_acpi/hwdd_detail
+
+This value displays location of damaged device having 1 line per damaged "item".
+For example:
+
+if no damage is detected:
+
+- No damage detected
+
+if damage detected:
+
+- TYPE-C: Base, Right side, Center port
+
+The property is read-only. If feature is not supported then sysfs
+attribute is not created.
 
 Multiple Commands, Module Parameters
 ------------------------------------

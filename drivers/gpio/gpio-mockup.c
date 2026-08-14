@@ -17,6 +17,7 @@
 #include <linux/irq.h>
 #include <linux/irq_sim.h>
 #include <linux/irqdomain.h>
+#include <linux/limits.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -122,7 +123,7 @@ static void __gpio_mockup_set(struct gpio_mockup_chip *chip,
 	chip->lines[offset].value = !!value;
 }
 
-static void gpio_mockup_set(struct gpio_chip *gc,
+static int gpio_mockup_set(struct gpio_chip *gc,
 			   unsigned int offset, int value)
 {
 	struct gpio_mockup_chip *chip = gpiochip_get_data(gc);
@@ -130,10 +131,12 @@ static void gpio_mockup_set(struct gpio_chip *gc,
 	guard(mutex)(&chip->lock);
 
 	__gpio_mockup_set(chip, offset, value);
+
+	return 0;
 }
 
-static void gpio_mockup_set_multiple(struct gpio_chip *gc,
-				     unsigned long *mask, unsigned long *bits)
+static int gpio_mockup_set_multiple(struct gpio_chip *gc,
+				    unsigned long *mask, unsigned long *bits)
 {
 	struct gpio_mockup_chip *chip = gpiochip_get_data(gc);
 	unsigned int bit;
@@ -142,6 +145,8 @@ static void gpio_mockup_set_multiple(struct gpio_chip *gc,
 
 	for_each_set_bit(bit, mask, gc->ngpio)
 		__gpio_mockup_set(chip, bit, test_bit(bit, bits));
+
+	return 0;
 }
 
 static int gpio_mockup_apply_pull(struct gpio_mockup_chip *chip,
@@ -347,7 +352,6 @@ static const struct file_operations gpio_mockup_debugfs_ops = {
 	.open = gpio_mockup_debugfs_open,
 	.read = gpio_mockup_debugfs_read,
 	.write = gpio_mockup_debugfs_write,
-	.llseek = no_llseek,
 	.release = single_release,
 };
 
@@ -575,7 +579,7 @@ static int __init gpio_mockup_register_chip(int idx)
 
 static int __init gpio_mockup_init(void)
 {
-	int i, num_chips, err;
+	int i, num_chips, err, base, ngpio;
 
 	if ((gpio_mockup_num_ranges % 2) ||
 	    (gpio_mockup_num_ranges > GPIO_MOCKUP_MAX_RANGES))
@@ -589,8 +593,19 @@ static int __init gpio_mockup_init(void)
 	 * always be greater than 0.
 	 */
 	for (i = 0; i < num_chips; i++) {
-		if (gpio_mockup_range_ngpio(i) < 0)
+		base = gpio_mockup_range_base(i);
+		ngpio = gpio_mockup_range_ngpio(i);
+
+		if (ngpio <= 0)
 			return -EINVAL;
+
+		if (base < 0) {
+			if (ngpio > U16_MAX)
+				return -EINVAL;
+		} else {
+			if (ngpio <= base || ngpio - base > U16_MAX)
+				return -EINVAL;
+		}
 	}
 
 	gpio_mockup_dbg_dir = debugfs_create_dir("gpio-mockup", NULL);

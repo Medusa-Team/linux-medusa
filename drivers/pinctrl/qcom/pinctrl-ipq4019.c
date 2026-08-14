@@ -242,7 +242,6 @@ DECLARE_QCA_GPIO_PINS(99);
 		.io_reg = 0x4 + 0x1000 * id,		\
 		.intr_cfg_reg = 0x8 + 0x1000 * id,	\
 		.intr_status_reg = 0xc + 0x1000 * id,	\
-		.intr_target_reg = 0x8 + 0x1000 * id,	\
 		.mux_bit = 2,			\
 		.pull_bit = 0,			\
 		.drv_bit = 6,			\
@@ -480,7 +479,7 @@ static const struct pinfunction ipq4019_functions[] = {
 	QCA_PIN_FUNCTION(blsp_uart0),
 	QCA_PIN_FUNCTION(blsp_uart1),
 	QCA_PIN_FUNCTION(chip_rst),
-	QCA_PIN_FUNCTION(gpio),
+	QCA_GPIO_PIN_FUNCTION(gpio),
 	QCA_PIN_FUNCTION(i2s_rx),
 	QCA_PIN_FUNCTION(i2s_spdif_in),
 	QCA_PIN_FUNCTION(i2s_spdif_out),
@@ -710,7 +709,6 @@ static struct platform_driver ipq4019_pinctrl_driver = {
 		.of_match_table = ipq4019_pinctrl_of_match,
 	},
 	.probe = ipq4019_pinctrl_probe,
-	.remove_new = msm_pinctrl_remove,
 };
 
 static int __init ipq4019_pinctrl_init(void)

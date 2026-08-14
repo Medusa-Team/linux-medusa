@@ -20,6 +20,7 @@
 #include <linux/spi/spi.h>
 #include <linux/spi/spi-mem.h>
 #include <linux/dma-mapping.h>
+#include <linux/pm_qos.h>
 
 #define SPI_CFG0_REG			0x0000
 #define SPI_CFG1_REG			0x0004
@@ -147,6 +148,7 @@ struct mtk_spi_compatible {
  * @tx_sgl_len:		Size of TX DMA transfer
  * @rx_sgl_len:		Size of RX DMA transfer
  * @dev_comp:		Device data structure
+ * @qos_request:	QoS request
  * @spi_clk_hz:		Current SPI clock in Hz
  * @spimem_done:	SPI-MEM operation completion
  * @use_spimem:		Enables SPI-MEM
@@ -166,6 +168,7 @@ struct mtk_spi {
 	struct scatterlist *tx_sgl, *rx_sgl;
 	u32 tx_sgl_len, rx_sgl_len;
 	const struct mtk_spi_compatible *dev_comp;
+	struct pm_qos_request qos_request;
 	u32 spi_clk_hz;
 	struct completion spimem_done;
 	bool use_spimem;
@@ -217,6 +220,14 @@ static const struct mtk_spi_compatible mt6893_compat = {
 	.no_need_unprepare = true,
 };
 
+static const struct mtk_spi_compatible mt6991_compat = {
+	.need_pad_sel = true,
+	.must_tx = true,
+	.enhance_timing = true,
+	.dma_ext = true,
+	.ipm_design = true,
+};
+
 /*
  * A piece of default chip info unless the platform
  * supplies it.
@@ -241,6 +252,9 @@ static const struct of_device_id mtk_spi_of_match[] = {
 	},
 	{ .compatible = "mediatek,mt6765-spi",
 		.data = (void *)&mt6765_compat,
+	},
+	{ .compatible = "mediatek,mt6991-spi",
+		.data = (void *)&mt6991_compat,
 	},
 	{ .compatible = "mediatek,mt7622-spi",
 		.data = (void *)&mt7622_compat,
@@ -356,6 +370,7 @@ static int mtk_spi_hw_init(struct spi_controller *host,
 	struct mtk_chip_config *chip_config = spi->controller_data;
 	struct mtk_spi *mdata = spi_controller_get_devdata(host);
 
+	cpu_latency_qos_update_request(&mdata->qos_request, 500);
 	cpha = spi->mode & SPI_CPHA ? 1 : 0;
 	cpol = spi->mode & SPI_CPOL ? 1 : 0;
 
@@ -459,6 +474,15 @@ static int mtk_spi_prepare_message(struct spi_controller *host,
 	return mtk_spi_hw_init(host, msg->spi);
 }
 
+static int mtk_spi_unprepare_message(struct spi_controller *host,
+				     struct spi_message *message)
+{
+	struct mtk_spi *mdata = spi_controller_get_devdata(host);
+
+	cpu_latency_qos_update_request(&mdata->qos_request, PM_QOS_DEFAULT_VALUE);
+	return 0;
+}
+
 static void mtk_spi_set_cs(struct spi_device *spi, bool enable)
 {
 	u32 reg_val;
@@ -537,6 +561,22 @@ static void mtk_spi_setup_packet(struct spi_controller *host)
 	reg_val &= ~SPI_CFG1_PACKET_LOOP_MASK;
 	reg_val |= (packet_loop - 1) << SPI_CFG1_PACKET_LOOP_OFFSET;
 	writel(reg_val, mdata->base + SPI_CFG1_REG);
+}
+
+inline u32 mtk_spi_set_nbit(u32 nbit)
+{
+	switch (nbit) {
+	default:
+		pr_warn_once("unknown nbit mode %u. Falling back to single mode\n",
+			     nbit);
+		fallthrough;
+	case SPI_NBITS_SINGLE:
+		return 0x0;
+	case SPI_NBITS_DUAL:
+		return 0x1;
+	case SPI_NBITS_QUAD:
+		return 0x2;
+	}
 }
 
 static void mtk_spi_enable_transfer(struct spi_controller *host)
@@ -705,10 +745,16 @@ static int mtk_spi_transfer_one(struct spi_controller *host,
 
 	/* prepare xfer direction and duplex mode */
 	if (mdata->dev_comp->ipm_design) {
-		if (!xfer->tx_buf || !xfer->rx_buf) {
+		if (xfer->tx_buf && xfer->rx_buf) {
+			reg_val &= ~SPI_CFG3_IPM_HALF_DUPLEX_EN;
+		} else if (xfer->tx_buf) {
 			reg_val |= SPI_CFG3_IPM_HALF_DUPLEX_EN;
-			if (xfer->rx_buf)
-				reg_val |= SPI_CFG3_IPM_HALF_DUPLEX_DIR;
+			reg_val &= ~SPI_CFG3_IPM_HALF_DUPLEX_DIR;
+			reg_val |= mtk_spi_set_nbit(xfer->tx_nbits);
+		} else {
+			reg_val |= SPI_CFG3_IPM_HALF_DUPLEX_EN;
+			reg_val |= SPI_CFG3_IPM_HALF_DUPLEX_DIR;
+			reg_val |= mtk_spi_set_nbit(xfer->rx_nbits);
 		}
 		writel(reg_val, mdata->base + SPI_CFG3_IPM_REG);
 	}
@@ -743,24 +789,12 @@ static int mtk_spi_setup(struct spi_device *spi)
 	return 0;
 }
 
-static irqreturn_t mtk_spi_interrupt(int irq, void *dev_id)
+static irqreturn_t mtk_spi_interrupt_thread(int irq, void *dev_id)
 {
 	u32 cmd, reg_val, cnt, remainder, len;
 	struct spi_controller *host = dev_id;
 	struct mtk_spi *mdata = spi_controller_get_devdata(host);
 	struct spi_transfer *xfer = mdata->cur_transfer;
-
-	reg_val = readl(mdata->base + SPI_STATUS0_REG);
-	if (reg_val & MTK_SPI_PAUSE_INT_STATUS)
-		mdata->state = MTK_SPI_PAUSED;
-	else
-		mdata->state = MTK_SPI_IDLE;
-
-	/* SPI-MEM ops */
-	if (mdata->use_spimem) {
-		complete(&mdata->spimem_done);
-		return IRQ_HANDLED;
-	}
 
 	if (!host->can_dma(host, NULL, xfer)) {
 		if (xfer->rx_buf) {
@@ -843,6 +877,27 @@ static irqreturn_t mtk_spi_interrupt(int irq, void *dev_id)
 	mtk_spi_enable_transfer(host);
 
 	return IRQ_HANDLED;
+}
+
+static irqreturn_t mtk_spi_interrupt(int irq, void *dev_id)
+{
+	struct spi_controller *host = dev_id;
+	struct mtk_spi *mdata = spi_controller_get_devdata(host);
+	u32 reg_val;
+
+	reg_val = readl(mdata->base + SPI_STATUS0_REG);
+	if (reg_val & MTK_SPI_PAUSE_INT_STATUS)
+		mdata->state = MTK_SPI_PAUSED;
+	else
+		mdata->state = MTK_SPI_IDLE;
+
+	/* SPI-MEM ops */
+	if (mdata->use_spimem) {
+		complete(&mdata->spimem_done);
+		return IRQ_HANDLED;
+	}
+
+	return IRQ_WAKE_THREAD;
 }
 
 static int mtk_spi_mem_adjust_op_size(struct spi_mem *mem,
@@ -952,7 +1007,7 @@ static int mtk_spi_mem_exec_op(struct spi_mem *mem,
 
 	mtk_spi_reset(mdata);
 	mtk_spi_hw_init(mem->spi->controller, mem->spi);
-	mtk_spi_prepare_transfer(mem->spi->controller, mem->spi->max_speed_hz);
+	mtk_spi_prepare_transfer(mem->spi->controller, op->max_freq);
 
 	reg_val = readl(mdata->base + SPI_CFG3_IPM_REG);
 	/* opcode byte len */
@@ -1113,6 +1168,10 @@ static const struct spi_controller_mem_ops mtk_spi_mem_ops = {
 	.exec_op = mtk_spi_mem_exec_op,
 };
 
+static const struct spi_controller_mem_caps mtk_spi_mem_caps = {
+	.per_op_freq = true,
+};
+
 static int mtk_spi_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1122,14 +1181,14 @@ static int mtk_spi_probe(struct platform_device *pdev)
 
 	host = devm_spi_alloc_host(dev, sizeof(*mdata));
 	if (!host)
-		return dev_err_probe(dev, -ENOMEM, "failed to alloc spi host\n");
+		return -ENOMEM;
 
 	host->auto_runtime_pm = true;
-	host->dev.of_node = dev->of_node;
 	host->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LSB_FIRST;
 
 	host->set_cs = mtk_spi_set_cs;
 	host->prepare_message = mtk_spi_prepare_message;
+	host->unprepare_message = mtk_spi_unprepare_message;
 	host->transfer_one = mtk_spi_transfer_one;
 	host->can_dma = mtk_spi_can_dma;
 	host->setup = mtk_spi_setup;
@@ -1151,6 +1210,7 @@ static int mtk_spi_probe(struct platform_device *pdev)
 	if (mdata->dev_comp->ipm_design) {
 		mdata->dev = dev;
 		host->mem_ops = &mtk_spi_mem_ops;
+		host->mem_caps = &mtk_spi_mem_caps;
 		init_completion(&mdata->spimem_done);
 	}
 
@@ -1235,6 +1295,8 @@ static int mtk_spi_probe(struct platform_device *pdev)
 		clk_disable_unprepare(mdata->spi_hclk);
 	}
 
+	cpu_latency_qos_add_request(&mdata->qos_request, PM_QOS_DEFAULT_VALUE);
+
 	if (mdata->dev_comp->need_pad_sel) {
 		if (mdata->pad_num != host->num_chipselect)
 			return dev_err_probe(dev, -EINVAL,
@@ -1255,14 +1317,15 @@ static int mtk_spi_probe(struct platform_device *pdev)
 		dev_notice(dev, "SPI dma_set_mask(%d) failed, ret:%d\n",
 			   addr_bits, ret);
 
-	ret = devm_request_irq(dev, irq, mtk_spi_interrupt,
-			       IRQF_TRIGGER_NONE, dev_name(dev), host);
+	ret = devm_request_threaded_irq(dev, irq, mtk_spi_interrupt,
+					mtk_spi_interrupt_thread,
+					IRQF_ONESHOT, dev_name(dev), host);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to register irq\n");
 
 	pm_runtime_enable(dev);
 
-	ret = devm_spi_register_controller(dev, host);
+	ret = spi_register_controller(host);
 	if (ret) {
 		pm_runtime_disable(dev);
 		return dev_err_probe(dev, ret, "failed to register host\n");
@@ -1277,6 +1340,9 @@ static void mtk_spi_remove(struct platform_device *pdev)
 	struct mtk_spi *mdata = spi_controller_get_devdata(host);
 	int ret;
 
+	spi_unregister_controller(host);
+
+	cpu_latency_qos_remove_request(&mdata->qos_request);
 	if (mdata->use_spimem && !completion_done(&mdata->spimem_done))
 		complete(&mdata->spimem_done);
 
@@ -1422,7 +1488,7 @@ static struct platform_driver mtk_spi_driver = {
 		.of_match_table = mtk_spi_of_match,
 	},
 	.probe = mtk_spi_probe,
-	.remove_new = mtk_spi_remove,
+	.remove = mtk_spi_remove,
 };
 
 module_platform_driver(mtk_spi_driver);

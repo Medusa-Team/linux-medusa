@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/sound/oss/dmasound/dmasound_core.c
  *
@@ -20,10 +21,6 @@
  *
  *  /dev/sndstat is based on code by Hannu Savolainen, the author of the
  *  VoxWare family of drivers.
- *
- *  This file is subject to the terms and conditions of the GNU General Public
- *  License.  See the file COPYING in the main directory of this archive
- *  for more details.
  *
  *  History:
  *
@@ -381,7 +378,6 @@ static long mixer_unlocked_ioctl(struct file *file, u_int cmd, u_long arg)
 static const struct file_operations mixer_fops =
 {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.unlocked_ioctl	= mixer_unlocked_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
 	.open		= mixer_open,
@@ -1155,7 +1151,6 @@ static long sq_unlocked_ioctl(struct file *file, u_int cmd, u_long arg)
 static const struct file_operations sq_fops =
 {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.write		= sq_write,
 	.poll		= sq_poll,
 	.unlocked_ioctl	= sq_unlocked_ioctl,
@@ -1351,7 +1346,6 @@ static ssize_t state_read(struct file *file, char __user *buf, size_t count,
 
 static const struct file_operations state_fops = {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.read		= state_read,
 	.open		= state_open,
 	.release	= state_release,

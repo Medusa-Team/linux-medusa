@@ -13,6 +13,11 @@
 Active MM
 =========
 
+注意，在配置了 CONFIG_MMU_LAZY_TLB_REFCOUNT=n 的内核中，mm_count 引用计数
+可能不再包括“懒惰”用户（运行任务中 ->active_mm == mm && ->mm == NULL）。
+获取和释放这些懒惰引用必须使用 mmgrab_lazy_tlb() 和 mmdrop_lazy_tlb() 这
+两个辅助函数，它们抽象了这个配置选项。
+
 这是一封linux之父回复开发者的一封邮件，所以翻译时我尽量保持邮件格式的完整。
 
 ::
@@ -82,4 +87,4 @@ Active MM
  最丑陋的之一--不像其他架构的MM和寄存器状态是分开的，alpha的PALcode将两者
  连接起来，你需要同时切换两者）。
 
- (文档来源 http://marc.info/?l=linux-kernel&m=93337278602211&w=2)
+ (文档来源 https://lore.kernel.org/lkml/Pine.LNX.4.10.9907301410280.752-100000@penguin.transmeta.com/)

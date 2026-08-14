@@ -245,11 +245,6 @@ unsigned int dmz_zone_nr_blocks(struct dmz_metadata *zmd)
 	return zmd->zone_nr_blocks;
 }
 
-unsigned int dmz_zone_nr_blocks_shift(struct dmz_metadata *zmd)
-{
-	return zmd->zone_nr_blocks_shift;
-}
-
 unsigned int dmz_zone_nr_sectors(struct dmz_metadata *zmd)
 {
 	return zmd->zone_nr_sectors;
@@ -308,7 +303,7 @@ static struct dm_zone *dmz_get(struct dmz_metadata *zmd, unsigned int zone_id)
 static struct dm_zone *dmz_insert(struct dmz_metadata *zmd,
 				  unsigned int zone_id, struct dmz_dev *dev)
 {
-	struct dm_zone *zone = kzalloc(sizeof(struct dm_zone), GFP_KERNEL);
+	struct dm_zone *zone = kzalloc_obj(struct dm_zone);
 
 	if (!zone)
 		return ERR_PTR(-ENOMEM);
@@ -424,7 +419,7 @@ static struct dmz_mblock *dmz_alloc_mblock(struct dmz_metadata *zmd,
 	}
 
 	/* Allocate a new block */
-	mblk = kmalloc(sizeof(struct dmz_mblock), GFP_NOIO);
+	mblk = kmalloc_obj(struct dmz_mblock, GFP_NOIO);
 	if (!mblk)
 		return NULL;
 
@@ -1316,7 +1311,7 @@ static int dmz_load_sb(struct dmz_metadata *zmd)
 		int i;
 		struct dmz_sb *sb;
 
-		sb = kzalloc(sizeof(struct dmz_sb), GFP_KERNEL);
+		sb = kzalloc_obj(struct dmz_sb);
 		if (!sb)
 			return -ENOMEM;
 		for (i = 1; i < zmd->nr_devs; i++) {
@@ -1691,8 +1686,7 @@ static int dmz_load_mapping(struct dmz_metadata *zmd)
 	unsigned int bzone_id;
 
 	/* Metadata block array for the chunk mapping table */
-	zmd->map_mblk = kcalloc(zmd->nr_map_blocks,
-				sizeof(struct dmz_mblk *), GFP_KERNEL);
+	zmd->map_mblk = kzalloc_objs(struct dmz_mblock *, zmd->nr_map_blocks);
 	if (!zmd->map_mblk)
 		return -ENOMEM;
 
@@ -2873,7 +2867,7 @@ int dmz_ctr_metadata(struct dmz_dev *dev, int num_dev,
 	struct dm_zone *zone;
 	int ret;
 
-	zmd = kzalloc(sizeof(struct dmz_metadata), GFP_KERNEL);
+	zmd = kzalloc_obj(struct dmz_metadata);
 	if (!zmd)
 		return -ENOMEM;
 
@@ -3004,49 +2998,4 @@ void dmz_dtr_metadata(struct dmz_metadata *zmd)
 	shrinker_free(zmd->mblk_shrinker);
 	dmz_cleanup_metadata(zmd);
 	kfree(zmd);
-}
-
-/*
- * Check zone information on resume.
- */
-int dmz_resume_metadata(struct dmz_metadata *zmd)
-{
-	struct dm_zone *zone;
-	sector_t wp_block;
-	unsigned int i;
-	int ret;
-
-	/* Check zones */
-	for (i = 0; i < zmd->nr_zones; i++) {
-		zone = dmz_get(zmd, i);
-		if (!zone) {
-			dmz_zmd_err(zmd, "Unable to get zone %u", i);
-			return -EIO;
-		}
-		wp_block = zone->wp_block;
-
-		ret = dmz_update_zone(zmd, zone);
-		if (ret) {
-			dmz_zmd_err(zmd, "Broken zone %u", i);
-			return ret;
-		}
-
-		if (dmz_is_offline(zone)) {
-			dmz_zmd_warn(zmd, "Zone %u is offline", i);
-			continue;
-		}
-
-		/* Check write pointer */
-		if (!dmz_is_seq(zone))
-			zone->wp_block = 0;
-		else if (zone->wp_block != wp_block) {
-			dmz_zmd_err(zmd, "Zone %u: Invalid wp (%llu / %llu)",
-				    i, (u64)zone->wp_block, (u64)wp_block);
-			zone->wp_block = wp_block;
-			dmz_invalidate_blocks(zmd, zone, zone->wp_block,
-					      zmd->zone_nr_blocks - zone->wp_block);
-		}
-	}
-
-	return 0;
 }

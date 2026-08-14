@@ -530,10 +530,7 @@ static int __load_bitset_in_core(struct dm_clone_metadata *cmd)
 		return r;
 
 	for (i = 0; ; i++) {
-		if (dm_bitset_cursor_get_value(&c))
-			__set_bit(i, cmd->region_map);
-		else
-			__clear_bit(i, cmd->region_map);
+		__assign_bit(i, cmd->region_map, dm_bitset_cursor_get_value(&c));
 
 		if (i >= (cmd->nr_regions - 1))
 			break;
@@ -556,7 +553,7 @@ struct dm_clone_metadata *dm_clone_metadata_open(struct block_device *bdev,
 	int r;
 	struct dm_clone_metadata *cmd;
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd) {
 		DMERR("Failed to allocate memory for dm-clone metadata");
 		return ERR_PTR(-ENOMEM);

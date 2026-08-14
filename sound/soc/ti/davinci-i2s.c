@@ -892,8 +892,7 @@ static int davinci_i2s_probe(struct platform_device *pdev)
 err_unregister_component:
 	snd_soc_unregister_component(&pdev->dev);
 err_disable_ext_clk:
-	if (dev->ext_clk)
-		clk_disable_unprepare(dev->ext_clk);
+	clk_disable_unprepare(dev->ext_clk);
 err_disable_clk:
 	clk_disable_unprepare(dev->clk);
 
@@ -908,8 +907,7 @@ static void davinci_i2s_remove(struct platform_device *pdev)
 
 	clk_disable_unprepare(dev->clk);
 
-	if (dev->ext_clk)
-		clk_disable_unprepare(dev->ext_clk);
+	clk_disable_unprepare(dev->ext_clk);
 }
 
 static const struct of_device_id davinci_i2s_match[] __maybe_unused = {
@@ -920,7 +918,7 @@ MODULE_DEVICE_TABLE(of, davinci_i2s_match);
 
 static struct platform_driver davinci_mcbsp_driver = {
 	.probe		= davinci_i2s_probe,
-	.remove_new	= davinci_i2s_remove,
+	.remove		= davinci_i2s_remove,
 	.driver		= {
 		.name	= "davinci-mcbsp",
 		.of_match_table = of_match_ptr(davinci_i2s_match),

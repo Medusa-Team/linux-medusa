@@ -5,11 +5,12 @@
  *	    Chander Kashyap <k.chander@samsung.com>
  *
  * Common Clock Framework support for Exynos5420 SoC.
-*/
+ */
 
 #include <dt-bindings/clock/exynos5420.h>
 #include <linux/slab.h>
 #include <linux/clk-provider.h>
+#include <linux/mod_devicetable.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/clk.h>
@@ -295,8 +296,8 @@ static const struct samsung_clk_reg_dump exynos5420_set_clksrc[] = {
 /* list of all parent clocks */
 PNAME(mout_mspll_cpu_p) = {"mout_sclk_cpll", "mout_sclk_dpll",
 				"mout_sclk_mpll", "mout_sclk_spll"};
-PNAME(mout_cpu_p) = {"mout_apll" , "mout_mspll_cpu"};
-PNAME(mout_kfc_p) = {"mout_kpll" , "mout_mspll_kfc"};
+PNAME(mout_cpu_p) = {"mout_apll", "mout_mspll_cpu"};
+PNAME(mout_kfc_p) = {"mout_kpll", "mout_mspll_kfc"};
 PNAME(mout_apll_p) = {"fin_pll", "fout_apll"};
 PNAME(mout_bpll_p) = {"fin_pll", "fout_bpll"};
 PNAME(mout_cpll_p) = {"fin_pll", "fout_cpll"};
@@ -1648,12 +1649,12 @@ static void __init exynos5x_clk_init(struct device_node *np,
 				ARRAY_SIZE(exynos5800_cpu_clks));
 	}
 
-	samsung_clk_extended_sleep_init(reg_base,
+	samsung_clk_extended_sleep_init(reg_base, NULL,
 		exynos5x_clk_regs, ARRAY_SIZE(exynos5x_clk_regs),
 		exynos5420_set_clksrc, ARRAY_SIZE(exynos5420_set_clksrc));
 
 	if (soc == EXYNOS5800) {
-		samsung_clk_sleep_init(reg_base, exynos5800_clk_regs,
+		samsung_clk_sleep_init(reg_base, NULL, exynos5800_clk_regs,
 				       ARRAY_SIZE(exynos5800_clk_regs));
 
 		exynos5_subcmus_init(ctx, ARRAY_SIZE(exynos5800_subcmus),

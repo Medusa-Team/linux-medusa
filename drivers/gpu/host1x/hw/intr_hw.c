@@ -6,38 +6,69 @@
  * Copyright (c) 2010-2013, NVIDIA Corporation.
  */
 
-#include <linux/interrupt.h>
-#include <linux/irq.h>
 #include <linux/io.h>
 
 #include "../intr.h"
 #include "../dev.h"
 
-struct host1x_intr_irq_data {
-	struct host1x *host;
-	u32 offset;
-};
+static void process_32_syncpts(struct host1x *host, unsigned long val, u32 reg_offset)
+{
+	unsigned int id;
+
+	if (!val)
+		return;
+
+	host1x_sync_writel(host, val, HOST1X_SYNC_SYNCPT_THRESH_INT_DISABLE(reg_offset));
+	host1x_sync_writel(host, val, HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(reg_offset));
+
+	for_each_set_bit(id, &val, 32)
+		host1x_intr_handle_interrupt(host, reg_offset * 32 + id);
+}
 
 static irqreturn_t syncpt_thresh_isr(int irq, void *dev_id)
 {
 	struct host1x_intr_irq_data *irq_data = dev_id;
 	struct host1x *host = irq_data->host;
 	unsigned long reg;
-	unsigned int i, id;
+	unsigned int i;
 
+#if !defined(CONFIG_64BIT)
 	for (i = irq_data->offset; i < DIV_ROUND_UP(host->info->nb_pts, 32);
 	     i += host->num_syncpt_irqs) {
 		reg = host1x_sync_readl(host,
 			HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(i));
 
-		host1x_sync_writel(host, reg,
-			HOST1X_SYNC_SYNCPT_THRESH_INT_DISABLE(i));
-		host1x_sync_writel(host, reg,
+		process_32_syncpts(host, reg, i);
+	}
+#elif HOST1X_HW == 6 || HOST1X_HW == 7
+	/*
+	 * Tegra186 and Tegra194 have the first INT_STATUS register not 64-bit aligned,
+	 * and only have one interrupt line.
+	 */
+	reg = host1x_sync_readl(host, HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(0));
+	process_32_syncpts(host, reg, 0);
+
+	for (i = 1; i < (host->info->nb_pts / 32) - 1; i += 2) {
+		reg = host1x_sync_readq(host,
 			HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(i));
 
-		for_each_set_bit(id, &reg, 32)
-			host1x_intr_handle_interrupt(host, i * 32 + id);
+		process_32_syncpts(host, lower_32_bits(reg), i);
+		process_32_syncpts(host, upper_32_bits(reg), i + 1);
 	}
+
+	reg = host1x_sync_readl(host, HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(i));
+	process_32_syncpts(host, reg, i);
+#else
+	/* All 64-bit capable SoCs have number of syncpoints divisible by 64 */
+	for (i = irq_data->offset; i < DIV_ROUND_UP(host->info->nb_pts, 64);
+	     i += host->num_syncpt_irqs) {
+		reg = host1x_sync_readq(host,
+			HOST1X_SYNC_SYNCPT_THRESH_CPU0_INT_STATUS(i * 2));
+
+		process_32_syncpts(host, lower_32_bits(reg), i * 2 + 0);
+		process_32_syncpts(host, upper_32_bits(reg), i * 2 + 1);
+	}
+#endif
 
 	return IRQ_HANDLED;
 }
@@ -54,7 +85,8 @@ static void host1x_intr_disable_all_syncpt_intrs(struct host1x *host)
 	}
 }
 
-static void intr_hw_init(struct host1x *host, u32 cpm)
+static int
+host1x_intr_init_host_sync(struct host1x *host, u32 cpm)
 {
 #if HOST1X_HW < 6
 	/* disable the ip_busy_timeout. this prevents write drops */
@@ -74,43 +106,17 @@ static void intr_hw_init(struct host1x *host, u32 cpm)
 
 	/*
 	 * Program threshold interrupt destination among 8 lines per VM,
-	 * per syncpoint. For each group of 32 syncpoints (corresponding to one
-	 * interrupt status register), direct to one interrupt line, going
+	 * per syncpoint. For each group of 64 syncpoints (corresponding to two
+	 * interrupt status registers), direct to one interrupt line, going
 	 * around in a round robin fashion.
 	 */
 	for (id = 0; id < host->info->nb_pts; id++) {
-		u32 reg_offset = id / 32;
+		u32 reg_offset = id / 64;
 		u32 irq_index = reg_offset % host->num_syncpt_irqs;
 
 		host1x_sync_writel(host, irq_index, HOST1X_SYNC_SYNCPT_INTR_DEST(id));
 	}
 #endif
-}
-
-static int
-host1x_intr_init_host_sync(struct host1x *host, u32 cpm)
-{
-	int err, i;
-	struct host1x_intr_irq_data *irq_data;
-
-	irq_data = devm_kcalloc(host->dev, host->num_syncpt_irqs, sizeof(irq_data[0]), GFP_KERNEL);
-	if (!irq_data)
-		return -ENOMEM;
-
-	host1x_hw_intr_disable_all_syncpt_intrs(host);
-
-	for (i = 0; i < host->num_syncpt_irqs; i++) {
-		irq_data[i].host = host;
-		irq_data[i].offset = i;
-
-		err = devm_request_irq(host->dev, host->syncpt_irqs[i],
-				       syncpt_thresh_isr, IRQF_SHARED,
-				       "host1x_syncpt", &irq_data[i]);
-		if (err < 0)
-			return err;
-	}
-
-	intr_hw_init(host, cpm);
 
 	return 0;
 }
@@ -144,4 +150,5 @@ static const struct host1x_intr_ops host1x_intr_ops = {
 	.enable_syncpt_intr = host1x_intr_enable_syncpt_intr,
 	.disable_syncpt_intr = host1x_intr_disable_syncpt_intr,
 	.disable_all_syncpt_intrs = host1x_intr_disable_all_syncpt_intrs,
+	.isr = syncpt_thresh_isr,
 };

@@ -1,30 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Copyright (c) 2021 Facebook */
 #define _GNU_SOURCE
-#include <pthread.h>
-#include <sched.h>
+#include <linux/compiler.h>
 #include <test_progs.h>
+#include "testing_helpers.h"
 #include "test_perf_link.skel.h"
+
+#define BURN_TIMEOUT_MS 100
+#define BURN_TIMEOUT_NS BURN_TIMEOUT_MS * 1000000
 
 static void burn_cpu(void)
 {
-	volatile int j = 0;
-	cpu_set_t cpu_set;
-	int i, err;
-
-	/* generate some branches on cpu 0 */
-	CPU_ZERO(&cpu_set);
-	CPU_SET(0, &cpu_set);
-	err = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set);
-	ASSERT_OK(err, "set_thread_affinity");
+	int i;
 
 	/* spin the loop for a while (random high number) */
 	for (i = 0; i < 1000000; ++i)
-		++j;
+		barrier();
 }
 
-/* TODO: often fails in concurrent mode */
-void serial_test_perf_link(void)
+void test_perf_link(void)
 {
 	struct test_perf_link *skel = NULL;
 	struct perf_event_attr attr;
@@ -32,6 +26,7 @@ void serial_test_perf_link(void)
 	int run_cnt_before, run_cnt_after;
 	struct bpf_link_info info;
 	__u32 info_len = sizeof(info);
+	__u64 timeout_time_ns;
 
 	/* create perf event */
 	memset(&attr, 0, sizeof(attr));
@@ -40,7 +35,7 @@ void serial_test_perf_link(void)
 	attr.config = PERF_COUNT_SW_CPU_CLOCK;
 	attr.freq = 1;
 	attr.sample_freq = 1000;
-	pfd = syscall(__NR_perf_event_open, &attr, -1, 0, -1, PERF_FLAG_FD_CLOEXEC);
+	pfd = syscall(__NR_perf_event_open, &attr, 0, -1, -1, PERF_FLAG_FD_CLOEXEC);
 	if (!ASSERT_GE(pfd, 0, "perf_fd"))
 		goto cleanup;
 
@@ -63,8 +58,14 @@ void serial_test_perf_link(void)
 	ASSERT_GT(info.prog_id, 0, "link_prog_id");
 
 	/* ensure we get at least one perf_event prog execution */
-	burn_cpu();
-	ASSERT_GT(skel->bss->run_cnt, 0, "run_cnt");
+	timeout_time_ns = get_time_ns() + BURN_TIMEOUT_NS;
+	while (true) {
+		burn_cpu();
+		if (skel->bss->run_cnt > 0)
+			break;
+	        if (!ASSERT_LT(get_time_ns(), timeout_time_ns, "run_cnt_timeout"))
+			break;
+	}
 
 	/* perf_event is still active, but we close link and BPF program
 	 * shouldn't be executed anymore

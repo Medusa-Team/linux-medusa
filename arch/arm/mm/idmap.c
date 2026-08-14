@@ -11,6 +11,7 @@
 #include <asm/pgalloc.h>
 #include <asm/sections.h>
 #include <asm/system_info.h>
+#include <asm/uaccess.h>
 
 /*
  * Note: accesses outside of the kernel image and the identity map area
@@ -84,8 +85,15 @@ static void identity_mapping_add(pgd_t *pgd, const char *text_start,
 	unsigned long addr, end;
 	unsigned long next;
 
+#ifdef CONFIG_XIP_KERNEL
+	addr = (phys_addr_t)(text_start) - XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR)
+		+ CONFIG_XIP_PHYS_ADDR;
+	end = (phys_addr_t)(text_end) - XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR)
+		+ CONFIG_XIP_PHYS_ADDR;
+#else
 	addr = virt_to_idmap(text_start);
 	end = virt_to_idmap(text_end);
+#endif
 	pr_info("Setting up static identity map for 0x%lx - 0x%lx\n", addr, end);
 
 	prot |= PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_AF;
@@ -126,6 +134,17 @@ early_initcall(init_static_idmap);
  */
 void setup_mm_for_reboot(void)
 {
+	/*
+	 * With CONFIG_CPU_TTBR0_PAN enabled, TTBCR.EPD0 is set whenever
+	 * user-space access is disabled in order to block TTBR0 page-table
+	 * walks.  The identity mapping lives at low (user-space) virtual
+	 * addresses and can only be reached via TTBR0, so we must re-enable
+	 * those walks before switching page tables.  On non-PAN kernels this
+	 * is a no-op.
+	 */
+	if (IS_ENABLED(CONFIG_CPU_TTBR0_PAN))
+		uaccess_save_and_enable();
+
 	/* Switch to the identity mapping. */
 	cpu_switch_mm(idmap_pgd, &init_mm);
 	local_flush_bp_all();

@@ -183,6 +183,12 @@ resources, scheduled and executed.
   BH work items cannot sleep. All other features such as delayed queueing,
   flushing and canceling are supported.
 
+``WQ_PERCPU``
+  Work items queued to a per-cpu wq are bound to a specific CPU.
+  This flag is the right choice when cpu locality is important.
+
+  This flag is the complement of ``WQ_UNBOUND``.
+
 ``WQ_UNBOUND``
   Work items queued to an unbound wq are served by the special
   worker-pools which host workers which are not bound to any
@@ -245,8 +251,8 @@ CPU which can be assigned to the work items of a wq. For example, with
 at the same time per CPU. This is always a per-CPU attribute, even for
 unbound workqueues.
 
-The maximum limit for ``@max_active`` is 512 and the default value used
-when 0 is specified is 256. These values are chosen sufficiently high
+The maximum limit for ``@max_active`` is 2048 and the default value used
+when 0 is specified is 1024. These values are chosen sufficiently high
 such that they are not the limiting factor while providing protection in
 runaway cases.
 
@@ -357,6 +363,11 @@ Guidelines
   difference in execution characteristics between using a dedicated wq
   and a system wq.
 
+  Note: If something may generate more than @max_active outstanding
+  work items (do stress test your producers), it may saturate a system
+  wq and potentially lead to deadlock. It should utilize its own
+  dedicated workqueue rather than the system wq.
+
 * Unless work items are expected to consume a huge amount of CPU
   cycles, using a bound wq is usually beneficial due to the increased
   level of locality in wq operations and work item execution.
@@ -367,9 +378,9 @@ Affinity Scopes
 
 An unbound workqueue groups CPUs according to its affinity scope to improve
 cache locality. For example, if a workqueue is using the default affinity
-scope of "cache", it will group CPUs according to last level cache
-boundaries. A work item queued on the workqueue will be assigned to a worker
-on one of the CPUs which share the last level cache with the issuing CPU.
+scope of "cache_shard", it will group CPUs into sub-LLC shards. A work item
+queued on the workqueue will be assigned to a worker on one of the CPUs
+within the same shard as the issuing CPU.
 Once started, the worker may or may not be allowed to move outside the scope
 depending on the ``affinity_strict`` setting of the scope.
 
@@ -391,7 +402,13 @@ Workqueue currently supports the following affinity scopes.
 ``cache``
   CPUs are grouped according to cache boundaries. Which specific cache
   boundary is used is determined by the arch code. L3 is used in a lot of
-  cases. This is the default affinity scope.
+  cases.
+
+``cache_shard``
+  CPUs are grouped into sub-LLC shards of at most ``wq_cache_shard_size``
+  cores (default 8, tunable via the ``workqueue.cache_shard_size`` boot
+  parameter). Shards are always split on core (SMT group) boundaries.
+  This is the default affinity scope.
 
 ``numa``
   CPUs are grouped according to NUMA boundaries.

@@ -247,9 +247,8 @@ vmw_vkms_get_vblank_timestamp(struct drm_crtc *crtc,
 {
 	struct drm_device *dev = crtc->dev;
 	struct vmw_private *vmw = vmw_priv(dev);
-	unsigned int pipe = crtc->index;
 	struct vmw_display_unit *du = vmw_crtc_to_du(crtc);
-	struct drm_vblank_crtc *vblank = &dev->vblank[pipe];
+	struct drm_vblank_crtc *vblank = drm_crtc_vblank_crtc(crtc);
 
 	if (!vmw->vkms_enabled)
 		return false;
@@ -281,8 +280,7 @@ vmw_vkms_enable_vblank(struct drm_crtc *crtc)
 {
 	struct drm_device *dev = crtc->dev;
 	struct vmw_private *vmw = vmw_priv(dev);
-	unsigned int pipe = drm_crtc_index(crtc);
-	struct drm_vblank_crtc *vblank = &dev->vblank[pipe];
+	struct drm_vblank_crtc *vblank = drm_crtc_vblank_crtc(crtc);
 	struct vmw_display_unit *du = vmw_crtc_to_du(crtc);
 
 	if (!vmw->vkms_enabled)
@@ -290,8 +288,8 @@ vmw_vkms_enable_vblank(struct drm_crtc *crtc)
 
 	drm_calc_timestamping_constants(crtc, &crtc->mode);
 
-	hrtimer_init(&du->vkms.timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	du->vkms.timer.function = &vmw_vkms_vblank_simulate;
+	hrtimer_setup(&du->vkms.timer, &vmw_vkms_vblank_simulate, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL);
 	du->vkms.period_ns = ktime_set(0, vblank->framedur_ns);
 	hrtimer_start(&du->vkms.timer, du->vkms.period_ns, HRTIMER_MODE_REL);
 

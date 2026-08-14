@@ -54,6 +54,11 @@ struct prop_nums {
 	int platforms;
 };
 
+enum simple_util_sysclk_order {
+	SIMPLE_SYSCLK_ORDER_CODEC_FIRST = 0,
+	SIMPLE_SYSCLK_ORDER_CPU_FIRST,
+};
+
 struct simple_util_priv {
 	struct snd_soc_card snd_card;
 	struct simple_dai_props {
@@ -63,6 +68,7 @@ struct simple_util_priv {
 		struct snd_soc_codec_conf *codec_conf;
 		struct prop_nums num;
 		unsigned int mclk_fs;
+		enum simple_util_sysclk_order sysclk_order;
 	} *dai_props;
 	struct simple_util_jack hp_jack;
 	struct simple_util_jack mic_jack;
@@ -88,6 +94,13 @@ struct simple_util_priv {
 #define simple_props_to_dai_cpu(props, i)	((props)->cpu_dai + i)
 #define simple_props_to_dai_codec(props, i)	((props)->codec_dai + i)
 #define simple_props_to_codec_conf(props, i)	((props)->codec_conf + i)
+
+/* has the same effect as simple_priv_to_props(). Preferred over
+ * simple_priv_to_props() when dealing with PCM runtime data as
+ * the ID stored in rtd->id may not be a valid array index.
+ */
+#define runtime_simple_priv_to_props(priv, rtd)				\
+	((priv)->dai_props + ((rtd)->dai_link - (priv)->dai_link))
 
 #define for_each_prop_dlc_cpus(props, i, cpu)				\
 	for ((i) = 0;							\
@@ -135,14 +148,14 @@ int simple_util_parse_daifmt(struct device *dev,
 			     struct device_node *codec,
 			     char *prefix,
 			     unsigned int *retfmt);
-int simple_util_parse_tdm_width_map(struct device *dev, struct device_node *np,
+int simple_util_parse_tdm_width_map(struct simple_util_priv *priv, struct device_node *np,
 				    struct simple_util_dai *dai);
 
 __printf(3, 4)
-int simple_util_set_dailink_name(struct device *dev,
+int simple_util_set_dailink_name(struct simple_util_priv *priv,
 				 struct snd_soc_dai_link *dai_link,
 				 const char *fmt, ...);
-int simple_util_parse_card_name(struct snd_soc_card *card,
+int simple_util_parse_card_name(struct simple_util_priv *priv,
 				char *prefix);
 
 int simple_util_parse_clk(struct device *dev,
@@ -194,7 +207,7 @@ void simple_util_remove(struct platform_device *pdev);
 
 int graph_util_card_probe(struct snd_soc_card *card);
 int graph_util_is_ports0(struct device_node *port);
-int graph_util_parse_dai(struct device *dev, struct device_node *ep,
+int graph_util_parse_dai(struct simple_util_priv *priv, struct device_node *ep,
 			 struct snd_soc_dai_link_component *dlc, int *is_single_link);
 
 void graph_util_parse_link_direction(struct device_node *np,
@@ -264,9 +277,13 @@ static inline void simple_util_debug_info(struct simple_util_priv *priv)
 			simple_util_debug_dai(priv, "codec", dai);
 
 		if (link->name)
-			dev_dbg(dev, "dai name = %s\n", link->name);
+			dev_dbg(dev, "link name = %s\n", link->name);
 		if (link->dai_fmt)
-			dev_dbg(dev, "dai format = %04x\n", link->dai_fmt);
+			dev_dbg(dev, "link format = %04x\n", link->dai_fmt);
+		if (link->playback_only)
+			dev_dbg(dev, "link has playback_only");
+		if (link->capture_only)
+			dev_dbg(dev, "link has capture_only");
 		if (props->adata.convert_rate)
 			dev_dbg(dev, "convert_rate = %d\n", props->adata.convert_rate);
 		if (props->adata.convert_channels)

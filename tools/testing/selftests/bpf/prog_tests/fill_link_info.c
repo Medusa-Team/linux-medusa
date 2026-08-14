@@ -37,6 +37,7 @@ static noinline void uprobe_func(void)
 static int verify_perf_link_info(int fd, enum bpf_perf_event_type type, long addr,
 				 ssize_t offset, ssize_t entry_offset)
 {
+	ssize_t ref_ctr_offset = entry_offset /* ref_ctr_offset for uprobes */;
 	struct bpf_link_info info;
 	__u32 len = sizeof(info);
 	char buf[PATH_MAX];
@@ -67,8 +68,9 @@ again:
 
 		ASSERT_EQ(info.perf_event.kprobe.cookie, PERF_EVENT_COOKIE, "kprobe_cookie");
 
+		ASSERT_EQ(info.perf_event.kprobe.name_len, strlen(KPROBE_FUNC) + 1,
+				  "name_len");
 		if (!info.perf_event.kprobe.func_name) {
-			ASSERT_EQ(info.perf_event.kprobe.name_len, 0, "name_len");
 			info.perf_event.kprobe.func_name = ptr_to_u64(&buf);
 			info.perf_event.kprobe.name_len = sizeof(buf);
 			goto again;
@@ -79,8 +81,9 @@ again:
 		ASSERT_EQ(err, 0, "cmp_kprobe_func_name");
 		break;
 	case BPF_PERF_EVENT_TRACEPOINT:
+		ASSERT_EQ(info.perf_event.tracepoint.name_len, strlen(TP_NAME) + 1,
+				  "name_len");
 		if (!info.perf_event.tracepoint.tp_name) {
-			ASSERT_EQ(info.perf_event.tracepoint.name_len, 0, "name_len");
 			info.perf_event.tracepoint.tp_name = ptr_to_u64(&buf);
 			info.perf_event.tracepoint.name_len = sizeof(buf);
 			goto again;
@@ -95,9 +98,11 @@ again:
 	case BPF_PERF_EVENT_UPROBE:
 	case BPF_PERF_EVENT_URETPROBE:
 		ASSERT_EQ(info.perf_event.uprobe.offset, offset, "uprobe_offset");
+		ASSERT_EQ(info.perf_event.uprobe.ref_ctr_offset, ref_ctr_offset, "uprobe_ref_ctr_offset");
 
+		ASSERT_EQ(info.perf_event.uprobe.name_len, strlen(UPROBE_FILE) + 1,
+				  "name_len");
 		if (!info.perf_event.uprobe.file_name) {
-			ASSERT_EQ(info.perf_event.uprobe.name_len, 0, "name_len");
 			info.perf_event.uprobe.file_name = ptr_to_u64(&buf);
 			info.perf_event.uprobe.name_len = sizeof(buf);
 			goto again;
@@ -168,6 +173,10 @@ static void test_kprobe_fill_link_info(struct test_fill_link_info *skel,
 		/* See also arch_adjust_kprobe_addr(). */
 		if (skel->kconfig->CONFIG_X86_KERNEL_IBT)
 			entry_offset = 4;
+		if (skel->kconfig->CONFIG_PPC64 &&
+		    skel->kconfig->CONFIG_KPROBES_ON_FTRACE &&
+		    !skel->kconfig->CONFIG_PPC_FTRACE_OUT_OF_LINE)
+			entry_offset = 4;
 		err = verify_perf_link_info(link_fd, type, kprobe_addr, 0, entry_offset);
 		ASSERT_OK(err, "verify_perf_link_info");
 	} else {
@@ -234,20 +243,32 @@ static void test_uprobe_fill_link_info(struct test_fill_link_info *skel,
 		.retprobe = type == BPF_PERF_EVENT_URETPROBE,
 		.bpf_cookie = PERF_EVENT_COOKIE,
 	);
+	const char *sema[1] = {
+		"uprobe_link_info_sema_1",
+	};
+	__u64 *ref_ctr_offset;
 	struct bpf_link *link;
 	int link_fd, err;
 
+	err = elf_resolve_syms_offsets("/proc/self/exe", 1, sema,
+				       (unsigned long **) &ref_ctr_offset, STT_OBJECT);
+	if (!ASSERT_OK(err, "elf_resolve_syms_offsets_object"))
+		return;
+
+	opts.ref_ctr_offset = *ref_ctr_offset;
 	link = bpf_program__attach_uprobe_opts(skel->progs.uprobe_run,
 					       0, /* self pid */
 					       UPROBE_FILE, uprobe_offset,
 					       &opts);
 	if (!ASSERT_OK_PTR(link, "attach_uprobe"))
-		return;
+		goto out;
 
 	link_fd = bpf_link__fd(link);
-	err = verify_perf_link_info(link_fd, type, 0, uprobe_offset, 0);
+	err = verify_perf_link_info(link_fd, type, 0, uprobe_offset, *ref_ctr_offset);
 	ASSERT_OK(err, "verify_perf_link_info");
 	bpf_link__destroy(link);
+out:
+	free(ref_ctr_offset);
 }
 
 static int verify_kmulti_link_info(int fd, bool retprobe, bool has_cookies)
@@ -416,6 +437,15 @@ verify_umulti_link_info(int fd, bool retprobe, __u64 *offsets,
 	err = readlink("/proc/self/exe", path, sizeof(path));
 	if (!ASSERT_NEQ(err, -1, "readlink"))
 		return -1;
+
+	memset(&info, 0, sizeof(info));
+	err = bpf_link_get_info_by_fd(fd, &info, &len);
+	if (!ASSERT_OK(err, "bpf_link_get_info_by_fd"))
+		return -1;
+
+	ASSERT_EQ(info.uprobe_multi.count, 3, "info.uprobe_multi.count");
+	ASSERT_EQ(info.uprobe_multi.path_size, strlen(path) + 1,
+		  "info.uprobe_multi.path_size");
 
 	for (bit = 0; bit < 8; bit++) {
 		memset(&info, 0, sizeof(info));

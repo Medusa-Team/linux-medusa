@@ -4,6 +4,7 @@
 
 #include <drm/drm_drv.h>
 #include <drm/drm_edid.h>
+#include <drm/drm_print.h>
 
 #include "udl_drv.h"
 #include "udl_edid.h"
@@ -69,7 +70,7 @@ bool udl_probe_edid(struct udl_device *udl)
 	 * The adapter sends all-zeros if no monitor has been
 	 * connected. We consider anything else a connection.
 	 */
-	return !!memchr_inv(hdr, 0, sizeof(hdr));
+	return !mem_is_zero(hdr, sizeof(hdr));
 }
 
 const struct drm_edid *udl_edid_read(struct drm_connector *connector)

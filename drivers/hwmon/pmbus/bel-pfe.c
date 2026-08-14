@@ -88,13 +88,10 @@ static struct pmbus_driver_info pfe_driver_info[] = {
 	},
 };
 
-static const struct i2c_device_id pfe_device_id[];
-
 static int pfe_pmbus_probe(struct i2c_client *client)
 {
-	int model;
+	int model = (uintptr_t)i2c_get_match_data(client);
 
-	model = (int)i2c_match_id(pfe_device_id, client)->driver_data;
 	client->dev.platform_data = &pfe_plat_data;
 
 	/*
@@ -129,4 +126,4 @@ module_i2c_driver(pfe_pmbus_driver);
 MODULE_AUTHOR("Tao Ren <rentao.bupt@gmail.com>");
 MODULE_DESCRIPTION("PMBus driver for BEL PFE Family Power Supplies");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(PMBUS);
+MODULE_IMPORT_NS("PMBUS");

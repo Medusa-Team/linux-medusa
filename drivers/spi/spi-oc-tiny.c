@@ -192,7 +192,6 @@ static int tiny_spi_of_probe(struct platform_device *pdev)
 
 	if (!np)
 		return 0;
-	hw->bitbang.ctlr->dev.of_node = pdev->dev.of_node;
 	if (!of_property_read_u32(np, "clock-frequency", &val))
 		hw->freq = val;
 	if (!of_property_read_u32(np, "baud-width", &val))
@@ -288,7 +287,7 @@ MODULE_DEVICE_TABLE(of, tiny_spi_match);
 
 static struct platform_driver tiny_spi_driver = {
 	.probe = tiny_spi_probe,
-	.remove_new = tiny_spi_remove,
+	.remove = tiny_spi_remove,
 	.driver = {
 		.name = DRV_NAME,
 		.pm = NULL,

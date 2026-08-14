@@ -51,16 +51,17 @@
 #include "dce/dce_clock_source.h"
 #include "dce/dce_audio.h"
 #include "dce/dce_hwseq.h"
-#include "virtual/virtual_stream_encoder.h"
+#include "dio/virtual/virtual_stream_encoder.h"
 #include "dce110/dce110_resource.h"
 #include "dce/dce_aux.h"
 #include "dce/dce_i2c.h"
 #include "dcn10/dcn10_resource.h"
+#include "dio/dcn10/dcn10_dio.h"
 
 #include "cyan_skillfish_ip_offset.h"
 
-#include "dcn/dcn_2_0_3_offset.h"
-#include "dcn/dcn_2_0_3_sh_mask.h"
+#include "dcn/dcn_2_0_1_offset.h"
+#include "dcn/dcn_2_0_1_sh_mask.h"
 #include "dpcs/dpcs_2_0_3_offset.h"
 #include "dpcs/dpcs_2_0_3_sh_mask.h"
 
@@ -600,7 +601,6 @@ static const struct dc_plane_cap plane_cap = {
 static const struct dc_debug_options debug_defaults_drv = {
 		.disable_dmcu = true,
 		.force_abm_enable = false,
-		.timing_trace = false,
 		.clock_trace = true,
 		.disable_pplib_clock_request = true,
 		.pipe_split_policy = MPC_SPLIT_DYNAMIC,
@@ -615,8 +615,11 @@ static const struct dc_debug_options debug_defaults_drv = {
 		.sanity_checks = false,
 		.underflow_assert_delay_us = 0xFFFFFFFF,
 		.enable_tri_buf = true,
-		.enable_legacy_fast_update = true,
 		.using_dml2 = false,
+};
+
+static const struct dc_check_config config_defaults = {
+		.enable_legacy_fast_update = true,
 };
 
 static void dcn201_dpp_destroy(struct dpp **dpp)
@@ -630,7 +633,7 @@ static struct dpp *dcn201_dpp_create(
 	uint32_t inst)
 {
 	struct dcn201_dpp *dpp =
-		kzalloc(sizeof(struct dcn201_dpp), GFP_ATOMIC);
+		kzalloc_obj(struct dcn201_dpp);
 
 	if (!dpp)
 		return NULL;
@@ -647,7 +650,7 @@ static struct input_pixel_processor *dcn201_ipp_create(
 	struct dc_context *ctx, uint32_t inst)
 {
 	struct dcn10_ipp *ipp =
-		kzalloc(sizeof(struct dcn10_ipp), GFP_ATOMIC);
+		kzalloc_obj(struct dcn10_ipp);
 
 	if (!ipp) {
 		return NULL;
@@ -663,7 +666,7 @@ static struct output_pixel_processor *dcn201_opp_create(
 	struct dc_context *ctx, uint32_t inst)
 {
 	struct dcn201_opp *opp =
-		kzalloc(sizeof(struct dcn201_opp), GFP_ATOMIC);
+		kzalloc_obj(struct dcn201_opp);
 
 	if (!opp) {
 		return NULL;
@@ -678,7 +681,7 @@ static struct dce_aux *dcn201_aux_engine_create(struct dc_context *ctx,
 						uint32_t inst)
 {
 	struct aux_engine_dce110 *aux_engine =
-		kzalloc(sizeof(struct aux_engine_dce110), GFP_ATOMIC);
+		kzalloc_obj(struct aux_engine_dce110);
 
 	if (!aux_engine)
 		return NULL;
@@ -711,7 +714,7 @@ static struct dce_i2c_hw *dcn201_i2c_hw_create(struct dc_context *ctx,
 					       uint32_t inst)
 {
 	struct dce_i2c_hw *dce_i2c_hw =
-		kzalloc(sizeof(struct dce_i2c_hw), GFP_ATOMIC);
+		kzalloc_obj(struct dce_i2c_hw);
 
 	if (!dce_i2c_hw)
 		return NULL;
@@ -724,8 +727,7 @@ static struct dce_i2c_hw *dcn201_i2c_hw_create(struct dc_context *ctx,
 
 static struct mpc *dcn201_mpc_create(struct dc_context *ctx, uint32_t num_mpcc)
 {
-	struct dcn201_mpc *mpc201 = kzalloc(sizeof(struct dcn201_mpc),
-					    GFP_ATOMIC);
+	struct dcn201_mpc *mpc201 = kzalloc_obj(struct dcn201_mpc);
 
 	if (!mpc201)
 		return NULL;
@@ -741,8 +743,7 @@ static struct mpc *dcn201_mpc_create(struct dc_context *ctx, uint32_t num_mpcc)
 
 static struct hubbub *dcn201_hubbub_create(struct dc_context *ctx)
 {
-	struct dcn20_hubbub *hubbub = kzalloc(sizeof(struct dcn20_hubbub),
-					  GFP_ATOMIC);
+	struct dcn20_hubbub *hubbub = kzalloc_obj(struct dcn20_hubbub);
 
 	if (!hubbub)
 		return NULL;
@@ -755,12 +756,39 @@ static struct hubbub *dcn201_hubbub_create(struct dc_context *ctx)
 	return &hubbub->base;
 }
 
+static const struct dcn_dio_registers dio_regs = {
+		DIO_REG_LIST_DCN10()
+};
+
+#define DIO_MASK_SH_LIST(mask_sh)\
+		HWS_SF(, DIO_MEM_PWR_CTRL, I2C_LIGHT_SLEEP_FORCE, mask_sh)
+
+static const struct dcn_dio_shift dio_shift = {
+		DIO_MASK_SH_LIST(__SHIFT)
+};
+
+static const struct dcn_dio_mask dio_mask = {
+		DIO_MASK_SH_LIST(_MASK)
+};
+
+static struct dio *dcn201_dio_create(struct dc_context *ctx)
+{
+	struct dcn10_dio *dio10 = kzalloc_obj(struct dcn10_dio);
+
+	if (!dio10)
+		return NULL;
+
+	dcn10_dio_construct(dio10, ctx, &dio_regs, &dio_shift, &dio_mask);
+
+	return &dio10->base;
+}
+
 static struct timing_generator *dcn201_timing_generator_create(
 		struct dc_context *ctx,
 		uint32_t instance)
 {
 	struct optc *tgn10 =
-		kzalloc(sizeof(struct optc), GFP_ATOMIC);
+		kzalloc_obj(struct optc);
 
 	if (!tgn10)
 		return NULL;
@@ -794,10 +822,10 @@ static struct link_encoder *dcn201_link_encoder_create(
 	const struct encoder_init_data *enc_init_data)
 {
 	struct dcn20_link_encoder *enc20 =
-		kzalloc(sizeof(struct dcn20_link_encoder), GFP_ATOMIC);
+		kzalloc_obj(struct dcn20_link_encoder);
 	struct dcn10_link_encoder *enc10;
 
-	if (!enc20)
+	if (!enc20 || enc_init_data->hpd_source >= ARRAY_SIZE(link_enc_hpd_regs))
 		return NULL;
 
 	enc10 = &enc20->enc10;
@@ -822,7 +850,7 @@ static struct clock_source *dcn201_clock_source_create(
 	bool dp_clk_src)
 {
 	struct dce110_clk_src *clk_src =
-		kzalloc(sizeof(struct dce110_clk_src), GFP_ATOMIC);
+		kzalloc_obj(struct dce110_clk_src);
 
 	if (!clk_src)
 		return NULL;
@@ -857,7 +885,7 @@ static struct stream_encoder *dcn201_stream_encoder_create(
 	struct dc_context *ctx)
 {
 	struct dcn10_stream_encoder *enc1 =
-		kzalloc(sizeof(struct dcn10_stream_encoder), GFP_ATOMIC);
+		kzalloc_obj(struct dcn10_stream_encoder);
 
 	if (!enc1)
 		return NULL;
@@ -884,7 +912,7 @@ static const struct dce_hwseq_mask hwseq_mask = {
 static struct dce_hwseq *dcn201_hwseq_create(
 	struct dc_context *ctx)
 {
-	struct dce_hwseq *hws = kzalloc(sizeof(struct dce_hwseq), GFP_ATOMIC);
+	struct dce_hwseq *hws = kzalloc_obj(struct dce_hwseq);
 
 	if (hws) {
 		hws->ctx = ctx;
@@ -928,6 +956,11 @@ static void dcn201_resource_destruct(struct dcn201_resource_pool *pool)
 	if (pool->base.hubbub != NULL) {
 		kfree(pool->base.hubbub);
 		pool->base.hubbub = NULL;
+	}
+
+	if (pool->base.dio != NULL) {
+		kfree(TO_DCN10_DIO(pool->base.dio));
+		pool->base.dio = NULL;
 	}
 
 	for (i = 0; i < pool->base.pipe_count; i++) {
@@ -984,7 +1017,7 @@ static struct hubp *dcn201_hubp_create(
 	uint32_t inst)
 {
 	struct dcn201_hubp *hubp201 =
-		kzalloc(sizeof(struct dcn201_hubp), GFP_ATOMIC);
+		kzalloc_obj(struct dcn201_hubp);
 
 	if (!hubp201)
 		return NULL;
@@ -1007,8 +1040,10 @@ static struct pipe_ctx *dcn201_acquire_free_pipe_for_layer(
 	struct pipe_ctx *head_pipe = resource_get_otg_master_for_stream(res_ctx, opp_head_pipe->stream);
 	struct pipe_ctx *idle_pipe = resource_find_free_secondary_pipe_legacy(res_ctx, pool, head_pipe);
 
-	if (!head_pipe)
+	if (!head_pipe) {
 		ASSERT(0);
+		return NULL;
+	}
 
 	if (!idle_pipe)
 		return NULL;
@@ -1078,7 +1113,9 @@ static struct resource_funcs dcn201_res_pool_funcs = {
 	.populate_dml_writeback_from_context = dcn201_populate_dml_writeback_from_context,
 	.patch_unknown_plane_state = dcn20_patch_unknown_plane_state,
 	.set_mcif_arb_params = dcn20_set_mcif_arb_params,
-	.find_first_free_match_stream_enc_for_link = dcn10_find_first_free_match_stream_enc_for_link
+	.find_first_free_match_stream_enc_for_link = dcn10_find_first_free_match_stream_enc_for_link,
+	.get_vstartup_for_pipe = dcn10_get_vstartup_for_pipe,
+	.get_default_tiling_info = dcn10_get_default_tiling_info
 };
 
 static bool dcn201_resource_construct(
@@ -1151,6 +1188,7 @@ static bool dcn201_resource_construct(
 	dc->caps.color.mpc.ocsc = 1;
 
 	dc->debug = debug_defaults_drv;
+	dc->check_config = config_defaults;
 
 	/*a0 only, remove later*/
 	dc->work_arounds.no_connect_phy_config  = true;
@@ -1272,6 +1310,14 @@ static bool dcn201_resource_construct(
 		goto create_fail;
 	}
 
+	/* DIO */
+	pool->base.dio = dcn201_dio_create(ctx);
+	if (pool->base.dio == NULL) {
+		BREAK_TO_DEBUGGER();
+		dm_error("DC: failed to create dio!\n");
+		goto create_fail;
+	}
+
 	if (!resource_construct(num_virtual_links, dc, &pool->base,
 			&res_create_funcs))
 		goto create_fail;
@@ -1282,6 +1328,8 @@ static bool dcn201_resource_construct(
 
 	for (i = 0; i < dc->caps.max_planes; ++i)
 		dc->caps.planes[i] = plane_cap;
+
+	dc->caps.max_odm_combine_factor = 2;
 
 	dc->cap_funcs = cap_funcs;
 
@@ -1299,7 +1347,7 @@ struct resource_pool *dcn201_create_resource_pool(
 		struct dc *dc)
 {
 	struct dcn201_resource_pool *pool =
-		kzalloc(sizeof(struct dcn201_resource_pool), GFP_ATOMIC);
+		kzalloc_obj(struct dcn201_resource_pool);
 
 	if (!pool)
 		return NULL;

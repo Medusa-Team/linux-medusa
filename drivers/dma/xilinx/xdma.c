@@ -38,7 +38,7 @@ static const struct regmap_config xdma_regmap_config = {
 	.reg_bits = 32,
 	.val_bits = 32,
 	.reg_stride = 4,
-	.max_register = XDMA_REG_SPACE_LEN,
+	.max_register = XDMA_MAX_REG_OFFSET,
 };
 
 /**
@@ -61,6 +61,8 @@ struct xdma_desc_block {
  * @dir: Transferring direction of the channel
  * @cfg: Transferring config of the channel
  * @irq: IRQ assigned to the channel
+ * @last_interrupt: task for comppleting last interrupt
+ * @stop_requested: stop request flag
  */
 struct xdma_chan {
 	struct virt_dma_chan		vchan;
@@ -275,7 +277,7 @@ xdma_alloc_desc(struct xdma_chan *chan, u32 desc_num, bool cyclic)
 	void *addr;
 	int i, j;
 
-	sw_desc = kzalloc(sizeof(*sw_desc), GFP_NOWAIT);
+	sw_desc = kzalloc_obj(*sw_desc, GFP_NOWAIT);
 	if (!sw_desc)
 		return NULL;
 
@@ -284,8 +286,8 @@ xdma_alloc_desc(struct xdma_chan *chan, u32 desc_num, bool cyclic)
 	sw_desc->cyclic = cyclic;
 	sw_desc->error = false;
 	dblk_num = DIV_ROUND_UP(desc_num, XDMA_DESC_ADJACENT);
-	sw_desc->desc_blocks = kcalloc(dblk_num, sizeof(*sw_desc->desc_blocks),
-				       GFP_NOWAIT);
+	sw_desc->desc_blocks = kzalloc_objs(*sw_desc->desc_blocks, dblk_num,
+					    GFP_NOWAIT);
 	if (!sw_desc->desc_blocks)
 		goto failed;
 
@@ -390,15 +392,11 @@ static int xdma_xfer_start(struct xdma_chan *xchan)
  */
 static int xdma_xfer_stop(struct xdma_chan *xchan)
 {
-	int ret;
 	struct xdma_device *xdev = xchan->xdev_hdl;
 
 	/* clear run stop bit to prevent any further auto-triggering */
-	ret = regmap_write(xdev->rmap, xchan->base + XDMA_CHAN_CONTROL_W1C,
-			   CHAN_CTRL_RUN_STOP);
-	if (ret)
-		return ret;
-	return ret;
+	return regmap_write(xdev->rmap, xchan->base + XDMA_CHAN_CONTROL_W1C,
+			    CHAN_CTRL_RUN_STOP);
 }
 
 /**
@@ -609,13 +607,11 @@ xdma_prep_device_sg(struct dma_chan *chan, struct scatterlist *sgl,
 	struct xdma_chan *xdma_chan = to_xdma_chan(chan);
 	struct dma_async_tx_descriptor *tx_desc;
 	struct xdma_desc *sw_desc;
-	u32 desc_num = 0, i;
 	u64 addr, dev_addr, *src, *dst;
+	u32 desc_num, i;
 	struct scatterlist *sg;
 
-	for_each_sg(sgl, sg, sg_len, i)
-		desc_num += DIV_ROUND_UP(sg_dma_len(sg), XDMA_DESC_BLEN_MAX);
-
+	desc_num = sg_nents_for_dma(sgl, sg_len, XDMA_DESC_BLEN_MAX);
 	sw_desc = xdma_alloc_desc(xdma_chan, desc_num, false);
 	if (!sw_desc)
 		return NULL;
@@ -1240,8 +1236,8 @@ static int xdma_probe(struct platform_device *pdev)
 
 	xdev->rmap = devm_regmap_init_mmio(&pdev->dev, reg_base,
 					   &xdma_regmap_config);
-	if (!xdev->rmap) {
-		xdma_err(xdev, "config regmap failed: %d", ret);
+	if (IS_ERR(xdev->rmap)) {
+		xdma_err(xdev, "config regmap failed: %pe", xdev->rmap);
 		goto failed;
 	}
 	INIT_LIST_HEAD(&xdev->dma_dev.channels);
@@ -1315,7 +1311,7 @@ static struct platform_driver xdma_driver = {
 	},
 	.id_table	= xdma_id_table,
 	.probe		= xdma_probe,
-	.remove_new	= xdma_remove,
+	.remove		= xdma_remove,
 };
 
 module_platform_driver(xdma_driver);

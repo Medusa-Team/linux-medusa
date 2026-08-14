@@ -18,8 +18,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/nvmem-provider.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
@@ -207,6 +205,8 @@ AT24_CHIP_DATA(at24_data_24cs64, 16,
 	AT24_FLAG_ADDR16 | AT24_FLAG_SERIAL | AT24_FLAG_READONLY);
 AT24_CHIP_DATA(at24_data_24c128, 131072 / 8, AT24_FLAG_ADDR16);
 AT24_CHIP_DATA(at24_data_24c256, 262144 / 8, AT24_FLAG_ADDR16);
+/* M24256E Additional Write lockable page (M24256E-F order codes) */
+AT24_CHIP_DATA(at24_data_24256e_wlp, 64, AT24_FLAG_ADDR16);
 AT24_CHIP_DATA(at24_data_24c512, 524288 / 8, AT24_FLAG_ADDR16);
 AT24_CHIP_DATA(at24_data_24c1024, 1048576 / 8, AT24_FLAG_ADDR16);
 AT24_CHIP_DATA_BS(at24_data_24c1025, 1048576 / 8, AT24_FLAG_ADDR16, 2);
@@ -240,6 +240,7 @@ static const struct i2c_device_id at24_ids[] = {
 	{ "24cs64",	(kernel_ulong_t)&at24_data_24cs64 },
 	{ "24c128",	(kernel_ulong_t)&at24_data_24c128 },
 	{ "24c256",	(kernel_ulong_t)&at24_data_24c256 },
+	{ "24256e-wl",	(kernel_ulong_t)&at24_data_24256e_wlp },
 	{ "24c512",	(kernel_ulong_t)&at24_data_24c512 },
 	{ "24c1024",	(kernel_ulong_t)&at24_data_24c1024 },
 	{ "24c1025",	(kernel_ulong_t)&at24_data_24c1025 },
@@ -249,7 +250,7 @@ static const struct i2c_device_id at24_ids[] = {
 };
 MODULE_DEVICE_TABLE(i2c, at24_ids);
 
-static const struct of_device_id __maybe_unused at24_of_match[] = {
+static const struct of_device_id at24_of_match[] = {
 	{ .compatible = "atmel,24c00",		.data = &at24_data_24c00 },
 	{ .compatible = "atmel,24c01",		.data = &at24_data_24c01 },
 	{ .compatible = "atmel,24cs01",		.data = &at24_data_24cs01 },
@@ -278,11 +279,12 @@ static const struct of_device_id __maybe_unused at24_of_match[] = {
 	{ .compatible = "atmel,24c2048",	.data = &at24_data_24c2048 },
 	{ .compatible = "microchip,24aa025e48",	.data = &at24_data_24aa025e48 },
 	{ .compatible = "microchip,24aa025e64",	.data = &at24_data_24aa025e64 },
+	{ .compatible = "st,24256e-wl",		.data = &at24_data_24256e_wlp },
 	{ /* END OF LIST */ },
 };
 MODULE_DEVICE_TABLE(of, at24_of_match);
 
-static const struct acpi_device_id __maybe_unused at24_acpi_ids[] = {
+static const struct acpi_device_id at24_acpi_ids[] = {
 	{ "INT3499",	(kernel_ulong_t)&at24_data_INT3499 },
 	{ "TPF0001",	(kernel_ulong_t)&at24_data_24c1024 },
 	{ /* END OF LIST */ }
@@ -655,10 +657,8 @@ static int at24_probe(struct i2c_client *client)
 	if (!i2c_fn_i2c && !i2c_fn_block)
 		page_size = 1;
 
-	if (!page_size) {
-		dev_err(dev, "page_size must not be 0!\n");
-		return -EINVAL;
-	}
+	if (!page_size)
+		return dev_err_probe(dev, -EINVAL, "page_size must not be 0!\n");
 
 	if (!is_power_of_2(page_size))
 		dev_warn(dev, "page_size looks suspicious (no power of 2)!\n");
@@ -672,11 +672,9 @@ static int at24_probe(struct i2c_client *client)
 				(flags & AT24_FLAG_ADDR16) ? 65536 : 256);
 	}
 
-	if ((flags & AT24_FLAG_SERIAL) && (flags & AT24_FLAG_MAC)) {
-		dev_err(dev,
-			"invalid device data - cannot have both AT24_FLAG_SERIAL & AT24_FLAG_MAC.");
-		return -EINVAL;
-	}
+	if ((flags & AT24_FLAG_SERIAL) && (flags & AT24_FLAG_MAC))
+		return dev_err_probe(dev, -EINVAL,
+				     "invalid device data - cannot have both AT24_FLAG_SERIAL & AT24_FLAG_MAC.");
 
 	regmap_config.val_bits = 8;
 	regmap_config.reg_bits = (flags & AT24_FLAG_ADDR16) ? 16 : 8;
@@ -757,10 +755,8 @@ static int at24_probe(struct i2c_client *client)
 	full_power = acpi_dev_state_d0(&client->dev);
 	if (full_power) {
 		err = regulator_enable(at24->vcc_reg);
-		if (err) {
-			dev_err(dev, "Failed to enable vcc regulator\n");
-			return err;
-		}
+		if (err)
+			return dev_err_probe(dev, err, "Failed to enable vcc regulator\n");
 
 		pm_runtime_set_active(dev);
 	}
@@ -844,8 +840,8 @@ static struct i2c_driver at24_driver = {
 	.driver = {
 		.name = "at24",
 		.pm = &at24_pm_ops,
-		.of_match_table = of_match_ptr(at24_of_match),
-		.acpi_match_table = ACPI_PTR(at24_acpi_ids),
+		.of_match_table = at24_of_match,
+		.acpi_match_table = at24_acpi_ids,
 	},
 	.probe = at24_probe,
 	.remove = at24_remove,

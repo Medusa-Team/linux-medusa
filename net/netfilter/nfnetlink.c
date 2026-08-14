@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /* Netfilter messages via netlink socket. Allows for user space
  * protocol helpers and general trouble making from userspace.
  *
@@ -9,9 +10,6 @@
  * generally made possible by Network Robots, Inc. (www.networkrobots.com)
  *
  * Further development of this code funded by Astaro AG (http://www.astaro.com)
- *
- * This software may be used and distributed according to the terms
- * of the GNU General Public License, incorporated herein by reference.
  */
 
 #include <linux/module.h>
@@ -325,7 +323,7 @@ static int nfnl_err_add(struct list_head *list, struct nlmsghdr *nlh, int err,
 {
 	struct nfnl_err *nfnl_err;
 
-	nfnl_err = kmalloc(sizeof(struct nfnl_err), GFP_KERNEL);
+	nfnl_err = kmalloc_obj(struct nfnl_err);
 	if (nfnl_err == NULL)
 		return -ENOMEM;
 
@@ -376,6 +374,7 @@ static void nfnetlink_rcv_batch(struct sk_buff *skb, struct nlmsghdr *nlh,
 	const struct nfnetlink_subsystem *ss;
 	const struct nfnl_callback *nc;
 	struct netlink_ext_ack extack;
+	struct nlmsghdr *onlh = nlh;
 	LIST_HEAD(err_list);
 	u32 status;
 	int err;
@@ -386,6 +385,7 @@ replay:
 	status = 0;
 replay_abort:
 	skb = netlink_skb_clone(oskb, GFP_KERNEL);
+	nlh = onlh;
 	if (!skb)
 		return netlink_ack(oskb, nlh, -ENOMEM, NULL);
 
@@ -402,27 +402,27 @@ replay_abort:
 		{
 			nfnl_unlock(subsys_id);
 			netlink_ack(oskb, nlh, -EOPNOTSUPP, NULL);
-			return kfree_skb(skb);
+			return consume_skb(skb);
 		}
 	}
 
 	if (!ss->valid_genid || !ss->commit || !ss->abort) {
 		nfnl_unlock(subsys_id);
 		netlink_ack(oskb, nlh, -EOPNOTSUPP, NULL);
-		return kfree_skb(skb);
+		return consume_skb(skb);
 	}
 
 	if (!try_module_get(ss->owner)) {
 		nfnl_unlock(subsys_id);
 		netlink_ack(oskb, nlh, -EOPNOTSUPP, NULL);
-		return kfree_skb(skb);
+		return consume_skb(skb);
 	}
 
 	if (!ss->valid_genid(net, genid)) {
 		module_put(ss->owner);
 		nfnl_unlock(subsys_id);
 		netlink_ack(oskb, nlh, -ERESTART, NULL);
-		return kfree_skb(skb);
+		return consume_skb(skb);
 	}
 
 	nfnl_unlock(subsys_id);
@@ -517,7 +517,7 @@ replay_abort:
 			err = nla_parse_deprecated(cda,
 						   ss->cb[cb_id].attr_count,
 						   attr, attrlen,
-						   ss->cb[cb_id].policy, NULL);
+						   ss->cb[cb_id].policy, &extack);
 			if (err < 0)
 				goto ack;
 
@@ -567,7 +567,7 @@ done:
 	if (status & NFNL_BATCH_REPLAY) {
 		ss->abort(net, oskb, NFNL_ABORT_AUTOLOAD);
 		nfnl_err_reset(&err_list);
-		kfree_skb(skb);
+		consume_skb(skb);
 		module_put(ss->owner);
 		goto replay;
 	} else if (status == NFNL_BATCH_DONE) {
@@ -593,7 +593,7 @@ done:
 		err = ss->abort(net, oskb, abort_action);
 		if (err == -EAGAIN) {
 			nfnl_err_reset(&err_list);
-			kfree_skb(skb);
+			consume_skb(skb);
 			module_put(ss->owner);
 			status |= NFNL_BATCH_FAILURE;
 			goto replay_abort;
@@ -601,7 +601,7 @@ done:
 	}
 
 	nfnl_err_deliver(&err_list, oskb);
-	kfree_skb(skb);
+	consume_skb(skb);
 	module_put(ss->owner);
 }
 

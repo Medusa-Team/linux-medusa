@@ -86,8 +86,8 @@ static const struct net_device_ops pci402_acc_netdev_ops = {
 	.ndo_open = acc_open,
 	.ndo_stop = acc_close,
 	.ndo_start_xmit = acc_start_xmit,
-	.ndo_change_mtu = can_change_mtu,
-	.ndo_eth_ioctl = can_eth_ioctl_hwts,
+	.ndo_hwtstamp_get = can_hwtstamp_get,
+	.ndo_hwtstamp_set = can_hwtstamp_set,
 };
 
 static const struct ethtool_ops pci402_acc_ethtool_ops = {
@@ -369,12 +369,13 @@ static int pci402_init_cores(struct pci_dev *pdev)
 		SET_NETDEV_DEV(netdev, &pdev->dev);
 
 		priv = netdev_priv(netdev);
+		priv->can.clock.freq = card->ov.core_frequency;
 		priv->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK |
 			CAN_CTRLMODE_LISTENONLY |
 			CAN_CTRLMODE_BERR_REPORTING |
 			CAN_CTRLMODE_CC_LEN8_DLC;
-
-		priv->can.clock.freq = card->ov.core_frequency;
+		if (card->ov.features & ACC_OV_REG_FEAT_MASK_DAR)
+			priv->can.ctrlmode_supported |= CAN_CTRLMODE_ONE_SHOT;
 		if (card->ov.features & ACC_OV_REG_FEAT_MASK_CANFD)
 			priv->can.bittiming_const = &pci402_bittiming_const_canfd;
 		else

@@ -5,8 +5,7 @@
  * Copyright IBM Corp. 2017
  */
 
-#define KMSG_COMPONENT "sclp_sd"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "sclp_sd: " fmt
 
 #include <linux/completion.h>
 #include <linux/jiffies.h>
@@ -16,10 +15,8 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/async.h>
-#include <linux/export.h>
 #include <linux/mutex.h>
-
-#include <asm/pgalloc.h>
+#include <linux/pgalloc.h>
 
 #include "sclp.h"
 
@@ -476,7 +473,7 @@ static struct kobj_type sclp_sd_file_ktype = {
  * on EOF.
  */
 static ssize_t data_read(struct file *file, struct kobject *kobj,
-			 struct bin_attribute *attr, char *buffer,
+			 const struct bin_attribute *attr, char *buffer,
 			 loff_t off, size_t size)
 {
 	struct sclp_sd_file *sd_file = to_sd_file(kobj);
@@ -521,7 +518,7 @@ static __init struct sclp_sd_file *sclp_sd_file_create(const char *name, u8 di)
 	struct sclp_sd_file *sd_file;
 	int rc;
 
-	sd_file = kzalloc(sizeof(*sd_file), GFP_KERNEL);
+	sd_file = kzalloc_obj(*sd_file);
 	if (!sd_file)
 		return NULL;
 	sd_file->di = di;

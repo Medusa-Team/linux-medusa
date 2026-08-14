@@ -123,8 +123,17 @@
 	HUBBUB_SF(DCHUBBUB_CLOCK_CNTL, DCFCLK_R_DCHUBBUB_GATE_DIS, mask_sh),\
 	HUBBUB_SF(DCHUBBUB_SDPIF_CFG0, SDPIF_PORT_CONTROL, mask_sh),\
 	HUBBUB_SF(DCHUBBUB_SDPIF_CFG1, SDPIF_MAX_NUM_OUTSTANDING, mask_sh),\
-	HUBBUB_SF(DCHUBBUB_MEM_PWR_MODE_CTRL, DET_MEM_PWR_LS_MODE, mask_sh)
-
+	HUBBUB_SF(DCHUBBUB_MEM_PWR_MODE_CTRL, DET_MEM_PWR_LS_MODE, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_TIMEOUT_DETECTION_CTRL1, DCHUBBUB_TIMEOUT_ERROR_STATUS, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_TIMEOUT_DETECTION_CTRL1, DCHUBBUB_TIMEOUT_REQ_STALL_THRESHOLD, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_TIMEOUT_DETECTION_CTRL2, DCHUBBUB_TIMEOUT_PSTATE_STALL_THRESHOLD, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_TIMEOUT_DETECTION_CTRL2, DCHUBBUB_TIMEOUT_DETECTION_EN, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_TIMEOUT_DETECTION_CTRL2, DCHUBBUB_TIMEOUT_TIMER_RESET, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_CTRL_STATUS, ROB_UNDERFLOW_STATUS, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_CTRL_STATUS, ROB_OVERFLOW_STATUS, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_CTRL_STATUS, ROB_OVERFLOW_CLEAR, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_CTRL_STATUS, DCHUBBUB_HW_DEBUG, mask_sh),\
+	HUBBUB_SF(DCHUBBUB_CTRL_STATUS, CSTATE_SWATH_CHK_GOOD_MODE, mask_sh)
 
 bool hubbub401_program_urgent_watermarks(
 		struct hubbub *hubbub,
@@ -185,6 +194,11 @@ bool hubbub401_get_dcc_compression_cap(
 		const struct dc_dcc_surface_param *input,
 		struct dc_surface_dcc_cap *output);
 
+bool dcn401_program_arbiter(
+	struct hubbub *hubbub,
+	struct dml2_display_arb_regs *arb_regs,
+	bool safe_to_lower);
+
 void hubbub401_construct(struct dcn20_hubbub *hubbub2,
 	struct dc_context *ctx,
 	const struct dcn_hubbub_registers *hubbub_regs,
@@ -193,5 +207,10 @@ void hubbub401_construct(struct dcn20_hubbub *hubbub2,
 	int det_size_kb,
 	int pixel_chunk_size_kb,
 	int config_return_buffer_size_kb);
+
+void dcn401_program_det_segments(struct hubbub *hubbub, int hubp_inst, unsigned det_buffer_size_seg);
+void dcn401_program_compbuf_segments(struct hubbub *hubbub, unsigned compbuf_size_seg, bool safe_to_increase);
+void dcn401_wait_for_det_update(struct hubbub *hubbub, int hubp_inst);
+void dcn401_init_crb(struct hubbub *hubbub);
 
 #endif

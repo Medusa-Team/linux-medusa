@@ -253,14 +253,13 @@ static int hspi_probe(struct platform_device *pdev)
 
 	ctlr->bus_num = pdev->id;
 	ctlr->mode_bits	= SPI_CPOL | SPI_CPHA;
-	ctlr->dev.of_node = pdev->dev.of_node;
 	ctlr->auto_runtime_pm = true;
 	ctlr->transfer_one_message = hspi_transfer_one_message;
 	ctlr->bits_per_word_mask = SPI_BPW_MASK(8);
 
-	ret = devm_spi_register_controller(&pdev->dev, ctlr);
+	ret = spi_register_controller(ctlr);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "devm_spi_register_controller error.\n");
+		dev_err(&pdev->dev, "failed to register controller\n");
 		goto error2;
 	}
 
@@ -280,9 +279,15 @@ static void hspi_remove(struct platform_device *pdev)
 {
 	struct hspi_priv *hspi = platform_get_drvdata(pdev);
 
+	spi_controller_get(hspi->ctlr);
+
+	spi_unregister_controller(hspi->ctlr);
+
 	pm_runtime_disable(&pdev->dev);
 
 	clk_put(hspi->clk);
+
+	spi_controller_put(hspi->ctlr);
 }
 
 static const struct of_device_id hspi_of_match[] = {
@@ -293,7 +298,7 @@ MODULE_DEVICE_TABLE(of, hspi_of_match);
 
 static struct platform_driver hspi_driver = {
 	.probe = hspi_probe,
-	.remove_new = hspi_remove,
+	.remove = hspi_remove,
 	.driver = {
 		.name = "sh-hspi",
 		.of_match_table = hspi_of_match,

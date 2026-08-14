@@ -3,10 +3,10 @@
  * Copyright (c) 2022, Oracle and/or its affiliates.
  * Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved
  */
+#include <linux/highmem.h>
 #include <linux/iova_bitmap.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
-#include <linux/highmem.h>
 
 #define BITS_PER_PAGE (PAGE_SIZE * BITS_PER_BYTE)
 
@@ -130,9 +130,8 @@ struct iova_bitmap {
 static unsigned long iova_bitmap_offset_to_index(struct iova_bitmap *bitmap,
 						 unsigned long iova)
 {
-	unsigned long pgsize = 1 << bitmap->mapped.pgshift;
-
-	return iova / (BITS_PER_TYPE(*bitmap->bitmap) * pgsize);
+	return (iova >> bitmap->mapped.pgshift) /
+	       BITS_PER_TYPE(*bitmap->bitmap);
 }
 
 /*
@@ -248,7 +247,7 @@ struct iova_bitmap *iova_bitmap_alloc(unsigned long iova, size_t length,
 	struct iova_bitmap *bitmap;
 	int rc;
 
-	bitmap = kzalloc(sizeof(*bitmap), GFP_KERNEL);
+	bitmap = kzalloc_obj(*bitmap);
 	if (!bitmap)
 		return ERR_PTR(-ENOMEM);
 
@@ -272,7 +271,7 @@ err:
 	iova_bitmap_free(bitmap);
 	return ERR_PTR(rc);
 }
-EXPORT_SYMBOL_NS_GPL(iova_bitmap_alloc, IOMMUFD);
+EXPORT_SYMBOL_NS_GPL(iova_bitmap_alloc, "IOMMUFD");
 
 /**
  * iova_bitmap_free() - Frees an IOVA bitmap object
@@ -294,7 +293,7 @@ void iova_bitmap_free(struct iova_bitmap *bitmap)
 
 	kfree(bitmap);
 }
-EXPORT_SYMBOL_NS_GPL(iova_bitmap_free, IOMMUFD);
+EXPORT_SYMBOL_NS_GPL(iova_bitmap_free, "IOMMUFD");
 
 /*
  * Returns the remaining bitmap indexes from mapped_total_index to process for
@@ -387,7 +386,7 @@ int iova_bitmap_for_each(struct iova_bitmap *bitmap, void *opaque,
 {
 	return fn(bitmap, bitmap->iova, bitmap->length, opaque);
 }
-EXPORT_SYMBOL_NS_GPL(iova_bitmap_for_each, IOMMUFD);
+EXPORT_SYMBOL_NS_GPL(iova_bitmap_for_each, "IOMMUFD");
 
 /**
  * iova_bitmap_set() - Records an IOVA range in bitmap
@@ -407,7 +406,6 @@ void iova_bitmap_set(struct iova_bitmap *bitmap,
 
 update_indexes:
 	if (unlikely(!iova_bitmap_mapped_range(mapped, iova, length))) {
-
 		/*
 		 * The attempt to advance the base index to @iova
 		 * may fail if it's out of bounds, or pinning the pages
@@ -445,4 +443,4 @@ update_indexes:
 		cur_bit += nbits;
 	} while (cur_bit <= last_bit);
 }
-EXPORT_SYMBOL_NS_GPL(iova_bitmap_set, IOMMUFD);
+EXPORT_SYMBOL_NS_GPL(iova_bitmap_set, "IOMMUFD");

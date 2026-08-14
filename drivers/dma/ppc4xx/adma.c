@@ -9,7 +9,7 @@
  */
 
 /*
- * This driver supports the asynchrounous DMA copy and RAID engines available
+ * This driver supports the asynchronous DMA copy and RAID engines available
  * on the AMCC PPC440SPe Processors.
  * Based on the Intel Xscale(R) family of I/O Processors (IOP 32x, 33x, 134x)
  * ADMA driver written by D.Williams.
@@ -874,7 +874,7 @@ static int ppc440spe_dma2_pq_slot_count(dma_addr_t *srcs,
 		pr_err("%s: src_cnt=%d, state=%d, addr_count=%d, order=%lld\n",
 			__func__, src_cnt, state, addr_count, order);
 		for (i = 0; i < src_cnt; i++)
-			pr_err("\t[%d] 0x%llx \n", i, srcs[i]);
+			pr_err("\t[%d] 0x%llx\n", i, srcs[i]);
 		BUG();
 	}
 
@@ -1781,8 +1781,7 @@ static int ppc440spe_adma_alloc_chan_resources(struct dma_chan *chan)
 		db_sz = sizeof(struct xor_cb);
 
 	for (; i < (ppc440spe_chan->device->pool_size / db_sz); i++) {
-		slot = kzalloc(sizeof(struct ppc440spe_adma_desc_slot),
-			       GFP_KERNEL);
+		slot = kzalloc_obj(struct ppc440spe_adma_desc_slot);
 		if (!slot) {
 			printk(KERN_INFO "SPE ADMA Channel only initialized"
 				" %d descriptor slots", i--);
@@ -3636,7 +3635,7 @@ static void ppc440spe_adma_issue_pending(struct dma_chan *chan)
 
 	ppc440spe_chan = to_ppc440spe_adma_chan(chan);
 	dev_dbg(ppc440spe_chan->device->common.dev,
-		"ppc440spe adma%d: %s %d \n", ppc440spe_chan->device->id,
+		"ppc440spe adma%d: %s %d\n", ppc440spe_chan->device->id,
 		__func__, ppc440spe_chan->pending);
 
 	if (ppc440spe_chan->pending) {
@@ -4064,7 +4063,7 @@ static int ppc440spe_adma_probe(struct platform_device *ofdev)
 	}
 
 	/* create a device */
-	adev = kzalloc(sizeof(*adev), GFP_KERNEL);
+	adev = kzalloc_obj(*adev);
 	if (!adev) {
 		initcode = PPC_ADMA_INIT_ALLOC;
 		ret = -ENOMEM;
@@ -4124,7 +4123,7 @@ static int ppc440spe_adma_probe(struct platform_device *ofdev)
 	platform_set_drvdata(ofdev, adev);
 
 	/* create a channel */
-	chan = kzalloc(sizeof(*chan), GFP_KERNEL);
+	chan = kzalloc_obj(*chan);
 	if (!chan) {
 		initcode = PPC_ADMA_INIT_CHANNEL;
 		ret = -ENOMEM;
@@ -4161,7 +4160,7 @@ static int ppc440spe_adma_probe(struct platform_device *ofdev)
 					   PAGE_SIZE, DMA_BIDIRECTIONAL);
 	}
 
-	ref = kmalloc(sizeof(*ref), GFP_KERNEL);
+	ref = kmalloc_obj(*ref);
 	if (ref) {
 		ref->chan = &chan->common;
 		INIT_LIST_HEAD(&ref->node);
@@ -4549,7 +4548,7 @@ MODULE_DEVICE_TABLE(of, ppc440spe_adma_of_match);
 
 static struct platform_driver ppc440spe_adma_driver = {
 	.probe = ppc440spe_adma_probe,
-	.remove_new = ppc440spe_adma_remove,
+	.remove = ppc440spe_adma_remove,
 	.driver = {
 		.name = "PPC440SP(E)-ADMA",
 		.of_match_table = ppc440spe_adma_of_match,

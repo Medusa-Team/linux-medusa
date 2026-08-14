@@ -311,12 +311,8 @@ static int cxd2841er_set_reg_bits(struct cxd2841er_priv *priv,
 
 static u32 cxd2841er_calc_iffreq_xtal(enum cxd2841er_xtal xtal, u32 ifhz)
 {
-	u64 tmp;
-
-	tmp = (u64) ifhz * 16777216;
-	do_div(tmp, ((xtal == SONY_XTAL_24000) ? 48000000 : 41000000));
-
-	return (u32) tmp;
+	return div_u64(ifhz * 16777216ull,
+		       (xtal == SONY_XTAL_24000) ? 48000000 : 41000000);
 }
 
 static u32 cxd2841er_calc_iffreq(u32 ifhz)
@@ -1940,7 +1936,8 @@ static void cxd2841er_read_ber(struct dvb_frontend *fe)
 {
 	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
 	struct cxd2841er_priv *priv = fe->demodulator_priv;
-	u32 ret, bit_error = 0, bit_count = 0;
+	u32 bit_error = 0, bit_count = 0;
+	int ret;
 
 	dev_dbg(&priv->i2c->dev, "%s()\n", __func__);
 	switch (p->delivery_system) {
@@ -3847,7 +3844,7 @@ static struct dvb_frontend *cxd2841er_attach(struct cxd2841er_config *cfg,
 	struct cxd2841er_priv *priv = NULL;
 
 	/* allocate memory for the internal state */
-	priv = kzalloc(sizeof(struct cxd2841er_priv), GFP_KERNEL);
+	priv = kzalloc_obj(struct cxd2841er_priv);
 	if (!priv)
 		return NULL;
 	priv->i2c = i2c;

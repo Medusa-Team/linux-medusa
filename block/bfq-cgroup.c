@@ -380,7 +380,7 @@ static void bfqg_stats_add_aux(struct bfqg_stats *to, struct bfqg_stats *from)
 	blkg_rwstat_add_aux(&to->merged, &from->merged);
 	blkg_rwstat_add_aux(&to->service_time, &from->service_time);
 	blkg_rwstat_add_aux(&to->wait_time, &from->wait_time);
-	bfq_stat_add_aux(&from->time, &from->time);
+	bfq_stat_add_aux(&to->time, &from->time);
 	bfq_stat_add_aux(&to->avg_queue_size_sum, &from->avg_queue_size_sum);
 	bfq_stat_add_aux(&to->avg_queue_size_samples,
 			  &from->avg_queue_size_samples);
@@ -494,7 +494,7 @@ static struct blkcg_policy_data *bfq_cpd_alloc(gfp_t gfp)
 {
 	struct bfq_group_data *bgd;
 
-	bgd = kzalloc(sizeof(*bgd), gfp);
+	bgd = kzalloc_obj(*bgd, gfp);
 	if (!bgd)
 		return NULL;
 
@@ -679,12 +679,7 @@ void bfq_bfqq_move(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 		bfq_put_idle_entity(bfq_entity_service_tree(entity), entity);
 	bfqg_and_blkg_put(old_parent);
 
-	if (entity->parent &&
-	    entity->parent->last_bfqq_created == bfqq)
-		entity->parent->last_bfqq_created = NULL;
-	else if (bfqd->last_bfqq_created == bfqq)
-		bfqd->last_bfqq_created = NULL;
-
+	bfq_reassign_last_bfqq(bfqq, NULL);
 	entity->parent = bfqg->my_entity;
 	entity->sched_data = &bfqg->sched_data;
 	/* pin down bfqg and its associated blkg  */

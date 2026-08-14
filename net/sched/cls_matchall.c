@@ -189,7 +189,7 @@ static int mall_change(struct net *net, struct sk_buff *in_skb,
 			return -EINVAL;
 	}
 
-	new = kzalloc(sizeof(*new), GFP_KERNEL);
+	new = kzalloc_obj(*new);
 	if (!new)
 		return -ENOBUFS;
 
@@ -227,6 +227,8 @@ static int mall_change(struct net *net, struct sk_buff *in_skb,
 
 	if (!tc_in_hw(new->flags))
 		new->flags |= TCA_CLS_FLAGS_NOT_IN_HW;
+
+	tcf_proto_update_usesw(tp, new->flags);
 
 	*arg = head;
 	rcu_assign_pointer(tp->root, new);

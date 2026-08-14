@@ -215,8 +215,7 @@ static int pca9532_update_hw_blink(struct pca9532_led *led,
 		if (other->state == PCA9532_PWM1) {
 			if (other->ldev.blink_delay_on != delay_on ||
 			    other->ldev.blink_delay_off != delay_off) {
-				dev_err(&led->client->dev,
-					"HW can handle only one blink configuration at a time\n");
+				/* HW can handle only one blink configuration at a time */
 				return -EINVAL;
 			}
 		}
@@ -224,7 +223,7 @@ static int pca9532_update_hw_blink(struct pca9532_led *led,
 
 	psc = ((delay_on + delay_off) * PCA9532_PWM_PERIOD_DIV - 1) / 1000;
 	if (psc > U8_MAX) {
-		dev_err(&led->client->dev, "Blink period too long to be handled by hardware\n");
+		/* Blink period too long to be handled by hardware */
 		return -EINVAL;
 	}
 
@@ -319,7 +318,8 @@ static int pca9532_gpio_request_pin(struct gpio_chip *gc, unsigned offset)
 	return -EBUSY;
 }
 
-static void pca9532_gpio_set_value(struct gpio_chip *gc, unsigned offset, int val)
+static int pca9532_gpio_set_value(struct gpio_chip *gc, unsigned int offset,
+				  int val)
 {
 	struct pca9532_data *data = gpiochip_get_data(gc);
 	struct pca9532_led *led = &data->leds[offset];
@@ -330,6 +330,8 @@ static void pca9532_gpio_set_value(struct gpio_chip *gc, unsigned offset, int va
 		led->state = PCA9532_OFF;
 
 	pca9532_setled(led);
+
+	return 0;
 }
 
 static int pca9532_gpio_get_value(struct gpio_chip *gc, unsigned offset)
@@ -352,9 +354,7 @@ static int pca9532_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
 
 static int pca9532_gpio_direction_output(struct gpio_chip *gc, unsigned offset, int val)
 {
-	pca9532_gpio_set_value(gc, offset, val);
-
-	return 0;
+	return pca9532_gpio_set_value(gc, offset, val);
 }
 #endif /* CONFIG_LEDS_PCA9532_GPIO */
 
@@ -506,7 +506,6 @@ static struct pca9532_platform_data *
 pca9532_of_populate_pdata(struct device *dev, struct device_node *np)
 {
 	struct pca9532_platform_data *pdata;
-	struct device_node *child;
 	int devid, maxleds;
 	int i = 0;
 	const char *state;
@@ -525,7 +524,7 @@ pca9532_of_populate_pdata(struct device *dev, struct device_node *np)
 	of_property_read_u8_array(np, "nxp,psc", &pdata->psc[PCA9532_PWM_ID_0],
 				  ARRAY_SIZE(pdata->psc));
 
-	for_each_available_child_of_node(np, child) {
+	for_each_available_child_of_node_scoped(np, child) {
 		if (of_property_read_string(child, "label",
 					    &pdata->leds[i].name))
 			pdata->leds[i].name = child->name;
@@ -538,10 +537,8 @@ pca9532_of_populate_pdata(struct device *dev, struct device_node *np)
 			else if (!strcmp(state, "keep"))
 				pdata->leds[i].state = PCA9532_KEEP;
 		}
-		if (++i >= maxleds) {
-			of_node_put(child);
+		if (++i >= maxleds)
 			break;
-		}
 	}
 
 	return pdata;

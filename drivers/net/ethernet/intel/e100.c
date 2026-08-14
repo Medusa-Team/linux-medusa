@@ -146,7 +146,7 @@
 #include <linux/string.h>
 #include <linux/firmware.h>
 #include <linux/rtnetlink.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 
 #define DRV_NAME		"e100"
@@ -1682,7 +1682,7 @@ static void e100_adjust_adaptive_ifs(struct nic *nic, int speed, int duplex)
 
 static void e100_watchdog(struct timer_list *t)
 {
-	struct nic *nic = from_timer(nic, t, watchdog);
+	struct nic *nic = timer_container_of(nic, t, watchdog);
 	struct ethtool_cmd cmd = { .cmd = ETHTOOL_GSET };
 	u32 speed;
 
@@ -2156,7 +2156,7 @@ static int e100_rx_alloc_list(struct nic *nic)
 	nic->rx_to_use = nic->rx_to_clean = NULL;
 	nic->ru_running = RU_UNINITIALIZED;
 
-	if (!(nic->rxs = kcalloc(count, sizeof(struct rx), GFP_KERNEL)))
+	if (!(nic->rxs = kzalloc_objs(struct rx, count)))
 		return -ENOMEM;
 
 	for (rx = nic->rxs, i = 0; i < count; rx++, i++) {
@@ -2293,7 +2293,7 @@ static int e100_up(struct nic *nic)
 	return 0;
 
 err_no_irq:
-	del_timer_sync(&nic->watchdog);
+	timer_delete_sync(&nic->watchdog);
 err_clean_cbs:
 	e100_clean_cbs(nic);
 err_rx_clean_list:
@@ -2308,7 +2308,7 @@ static void e100_down(struct nic *nic)
 	netif_stop_queue(nic->netdev);
 	e100_hw_reset(nic);
 	free_irq(nic->pdev->irq, nic->netdev);
-	del_timer_sync(&nic->watchdog);
+	timer_delete_sync(&nic->watchdog);
 	netif_carrier_off(nic->netdev);
 	e100_clean_cbs(nic);
 	e100_rx_clean_list(nic);

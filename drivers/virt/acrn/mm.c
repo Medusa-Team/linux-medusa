@@ -21,7 +21,7 @@ static int modify_region(struct acrn_vm *vm, struct vm_memory_region_op *region)
 	struct vm_memory_region_batch *regions;
 	int ret;
 
-	regions = kzalloc(sizeof(*regions), GFP_KERNEL);
+	regions = kzalloc_obj(*regions);
 	if (!regions)
 		return -ENOMEM;
 
@@ -55,7 +55,7 @@ int acrn_mm_region_add(struct acrn_vm *vm, u64 user_gpa, u64 service_gpa,
 	struct vm_memory_region_op *region;
 	int ret = 0;
 
-	region = kzalloc(sizeof(*region), GFP_KERNEL);
+	region = kzalloc_obj(*region);
 	if (!region)
 		return -ENOMEM;
 
@@ -68,7 +68,7 @@ int acrn_mm_region_add(struct acrn_vm *vm, u64 user_gpa, u64 service_gpa,
 	ret = modify_region(vm, region);
 
 	dev_dbg(acrn_dev.this_device,
-		"%s: user-GPA[%pK] service-GPA[%pK] size[0x%llx].\n",
+		"%s: user-GPA[%p] service-GPA[%p] size[0x%llx].\n",
 		__func__, (void *)user_gpa, (void *)service_gpa, size);
 	kfree(region);
 	return ret;
@@ -87,7 +87,7 @@ int acrn_mm_region_del(struct acrn_vm *vm, u64 user_gpa, u64 size)
 	struct vm_memory_region_op *region;
 	int ret = 0;
 
-	region = kzalloc(sizeof(*region), GFP_KERNEL);
+	region = kzalloc_obj(*region);
 	if (!region)
 		return -ENOMEM;
 
@@ -99,7 +99,7 @@ int acrn_mm_region_del(struct acrn_vm *vm, u64 user_gpa, u64 size)
 
 	ret = modify_region(vm, region);
 
-	dev_dbg(acrn_dev.this_device, "%s: user-GPA[%pK] size[0x%llx].\n",
+	dev_dbg(acrn_dev.this_device, "%s: user-GPA[%p] size[0x%llx].\n",
 		__func__, (void *)user_gpa, size);
 	kfree(region);
 	return ret;
@@ -177,9 +177,7 @@ int acrn_vm_ram_map(struct acrn_vm *vm, struct acrn_vm_memmap *memmap)
 	vma = vma_lookup(current->mm, memmap->vma_base);
 	if (vma && ((vma->vm_flags & VM_PFNMAP) != 0)) {
 		unsigned long start_pfn, cur_pfn;
-		spinlock_t *ptl;
 		bool writable;
-		pte_t *ptep;
 
 		if ((memmap->vma_base + memmap->len) > vma->vm_end) {
 			mmap_read_unlock(current->mm);
@@ -187,16 +185,20 @@ int acrn_vm_ram_map(struct acrn_vm *vm, struct acrn_vm_memmap *memmap)
 		}
 
 		for (i = 0; i < nr_pages; i++) {
-			ret = follow_pte(vma, memmap->vma_base + i * PAGE_SIZE,
-					 &ptep, &ptl);
+			struct follow_pfnmap_args args = {
+				.vma = vma,
+				.address = memmap->vma_base + i * PAGE_SIZE,
+			};
+
+			ret = follow_pfnmap_start(&args);
 			if (ret)
 				break;
 
-			cur_pfn = pte_pfn(ptep_get(ptep));
+			cur_pfn = args.pfn;
 			if (i == 0)
 				start_pfn = cur_pfn;
-			writable = !!pte_write(ptep_get(ptep));
-			pte_unmap_unlock(ptep, ptl);
+			writable = args.writable;
+			follow_pfnmap_end(&args);
 
 			/* Disallow write access if the PTE is not writable. */
 			if (!writable &&
@@ -222,7 +224,7 @@ int acrn_vm_ram_map(struct acrn_vm *vm, struct acrn_vm_memmap *memmap)
 
 		if (ret) {
 			dev_dbg(acrn_dev.this_device,
-				"Failed to lookup PFN at VMA:%pK.\n", (void *)memmap->vma_base);
+				"Failed to lookup PFN at VMA:%p.\n", (void *)memmap->vma_base);
 			return ret;
 		}
 
@@ -283,8 +285,7 @@ int acrn_vm_ram_map(struct acrn_vm *vm, struct acrn_vm_memmap *memmap)
 	}
 
 	/* Prepare the vm_memory_region_batch */
-	regions_info = kzalloc(struct_size(regions_info, regions_op,
-					   nr_regions), GFP_KERNEL);
+	regions_info = kzalloc_flex(*regions_info, regions_op, nr_regions);
 	if (!regions_info) {
 		ret = -ENOMEM;
 		goto unmap_kernel_map;
@@ -324,7 +325,7 @@ int acrn_vm_ram_map(struct acrn_vm *vm, struct acrn_vm_memmap *memmap)
 	kfree(regions_info);
 
 	dev_dbg(acrn_dev.this_device,
-		"%s: VM[%u] service-GVA[%pK] user-GPA[%pK] size[0x%llx]\n",
+		"%s: VM[%u] service-GVA[%p] user-GPA[%p] size[0x%llx]\n",
 		__func__, vm->vmid,
 		remap_vaddr, (void *)memmap->user_vm_pa, memmap->len);
 	return ret;

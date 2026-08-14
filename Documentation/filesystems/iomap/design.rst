@@ -142,9 +142,9 @@ Definitions
  * **pure overwrite**: A write operation that does not require any
    metadata or zeroing operations to perform during either submission
    or completion.
-   This implies that the fileystem must have already allocated space
+   This implies that the filesystem must have already allocated space
    on disk as ``IOMAP_MAPPED`` and the filesystem must not place any
-   constaints on IO alignment or size.
+   constraints on IO alignment or size.
    The only constraints on I/O alignment are device level (minimum I/O
    size and alignment, typically sector size).
 
@@ -165,9 +165,8 @@ structure below:
      u16                 flags;
      struct block_device *bdev;
      struct dax_device   *dax_dev;
-     voidw               *inline_data;
+     void                *inline_data;
      void                *private;
-     const struct iomap_folio_ops *folio_ops;
      u64                 validity_cookie;
  };
 
@@ -243,8 +242,24 @@ The fields are as follows:
      regular file data.
      This is only useful for FIEMAP.
 
-   * **IOMAP_F_PRIVATE**: Starting with this value, the upper bits can
-     be set by the filesystem for its own purposes.
+   * **IOMAP_F_BOUNDARY**: This indicates I/O and its completion must not be
+     merged with any other I/O or completion. Filesystems must use this when
+     submitting I/O to devices that cannot handle I/O crossing certain LBAs
+     (e.g. ZNS devices). This flag applies only to buffered I/O writeback; all
+     other functions ignore it.
+
+   * **IOMAP_F_PRIVATE**: This flag is reserved for filesystem private use.
+
+   * **IOMAP_F_ANON_WRITE**: Indicates that (write) I/O does not have a target
+     block assigned to it yet and the file system will do that in the bio
+     submission handler, splitting the I/O as needed.
+
+   * **IOMAP_F_ATOMIC_BIO**: This indicates write I/O must be submitted with the
+     ``REQ_ATOMIC`` flag set in the bio. Filesystems need to set this flag to
+     inform iomap that the write I/O operation requires torn-write protection
+     based on HW-offload mechanism. They must also ensure that mapping updates
+     upon the completion of the I/O must be performed in a single metadata
+     update.
 
    These flags can be set by iomap itself during file operations.
    The filesystem should supply an ``->iomap_end`` function if it needs
@@ -275,8 +290,6 @@ The fields are as follows:
  * ``private`` is a pointer to `filesystem-private information
    <https://lore.kernel.org/all/20180619164137.13720-7-hch@lst.de/>`_.
    This value will be passed unchanged to ``->iomap_end``.
-
- * ``folio_ops`` will be covered in the section on pagecache operations.
 
  * ``validity_cookie`` is a magic freshness value set by the filesystem
    that should be used to detect stale mappings.
@@ -352,6 +365,11 @@ operations:
    ``IOMAP_NOWAIT`` is often set on behalf of ``IOCB_NOWAIT`` or
    ``RWF_NOWAIT``.
 
+ * ``IOMAP_DONTCACHE`` is set when the caller wishes to perform a
+   buffered file I/O and would like the kernel to drop the pagecache
+   after the I/O completes, if it isn't already being used by another
+   thread.
+
 If it is necessary to read existing file contents from a `different
 <https://lore.kernel.org/all/20191008071527.29304-9-hch@lst.de/>`_
 device or address range on a device, the filesystem should return that
@@ -394,7 +412,7 @@ iomap is concerned:
 
  * The **upper** level primitive is provided by the filesystem to
    coordinate access to different iomap operations.
-   The exact primitive is specifc to the filesystem and operation,
+   The exact primitive is specific to the filesystem and operation,
    but is often a VFS inode, pagecache invalidation, or folio lock.
    For example, a filesystem might take ``i_rwsem`` before calling
    ``iomap_file_buffered_write`` and ``iomap_file_unshare`` to prevent
@@ -426,7 +444,7 @@ iomap is concerned:
 
 The exact locking requirements are specific to the filesystem; for
 certain operations, some of these locks can be elided.
-All further mention of locking are *recommendations*, not mandates.
+All further mentions of locking are *recommendations*, not mandates.
 Each filesystem author must figure out the locking for themself.
 
 Bugs and Limitations

@@ -40,6 +40,9 @@
 #define smnPCS_GOPX1_PCS_ERROR_STATUS    0x12200210
 #define smnPCS_GOPX1_PCS_ERROR_NONCORRECTABLE_MASK      0x12200218
 
+#define XGMI_STATE_DISABLE                      0xD1
+#define XGMI_STATE_LS0                          0x81
+
 static DEFINE_MUTEX(xgmi_mutex);
 
 #define AMDGPU_MAX_XGMI_DEVICE_PER_HIVE		4
@@ -289,6 +292,85 @@ static const struct amdgpu_pcs_ras_field xgmi3x16_pcs_ras_fields[] = {
 	 SOC15_REG_FIELD(PCS_XGMI3X16_PCS_ERROR_STATUS, RxCMDPktErr)},
 };
 
+int amdgpu_xgmi_get_ext_link(struct amdgpu_device *adev, int link_num)
+{
+	int link_map_6_4_x[8] = { 0, 3, 1, 2, 7, 6, 4, 5 };
+
+	if (adev->gmc.xgmi.num_physical_nodes <= 1)
+		return -EINVAL;
+
+	switch (amdgpu_ip_version(adev, XGMI_HWIP, 0)) {
+	case IP_VERSION(6, 4, 0):
+	case IP_VERSION(6, 4, 1):
+		if (link_num < ARRAY_SIZE(link_map_6_4_x))
+			return link_map_6_4_x[link_num];
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return -EINVAL;
+}
+
+static u32 xgmi_v6_4_get_link_status(struct amdgpu_device *adev, int global_link_num)
+{
+	const u32 smn_xgmi_6_4_pcs_state_hist1[2] = { 0x11a00070, 0x11b00070 };
+	const u32 smn_xgmi_6_4_1_pcs_state_hist1[2] = { 0x12100070,
+							0x11b00070 };
+	u32 i, n;
+	u64 addr;
+
+	switch (amdgpu_ip_version(adev, XGMI_HWIP, 0)) {
+	case IP_VERSION(6, 4, 0):
+		n = ARRAY_SIZE(smn_xgmi_6_4_pcs_state_hist1);
+		addr = smn_xgmi_6_4_pcs_state_hist1[global_link_num % n];
+		break;
+	case IP_VERSION(6, 4, 1):
+		n = ARRAY_SIZE(smn_xgmi_6_4_1_pcs_state_hist1);
+		addr = smn_xgmi_6_4_1_pcs_state_hist1[global_link_num % n];
+		break;
+	default:
+		return U32_MAX;
+	}
+
+	i = global_link_num / n;
+
+	if (!(adev->aid_mask & BIT(i)))
+		return U32_MAX;
+
+	addr += amdgpu_reg_get_smn_base64(adev, XGMI_HWIP, i);
+
+	return RREG32_PCIE_EXT(addr);
+}
+
+int amdgpu_get_xgmi_link_status(struct amdgpu_device *adev, int global_link_num)
+{
+	u32 xgmi_state_reg_val;
+
+	if (amdgpu_sriov_vf(adev))
+		return AMDGPU_XGMI_LINK_NA;
+
+	if (adev->gmc.xgmi.num_physical_nodes <= 1)
+		return -EINVAL;
+
+	switch (amdgpu_ip_version(adev, XGMI_HWIP, 0)) {
+	case IP_VERSION(6, 4, 0):
+	case IP_VERSION(6, 4, 1):
+		xgmi_state_reg_val = xgmi_v6_4_get_link_status(adev, global_link_num);
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	if ((xgmi_state_reg_val & 0xFF) == XGMI_STATE_DISABLE)
+		return -ENOLINK;
+
+	if ((xgmi_state_reg_val & 0xFF) == XGMI_STATE_LS0)
+		return AMDGPU_XGMI_LINK_ACTIVE;
+
+	return AMDGPU_XGMI_LINK_INACTIVE;
+}
+
 /**
  * DOC: AMDGPU XGMI Support
  *
@@ -390,12 +472,12 @@ static ssize_t amdgpu_xgmi_show_num_hops(struct device *dev,
 	struct drm_device *ddev = dev_get_drvdata(dev);
 	struct amdgpu_device *adev = drm_to_adev(ddev);
 	struct psp_xgmi_topology_info *top = &adev->psp.xgmi_context.top_info;
-	int i;
+	int i, offset = 0;
 
 	for (i = 0; i < top->num_nodes; i++)
-		sprintf(buf + 3 * i, "%02x ", top->nodes[i].num_hops);
+		offset += sysfs_emit_at(buf, offset, "%02x ", top->nodes[i].num_hops);
 
-	return sysfs_emit(buf, "%s\n", buf);
+	return offset + sysfs_emit_at(buf, offset, "\n");
 }
 
 static ssize_t amdgpu_xgmi_show_num_links(struct device *dev,
@@ -405,12 +487,12 @@ static ssize_t amdgpu_xgmi_show_num_links(struct device *dev,
 	struct drm_device *ddev = dev_get_drvdata(dev);
 	struct amdgpu_device *adev = drm_to_adev(ddev);
 	struct psp_xgmi_topology_info *top = &adev->psp.xgmi_context.top_info;
-	int i;
+	int i, offset = 0;
 
 	for (i = 0; i < top->num_nodes; i++)
-		sprintf(buf + 3 * i, "%02x ", top->nodes[i].num_links);
+		offset += sysfs_emit_at(buf, offset, "%02x ", top->nodes[i].num_links);
 
-	return sysfs_emit(buf, "%s\n", buf);
+	return offset + sysfs_emit_at(buf, offset, "\n");
 }
 
 static ssize_t amdgpu_xgmi_show_connected_port_num(struct device *dev,
@@ -611,7 +693,7 @@ struct amdgpu_hive_info *amdgpu_get_xgmi_hive(struct amdgpu_device *adev)
 			goto pro_end;
 	}
 
-	hive = kzalloc(sizeof(*hive), GFP_KERNEL);
+	hive = kzalloc_obj(*hive);
 	if (!hive) {
 		dev_err(adev->dev, "XGMI: allocation failed\n");
 		ret = -ENOMEM;
@@ -667,6 +749,7 @@ struct amdgpu_hive_info *amdgpu_get_xgmi_hive(struct amdgpu_device *adev)
 	task_barrier_init(&hive->tb);
 	hive->pstate = AMDGPU_XGMI_PSTATE_UNKNOWN;
 	hive->hi_req_gpu = NULL;
+	atomic_set(&hive->requested_nps_mode, UNKNOWN_MEMORY_PARTITION_MODE);
 
 	/*
 	 * hive pstate on boot is high in vega20 so we have to go to low
@@ -776,28 +859,88 @@ int amdgpu_xgmi_update_topology(struct amdgpu_hive_info *hive, struct amdgpu_dev
  * num_hops[2:0] = number of hops
  */
 int amdgpu_xgmi_get_hops_count(struct amdgpu_device *adev,
-		struct amdgpu_device *peer_adev)
+			       struct amdgpu_device *peer_adev)
 {
 	struct psp_xgmi_topology_info *top = &adev->psp.xgmi_context.top_info;
 	uint8_t num_hops_mask = 0x7;
 	int i;
 
+	if (!adev->gmc.xgmi.supported)
+		return 0;
+
 	for (i = 0 ; i < top->num_nodes; ++i)
 		if (top->nodes[i].node_id == peer_adev->gmc.xgmi.node_id)
 			return top->nodes[i].num_hops & num_hops_mask;
-	return	-EINVAL;
+
+	dev_err(adev->dev, "Failed to get xgmi hops count for peer %d.\n",
+		peer_adev->gmc.xgmi.physical_node_id);
+
+	return 0;
 }
 
-int amdgpu_xgmi_get_num_links(struct amdgpu_device *adev,
-		struct amdgpu_device *peer_adev)
+int amdgpu_xgmi_get_bandwidth(struct amdgpu_device *adev, struct amdgpu_device *peer_adev,
+			      enum amdgpu_xgmi_bw_mode bw_mode, enum amdgpu_xgmi_bw_unit bw_unit,
+			      uint32_t *min_bw, uint32_t *max_bw)
+{
+	bool peer_mode = bw_mode == AMDGPU_XGMI_BW_MODE_PER_PEER;
+	int unit_scale = bw_unit == AMDGPU_XGMI_BW_UNIT_MBYTES ? 1000 : 1;
+	int num_lanes = adev->gmc.xgmi.max_width;
+	int speed = adev->gmc.xgmi.max_speed;
+	int num_links = !peer_mode ? 1 : -1;
+
+	if (!(min_bw && max_bw))
+		return -EINVAL;
+
+	*min_bw = 0;
+	*max_bw = 0;
+
+	if (!adev->gmc.xgmi.supported)
+		return -ENODATA;
+
+	if (peer_mode && !peer_adev)
+		return -EINVAL;
+
+	if (peer_mode) {
+		struct psp_xgmi_topology_info *top = &adev->psp.xgmi_context.top_info;
+		int i;
+
+		for (i = 0 ; i < top->num_nodes; ++i) {
+			if (top->nodes[i].node_id != peer_adev->gmc.xgmi.node_id)
+				continue;
+
+			num_links =  top->nodes[i].num_links;
+			break;
+		}
+	}
+
+	if (num_links == -1) {
+		dev_err(adev->dev, "Failed to get number of xgmi links for peer %d.\n",
+			peer_adev->gmc.xgmi.physical_node_id);
+	} else if (num_links) {
+		int per_link_bw = (speed * num_lanes * unit_scale)/BITS_PER_BYTE;
+
+		*min_bw = per_link_bw;
+		*max_bw = num_links * per_link_bw;
+	}
+
+	return 0;
+}
+
+bool amdgpu_xgmi_get_is_sharing_enabled(struct amdgpu_device *adev,
+					struct amdgpu_device *peer_adev)
 {
 	struct psp_xgmi_topology_info *top = &adev->psp.xgmi_context.top_info;
 	int i;
 
+	/* Sharing should always be enabled for non-SRIOV. */
+	if (!amdgpu_sriov_vf(adev))
+		return true;
+
 	for (i = 0 ; i < top->num_nodes; ++i)
 		if (top->nodes[i].node_id == peer_adev->gmc.xgmi.node_id)
-			return top->nodes[i].num_links;
-	return	-EINVAL;
+			return !!top->nodes[i].is_sharing_enabled;
+
+	return false;
 }
 
 /*
@@ -826,28 +969,6 @@ static int amdgpu_xgmi_initialize_hive_get_data_partition(struct amdgpu_hive_inf
 	return 0;
 }
 
-static void amdgpu_xgmi_fill_topology_info(struct amdgpu_device *adev,
-	struct amdgpu_device *peer_adev)
-{
-	struct psp_xgmi_topology_info *top_info = &adev->psp.xgmi_context.top_info;
-	struct psp_xgmi_topology_info *peer_info = &peer_adev->psp.xgmi_context.top_info;
-
-	for (int i = 0; i < peer_info->num_nodes; i++) {
-		if (peer_info->nodes[i].node_id == adev->gmc.xgmi.node_id) {
-			for (int j = 0; j < top_info->num_nodes; j++) {
-				if (top_info->nodes[j].node_id == peer_adev->gmc.xgmi.node_id) {
-					peer_info->nodes[i].num_hops = top_info->nodes[j].num_hops;
-					peer_info->nodes[i].is_sharing_enabled =
-							top_info->nodes[j].is_sharing_enabled;
-					peer_info->nodes[i].num_links =
-							top_info->nodes[j].num_links;
-					return;
-				}
-			}
-		}
-	}
-}
-
 int amdgpu_xgmi_add_device(struct amdgpu_device *adev)
 {
 	struct psp_xgmi_topology_info *top_info;
@@ -860,8 +981,7 @@ int amdgpu_xgmi_add_device(struct amdgpu_device *adev)
 	if (!adev->gmc.xgmi.supported)
 		return 0;
 
-	if (!adev->gmc.xgmi.pending_reset &&
-	    amdgpu_device_ip_get_ip_block(adev, AMD_IP_BLOCK_TYPE_PSP)) {
+	if (amdgpu_device_ip_get_ip_block(adev, AMD_IP_BLOCK_TYPE_PSP)) {
 		ret = psp_xgmi_initialize(&adev->psp, false, true);
 		if (ret) {
 			dev_err(adev->dev,
@@ -907,8 +1027,7 @@ int amdgpu_xgmi_add_device(struct amdgpu_device *adev)
 
 	task_barrier_add_task(&hive->tb);
 
-	if (!adev->gmc.xgmi.pending_reset &&
-	    amdgpu_device_ip_get_ip_block(adev, AMD_IP_BLOCK_TYPE_PSP)) {
+	if (amdgpu_device_ip_get_ip_block(adev, AMD_IP_BLOCK_TYPE_PSP)) {
 		list_for_each_entry(tmp_adev, &hive->device_list, gmc.xgmi.head) {
 			/* update node list for other device in the hive */
 			if (tmp_adev != adev) {
@@ -934,11 +1053,6 @@ int amdgpu_xgmi_add_device(struct amdgpu_device *adev)
 					adev->gmc.xgmi.hive_id, ret);
 				/* To do: continue with some node failed or disable the whole hive*/
 				goto exit_unlock;
-			}
-
-			/* fill the topology info for peers instead of getting from PSP */
-			list_for_each_entry(tmp_adev, &hive->device_list, gmc.xgmi.head) {
-				amdgpu_xgmi_fill_topology_info(adev, tmp_adev);
 			}
 		} else {
 			/* get latest topology info for each device from psp */
@@ -985,7 +1099,7 @@ int amdgpu_xgmi_add_device(struct amdgpu_device *adev)
 		}
 	}
 
-	if (!ret && !adev->gmc.xgmi.pending_reset)
+	if (!ret)
 		ret = amdgpu_xgmi_sysfs_add_dev_info(adev, hive);
 
 exit_unlock:
@@ -1063,14 +1177,16 @@ static int xgmi_v6_4_0_aca_bank_parser(struct aca_handle *handle, struct aca_ban
 
 	switch (type) {
 	case ACA_SMU_TYPE_UE:
-		if (ext_error_code != 0 && ext_error_code != 9)
+		if (ext_error_code != 0 && ext_error_code != 1 && ext_error_code != 9)
 			count = 0ULL;
 
+		bank->aca_err_type = ACA_ERROR_TYPE_UE;
 		ret = aca_error_cache_log_bank_error(handle, &info, ACA_ERROR_TYPE_UE, count);
 		break;
 	case ACA_SMU_TYPE_CE:
 		count = ext_error_code == 6 ? count : 0ULL;
-		ret = aca_error_cache_log_bank_error(handle, &info, ACA_ERROR_TYPE_CE, count);
+		bank->aca_err_type = ACA_ERROR_TYPE_CE;
+		ret = aca_error_cache_log_bank_error(handle, &info, bank->aca_err_type, count);
 		break;
 	default:
 		return -EINVAL;
@@ -1105,6 +1221,7 @@ static int amdgpu_xgmi_ras_late_init(struct amdgpu_device *adev, struct ras_comm
 
 	switch (amdgpu_ip_version(adev, XGMI_HWIP, 0)) {
 	case IP_VERSION(6, 4, 0):
+	case IP_VERSION(6, 4, 1):
 		r = amdgpu_ras_bind_aca(adev, AMDGPU_RAS_BLOCK__XGMI_WAFL,
 					&xgmi_v6_4_0_aca_info, NULL);
 		if (r)
@@ -1164,6 +1281,7 @@ static void amdgpu_xgmi_legacy_reset_ras_error_count(struct amdgpu_device *adev)
 
 	switch (amdgpu_ip_version(adev, XGMI_HWIP, 0)) {
 	case IP_VERSION(6, 4, 0):
+	case IP_VERSION(6, 4, 1):
 		for (i = 0; i < ARRAY_SIZE(xgmi3x16_pcs_err_status_reg_v6_4); i++)
 			pcs_clear_status(adev,
 					xgmi3x16_pcs_err_status_reg_v6_4[i]);
@@ -1175,7 +1293,10 @@ static void amdgpu_xgmi_legacy_reset_ras_error_count(struct amdgpu_device *adev)
 
 static void __xgmi_v6_4_0_reset_error_count(struct amdgpu_device *adev, int xgmi_inst, u64 mca_base)
 {
-	WREG64_MCA(xgmi_inst, mca_base, ACA_REG_IDX_STATUS, 0ULL);
+	uint64_t smn_base =
+		amdgpu_reg_get_smn_base64(adev, XGMI_HWIP, xgmi_inst);
+
+	WREG64_MCA(smn_base, mca_base, ACA_REG_IDX_STATUS, 0ULL);
 }
 
 static void xgmi_v6_4_0_reset_error_count(struct amdgpu_device *adev, int xgmi_inst)
@@ -1198,6 +1319,7 @@ static void amdgpu_xgmi_reset_ras_error_count(struct amdgpu_device *adev)
 {
 	switch (amdgpu_ip_version(adev, XGMI_HWIP, 0)) {
 	case IP_VERSION(6, 4, 0):
+	case IP_VERSION(6, 4, 1):
 		xgmi_v6_4_0_reset_ras_error_count(adev);
 		break;
 	default:
@@ -1223,7 +1345,9 @@ static int amdgpu_xgmi_query_pcs_error_status(struct amdgpu_device *adev,
 		if (amdgpu_ip_version(adev, XGMI_HWIP, 0) ==
 		    IP_VERSION(6, 1, 0) ||
 		    amdgpu_ip_version(adev, XGMI_HWIP, 0) ==
-		    IP_VERSION(6, 4, 0)) {
+		    IP_VERSION(6, 4, 0) ||
+		    amdgpu_ip_version(adev, XGMI_HWIP, 0) ==
+		    IP_VERSION(6, 4, 1)) {
 			pcs_ras_fields = &xgmi3x16_pcs_ras_fields[0];
 			field_array_size = ARRAY_SIZE(xgmi3x16_pcs_ras_fields);
 		} else {
@@ -1331,6 +1455,7 @@ static void amdgpu_xgmi_legacy_query_ras_error_count(struct amdgpu_device *adev,
 
 	switch (amdgpu_ip_version(adev, XGMI_HWIP, 0)) {
 	case IP_VERSION(6, 4, 0):
+	case IP_VERSION(6, 4, 1):
 		/* check xgmi3x16 pcs error */
 		for (i = 0; i < ARRAY_SIZE(xgmi3x16_pcs_err_status_reg_v6_4); i++) {
 			data = RREG32_PCIE(xgmi3x16_pcs_err_status_reg_v6_4[i]);
@@ -1381,6 +1506,7 @@ static void __xgmi_v6_4_0_query_error_count(struct amdgpu_device *adev, struct a
 					    u64 mca_base, struct ras_err_data *err_data)
 {
 	int xgmi_inst = mcm_info->die_id;
+	uint64_t smn_base;
 	u64 status = 0;
 
 	status = RREG64_MCA(xgmi_inst, mca_base, ACA_REG_IDX_STATUS);
@@ -1389,16 +1515,16 @@ static void __xgmi_v6_4_0_query_error_count(struct amdgpu_device *adev, struct a
 
 	switch (xgmi_v6_4_0_pcs_mca_get_error_type(adev, status)) {
 	case ACA_ERROR_TYPE_UE:
-		amdgpu_ras_error_statistic_ue_count(err_data, mcm_info, NULL, 1ULL);
+		amdgpu_ras_error_statistic_ue_count(err_data, mcm_info, 1ULL);
 		break;
 	case ACA_ERROR_TYPE_CE:
-		amdgpu_ras_error_statistic_ce_count(err_data, mcm_info, NULL, 1ULL);
+		amdgpu_ras_error_statistic_ce_count(err_data, mcm_info, 1ULL);
 		break;
 	default:
 		break;
 	}
-
-	WREG64_MCA(xgmi_inst, mca_base, ACA_REG_IDX_STATUS, 0ULL);
+	smn_base = amdgpu_reg_get_smn_base64(adev, XGMI_HWIP, xgmi_inst);
+	WREG64_MCA(smn_base, mca_base, ACA_REG_IDX_STATUS, 0ULL);
 }
 
 static void xgmi_v6_4_0_query_error_count(struct amdgpu_device *adev, int xgmi_inst, struct ras_err_data *err_data)
@@ -1427,6 +1553,7 @@ static void amdgpu_xgmi_query_ras_error_count(struct amdgpu_device *adev,
 {
 	switch (amdgpu_ip_version(adev, XGMI_HWIP, 0)) {
 	case IP_VERSION(6, 4, 0):
+	case IP_VERSION(6, 4, 1):
 		xgmi_v6_4_0_query_ras_error_count(adev, ras_error_status);
 		break;
 	default:
@@ -1499,4 +1626,158 @@ int amdgpu_xgmi_ras_sw_init(struct amdgpu_device *adev)
 	adev->gmc.xgmi.ras_if = &ras->ras_block.ras_comm;
 
 	return 0;
+}
+
+static void amdgpu_xgmi_reset_on_init_work(struct work_struct *work)
+{
+	struct amdgpu_hive_info *hive =
+		container_of(work, struct amdgpu_hive_info, reset_on_init_work);
+	struct amdgpu_reset_context reset_context;
+	struct amdgpu_device *tmp_adev;
+	struct list_head device_list;
+	int r;
+
+	mutex_lock(&hive->hive_lock);
+
+	INIT_LIST_HEAD(&device_list);
+	list_for_each_entry(tmp_adev, &hive->device_list, gmc.xgmi.head)
+		list_add_tail(&tmp_adev->reset_list, &device_list);
+
+	tmp_adev = list_first_entry(&device_list, struct amdgpu_device,
+				    reset_list);
+	amdgpu_device_lock_reset_domain(tmp_adev->reset_domain);
+
+	reset_context.method = AMD_RESET_METHOD_ON_INIT;
+	reset_context.reset_req_dev = tmp_adev;
+	reset_context.hive = hive;
+	reset_context.reset_device_list = &device_list;
+	set_bit(AMDGPU_NEED_FULL_RESET, &reset_context.flags);
+	set_bit(AMDGPU_SKIP_COREDUMP, &reset_context.flags);
+
+	amdgpu_reset_do_xgmi_reset_on_init(&reset_context);
+	mutex_unlock(&hive->hive_lock);
+	amdgpu_device_unlock_reset_domain(tmp_adev->reset_domain);
+
+	list_for_each_entry(tmp_adev, &hive->device_list, gmc.xgmi.head) {
+		r = amdgpu_ras_init_badpage_info(tmp_adev);
+		if (r && r != -EHWPOISON)
+			dev_err(tmp_adev->dev,
+				"error during bad page data initialization");
+	}
+}
+
+static void amdgpu_xgmi_schedule_reset_on_init(struct amdgpu_hive_info *hive)
+{
+	INIT_WORK(&hive->reset_on_init_work, amdgpu_xgmi_reset_on_init_work);
+	amdgpu_reset_domain_schedule(hive->reset_domain,
+				     &hive->reset_on_init_work);
+}
+
+int amdgpu_xgmi_reset_on_init(struct amdgpu_device *adev)
+{
+	struct amdgpu_hive_info *hive;
+	bool reset_scheduled;
+	int num_devs;
+
+	hive = amdgpu_get_xgmi_hive(adev);
+	if (!hive)
+		return -EINVAL;
+
+	mutex_lock(&hive->hive_lock);
+	num_devs = atomic_read(&hive->number_devices);
+	reset_scheduled = false;
+	if (num_devs == adev->gmc.xgmi.num_physical_nodes) {
+		amdgpu_xgmi_schedule_reset_on_init(hive);
+		reset_scheduled = true;
+	}
+
+	mutex_unlock(&hive->hive_lock);
+	amdgpu_put_xgmi_hive(hive);
+
+	if (reset_scheduled)
+		flush_work(&hive->reset_on_init_work);
+
+	return 0;
+}
+
+int amdgpu_xgmi_request_nps_change(struct amdgpu_device *adev,
+				   struct amdgpu_hive_info *hive,
+				   int req_nps_mode)
+{
+	struct amdgpu_device *tmp_adev;
+	int cur_nps_mode, r;
+
+	/* This is expected to be called only during unload of driver. The
+	 * request needs to be placed only once for all devices in the hive. If
+	 * one of them fail, revert the request for previous successful devices.
+	 * After placing the request, make hive mode as UNKNOWN so that other
+	 * devices don't request anymore.
+	 */
+	mutex_lock(&hive->hive_lock);
+	if (atomic_read(&hive->requested_nps_mode) ==
+	    UNKNOWN_MEMORY_PARTITION_MODE) {
+		dev_dbg(adev->dev, "Unexpected entry for hive NPS change");
+		mutex_unlock(&hive->hive_lock);
+		return 0;
+	}
+	list_for_each_entry(tmp_adev, &hive->device_list, gmc.xgmi.head) {
+		r = adev->gmc.gmc_funcs->request_mem_partition_mode(
+			tmp_adev, req_nps_mode);
+		if (r)
+			break;
+	}
+	if (r) {
+		/* Request back current mode if one of the requests failed */
+		cur_nps_mode =
+			adev->gmc.gmc_funcs->query_mem_partition_mode(tmp_adev);
+		list_for_each_entry_continue_reverse(
+			tmp_adev, &hive->device_list, gmc.xgmi.head)
+			adev->gmc.gmc_funcs->request_mem_partition_mode(
+				tmp_adev, cur_nps_mode);
+	}
+	/* Set to UNKNOWN so that other devices don't request anymore */
+	atomic_set(&hive->requested_nps_mode, UNKNOWN_MEMORY_PARTITION_MODE);
+	mutex_unlock(&hive->hive_lock);
+
+	return r;
+}
+
+bool amdgpu_xgmi_same_hive(struct amdgpu_device *adev,
+			   struct amdgpu_device *bo_adev)
+{
+	return (amdgpu_use_xgmi_p2p && adev != bo_adev &&
+		adev->gmc.xgmi.hive_id &&
+		adev->gmc.xgmi.hive_id == bo_adev->gmc.xgmi.hive_id);
+}
+
+void amdgpu_xgmi_early_init(struct amdgpu_device *adev)
+{
+	if (!adev->gmc.xgmi.supported)
+		return;
+
+	switch (amdgpu_ip_version(adev, GC_HWIP, 0)) {
+	case IP_VERSION(9, 4, 0):
+	case IP_VERSION(9, 4, 1):
+	case IP_VERSION(9, 4, 2):
+		/* 25 GT/s */
+		adev->gmc.xgmi.max_speed = 25;
+		adev->gmc.xgmi.max_width = 16;
+		break;
+	case IP_VERSION(9, 4, 3):
+	case IP_VERSION(9, 4, 4):
+	case IP_VERSION(9, 5, 0):
+		/* 32 GT/s */
+		adev->gmc.xgmi.max_speed = 32;
+		adev->gmc.xgmi.max_width = 16;
+		break;
+	default:
+		break;
+	}
+}
+
+void amgpu_xgmi_set_max_speed_width(struct amdgpu_device *adev,
+				    uint16_t max_speed, uint8_t max_width)
+{
+	adev->gmc.xgmi.max_speed = max_speed;
+	adev->gmc.xgmi.max_width = max_width;
 }

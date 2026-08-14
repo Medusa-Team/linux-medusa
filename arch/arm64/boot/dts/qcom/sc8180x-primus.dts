@@ -14,6 +14,8 @@
 #include "sc8180x.dtsi"
 #include "sc8180x-pmics.dtsi"
 
+/delete-node/ &gpu_mem;
+
 / {
 	model = "Qualcomm SC8180x Primus";
 	compatible = "qcom,sc8180x-primus", "qcom,sc8180x";
@@ -223,6 +225,32 @@
 		vin-supply = <&vph_pwr>;
 	};
 
+	vreg_usb2_host_en: regulator-usb2-host-en {
+		compatible = "regulator-fixed";
+		regulator-name = "usb2_host_en";
+
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+
+		gpio = <&pmc8180_1_gpios 9 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+
+		regulator-always-on;
+	};
+
+	vreg_usb3_host_en: regulator-usb3-host-en {
+		compatible = "regulator-fixed";
+		regulator-name = "usb3_host_en";
+
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+
+		gpio = <&pmc8180_2_gpios 9 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+
+		regulator-always-on;
+	};
+
 	usbprim-sbu-mux {
 		compatible = "pericom,pi3usb102", "gpio-sbu-mux";
 
@@ -416,11 +444,10 @@
 
 &gpu {
 	status = "okay";
+};
 
-	zap-shader {
-		memory-region = <&gpu_mem>;
-		firmware-name = "qcom/sc8180x/qcdxkmsuc8180.mbn";
-	};
+&gpu_zap_shader {
+	firmware-name = "qcom/sc8180x/qcdxkmsuc8180.mbn";
 };
 
 &i2c1 {
@@ -505,8 +532,6 @@
 };
 
 &mdss_edp {
-	data-lanes = <0 1 2 3>;
-
 	pinctrl-names = "default";
 	pinctrl-0 = <&edp_hpd_active>;
 
@@ -525,15 +550,11 @@
 			};
 		};
 	};
+};
 
-	ports {
-		port@1 {
-			reg = <1>;
-			mdss_edp_out: endpoint {
-				remote-endpoint = <&auo_b133han05_in>;
-			};
-		};
-	};
+&mdss_edp_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&auo_b133han05_in>;
 };
 
 &pcie1 {
@@ -549,6 +570,10 @@
 	vdda-phy-supply = <&vreg_l5e_0p88>;
 	vdda-pll-supply = <&vreg_l3c_1p2>;
 
+	status = "okay";
+};
+
+&pmc8180_pwrkey {
 	status = "okay";
 };
 
@@ -619,6 +644,40 @@
 &ufs_mem_phy {
 	vdda-phy-supply = <&vreg_l5e_0p88>;
 	vdda-pll-supply = <&vreg_l3c_1p2>;
+
+	status = "okay";
+};
+
+&usb_mp {
+	status = "okay";
+};
+
+&usb_mp_hsphy0 {
+	vdda-pll-supply = <&vreg_l5e_0p88>;
+	vdda18-supply = <&vreg_l12a_1p8>;
+	vdda33-supply = <&vreg_l16e_3p0>;
+
+	status = "okay";
+};
+
+&usb_mp_hsphy1 {
+	vdda-pll-supply = <&vreg_l5e_0p88>;
+	vdda18-supply = <&vreg_l12a_1p8>;
+	vdda33-supply = <&vreg_l16e_3p0>;
+
+	status = "okay";
+};
+
+&usb_mp_qmpphy0 {
+	vdda-phy-supply = <&vreg_l3c_1p2>;
+	vdda-pll-supply = <&vreg_l5e_0p88>;
+
+	status = "okay";
+};
+
+&usb_mp_qmpphy1 {
+	vdda-phy-supply = <&vreg_l3c_1p2>;
+	vdda-pll-supply = <&vreg_l5e_0p88>;
 
 	status = "okay";
 };
@@ -707,10 +766,6 @@
 	vdd-3.3-ch1-supply = <&vreg_l10c_3p3>;
 
 	status = "okay";
-};
-
-&xo_board_clk {
-	clock-frequency = <38400000>;
 };
 
 /* PINCTRL */

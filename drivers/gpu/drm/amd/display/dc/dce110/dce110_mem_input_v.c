@@ -40,6 +40,7 @@ static void set_flip_control(
 	struct dce_mem_input *mem_input110,
 	bool immediate)
 {
+	(void)immediate;
 	uint32_t value = 0;
 
 	value = dm_read_reg(
@@ -76,7 +77,6 @@ UNP_GRPH_PRIMARY_SURFACE_ADDRESS_HIGH_C__GRPH_PRIMARY_SURFACE_ADDRESS_HIGH_C_MAS
 		mmUNP_GRPH_PRIMARY_SURFACE_ADDRESS_HIGH_C,
 		value);
 
-	temp = 0;
 	value = 0;
 	temp = address.low_part >>
 	UNP_GRPH_PRIMARY_SURFACE_ADDRESS_C__GRPH_PRIMARY_SURFACE_ADDRESS_C__SHIFT;
@@ -112,7 +112,6 @@ UNP_GRPH_PRIMARY_SURFACE_ADDRESS_HIGH_L__GRPH_PRIMARY_SURFACE_ADDRESS_HIGH_L_MAS
 		mmUNP_GRPH_PRIMARY_SURFACE_ADDRESS_HIGH_L,
 		value);
 
-	temp = 0;
 	value = 0;
 	temp = address.low_part >>
 	UNP_GRPH_PRIMARY_SURFACE_ADDRESS_L__GRPH_PRIMARY_SURFACE_ADDRESS_L__SHIFT;
@@ -164,9 +163,10 @@ static void enable(struct dce_mem_input *mem_input110)
 
 static void program_tiling(
 	struct dce_mem_input *mem_input110,
-	const union dc_tiling_info *info,
+	const struct dc_tiling_info *info,
 	const enum surface_pixel_format pixel_format)
 {
+	(void)pixel_format;
 	uint32_t value = 0;
 
 	set_reg_field_value(value, info->gfx8.num_banks,
@@ -525,7 +525,7 @@ static const unsigned int dvmm_Hw_Setting_Linear[4][9] = {
 
 /* Helper to get table entry from surface info */
 static const unsigned int *get_dvmm_hw_setting(
-		union dc_tiling_info *tiling_info,
+		struct dc_tiling_info *tiling_info,
 		enum surface_pixel_format format,
 		bool chroma)
 {
@@ -565,7 +565,7 @@ static const unsigned int *get_dvmm_hw_setting(
 static void dce_mem_input_v_program_pte_vm(
 		struct mem_input *mem_input,
 		enum surface_pixel_format format,
-		union dc_tiling_info *tiling_info,
+		struct dc_tiling_info *tiling_info,
 		enum dc_rotation_angle rotation)
 {
 	struct dce_mem_input *mem_input110 = TO_DCE_MEM_INPUT(mem_input);
@@ -638,12 +638,14 @@ static void dce_mem_input_v_program_pte_vm(
 static void dce_mem_input_v_program_surface_config(
 	struct mem_input *mem_input,
 	enum surface_pixel_format format,
-	union dc_tiling_info *tiling_info,
+	struct dc_tiling_info *tiling_info,
 	struct plane_size *plane_size,
 	enum dc_rotation_angle rotation,
 	struct dc_plane_dcc_param *dcc,
 	bool horizotal_mirror)
 {
+	(void)dcc;
+	(void)horizotal_mirror;
 	struct dce_mem_input *mem_input110 = TO_DCE_MEM_INPUT(mem_input);
 
 	enable(mem_input110);
@@ -929,6 +931,7 @@ static void dce_mem_input_v_program_display_marks(
 	struct dce_watermarks urgent,
 	uint32_t total_dest_line_time_ns)
 {
+	(void)stutter_enter;
 	program_urgency_watermark_l(
 		mem_input->ctx,
 		urgent,
@@ -972,6 +975,9 @@ static void dce110_allocate_mem_input_v(
 	uint32_t pix_clk_khz,/* for current stream */
 	uint32_t total_stream_num)
 {
+	(void)h_total;
+	(void)v_total;
+	(void)total_stream_num;
 	uint32_t addr;
 	uint32_t value;
 	uint32_t pix_dur;
@@ -1011,6 +1017,8 @@ static void dce110_free_mem_input_v(
 	struct mem_input *mi,
 	uint32_t total_stream_num)
 {
+	(void)mi;
+	(void)total_stream_num;
 }
 
 static const struct mem_input_funcs dce110_mem_input_v_funcs = {

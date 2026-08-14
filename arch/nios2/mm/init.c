@@ -38,6 +38,11 @@
 
 pgd_t *pgd_current;
 
+void __init arch_zone_limits_init(unsigned long *max_zone_pfns)
+{
+	max_zone_pfns[ZONE_NORMAL] = max_low_pfn;
+}
+
 /*
  * paging_init() continues the virtual memory environment setup which
  * was begun by the code in arch/head.S.
@@ -46,32 +51,11 @@ pgd_t *pgd_current;
  */
 void __init paging_init(void)
 {
-	unsigned long max_zone_pfn[MAX_NR_ZONES] = { 0 };
-
 	pagetable_init();
 	pgd_current = swapper_pg_dir;
 
-	max_zone_pfn[ZONE_NORMAL] = max_mapnr;
-
-	/* pass the memory from the bootmem allocator to the main allocator */
-	free_area_init(max_zone_pfn);
-
 	flush_dcache_range((unsigned long)empty_zero_page,
 			(unsigned long)empty_zero_page + PAGE_SIZE);
-}
-
-void __init mem_init(void)
-{
-	unsigned long end_mem   = memory_end; /* this must not include
-						kernel stack at top */
-
-	pr_debug("mem_init: start=%lx, end=%lx\n", memory_start, memory_end);
-
-	end_mem &= PAGE_MASK;
-	high_memory = __va(end_mem);
-
-	/* this will put all memory onto the freelists */
-	memblock_free_all();
 }
 
 void __init mmu_init(void)
@@ -82,6 +66,10 @@ void __init mmu_init(void)
 pgd_t swapper_pg_dir[PTRS_PER_PGD] __aligned(PAGE_SIZE);
 pte_t invalid_pte_table[PTRS_PER_PTE] __aligned(PAGE_SIZE);
 static struct page *kuser_page[1];
+static struct vm_special_mapping vdso_mapping = {
+	.name = "[vdso]",
+	.pages = kuser_page,
+};
 
 static int alloc_kuser_page(void)
 {
@@ -106,18 +94,18 @@ arch_initcall(alloc_kuser_page);
 int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 {
 	struct mm_struct *mm = current->mm;
-	int ret;
+	struct vm_area_struct *vma;
 
 	mmap_write_lock(mm);
 
 	/* Map kuser helpers to user space address */
-	ret = install_special_mapping(mm, KUSER_BASE, KUSER_SIZE,
+	vma = _install_special_mapping(mm, KUSER_BASE, KUSER_SIZE,
 				      VM_READ | VM_EXEC | VM_MAYREAD |
-				      VM_MAYEXEC, kuser_page);
+				      VM_MAYEXEC, &vdso_mapping);
 
 	mmap_write_unlock(mm);
 
-	return ret;
+	return IS_ERR(vma) ? PTR_ERR(vma) : 0;
 }
 
 const char *arch_vma_name(struct vm_area_struct *vma)

@@ -352,6 +352,20 @@ static const struct dmi_system_id acpisleep_dmi_table[] __initconst = {
 		},
 	},
 	/*
+	 * The ASUS ROG M16 from 2023 has many events which wake it from s2idle
+	 * resulting in excessive battery drain and risk of laptop overheating,
+	 * these events can be caused by the MMC or  y AniMe display if installed.
+	 * The match is valid for all of the GU604V<x> range.
+	 */
+	{
+	.callback = init_default_s3,
+	.ident = "ASUS ROG Zephyrus M16 (2023)",
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "ASUSTeK COMPUTER INC."),
+		DMI_MATCH(DMI_PRODUCT_NAME, "ROG Zephyrus M16 GU604V"),
+		},
+	},
+	/*
 	 * https://bugzilla.kernel.org/show_bug.cgi?id=189431
 	 * Lenovo G50-45 is a platform later than 2012, but needs nvs memory
 	 * saving during S3.
@@ -370,6 +384,14 @@ static const struct dmi_system_id acpisleep_dmi_table[] __initconst = {
 	.matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
 		DMI_MATCH(DMI_PRODUCT_NAME, "80E1"),
+		},
+	},
+	{
+	.callback = init_nvs_save_s3,
+	.ident = "Lenovo G70-35",
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "80Q5"),
 		},
 	},
 	/*
@@ -628,7 +650,7 @@ static int acpi_suspend_enter(suspend_state_t pm_state)
 	/*
 	 * Disable all GPE and clear their status bits before interrupts are
 	 * enabled. Some GPEs (like wakeup GPEs) have no handlers and this can
-	 * prevent them from producing spurious interrups.
+	 * prevent them from producing spurious interrupts.
 	 *
 	 * acpi_leave_sleep_state() will reenable specific GPEs later.
 	 *
@@ -870,13 +892,13 @@ bool acpi_s2idle_wakeup(void)
 #ifdef CONFIG_PM_SLEEP
 static u32 saved_bm_rld;
 
-static int  acpi_save_bm_rld(void)
+static int  acpi_save_bm_rld(void *data)
 {
 	acpi_read_bit_register(ACPI_BITREG_BUS_MASTER_RLD, &saved_bm_rld);
 	return 0;
 }
 
-static void  acpi_restore_bm_rld(void)
+static void  acpi_restore_bm_rld(void *data)
 {
 	u32 resumed_bm_rld = 0;
 
@@ -887,14 +909,18 @@ static void  acpi_restore_bm_rld(void)
 	acpi_write_bit_register(ACPI_BITREG_BUS_MASTER_RLD, saved_bm_rld);
 }
 
-static struct syscore_ops acpi_sleep_syscore_ops = {
+static const struct syscore_ops acpi_sleep_syscore_ops = {
 	.suspend = acpi_save_bm_rld,
 	.resume = acpi_restore_bm_rld,
 };
 
+static struct syscore acpi_sleep_syscore = {
+	.ops = &acpi_sleep_syscore_ops,
+};
+
 static void acpi_sleep_syscore_init(void)
 {
-	register_syscore_ops(&acpi_sleep_syscore_ops);
+	register_syscore(&acpi_sleep_syscore);
 }
 #else
 static inline void acpi_sleep_syscore_init(void) {}

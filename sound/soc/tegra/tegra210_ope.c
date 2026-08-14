@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
 //
 // tegra210_ope.c - Tegra210 OPE driver
-//
-// Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
 
 #include <linux/clk.h>
 #include <linux/device.h>
@@ -47,6 +47,7 @@ static int tegra210_ope_set_audio_cif(struct tegra210_ope *ope,
 	case SNDRV_PCM_FORMAT_S16_LE:
 		audio_bits = TEGRA_ACIF_BITS_16;
 		break;
+	case SNDRV_PCM_FORMAT_S24_LE:
 	case SNDRV_PCM_FORMAT_S32_LE:
 		audio_bits = TEGRA_ACIF_BITS_32;
 		break;
@@ -129,6 +130,7 @@ static struct snd_soc_dai_driver tegra210_ope_dais[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S8 |
 				SNDRV_PCM_FMTBIT_S16_LE |
+				SNDRV_PCM_FMTBIT_S24_LE |
 				SNDRV_PCM_FMTBIT_S32_LE,
 		},
 		.capture = {
@@ -138,6 +140,7 @@ static struct snd_soc_dai_driver tegra210_ope_dais[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S8 |
 				SNDRV_PCM_FMTBIT_S16_LE |
+				SNDRV_PCM_FMTBIT_S24_LE |
 				SNDRV_PCM_FMTBIT_S32_LE,
 		},
 	},
@@ -150,6 +153,7 @@ static struct snd_soc_dai_driver tegra210_ope_dais[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S8 |
 				SNDRV_PCM_FMTBIT_S16_LE |
+				SNDRV_PCM_FMTBIT_S24_LE |
 				SNDRV_PCM_FMTBIT_S32_LE,
 		},
 		.capture = {
@@ -159,6 +163,7 @@ static struct snd_soc_dai_driver tegra210_ope_dais[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = SNDRV_PCM_FMTBIT_S8 |
 				SNDRV_PCM_FMTBIT_S16_LE |
+				SNDRV_PCM_FMTBIT_S24_LE |
 				SNDRV_PCM_FMTBIT_S32_LE,
 		},
 		.ops = &tegra210_ope_dai_ops,
@@ -197,7 +202,7 @@ static const struct soc_enum tegra210_ope_data_dir_enum =
 static int tegra210_ope_get_data_dir(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_ope *ope = snd_soc_component_get_drvdata(cmpnt);
 
 	ucontrol->value.enumerated.item[0] = ope->data_dir;
@@ -208,7 +213,7 @@ static int tegra210_ope_get_data_dir(struct snd_kcontrol *kcontrol,
 static int tegra210_ope_put_data_dir(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *cmpnt = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *cmpnt = snd_kcontrol_chip(kcontrol);
 	struct tegra210_ope *ope = snd_soc_component_get_drvdata(cmpnt);
 	unsigned int value = ucontrol->value.enumerated.item[0];
 
@@ -292,6 +297,7 @@ static const struct regmap_config tegra210_ope_regmap_config = {
 	.volatile_reg		= tegra210_ope_volatile_reg,
 	.reg_defaults		= tegra210_ope_reg_defaults,
 	.num_reg_defaults	= ARRAY_SIZE(tegra210_ope_reg_defaults),
+	.reg_default_cb		= regmap_default_zero_cb,
 	.cache_type		= REGCACHE_FLAT,
 };
 
@@ -312,34 +318,28 @@ static int tegra210_ope_probe(struct platform_device *pdev)
 
 	ope->regmap = devm_regmap_init_mmio(dev, regs,
 					    &tegra210_ope_regmap_config);
-	if (IS_ERR(ope->regmap)) {
-		dev_err(dev, "regmap init failed\n");
-		return PTR_ERR(ope->regmap);
-	}
+	if (IS_ERR(ope->regmap))
+		return dev_err_probe(dev, PTR_ERR(ope->regmap),
+				     "regmap init failed\n");
 
 	regcache_cache_only(ope->regmap, true);
 
 	dev_set_drvdata(dev, ope);
 
 	err = tegra210_peq_regmap_init(pdev);
-	if (err < 0) {
-		dev_err(dev, "PEQ init failed\n");
+	if (err < 0)
 		return err;
-	}
 
 	err = tegra210_mbdrc_regmap_init(pdev);
-	if (err < 0) {
-		dev_err(dev, "MBDRC init failed\n");
+	if (err < 0)
 		return err;
-	}
 
 	err = devm_snd_soc_register_component(dev, &tegra210_ope_cmpnt,
 					      tegra210_ope_dais,
 					      ARRAY_SIZE(tegra210_ope_dais));
-	if (err) {
-		dev_err(dev, "can't register OPE component, err: %d\n", err);
-		return err;
-	}
+	if (err)
+		return dev_err_probe(dev, err,
+				     "can't register OPE component\n");
 
 	pm_runtime_enable(dev);
 
@@ -351,7 +351,7 @@ static void tegra210_ope_remove(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 }
 
-static int __maybe_unused tegra210_ope_runtime_suspend(struct device *dev)
+static int tegra210_ope_runtime_suspend(struct device *dev)
 {
 	struct tegra210_ope *ope = dev_get_drvdata(dev);
 
@@ -369,7 +369,7 @@ static int __maybe_unused tegra210_ope_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused tegra210_ope_runtime_resume(struct device *dev)
+static int tegra210_ope_runtime_resume(struct device *dev)
 {
 	struct tegra210_ope *ope = dev_get_drvdata(dev);
 
@@ -388,10 +388,9 @@ static int __maybe_unused tegra210_ope_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops tegra210_ope_pm_ops = {
-	SET_RUNTIME_PM_OPS(tegra210_ope_runtime_suspend,
-			   tegra210_ope_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	RUNTIME_PM_OPS(tegra210_ope_runtime_suspend,
+		       tegra210_ope_runtime_resume, NULL)
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static const struct of_device_id tegra210_ope_of_match[] = {
@@ -404,10 +403,10 @@ static struct platform_driver tegra210_ope_driver = {
 	.driver = {
 		.name = "tegra210-ope",
 		.of_match_table = tegra210_ope_of_match,
-		.pm = &tegra210_ope_pm_ops,
+		.pm = pm_ptr(&tegra210_ope_pm_ops),
 	},
 	.probe = tegra210_ope_probe,
-	.remove_new = tegra210_ope_remove,
+	.remove = tegra210_ope_remove,
 };
 module_platform_driver(tegra210_ope_driver)
 

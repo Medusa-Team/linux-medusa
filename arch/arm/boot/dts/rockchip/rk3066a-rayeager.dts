@@ -42,7 +42,7 @@
 		};
 	};
 
-	vdd_log: vdd-log {
+	vdd_log: regulator-vdd-log {
 		compatible = "pwm-regulator";
 		pwms = <&pwm3 0 1000>;
 		regulator-name = "vdd_log";
@@ -54,7 +54,7 @@
 		status = "okay";
 	};
 
-	vsys: vsys-regulator {
+	vsys: regulator-vsys {
 		compatible = "regulator-fixed";
 		regulator-name = "vsys";
 		regulator-min-microvolt = <5000000>;
@@ -64,7 +64,7 @@
 	};
 
 	/* input for 5V_STDBY is VSYS or DC5V, selectable by jumper J4 */
-	vcc_stdby: stdby-regulator {
+	vcc_stdby: regulator-stdby {
 		compatible = "regulator-fixed";
 		regulator-name = "5v_stdby";
 		regulator-min-microvolt = <5000000>;
@@ -73,7 +73,7 @@
 		regulator-boot-on;
 	};
 
-	vcc_emmc: emmc-regulator {
+	vcc_emmc: regulator-emmc {
 		compatible = "regulator-fixed";
 		regulator-name = "emmc_vccq";
 		regulator-min-microvolt = <3000000>;
@@ -81,7 +81,7 @@
 		vin-supply = <&vsys>;
 	};
 
-	vcc_sata: sata-regulator {
+	vcc_sata: regulator-sata {
 		compatible = "regulator-fixed";
 		enable-active-high;
 		gpio = <&gpio4 RK_PC6 GPIO_ACTIVE_HIGH>;
@@ -94,7 +94,7 @@
 		vin-supply = <&vcc_stdby>;
 	};
 
-	vcc_sd: sdmmc-regulator {
+	vcc_sd: regulator-sdmmc {
 		compatible = "regulator-fixed";
 		gpio = <&gpio3 RK_PA7 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
@@ -106,7 +106,7 @@
 		vin-supply = <&vcc_io>;
 	};
 
-	vcc_host: usb-host-regulator {
+	vcc_host: regulator-usb-host {
 		compatible = "regulator-fixed";
 		enable-active-high;
 		gpio = <&gpio0 RK_PA6 GPIO_ACTIVE_HIGH>;
@@ -119,7 +119,7 @@
 		vin-supply = <&vcc_stdby>;
 	};
 
-	vcc_otg: usb-otg-regulator {
+	vcc_otg: regulator-usb-otg {
 		compatible = "regulator-fixed";
 		enable-active-high;
 		gpio = <&gpio0 RK_PA5 GPIO_ACTIVE_HIGH>;
@@ -198,9 +198,18 @@
 	status = "okay";
 
 	tps: tps@2d {
+		compatible = "ti,tps65910";
 		reg = <0x2d>;
+
+		gpio-controller;
+		#gpio-cells = <2>;
+
 		interrupt-parent = <&gpio6>;
 		interrupts = <RK_PA4 IRQ_TYPE_EDGE_RISING>;
+
+		interrupt-controller;
+		#interrupt-cells = <2>;
+
 		pinctrl-names = "default";
 		pinctrl-0 = <&pmic_int>, <&pwr_hold>;
 
@@ -214,19 +223,19 @@
 		vccio-supply = <&vsys>;
 
 		regulators {
-			vcc_rtc: regulator@0 {
+			vcc_rtc: vrtc {
 				regulator-name = "vcc_rtc";
 				regulator-always-on;
 			};
 
-			vcc_io: regulator@1 {
+			vcc_io: vio {
 				regulator-name = "vcc_io";
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-always-on;
 			};
 
-			vdd_arm: regulator@2 {
+			vdd_arm: vdd1 {
 				regulator-name = "vdd_arm";
 				regulator-min-microvolt = <600000>;
 				regulator-max-microvolt = <1500000>;
@@ -234,7 +243,7 @@
 				regulator-boot-on;
 			};
 
-			vcc_ddr: regulator@3 {
+			vcc_ddr: vdd2 {
 				regulator-name = "vcc_ddr";
 				regulator-min-microvolt = <600000>;
 				regulator-max-microvolt = <1500000>;
@@ -242,52 +251,52 @@
 				regulator-boot-on;
 			};
 
-			vcc18: regulator@5 {
+			vcc18: vdig1 {
 				regulator-name = "vcc18";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 				regulator-always-on;
 			};
 
-			vdd_11: regulator@6 {
+			vdd_11: vdig2 {
 				regulator-name = "vdd_11";
 				regulator-min-microvolt = <1100000>;
 				regulator-max-microvolt = <1100000>;
 				regulator-always-on;
 			};
 
-			vcc_25: regulator@7 {
+			vcc_25: vpll {
 				regulator-name = "vcc_25";
 				regulator-min-microvolt = <2500000>;
 				regulator-max-microvolt = <2500000>;
 				regulator-always-on;
 			};
 
-			vccio_wl: regulator@8 {
+			vccio_wl: vdac {
 				regulator-name = "vccio_wl";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 			};
 
-			vcc25_hdmi: regulator@9 {
+			vcc25_hdmi: vaux1 {
 				regulator-name = "vcc25_hdmi";
 				regulator-min-microvolt = <2500000>;
 				regulator-max-microvolt = <2500000>;
 			};
 
-			vcca_33: regulator@10 {
+			vcca_33: vaux2 {
 				regulator-name = "vcca_33";
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 			};
 
-			vcc_rmii: regulator@11 {
+			vcc_rmii: vaux33 {
 				regulator-name = "vcc_rmii";
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 			};
 
-			vcc28_cif: regulator@12 {
+			vcc28_cif: vmmc {
 				regulator-name = "vcc28_cif";
 				regulator-min-microvolt = <2800000>;
 				regulator-max-microvolt = <2800000>;
@@ -295,8 +304,6 @@
 		};
 	};
 };
-
-#include "../tps65910.dtsi"
 
 &i2c2 {
 	status = "okay";

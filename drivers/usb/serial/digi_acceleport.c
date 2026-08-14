@@ -262,7 +262,6 @@ MODULE_DEVICE_TABLE(usb, id_table_combined);
 
 static struct usb_serial_driver digi_acceleport_2_device = {
 	.driver = {
-		.owner =		THIS_MODULE,
 		.name =			"digi_2",
 	},
 	.description =			"Digi 2 port USB adapter",
@@ -293,7 +292,6 @@ static struct usb_serial_driver digi_acceleport_2_device = {
 
 static struct usb_serial_driver digi_acceleport_4_device = {
 	.driver = {
-		.owner =		THIS_MODULE,
 		.name =			"digi_4",
 	},
 	.description =			"Digi 4 port USB adapter",
@@ -1211,7 +1209,7 @@ static int digi_port_init(struct usb_serial_port *port, unsigned port_num)
 {
 	struct digi_port *priv;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
@@ -1231,15 +1229,34 @@ static int digi_port_init(struct usb_serial_port *port, unsigned port_num)
 static int digi_startup(struct usb_serial *serial)
 {
 	struct digi_serial *serial_priv;
+	int oob_port_num;
 	int ret;
+	int i;
 
-	serial_priv = kzalloc(sizeof(*serial_priv), GFP_KERNEL);
+	/*
+	 * The port bulk-out buffers must be large enough for header and
+	 * buffered data.
+	 */
+	for (i = 0; i < serial->type->num_ports; i++) {
+		if (serial->port[i]->bulk_out_size < DIGI_OUT_BUF_SIZE + 2)
+			return -EINVAL;
+	}
+
+	/*
+	 * The OOB port bulk-out buffer must be large enough for the two
+	 * commands in digi_set_modem_signals().
+	 */
+	oob_port_num = serial->type->num_ports;
+	if (serial->port[oob_port_num]->bulk_out_size < 8)
+		return -EINVAL;
+
+	serial_priv = kzalloc_obj(*serial_priv);
 	if (!serial_priv)
 		return -ENOMEM;
 
 	spin_lock_init(&serial_priv->ds_serial_lock);
-	serial_priv->ds_oob_port_num = serial->type->num_ports;
-	serial_priv->ds_oob_port = serial->port[serial_priv->ds_oob_port_num];
+	serial_priv->ds_oob_port_num = oob_port_num;
+	serial_priv->ds_oob_port = serial->port[oob_port_num];
 
 	ret = digi_port_init(serial_priv->ds_oob_port,
 						serial_priv->ds_oob_port_num);

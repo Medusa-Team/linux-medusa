@@ -11,13 +11,12 @@
 #include <sys/auxv.h>
 #include <sys/time.h>
 
-#include "../kselftest.h"
+#include "kselftest.h"
 #include "parse_vdso.h"
 #include "vdso_config.h"
+#include "vdso_call.h"
 
-struct getcpu_cache;
-typedef long (*getcpu_t)(unsigned int *, unsigned int *,
-			 struct getcpu_cache *);
+typedef long (*getcpu_t)(unsigned int *, unsigned int *, void *);
 
 int main(int argc, char **argv)
 {
@@ -42,7 +41,7 @@ int main(int argc, char **argv)
 		return KSFT_SKIP;
 	}
 
-	ret = get_cpu(&cpu, &node, 0);
+	ret = VDSO_CALL(get_cpu, 3, &cpu, &node, 0);
 	if (ret == 0) {
 		printf("Running on CPU %u node %u\n", cpu, node);
 	} else {

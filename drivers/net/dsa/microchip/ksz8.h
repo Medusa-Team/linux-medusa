@@ -54,10 +54,17 @@ int ksz8_reset_switch(struct ksz_device *dev);
 int ksz8_switch_init(struct ksz_device *dev);
 void ksz8_switch_exit(struct ksz_device *dev);
 int ksz8_change_mtu(struct ksz_device *dev, int port, int mtu);
+int ksz8_pme_write8(struct ksz_device *dev, u32 reg, u8 value);
+int ksz8_pme_pread8(struct ksz_device *dev, int port, int offset, u8 *data);
+int ksz8_pme_pwrite8(struct ksz_device *dev, int port, int offset, u8 data);
 void ksz8_phylink_mac_link_up(struct phylink_config *config,
 			      struct phy_device *phydev, unsigned int mode,
 			      phy_interface_t interface, int speed, int duplex,
 			      bool tx_pause, bool rx_pause);
 int ksz8_all_queues_split(struct ksz_device *dev, int queues);
+
+u32 ksz8463_get_port_addr(int port, int offset);
+int ksz8463_r_phy(struct ksz_device *dev, u16 phy, u16 reg, u16 *val);
+int ksz8463_w_phy(struct ksz_device *dev, u16 phy, u16 reg, u16 val);
 
 #endif

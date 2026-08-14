@@ -159,7 +159,7 @@ static int nfp_net_reconfig_wait(struct nfp_net *nn, unsigned long deadline)
 
 static void nfp_net_reconfig_timer(struct timer_list *t)
 {
-	struct nfp_net *nn = from_timer(nn, t, reconfig_timer);
+	struct nfp_net *nn = timer_container_of(nn, t, reconfig_timer);
 
 	spin_lock_bh(&nn->reconfig_lock);
 
@@ -227,7 +227,7 @@ static void nfp_net_reconfig_sync_enter(struct nfp_net *nn)
 	spin_unlock_bh(&nn->reconfig_lock);
 
 	if (cancelled_timer) {
-		del_timer_sync(&nn->reconfig_timer);
+		timer_delete_sync(&nn->reconfig_timer);
 		nfp_net_reconfig_wait(nn, nn->reconfig_timer.expires);
 	}
 
@@ -821,16 +821,15 @@ nfp_net_prepare_vector(struct nfp_net *nn, struct nfp_net_r_vector *r_vec,
 
 	snprintf(r_vec->name, sizeof(r_vec->name),
 		 "%s-rxtx-%d", nfp_net_name(nn), idx);
-	err = request_irq(r_vec->irq_vector, r_vec->handler, 0, r_vec->name,
-			  r_vec);
+	err = request_irq(r_vec->irq_vector, r_vec->handler, IRQF_NO_AUTOEN,
+			  r_vec->name, r_vec);
 	if (err) {
 		nfp_net_napi_del(&nn->dp, r_vec);
 		nn_err(nn, "Error requesting IRQ %d\n", r_vec->irq_vector);
 		return err;
 	}
-	disable_irq(r_vec->irq_vector);
 
-	irq_set_affinity_hint(r_vec->irq_vector, &r_vec->affinity_mask);
+	irq_update_affinity_hint(r_vec->irq_vector, &r_vec->affinity_mask);
 
 	nn_dbg(nn, "RV%02d: irq=%03d/%03d\n", idx, r_vec->irq_vector,
 	       r_vec->irq_entry);
@@ -841,7 +840,7 @@ nfp_net_prepare_vector(struct nfp_net *nn, struct nfp_net_r_vector *r_vec,
 static void
 nfp_net_cleanup_vector(struct nfp_net *nn, struct nfp_net_r_vector *r_vec)
 {
-	irq_set_affinity_hint(r_vec->irq_vector, NULL);
+	irq_update_affinity_hint(r_vec->irq_vector, NULL);
 	nfp_net_napi_del(&nn->dp, r_vec);
 	free_irq(r_vec->irq_vector, r_vec);
 }
@@ -1555,7 +1554,7 @@ struct nfp_net_dp *nfp_net_clone_dp(struct nfp_net *nn)
 {
 	struct nfp_net_dp *new;
 
-	new = kmalloc(sizeof(*new), GFP_KERNEL);
+	new = kmalloc_obj(*new);
 	if (!new)
 		return NULL;
 
@@ -2395,8 +2394,7 @@ static int nfp_udp_tunnel_sync(struct net_device *netdev, unsigned int table)
 
 static const struct udp_tunnel_nic_info nfp_udp_tunnels = {
 	.sync_table     = nfp_udp_tunnel_sync,
-	.flags          = UDP_TUNNEL_NIC_INFO_MAY_SLEEP |
-			  UDP_TUNNEL_NIC_INFO_OPEN_ONLY,
+	.flags          = UDP_TUNNEL_NIC_INFO_OPEN_ONLY,
 	.tables         = {
 		{
 			.n_entries      = NFP_NET_N_VXLAN_PORTS,
@@ -2539,8 +2537,7 @@ nfp_net_alloc(struct pci_dev *pdev, const struct nfp_dev_info *dev_info,
 				  nn->dp.num_r_vecs, num_online_cpus());
 	nn->max_r_vecs = nn->dp.num_r_vecs;
 
-	nn->dp.xsk_pools = kcalloc(nn->max_r_vecs, sizeof(nn->dp.xsk_pools),
-				   GFP_KERNEL);
+	nn->dp.xsk_pools = kzalloc_objs(*nn->dp.xsk_pools, nn->max_r_vecs);
 	if (!nn->dp.xsk_pools) {
 		err = -ENOMEM;
 		goto err_free_nn;
@@ -2559,14 +2556,16 @@ nfp_net_alloc(struct pci_dev *pdev, const struct nfp_dev_info *dev_info,
 	err = nfp_net_tlv_caps_parse(&nn->pdev->dev, nn->dp.ctrl_bar,
 				     &nn->tlv_caps);
 	if (err)
-		goto err_free_nn;
+		goto err_free_xsk_pools;
 
 	err = nfp_ccm_mbox_alloc(nn);
 	if (err)
-		goto err_free_nn;
+		goto err_free_xsk_pools;
 
 	return nn;
 
+err_free_xsk_pools:
+	kfree(nn->dp.xsk_pools);
 err_free_nn:
 	if (nn->dp.netdev)
 		free_netdev(nn->dp.netdev);
@@ -2780,7 +2779,7 @@ static void nfp_net_netdev_init(struct nfp_net *nn)
 		break;
 	}
 
-	netdev->watchdog_timeo = msecs_to_jiffies(5 * 1000);
+	netdev->watchdog_timeo = secs_to_jiffies(5);
 
 	/* MTU range: 68 - hw-specific max */
 	netdev->min_mtu = ETH_MIN_MTU;

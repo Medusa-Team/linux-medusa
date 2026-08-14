@@ -44,8 +44,18 @@ static int virtio_pmem_flush(struct nd_region *nd_region)
 	unsigned long flags;
 	int err, err1;
 
-	might_sleep();
-	req_data = kmalloc(sizeof(*req_data), GFP_KERNEL);
+	guard(mutex)(&vpmem->flush_lock);
+
+	/*
+	 * Don't bother to submit the request to the device if the device is
+	 * not activated.
+	 */
+	if (vdev->config->get_status(vdev) & VIRTIO_CONFIG_S_NEEDS_RESET) {
+		dev_info(&vdev->dev, "virtio pmem device needs a reset\n");
+		return -EIO;
+	}
+
+	req_data = kmalloc_obj(*req_data);
 	if (!req_data)
 		return -ENOMEM;
 
@@ -88,7 +98,7 @@ static int virtio_pmem_flush(struct nd_region *nd_region)
 		dev_info(&vdev->dev, "failed to send command to virtio pmem device\n");
 		err = -EIO;
 	} else {
-		/* A host repsonse results in "host_ack" getting called */
+		/* A host response results in "host_ack" getting called */
 		wait_event(req_data->host_acked, req_data->done);
 		err = le32_to_cpu(req_data->resp.ret);
 	}

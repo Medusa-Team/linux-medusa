@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-2-Clause */
 /*
- * Copyright 2018-2024 Amazon.com, Inc. or its affiliates. All rights reserved.
+ * Copyright 2018-2026 Amazon.com, Inc. or its affiliates. All rights reserved.
  */
 
 #ifndef _EFA_ADMIN_CMDS_H_
@@ -30,17 +30,19 @@ enum efa_admin_aq_opcode {
 	EFA_ADMIN_DEALLOC_UAR                       = 17,
 	EFA_ADMIN_CREATE_EQ                         = 18,
 	EFA_ADMIN_DESTROY_EQ                        = 19,
-	EFA_ADMIN_MAX_OPCODE                        = 19,
+	EFA_ADMIN_ALLOC_MR                          = 20,
+	EFA_ADMIN_MAX_OPCODE                        = 20,
 };
 
 enum efa_admin_aq_feature_id {
 	EFA_ADMIN_DEVICE_ATTR                       = 1,
 	EFA_ADMIN_AENQ_CONFIG                       = 2,
 	EFA_ADMIN_NETWORK_ATTR                      = 3,
-	EFA_ADMIN_QUEUE_ATTR                        = 4,
+	EFA_ADMIN_QUEUE_ATTR_1                      = 4,
 	EFA_ADMIN_HW_HINTS                          = 5,
 	EFA_ADMIN_HOST_INFO                         = 6,
 	EFA_ADMIN_EVENT_QUEUE_ATTR                  = 7,
+	EFA_ADMIN_QUEUE_ATTR_2                      = 9,
 };
 
 /* QP transport type */
@@ -67,6 +69,7 @@ enum efa_admin_get_stats_type {
 	EFA_ADMIN_GET_STATS_TYPE_MESSAGES           = 1,
 	EFA_ADMIN_GET_STATS_TYPE_RDMA_READ          = 2,
 	EFA_ADMIN_GET_STATS_TYPE_RDMA_WRITE         = 3,
+	EFA_ADMIN_GET_STATS_TYPE_NETWORK            = 4,
 };
 
 enum efa_admin_get_stats_scope {
@@ -150,8 +153,11 @@ struct efa_admin_create_qp_cmd {
 	/* UAR number */
 	u16 uar;
 
+	/* Requested service level for the QP, 0 is the default SL */
+	u8 sl;
+
 	/* MBZ */
-	u16 reserved;
+	u8 reserved;
 
 	/* MBZ */
 	u32 reserved2;
@@ -459,6 +465,41 @@ struct efa_admin_dereg_mr_resp {
 	struct efa_admin_acq_common_desc acq_common_desc;
 };
 
+/*
+ * Allocation of MemoryRegion, required for QP working with Virtual
+ * Addresses in kernel verbs semantics, ready for fast registration use.
+ */
+struct efa_admin_alloc_mr_cmd {
+	/* Common Admin Queue descriptor */
+	struct efa_admin_aq_common_desc aq_common_desc;
+
+	/* Protection Domain */
+	u16 pd;
+
+	/* MBZ */
+	u16 reserved1;
+
+	/* Maximum number of pages this MR supports. */
+	u32 max_pages;
+};
+
+struct efa_admin_alloc_mr_resp {
+	/* Common Admin Queue completion descriptor */
+	struct efa_admin_acq_common_desc acq_common_desc;
+
+	/*
+	 * L_Key, to be used in conjunction with local buffer references in
+	 * SQ and RQ WQE, or with virtual RQ/CQ rings
+	 */
+	u32 l_key;
+
+	/*
+	 * R_Key, to be used in RDMA messages to refer to remotely accessed
+	 * memory region
+	 */
+	u32 r_key;
+};
+
 struct efa_admin_create_cq_cmd {
 	struct efa_admin_aq_common_desc aq_common_desc;
 
@@ -483,8 +524,8 @@ struct efa_admin_create_cq_cmd {
 	 */
 	u8 cq_caps_2;
 
-	/* completion queue depth in # of entries. must be power of 2 */
-	u16 cq_depth;
+	/* Sub completion queue depth in # of entries. must be power of 2 */
+	u16 sub_cq_depth;
 
 	/* EQ number assigned to this cq */
 	u16 eqn;
@@ -519,8 +560,8 @@ struct efa_admin_create_cq_resp {
 
 	u16 cq_idx;
 
-	/* actual cq depth in number of entries */
-	u16 cq_actual_depth;
+	/* actual sub cq depth in number of entries */
+	u16 sub_cq_actual_depth;
 
 	/* CQ doorbell address, as offset to PCIe DB BAR */
 	u32 db_offset;
@@ -578,6 +619,8 @@ struct efa_admin_basic_stats {
 	u64 rx_pkts;
 
 	u64 rx_drops;
+
+	u64 qkey_viol;
 };
 
 struct efa_admin_messages_stats {
@@ -610,6 +653,18 @@ struct efa_admin_rdma_write_stats {
 	u64 write_recv_bytes;
 };
 
+struct efa_admin_network_stats {
+	u64 retrans_bytes;
+
+	u64 retrans_pkts;
+
+	u64 retrans_timeout_events;
+
+	u64 unresponsive_remote_events;
+
+	u64 impaired_remote_conn_events;
+};
+
 struct efa_admin_acq_get_stats_resp {
 	struct efa_admin_acq_common_desc acq_common_desc;
 
@@ -621,6 +676,8 @@ struct efa_admin_acq_get_stats_resp {
 		struct efa_admin_rdma_read_stats rdma_read_stats;
 
 		struct efa_admin_rdma_write_stats rdma_write_stats;
+
+		struct efa_admin_network_stats network_stats;
 	} u;
 };
 
@@ -674,16 +731,33 @@ struct efa_admin_feature_device_attr_desc {
 
 	/* Max RDMA transfer size in bytes */
 	u32 max_rdma_size;
+
+	/* Unique global ID for an EFA device */
+	u64 guid;
+
+	/* The device maximum link speed in Gbit/sec */
+	u16 max_link_speed_gbps;
+
+	/* MBZ */
+	u16 reserved0;
+
+	/* MBZ */
+	u32 reserved1;
 };
 
-struct efa_admin_feature_queue_attr_desc {
+struct efa_admin_feature_queue_attr_desc_1 {
 	/* The maximum number of queue pairs supported */
 	u32 max_qp;
 
 	/* Maximum number of WQEs per Send Queue */
 	u32 max_sq_depth;
 
-	/* Maximum size of data that can be sent inline in a Send WQE */
+	/*
+	 * Maximum size of data that can be sent inline in a Send WQE
+	 * (deprecated by
+	 * efa_admin_feature_queue_attr_desc_2::inline_buf_size_ex on
+	 * supporting devices)
+	 */
 	u32 inline_buf_size;
 
 	/* Maximum number of buffer descriptors per Recv Queue */
@@ -735,6 +809,11 @@ struct efa_admin_feature_queue_attr_desc {
 	 * two consecutive doorbells. Zero means unlimited.
 	 */
 	u16 max_tx_batch;
+};
+
+struct efa_admin_feature_queue_attr_desc_2 {
+	/* Maximum size of data that can be sent inline in a Send WQE */
+	u16 inline_buf_size_ex;
 };
 
 struct efa_admin_event_queue_attr_desc {
@@ -804,7 +883,9 @@ struct efa_admin_get_feature_resp {
 
 		struct efa_admin_feature_network_attr_desc network_attr;
 
-		struct efa_admin_feature_queue_attr_desc queue_attr;
+		struct efa_admin_feature_queue_attr_desc_1 queue_attr_1;
+
+		struct efa_admin_feature_queue_attr_desc_2 queue_attr_2;
 
 		struct efa_admin_event_queue_attr_desc event_queue_attr;
 
@@ -1054,7 +1135,6 @@ struct efa_admin_host_info {
 
 /* create_eq_cmd */
 #define EFA_ADMIN_CREATE_EQ_CMD_ENTRY_SIZE_WORDS_MASK       GENMASK(4, 0)
-#define EFA_ADMIN_CREATE_EQ_CMD_VIRT_MASK                   BIT(6)
 #define EFA_ADMIN_CREATE_EQ_CMD_COMPLETION_EVENTS_MASK      BIT(0)
 
 /* host_info */

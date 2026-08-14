@@ -54,7 +54,7 @@ static int zpci_setup_aipb(u8 nisc)
 	struct page *page;
 	int size, rc;
 
-	zpci_aipb = kzalloc(sizeof(union zpci_sic_iib), GFP_KERNEL);
+	zpci_aipb = kzalloc_obj(union zpci_sic_iib);
 	if (!zpci_aipb)
 		return -ENOMEM;
 
@@ -103,7 +103,7 @@ static int zpci_reset_aipb(u8 nisc)
 	/*
 	 * AEN registration can only happen once per system boot.  If
 	 * an aipb already exists then AEN was already registered and
-	 * we can re-use the aipb contents.  This can only happen if
+	 * we can reuse the aipb contents.  This can only happen if
 	 * the KVM module was removed and re-inserted.  However, we must
 	 * ensure that the same forwarding ISC is used as this is assigned
 	 * during KVM module load.
@@ -126,8 +126,7 @@ int kvm_s390_pci_aen_init(u8 nisc)
 		return -EPERM;
 
 	mutex_lock(&aift->aift_lock);
-	aift->kzdev = kcalloc(ZPCI_NR_DEVICES, sizeof(struct kvm_zdev *),
-			      GFP_KERNEL);
+	aift->kzdev = kzalloc_objs(struct kvm_zdev *, ZPCI_NR_DEVICES);
 	if (!aift->kzdev) {
 		rc = -ENOMEM;
 		goto unlock;
@@ -167,7 +166,7 @@ static int kvm_zpci_set_airq(struct zpci_dev *zdev)
 	fib.fmt0.noi = airq_iv_end(zdev->aibv);
 	fib.fmt0.aibv = virt_to_phys(zdev->aibv->vector);
 	fib.fmt0.aibvo = 0;
-	fib.fmt0.aisb = virt_to_phys(aift->sbv->vector + (zdev->aisb / 64) * 8);
+	fib.fmt0.aisb = virt_to_phys(aift->sbv->vector) + (zdev->aisb / 64) * 8;
 	fib.fmt0.aisbo = zdev->aisb & 63;
 	fib.gd = zdev->gisa;
 
@@ -208,13 +207,12 @@ static inline int account_mem(unsigned long nr_pages)
 
 	page_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 
+	cur_pages = atomic_long_read(&user->locked_vm);
 	do {
-		cur_pages = atomic_long_read(&user->locked_vm);
 		new_pages = cur_pages + nr_pages;
 		if (new_pages > page_limit)
 			return -ENOMEM;
-	} while (atomic_long_cmpxchg(&user->locked_vm, cur_pages,
-					new_pages) != cur_pages);
+	} while (!atomic_long_try_cmpxchg(&user->locked_vm, &cur_pages, new_pages));
 
 	atomic64_add(nr_pages, &current->mm->pinned_vm);
 
@@ -292,8 +290,7 @@ static int kvm_s390_pci_aif_enable(struct zpci_dev *zdev, struct zpci_fib *fib,
 				    phys_to_virt(fib->fmt0.aibv));
 
 	spin_lock_irq(&aift->gait_lock);
-	gaite = (struct zpci_gaite *)aift->gait + (zdev->aisb *
-						   sizeof(struct zpci_gaite));
+	gaite = aift->gait + zdev->aisb;
 
 	/* If assist not requested, host will get all alerts */
 	if (assist)
@@ -311,7 +308,7 @@ static int kvm_s390_pci_aif_enable(struct zpci_dev *zdev, struct zpci_fib *fib,
 
 	/* Update guest FIB for re-issue */
 	fib->fmt0.aisbo = zdev->aisb & 63;
-	fib->fmt0.aisb = virt_to_phys(aift->sbv->vector + (zdev->aisb / 64) * 8);
+	fib->fmt0.aisb = virt_to_phys(aift->sbv->vector) + (zdev->aisb / 64) * 8;
 	fib->fmt0.isc = gisc;
 
 	/* Save some guest fib values in the host for later use */
@@ -359,8 +356,7 @@ static int kvm_s390_pci_aif_disable(struct zpci_dev *zdev, bool force)
 	if (zdev->kzdev->fib.fmt0.aibv == 0)
 		goto out;
 	spin_lock_irq(&aift->gait_lock);
-	gaite = (struct zpci_gaite *)aift->gait + (zdev->aisb *
-						   sizeof(struct zpci_gaite));
+	gaite = aift->gait + zdev->aisb;
 	isc = gaite->gisc;
 	gaite->count--;
 	if (gaite->count == 0) {
@@ -405,7 +401,7 @@ static int kvm_s390_pci_dev_open(struct zpci_dev *zdev)
 {
 	struct kvm_zdev *kzdev;
 
-	kzdev = kzalloc(sizeof(struct kvm_zdev), GFP_KERNEL);
+	kzdev = kzalloc_obj(struct kvm_zdev);
 	if (!kzdev)
 		return -ENOMEM;
 
@@ -434,7 +430,6 @@ static void kvm_s390_pci_dev_release(struct zpci_dev *zdev)
 static int kvm_s390_pci_register_kvm(void *opaque, struct kvm *kvm)
 {
 	struct zpci_dev *zdev = opaque;
-	u8 status;
 	int rc;
 
 	if (!zdev)
@@ -481,13 +476,7 @@ static int kvm_s390_pci_register_kvm(void *opaque, struct kvm *kvm)
 	 */
 	zdev->gisa = (u32)virt_to_phys(&kvm->arch.sie_page2->gisa);
 
-	rc = zpci_enable_device(zdev);
-	if (rc)
-		goto clear_gisa;
-
-	/* Re-register the IOMMU that was already created */
-	rc = zpci_register_ioat(zdev, 0, zdev->start_dma, zdev->end_dma,
-				virt_to_phys(zdev->dma_table), &status);
+	rc = zpci_reenable_device(zdev);
 	if (rc)
 		goto clear_gisa;
 
@@ -517,7 +506,6 @@ static void kvm_s390_pci_unregister_kvm(void *opaque)
 {
 	struct zpci_dev *zdev = opaque;
 	struct kvm *kvm;
-	u8 status;
 
 	if (!zdev)
 		return;
@@ -551,12 +539,7 @@ static void kvm_s390_pci_unregister_kvm(void *opaque)
 			goto out;
 	}
 
-	if (zpci_enable_device(zdev))
-		goto out;
-
-	/* Re-register the IOMMU that was already created */
-	zpci_register_ioat(zdev, 0, zdev->start_dma, zdev->end_dma,
-			   virt_to_phys(zdev->dma_table), &status);
+	zpci_reenable_device(zdev);
 
 out:
 	spin_lock(&kvm->arch.kzdev_list_lock);
@@ -680,7 +663,7 @@ int __init kvm_s390_pci_init(void)
 	if (!kvm_s390_pci_interp_allowed())
 		return 0;
 
-	aift = kzalloc(sizeof(struct zpci_aift), GFP_KERNEL);
+	aift = kzalloc_obj(struct zpci_aift);
 	if (!aift)
 		return -ENOMEM;
 

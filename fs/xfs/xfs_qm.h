@@ -55,8 +55,9 @@ struct xfs_quotainfo {
 	struct xfs_inode	*qi_uquotaip;	/* user quota inode */
 	struct xfs_inode	*qi_gquotaip;	/* group quota inode */
 	struct xfs_inode	*qi_pquotaip;	/* project quota inode */
+	struct xfs_inode	*qi_dirip;	/* quota metadir */
 	struct list_lru		qi_lru;
-	int			qi_dquots;
+	uint64_t		qi_dquots;
 	struct mutex		qi_quotaofflock;/* to serialize quotaoff */
 	xfs_filblks_t		qi_dqchunklen;	/* # BBs in a chunk of dqs */
 	uint			qi_dqperchunk;	/* # ondisk dq in above chunk */
@@ -183,5 +184,8 @@ xfs_get_defquota(struct xfs_quotainfo *qi, xfs_dqtype_t type)
 		return NULL;
 	}
 }
+
+int xfs_qm_qino_load(struct xfs_mount *mp, xfs_dqtype_t type,
+		struct xfs_inode **ipp);
 
 #endif /* __XFS_QM_H__ */

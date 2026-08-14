@@ -250,7 +250,7 @@ static int xgene_xfi_mdio_read(struct mii_bus *bus, int phy_id, int reg)
 	} while ((status & BUSY_MASK) && timeout--);
 
 	if (status & BUSY_MASK) {
-		pr_err("XGENET_MII_MGMT write failed\n");
+		pr_err("XGENET_MII_MGMT read failed\n");
 		return -EBUSY;
 	}
 
@@ -441,7 +441,7 @@ static struct platform_driver xgene_mdio_driver = {
 		.acpi_match_table = ACPI_PTR(xgene_mdio_acpi_match),
 	},
 	.probe = xgene_mdio_probe,
-	.remove_new = xgene_mdio_remove,
+	.remove = xgene_mdio_remove,
 };
 
 module_platform_driver(xgene_mdio_driver);

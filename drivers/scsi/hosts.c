@@ -231,6 +231,12 @@ int scsi_add_host_with_dma(struct Scsi_Host *shost, struct device *dev,
 		goto fail;
 	}
 
+	if (shost->nr_reserved_cmds && !sht->queue_reserved_command) {
+		shost_printk(KERN_ERR, shost,
+			     "nr_reserved_cmds set but no method to queue\n");
+		goto fail;
+	}
+
 	/* Use min_t(int, ...) in case shost->can_queue exceeds SHRT_MAX */
 	shost->cmd_per_lun = min_t(int, shost->cmd_per_lun,
 				   shost->can_queue);
@@ -292,11 +298,10 @@ int scsi_add_host_with_dma(struct Scsi_Host *shost, struct device *dev,
 	}
 
 	if (shost->transportt->create_work_queue) {
-		snprintf(shost->work_q_name, sizeof(shost->work_q_name),
-			 "scsi_wq_%d", shost->host_no);
-		shost->work_q = alloc_workqueue("%s",
-			WQ_SYSFS | __WQ_LEGACY | WQ_MEM_RECLAIM | WQ_UNBOUND,
-			1, shost->work_q_name);
+		shost->work_q = alloc_workqueue(
+			"scsi_wq_%d",
+			WQ_SYSFS | __WQ_LEGACY | WQ_MEM_RECLAIM | WQ_UNBOUND, 1,
+			shost->host_no);
 
 		if (!shost->work_q) {
 			error = -EINVAL;
@@ -307,6 +312,14 @@ int scsi_add_host_with_dma(struct Scsi_Host *shost, struct device *dev,
 	error = scsi_sysfs_add_host(shost);
 	if (error)
 		goto out_del_dev;
+
+	if (shost->nr_reserved_cmds) {
+		shost->pseudo_sdev = scsi_get_pseudo_sdev(shost);
+		if (!shost->pseudo_sdev) {
+			error = -ENOMEM;
+			goto out_del_dev;
+		}
+	}
 
 	scsi_proc_host_add(shost);
 	scsi_autopm_put_host(shost);
@@ -437,6 +450,7 @@ struct Scsi_Host *scsi_host_alloc(const struct scsi_host_template *sht, int priv
 	shost->hostt = sht;
 	shost->this_id = sht->this_id;
 	shost->can_queue = sht->can_queue;
+	shost->nr_reserved_cmds = sht->nr_reserved_cmds;
 	shost->sg_tablesize = sht->sg_tablesize;
 	shost->sg_prot_tablesize = sht->sg_prot_tablesize;
 	shost->cmd_per_lun = sht->cmd_per_lun;
@@ -474,10 +488,17 @@ struct Scsi_Host *scsi_host_alloc(const struct scsi_host_template *sht, int priv
 	else
 		shost->max_sectors = SCSI_DEFAULT_MAX_SECTORS;
 
-	if (sht->max_segment_size)
-		shost->max_segment_size = sht->max_segment_size;
-	else
-		shost->max_segment_size = BLK_MAX_SEGMENT_SIZE;
+	shost->virt_boundary_mask = sht->virt_boundary_mask;
+	if (shost->virt_boundary_mask) {
+		WARN_ON_ONCE(sht->max_segment_size &&
+			     sht->max_segment_size != UINT_MAX);
+		shost->max_segment_size = UINT_MAX;
+	} else {
+		if (sht->max_segment_size)
+			shost->max_segment_size = sht->max_segment_size;
+		else
+			shost->max_segment_size = BLK_MAX_SEGMENT_SIZE;
+	}
 
 	/* 32-byte (dword) is a common minimum for HBAs. */
 	if (sht->dma_alignment)
@@ -492,9 +513,6 @@ struct Scsi_Host *scsi_host_alloc(const struct scsi_host_template *sht, int priv
 		shost->dma_boundary = sht->dma_boundary;
 	else
 		shost->dma_boundary = 0xffffffff;
-
-	if (sht->virt_boundary_mask)
-		shost->virt_boundary_mask = sht->virt_boundary_mask;
 
 	device_initialize(&shost->shost_gendev);
 	dev_set_name(&shost->shost_gendev, "host%d", shost->host_no);
@@ -601,8 +619,8 @@ static bool scsi_host_check_in_flight(struct request *rq, void *data)
 }
 
 /**
- * scsi_host_busy - Return the host busy counter
- * @shost:	Pointer to Scsi_Host to inc.
+ * scsi_host_busy - Return the count of in-flight commands
+ * @shost:	Pointer to Scsi_Host
  **/
 int scsi_host_busy(struct Scsi_Host *shost)
 {

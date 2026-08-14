@@ -227,7 +227,7 @@ static int o2cb_dlm_lock_status(struct ocfs2_dlm_lksb *lksb)
 }
 
 /*
- * o2dlm aways has a "valid" LVB. If the dlm loses track of the LVB
+ * o2dlm always has a "valid" LVB. If the dlm loses track of the LVB
  * contents, it will zero out the LVB.  Thus the caller can always trust
  * the contents.
  */
@@ -334,7 +334,7 @@ static int o2cb_cluster_connect(struct ocfs2_cluster_connection *conn)
 		goto out;
 	}
 
-	priv = kzalloc(sizeof(struct o2dlm_private), GFP_KERNEL);
+	priv = kzalloc_obj(struct o2dlm_private);
 	if (!priv) {
 		rc = -ENOMEM;
 		goto out_free;

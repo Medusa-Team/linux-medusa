@@ -11,6 +11,7 @@
 #include <linux/uio.h>
 
 #define BIO_MAX_VECS		256U
+#define BIO_MAX_INLINE_VECS	UIO_MAXIOV
 
 struct queue_limits;
 
@@ -18,9 +19,6 @@ static inline unsigned int bio_max_segs(unsigned int nr_segs)
 {
 	return min(nr_segs, BIO_MAX_VECS);
 }
-
-#define bio_prio(bio)			(bio)->bi_ioprio
-#define bio_set_prio(bio, prio)		((bio)->bi_ioprio = prio)
 
 #define bio_iter_iovec(bio, iter)				\
 	bvec_iter_bvec((bio)->bi_io_vec, (iter))
@@ -47,6 +45,21 @@ static inline unsigned int bio_max_segs(unsigned int nr_segs)
  */
 #define bio_data_dir(bio) \
 	(op_is_write(bio_op(bio)) ? WRITE : READ)
+
+static inline bool bio_flagged(const struct bio *bio, unsigned int bit)
+{
+	return bio->bi_flags & (1U << bit);
+}
+
+static inline void bio_set_flag(struct bio *bio, unsigned int bit)
+{
+	bio->bi_flags |= (1U << bit);
+}
+
+static inline void bio_clear_flag(struct bio *bio, unsigned int bit)
+{
+	bio->bi_flags &= ~(1U << bit);
+}
 
 /*
  * Check whether this bio carries any data or not. A NULL bio is allowed.
@@ -227,21 +240,6 @@ static inline void bio_cnt_set(struct bio *bio, unsigned int count)
 	atomic_set(&bio->__bi_cnt, count);
 }
 
-static inline bool bio_flagged(struct bio *bio, unsigned int bit)
-{
-	return bio->bi_flags & (1U << bit);
-}
-
-static inline void bio_set_flag(struct bio *bio, unsigned int bit)
-{
-	bio->bi_flags |= (1U << bit);
-}
-
-static inline void bio_clear_flag(struct bio *bio, unsigned int bit)
-{
-	bio->bi_flags &= ~(1U << bit);
-}
-
 static inline struct bio_vec *bio_first_bvec_all(struct bio *bio)
 {
 	WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED));
@@ -256,12 +254,6 @@ static inline struct page *bio_first_page_all(struct bio *bio)
 static inline struct folio *bio_first_folio_all(struct bio *bio)
 {
 	return page_folio(bio_first_page_all(bio));
-}
-
-static inline struct bio_vec *bio_last_bvec_all(struct bio *bio)
-{
-	WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED));
-	return &bio->bi_io_vec[bio->bi_vcnt - 1];
 }
 
 /**
@@ -293,7 +285,7 @@ static inline void bio_first_folio(struct folio_iter *fi, struct bio *bio,
 
 	fi->folio = page_folio(bvec->bv_page);
 	fi->offset = bvec->bv_offset +
-			PAGE_SIZE * (bvec->bv_page - &fi->folio->page);
+			PAGE_SIZE * folio_page_idx(fi->folio, bvec->bv_page);
 	fi->_seg_count = bvec->bv_len;
 	fi->length = min(folio_size(fi->folio) - fi->offset, fi->_seg_count);
 	fi->_next = folio_next(fi->folio);
@@ -324,8 +316,10 @@ static inline void bio_next_folio(struct folio_iter *fi, struct bio *bio)
 void bio_trim(struct bio *bio, sector_t offset, sector_t size);
 extern struct bio *bio_split(struct bio *bio, int sectors,
 			     gfp_t gfp, struct bio_set *bs);
-struct bio *bio_split_rw(struct bio *bio, const struct queue_limits *lim,
-		unsigned *segs, struct bio_set *bs, unsigned max_bytes);
+int bio_split_io_at(struct bio *bio, const struct queue_limits *lim,
+		unsigned *segs, unsigned max_bytes, unsigned len_align);
+u8 bio_seg_gap(struct request_queue *q, struct bio *prev, struct bio *next,
+		u8 gaps_bit);
 
 /**
  * bio_next_split - get next @sectors from a bio, splitting if necessary
@@ -356,8 +350,7 @@ extern void bioset_exit(struct bio_set *);
 extern int biovec_init_pool(mempool_t *pool, int pool_entries);
 
 struct bio *bio_alloc_bioset(struct block_device *bdev, unsigned short nr_vecs,
-			     blk_opf_t opf, gfp_t gfp_mask,
-			     struct bio_set *bs);
+			     blk_opf_t opf, gfp_t gfp, struct bio_set *bs);
 struct bio *bio_kmalloc(unsigned short nr_vecs, gfp_t gfp_mask);
 extern void bio_put(struct bio *);
 
@@ -403,32 +396,88 @@ static inline int bio_iov_vecs_to_alloc(struct iov_iter *iter, int max_segs)
 	return iov_iter_npages(iter, max_segs);
 }
 
+/**
+ * bio_iov_bounce_nr_vecs - calculate number of bvecs for a bounce bio
+ * @iter:	iter to bounce from
+ * @op:		REQ_OP_* for the bio
+ *
+ * Calculates how many bvecs are needed for the next bio to bounce from/to
+ * @iter.
+ */
+static inline unsigned short
+bio_iov_bounce_nr_vecs(struct iov_iter *iter, blk_opf_t op)
+{
+	/*
+	 * We still need to bounce bvec iters, so don't special case them
+	 * here unlike in bio_iov_vecs_to_alloc.
+	 *
+	 * For reads we need to use a vector for the bounce buffer, account
+	 * for that here.
+	 */
+	if (op_is_write(op))
+		return iov_iter_npages(iter, BIO_MAX_VECS);
+	return iov_iter_npages(iter, BIO_MAX_VECS - 1) + 1;
+}
+
 struct request_queue;
 
-extern int submit_bio_wait(struct bio *bio);
 void bio_init(struct bio *bio, struct block_device *bdev, struct bio_vec *table,
 	      unsigned short max_vecs, blk_opf_t opf);
+static inline void bio_init_inline(struct bio *bio, struct block_device *bdev,
+	      unsigned short max_vecs, blk_opf_t opf)
+{
+	bio_init(bio, bdev, bio_inline_vecs(bio), max_vecs, opf);
+}
 extern void bio_uninit(struct bio *);
 void bio_reset(struct bio *bio, struct block_device *bdev, blk_opf_t opf);
+void bio_reuse(struct bio *bio, blk_opf_t opf);
 void bio_chain(struct bio *, struct bio *);
+void bio_await(struct bio *bio, void *priv,
+	       void (*submit)(struct bio *bio, void *priv));
 
 int __must_check bio_add_page(struct bio *bio, struct page *page, unsigned len,
 			      unsigned off);
 bool __must_check bio_add_folio(struct bio *bio, struct folio *folio,
 				size_t len, size_t off);
-extern int bio_add_pc_page(struct request_queue *, struct bio *, struct page *,
-			   unsigned int, unsigned int);
-int bio_add_zone_append_page(struct bio *bio, struct page *page,
-			     unsigned int len, unsigned int offset);
 void __bio_add_page(struct bio *bio, struct page *page,
 		unsigned int len, unsigned int off);
 void bio_add_folio_nofail(struct bio *bio, struct folio *folio, size_t len,
 			  size_t off);
-int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter);
-void bio_iov_bvec_set(struct bio *bio, struct iov_iter *iter);
+void bio_add_virt_nofail(struct bio *bio, void *vaddr, unsigned len);
+
+/**
+ * bio_add_max_vecs - number of bio_vecs needed to add data to a bio
+ * @kaddr: kernel virtual address to add
+ * @len: length in bytes to add
+ *
+ * Calculate how many bio_vecs need to be allocated to add the kernel virtual
+ * address range in [@kaddr:@len] in the worse case.
+ */
+static inline unsigned int bio_add_max_vecs(void *kaddr, unsigned int len)
+{
+	if (is_vmalloc_addr(kaddr))
+		return DIV_ROUND_UP(offset_in_page(kaddr) + len, PAGE_SIZE);
+	return 1;
+}
+
+unsigned int bio_add_vmalloc_chunk(struct bio *bio, void *vaddr, unsigned len);
+bool bio_add_vmalloc(struct bio *bio, void *vaddr, unsigned int len);
+
+int submit_bio_wait(struct bio *bio);
+int bdev_rw_virt(struct block_device *bdev, sector_t sector, void *data,
+		size_t len, enum req_op op);
+
+int bio_iov_iter_get_pages(struct bio *bio, struct iov_iter *iter,
+		unsigned len_align_mask);
+
+void bio_iov_bvec_set(struct bio *bio, const struct iov_iter *iter);
 void __bio_release_pages(struct bio *bio, bool mark_dirty);
 extern void bio_set_pages_dirty(struct bio *bio);
 extern void bio_check_pages_dirty(struct bio *bio);
+
+int bio_iov_iter_bounce(struct bio *bio, struct iov_iter *iter, size_t maxlen,
+		size_t minsize);
+void bio_iov_iter_unbounce(struct bio *bio, bool is_error, bool mark_dirty);
 
 extern void bio_copy_data_iter(struct bio *dst, struct bvec_iter *dst_iter,
 			       struct bio *src, struct bvec_iter *src_iter);
@@ -632,10 +681,6 @@ struct bio_set {
 
 	mempool_t bio_pool;
 	mempool_t bvec_pool;
-#if defined(CONFIG_BLK_DEV_INTEGRITY)
-	mempool_t bio_integrity_pool;
-	mempool_t bvec_integrity_pool;
-#endif
 
 	unsigned int back_pad;
 	/*
@@ -675,6 +720,23 @@ static inline void bio_set_polled(struct bio *bio, struct kiocb *kiocb)
 static inline void bio_clear_polled(struct bio *bio)
 {
 	bio->bi_opf &= ~REQ_POLLED;
+}
+
+/**
+ * bio_is_zone_append - is this a zone append bio?
+ * @bio:	bio to check
+ *
+ * Check if @bio is a zone append operation.  Core block layer code and end_io
+ * handlers must use this instead of an open coded REQ_OP_ZONE_APPEND check
+ * because the block layer can rewrite REQ_OP_ZONE_APPEND to REQ_OP_WRITE if
+ * it is not natively supported.
+ */
+static inline bool bio_is_zone_append(struct bio *bio)
+{
+	if (!IS_ENABLED(CONFIG_BLK_DEV_ZONED))
+		return false;
+	return bio_op(bio) == REQ_OP_ZONE_APPEND ||
+		bio_flagged(bio, BIO_EMULATES_ZONE_APPEND);
 }
 
 struct bio *blk_next_bio(struct bio *bio, struct block_device *bdev,

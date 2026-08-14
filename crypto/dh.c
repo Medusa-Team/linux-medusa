@@ -145,9 +145,9 @@ static int dh_is_pubkey_valid(struct dh_ctx *ctx, MPI y)
 	 * ->p is odd, so no need to explicitly subtract one
 	 * from it before shifting to the right.
 	 */
-	mpi_rshift(q, ctx->p, 1);
+	ret = mpi_rshift(q, ctx->p, 1) ?:
+	      mpi_powm(val, y, q, ctx->p);
 
-	ret = mpi_powm(val, y, q, ctx->p);
 	mpi_free(q);
 	if (ret) {
 		mpi_free(val);
@@ -388,13 +388,7 @@ static void *dh_safe_prime_gen_privkey(const struct dh_safe_prime *safe_prime,
 	 * 5.6.1.1.3, step 3 (and implicitly step 4): obtain N + 64
 	 * random bits and interpret them as a big endian integer.
 	 */
-	err = -EFAULT;
-	if (crypto_get_default_rng())
-		goto out_err;
-
-	err = crypto_rng_get_bytes(crypto_default_rng, (u8 *)key,
-				   oversampling_size);
-	crypto_put_default_rng();
+	err = crypto_stdrng_get_bytes(key, oversampling_size);
 	if (err)
 		goto out_err;
 
@@ -920,7 +914,7 @@ static void __exit dh_exit(void)
 	crypto_unregister_kpp(&dh);
 }
 
-subsys_initcall(dh_init);
+module_init(dh_init);
 module_exit(dh_exit);
 MODULE_ALIAS_CRYPTO("dh");
 MODULE_LICENSE("GPL");

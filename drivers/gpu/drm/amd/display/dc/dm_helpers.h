@@ -153,17 +153,40 @@ bool dm_helpers_submit_i2c(
 		const struct dc_link *link,
 		struct i2c_command *cmd);
 
+bool dm_helpers_execute_fused_io(
+		struct dc_context *ctx,
+		struct dc_link *link,
+		union dmub_rb_cmd *commands,
+		uint8_t count,
+		uint32_t timeout_us
+);
+
 bool dm_helpers_dp_write_dsc_enable(
 		struct dc_context *ctx,
 		const struct dc_stream_state *stream,
 		bool enable
 );
+
+bool dm_helpers_dp_write_hblank_reduction(
+		struct dc_context *ctx,
+		const struct dc_stream_state *stream);
+
 bool dm_helpers_is_dp_sink_present(
 		struct dc_link *link);
 
 void dm_helpers_mst_enable_stream_features(const struct dc_stream_state *stream);
 
 enum dc_edid_status dm_helpers_read_local_edid(
+		struct dc_context *ctx,
+		struct dc_link *link,
+		struct dc_sink *sink);
+
+void dm_helpers_read_mccs_caps(
+		struct dc_context *ctx,
+		struct dc_link *link,
+		struct dc_sink *sink);
+
+void dm_helpers_mccs_vcp_set(
 		struct dc_context *ctx,
 		struct dc_link *link,
 		struct dc_sink *sink);
@@ -184,6 +207,7 @@ void dm_set_phyd32clk(struct dc_context *ctx, int freq_khz);
 
 bool dm_helpers_dmub_outbox_interrupt_control(struct dc_context *ctx, bool enable);
 
+void dm_helpers_dmu_timeout(struct dc_context *ctx);
 void dm_helpers_smu_timeout(struct dc_context *ctx, unsigned int msg_id, unsigned int param, unsigned int timeout_us);
 
 // 0x1 = Result_OK, 0xFE = Result_UnkmownCmd, 0x0 = Status_Busy
@@ -195,7 +219,7 @@ void dm_helpers_init_panel_settings(
 	struct dc_sink *sink);
 void dm_helpers_override_panel_settings(
 	struct dc_context *ctx,
-	struct dc_panel_config *config);
+	struct dc_link *link);
 int dm_helper_dmub_aux_transfer_sync(
 		struct dc_context *ctx,
 		const struct dc_link *link,
@@ -209,5 +233,8 @@ int dm_helpers_dmub_set_config_sync(struct dc_context *ctx,
 enum adaptive_sync_type dm_get_adaptive_sync_support_type(struct dc_link *link);
 
 enum dc_edid_status dm_helpers_get_sbios_edid(struct dc_link *link, struct dc_edid *edid);
+
+bool dm_helpers_is_fullscreen(struct dc_context *ctx, struct dc_stream_state *stream);
+bool dm_helpers_is_hdr_on(struct dc_context *ctx, struct dc_stream_state *stream);
 
 #endif /* __DM_HELPERS__ */

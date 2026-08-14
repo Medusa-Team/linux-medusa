@@ -4,7 +4,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include "bpf_misc.h"
-#include "../bpf_testmod/bpf_testmod_kfunc.h"
+#include "../test_kmods/bpf_testmod_kfunc.h"
 
 struct map_value {
 	char buf[8];
@@ -272,7 +272,7 @@ int reject_untrusted_xchg(struct __sk_buff *ctx)
 
 SEC("?tc")
 __failure
-__msg("invalid kptr access, R2 type=ptr_prog_test_ref_kfunc expected=ptr_prog_test_member")
+__msg("invalid kptr access, R2 type=trusted_ptr_prog_test_ref_kfunc expected=ptr_prog_test_member")
 int reject_bad_type_xchg(struct __sk_buff *ctx)
 {
 	struct prog_test_ref_kfunc *ref_ptr;
@@ -291,7 +291,7 @@ int reject_bad_type_xchg(struct __sk_buff *ctx)
 }
 
 SEC("?tc")
-__failure __msg("invalid kptr access, R2 type=ptr_prog_test_ref_kfunc")
+__failure __msg("invalid kptr access, R2 type=trusted_ptr_prog_test_ref_kfunc")
 int reject_member_of_ref_xchg(struct __sk_buff *ctx)
 {
 	struct prog_test_ref_kfunc *ref_ptr;
@@ -345,7 +345,7 @@ int reject_indirect_global_func_access(struct __sk_buff *ctx)
 }
 
 SEC("?tc")
-__failure __msg("Unreleased reference id=5 alloc_insn=")
+__failure __msg("Unreleased reference id=4 alloc_insn=")
 int kptr_xchg_ref_state(struct __sk_buff *ctx)
 {
 	struct prog_test_ref_kfunc *p;
@@ -382,6 +382,21 @@ int kptr_xchg_possibly_null(struct __sk_buff *ctx)
 	if (p)
 		bpf_kfunc_call_test_release(p);
 
+	return 0;
+}
+
+SEC("?tc")
+__failure __msg("invalid kptr access, R")
+int reject_scalar_store_to_kptr(struct __sk_buff *ctx)
+{
+	struct map_value *v;
+	int key = 0;
+
+	v = bpf_map_lookup_elem(&array_map, &key);
+	if (!v)
+		return 0;
+
+	*(volatile u64 *)&v->unref_ptr = 0xBADC0DE;
 	return 0;
 }
 

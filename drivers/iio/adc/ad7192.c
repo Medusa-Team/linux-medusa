@@ -7,7 +7,9 @@
 
 #include <linux/interrupt.h>
 #include <linux/bitfield.h>
+#include <linux/cleanup.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -201,6 +203,7 @@ struct ad7192_chip_info {
 struct ad7192_state {
 	const struct ad7192_chip_info	*chip_info;
 	struct clk			*mclk;
+	struct clk_hw			int_clk_hw;
 	u16				int_vref_mv;
 	u32				aincom_mv;
 	u32				fclk;
@@ -254,6 +257,9 @@ static ssize_t ad7192_write_syscalib(struct iio_dev *indio_dev,
 	if (ret)
 		return ret;
 
+	if (!iio_device_claim_direct(indio_dev))
+		return -EBUSY;
+
 	temp = st->syscalib_mode[chan->channel];
 	if (sys_calib) {
 		if (temp == AD7192_SYSCALIB_ZERO_SCALE)
@@ -263,6 +269,8 @@ static ssize_t ad7192_write_syscalib(struct iio_dev *indio_dev,
 			ret = ad_sd_calibrate(&st->sd, AD7192_MODE_CAL_SYS_FULL,
 					      chan->address);
 	}
+
+	iio_device_release_direct(indio_dev);
 
 	return ret ? ret : len;
 }
@@ -284,7 +292,7 @@ static const struct iio_chan_spec_ext_info ad7192_calibsys_ext_info[] = {
 		 &ad7192_syscalib_mode_enum),
 	IIO_ENUM_AVAILABLE("sys_calibration_mode", IIO_SHARED_BY_TYPE,
 			   &ad7192_syscalib_mode_enum),
-	{}
+	{ }
 };
 
 static struct ad7192_state *ad_sigma_delta_to_ad7192(struct ad_sigma_delta *sd)
@@ -359,6 +367,7 @@ static const struct ad_sigma_delta_info ad7192_sigma_delta_info = {
 	.status_ch_mask = GENMASK(3, 0),
 	.num_slots = 4,
 	.irq_flags = IRQF_TRIGGER_FALLING,
+	.num_resetclks = 40,
 };
 
 static const struct ad_sigma_delta_info ad7194_sigma_delta_info = {
@@ -371,6 +380,7 @@ static const struct ad_sigma_delta_info ad7194_sigma_delta_info = {
 	.read_mask = BIT(6),
 	.status_ch_mask = GENMASK(3, 0),
 	.irq_flags = IRQF_TRIGGER_FALLING,
+	.num_resetclks = 40,
 };
 
 static const struct ad_sd_calib_data ad7192_calib_arr[8] = {
@@ -396,25 +406,162 @@ static inline bool ad7192_valid_external_frequency(u32 freq)
 		freq <= AD7192_EXT_FREQ_MHZ_MAX);
 }
 
-static int ad7192_clock_select(struct ad7192_state *st)
+/*
+ * Position 0 of ad7192_clock_names, xtal, corresponds to clock source
+ * configuration AD7192_CLK_EXT_MCLK1_2 and position 1, mclk, corresponds to
+ * AD7192_CLK_EXT_MCLK2
+ */
+static const char *const ad7192_clock_names[] = {
+	"xtal",
+	"mclk"
+};
+
+static struct ad7192_state *clk_hw_to_ad7192(struct clk_hw *hw)
+{
+	return container_of(hw, struct ad7192_state, int_clk_hw);
+}
+
+static unsigned long ad7192_clk_recalc_rate(struct clk_hw *hw,
+					    unsigned long parent_rate)
+{
+	return AD7192_INT_FREQ_MHZ;
+}
+
+static int ad7192_clk_output_is_enabled(struct clk_hw *hw)
+{
+	struct ad7192_state *st = clk_hw_to_ad7192(hw);
+
+	return st->clock_sel == AD7192_CLK_INT_CO;
+}
+
+static int ad7192_clk_prepare(struct clk_hw *hw)
+{
+	struct ad7192_state *st = clk_hw_to_ad7192(hw);
+	int ret;
+
+	st->mode &= ~AD7192_MODE_CLKSRC_MASK;
+	st->mode |= AD7192_CLK_INT_CO;
+
+	ret = ad_sd_write_reg(&st->sd, AD7192_REG_MODE, 3, st->mode);
+	if (ret)
+		return ret;
+
+	st->clock_sel = AD7192_CLK_INT_CO;
+
+	return 0;
+}
+
+static void ad7192_clk_unprepare(struct clk_hw *hw)
+{
+	struct ad7192_state *st = clk_hw_to_ad7192(hw);
+	int ret;
+
+	st->mode &= ~AD7192_MODE_CLKSRC_MASK;
+	st->mode |= AD7192_CLK_INT;
+
+	ret = ad_sd_write_reg(&st->sd, AD7192_REG_MODE, 3, st->mode);
+	if (ret)
+		return;
+
+	st->clock_sel = AD7192_CLK_INT;
+}
+
+static const struct clk_ops ad7192_int_clk_ops = {
+	.recalc_rate = ad7192_clk_recalc_rate,
+	.is_enabled = ad7192_clk_output_is_enabled,
+	.prepare = ad7192_clk_prepare,
+	.unprepare = ad7192_clk_unprepare,
+};
+
+static int ad7192_register_clk_provider(struct ad7192_state *st)
 {
 	struct device *dev = &st->sd.spi->dev;
-	unsigned int clock_sel;
+	struct clk_init_data init = {};
+	int ret;
 
-	clock_sel = AD7192_CLK_INT;
+	if (!IS_ENABLED(CONFIG_COMMON_CLK))
+		return 0;
 
-	/* use internal clock */
-	if (!st->mclk) {
-		if (device_property_read_bool(dev, "adi,int-clock-output-enable"))
-			clock_sel = AD7192_CLK_INT_CO;
-	} else {
-		if (device_property_read_bool(dev, "adi,clock-xtal"))
-			clock_sel = AD7192_CLK_EXT_MCLK1_2;
-		else
-			clock_sel = AD7192_CLK_EXT_MCLK2;
+	if (!device_property_present(dev, "#clock-cells"))
+		return 0;
+
+	init.name = devm_kasprintf(dev, GFP_KERNEL, "%s-clk",
+				   fwnode_get_name(dev_fwnode(dev)));
+	if (!init.name)
+		return -ENOMEM;
+
+	init.ops = &ad7192_int_clk_ops;
+
+	st->int_clk_hw.init = &init;
+	ret = devm_clk_hw_register(dev, &st->int_clk_hw);
+	if (ret)
+		return ret;
+
+	return devm_of_clk_add_hw_provider(dev, of_clk_hw_simple_get,
+					   &st->int_clk_hw);
+}
+
+static int ad7192_clock_setup(struct ad7192_state *st)
+{
+	struct device *dev = &st->sd.spi->dev;
+	int ret;
+
+	/*
+	 * The following two if branches are kept for backward compatibility but
+	 * the use of the two devicetree properties is highly discouraged. Clock
+	 * configuration should be done according to the bindings.
+	 */
+
+	if (device_property_read_bool(dev, "adi,int-clock-output-enable")) {
+		st->clock_sel = AD7192_CLK_INT_CO;
+		st->fclk = AD7192_INT_FREQ_MHZ;
+		dev_warn(dev, "Property adi,int-clock-output-enable is deprecated! Check bindings!\n");
+		return 0;
 	}
 
-	return clock_sel;
+	if (device_property_read_bool(dev, "adi,clock-xtal")) {
+		st->clock_sel = AD7192_CLK_EXT_MCLK1_2;
+		st->mclk = devm_clk_get_enabled(dev, "mclk");
+		if (IS_ERR(st->mclk))
+			return dev_err_probe(dev, PTR_ERR(st->mclk),
+					     "Failed to get mclk\n");
+
+		st->fclk = clk_get_rate(st->mclk);
+		if (!ad7192_valid_external_frequency(st->fclk))
+			return dev_err_probe(dev, -EINVAL,
+					     "External clock frequency out of bounds\n");
+
+		dev_warn(dev, "Property adi,clock-xtal is deprecated! Check bindings!\n");
+		return 0;
+	}
+
+	ret = device_property_match_property_string(dev, "clock-names",
+						    ad7192_clock_names,
+						    ARRAY_SIZE(ad7192_clock_names));
+	if (ret < 0) {
+		st->clock_sel = AD7192_CLK_INT;
+		st->fclk = AD7192_INT_FREQ_MHZ;
+
+		ret = ad7192_register_clk_provider(st);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "Failed to register clock provider\n");
+		return 0;
+	}
+
+	st->clock_sel = AD7192_CLK_EXT_MCLK1_2 + ret;
+
+	st->mclk = devm_clk_get_enabled(dev, ad7192_clock_names[ret]);
+	if (IS_ERR(st->mclk))
+		return dev_err_probe(dev, PTR_ERR(st->mclk),
+				     "Failed to get clock source\n");
+
+	st->fclk = clk_get_rate(st->mclk);
+	if (!ad7192_valid_external_frequency(st->fclk))
+		return dev_err_probe(dev, -EINVAL,
+				     "External clock frequency out of bounds\n");
+
+	return 0;
 }
 
 static int ad7192_setup(struct iio_dev *indio_dev, struct device *dev)
@@ -426,7 +573,7 @@ static int ad7192_setup(struct iio_dev *indio_dev, struct device *dev)
 	int i, ret, id;
 
 	/* reset the serial interface */
-	ret = ad_sd_reset(&st->sd, 48);
+	ret = ad_sd_reset(&st->sd);
 	if (ret < 0)
 		return ret;
 	usleep_range(500, 1000); /* Wait for at least 500us */
@@ -552,9 +699,8 @@ static ssize_t ad7192_set(struct device *dev,
 	if (ret < 0)
 		return ret;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
+	if (!iio_device_claim_direct(indio_dev))
+		return -EBUSY;
 
 	switch ((u32)this_attr->address) {
 	case AD7192_REG_GPOCON:
@@ -577,7 +723,7 @@ static ssize_t ad7192_set(struct device *dev,
 		ret = -EINVAL;
 	}
 
-	iio_device_release_direct_mode(indio_dev);
+	iio_device_release_direct(indio_dev);
 
 	return ret ? ret : len;
 }
@@ -804,82 +950,83 @@ static int ad7192_read_raw(struct iio_dev *indio_dev,
 	return -EINVAL;
 }
 
+static int __ad7192_write_raw(struct iio_dev *indio_dev,
+			      struct iio_chan_spec const *chan,
+			      int val,
+			      int val2,
+			      long mask)
+{
+	struct ad7192_state *st = iio_priv(indio_dev);
+	int i, div;
+	unsigned int tmp;
+
+	guard(mutex)(&st->lock);
+
+	switch (mask) {
+	case IIO_CHAN_INFO_SCALE:
+		for (i = 0; i < ARRAY_SIZE(st->scale_avail); i++) {
+			if (val2 != st->scale_avail[i][1])
+				continue;
+
+			tmp = st->conf;
+			st->conf &= ~AD7192_CONF_GAIN_MASK;
+			st->conf |= FIELD_PREP(AD7192_CONF_GAIN_MASK, i);
+			if (tmp == st->conf)
+				return 0;
+			ad_sd_write_reg(&st->sd, AD7192_REG_CONF, 3, st->conf);
+			ad7192_calibrate_all(st);
+			return 0;
+		}
+		return -EINVAL;
+	case IIO_CHAN_INFO_SAMP_FREQ:
+		if (!val)
+			return -EINVAL;
+
+		div = st->fclk / (val * ad7192_get_f_order(st) * 1024);
+		if (div < 1 || div > 1023)
+			return -EINVAL;
+
+		st->mode &= ~AD7192_MODE_RATE_MASK;
+		st->mode |= FIELD_PREP(AD7192_MODE_RATE_MASK, div);
+		ad_sd_write_reg(&st->sd, AD7192_REG_MODE, 3, st->mode);
+		ad7192_update_filter_freq_avail(st);
+		return 0;
+	case IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY:
+		return ad7192_set_3db_filter_freq(st, val, val2 / 1000);
+	case IIO_CHAN_INFO_OVERSAMPLING_RATIO:
+		for (i = 0; i < ARRAY_SIZE(st->oversampling_ratio_avail); i++) {
+			if (val != st->oversampling_ratio_avail[i])
+				continue;
+
+			tmp = st->mode;
+			st->mode &= ~AD7192_MODE_AVG_MASK;
+			st->mode |= FIELD_PREP(AD7192_MODE_AVG_MASK, i);
+			if (tmp == st->mode)
+				return 0;
+			ad_sd_write_reg(&st->sd, AD7192_REG_MODE, 3, st->mode);
+			ad7192_update_filter_freq_avail(st);
+			return 0;
+		}
+		return -EINVAL;
+	default:
+		return -EINVAL;
+	}
+}
+
 static int ad7192_write_raw(struct iio_dev *indio_dev,
 			    struct iio_chan_spec const *chan,
 			    int val,
 			    int val2,
 			    long mask)
 {
-	struct ad7192_state *st = iio_priv(indio_dev);
-	int ret, i, div;
-	unsigned int tmp;
+	int ret;
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret)
-		return ret;
+	if (!iio_device_claim_direct(indio_dev))
+		return -EBUSY;
 
-	mutex_lock(&st->lock);
+	ret = __ad7192_write_raw(indio_dev, chan, val, val2, mask);
 
-	switch (mask) {
-	case IIO_CHAN_INFO_SCALE:
-		ret = -EINVAL;
-		for (i = 0; i < ARRAY_SIZE(st->scale_avail); i++)
-			if (val2 == st->scale_avail[i][1]) {
-				ret = 0;
-				tmp = st->conf;
-				st->conf &= ~AD7192_CONF_GAIN_MASK;
-				st->conf |= FIELD_PREP(AD7192_CONF_GAIN_MASK, i);
-				if (tmp == st->conf)
-					break;
-				ad_sd_write_reg(&st->sd, AD7192_REG_CONF,
-						3, st->conf);
-				ad7192_calibrate_all(st);
-				break;
-			}
-		break;
-	case IIO_CHAN_INFO_SAMP_FREQ:
-		if (!val) {
-			ret = -EINVAL;
-			break;
-		}
-
-		div = st->fclk / (val * ad7192_get_f_order(st) * 1024);
-		if (div < 1 || div > 1023) {
-			ret = -EINVAL;
-			break;
-		}
-
-		st->mode &= ~AD7192_MODE_RATE_MASK;
-		st->mode |= FIELD_PREP(AD7192_MODE_RATE_MASK, div);
-		ad_sd_write_reg(&st->sd, AD7192_REG_MODE, 3, st->mode);
-		ad7192_update_filter_freq_avail(st);
-		break;
-	case IIO_CHAN_INFO_LOW_PASS_FILTER_3DB_FREQUENCY:
-		ret = ad7192_set_3db_filter_freq(st, val, val2 / 1000);
-		break;
-	case IIO_CHAN_INFO_OVERSAMPLING_RATIO:
-		ret = -EINVAL;
-		for (i = 0; i < ARRAY_SIZE(st->oversampling_ratio_avail); i++)
-			if (val == st->oversampling_ratio_avail[i]) {
-				ret = 0;
-				tmp = st->mode;
-				st->mode &= ~AD7192_MODE_AVG_MASK;
-				st->mode |= FIELD_PREP(AD7192_MODE_AVG_MASK, i);
-				if (tmp == st->mode)
-					break;
-				ad_sd_write_reg(&st->sd, AD7192_REG_MODE,
-						3, st->mode);
-				break;
-			}
-		ad7192_update_filter_freq_avail(st);
-		break;
-	default:
-		ret = -EINVAL;
-	}
-
-	mutex_unlock(&st->lock);
-
-	iio_device_release_direct_mode(indio_dev);
+	iio_device_release_direct(indio_dev);
 
 	return ret;
 }
@@ -943,7 +1090,7 @@ static int ad7192_update_scan_mode(struct iio_dev *indio_dev, const unsigned lon
 
 	conf &= ~AD7192_CONF_CHAN_MASK;
 	for_each_set_bit(i, scan_mask, 8)
-		conf |= FIELD_PREP(AD7192_CONF_CHAN_MASK, i);
+		conf |= FIELD_PREP(AD7192_CONF_CHAN_MASK, BIT(i));
 
 	ret = ad_sd_write_reg(&st->sd, AD7192_REG_CONF, 3, conf);
 	if (ret < 0)
@@ -1275,21 +1422,9 @@ static int ad7192_probe(struct spi_device *spi)
 	if (ret)
 		return ret;
 
-	st->fclk = AD7192_INT_FREQ_MHZ;
-
-	st->mclk = devm_clk_get_optional_enabled(dev, "mclk");
-	if (IS_ERR(st->mclk))
-		return PTR_ERR(st->mclk);
-
-	st->clock_sel = ad7192_clock_select(st);
-
-	if (st->clock_sel == AD7192_CLK_EXT_MCLK1_2 ||
-	    st->clock_sel == AD7192_CLK_EXT_MCLK2) {
-		st->fclk = clk_get_rate(st->mclk);
-		if (!ad7192_valid_external_frequency(st->fclk))
-			return dev_err_probe(dev, -EINVAL,
-					     "External clock frequency out of bounds\n");
-	}
+	ret = ad7192_clock_setup(st);
+	if (ret)
+		return ret;
 
 	ret = ad7192_setup(indio_dev, dev);
 	if (ret)
@@ -1304,7 +1439,7 @@ static const struct of_device_id ad7192_of_match[] = {
 	{ .compatible = "adi,ad7193", .data = &ad7192_chip_info_tbl[ID_AD7193] },
 	{ .compatible = "adi,ad7194", .data = &ad7192_chip_info_tbl[ID_AD7194] },
 	{ .compatible = "adi,ad7195", .data = &ad7192_chip_info_tbl[ID_AD7195] },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, ad7192_of_match);
 
@@ -1314,7 +1449,7 @@ static const struct spi_device_id ad7192_ids[] = {
 	{ "ad7193", (kernel_ulong_t)&ad7192_chip_info_tbl[ID_AD7193] },
 	{ "ad7194", (kernel_ulong_t)&ad7192_chip_info_tbl[ID_AD7194] },
 	{ "ad7195", (kernel_ulong_t)&ad7192_chip_info_tbl[ID_AD7195] },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, ad7192_ids);
 
@@ -1331,4 +1466,4 @@ module_spi_driver(ad7192_driver);
 MODULE_AUTHOR("Michael Hennerich <michael.hennerich@analog.com>");
 MODULE_DESCRIPTION("Analog Devices AD7192 and similar ADC");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_AD_SIGMA_DELTA);
+MODULE_IMPORT_NS("IIO_AD_SIGMA_DELTA");

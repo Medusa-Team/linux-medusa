@@ -39,6 +39,14 @@ properties:
           - amlogic,meson-s4-pwm
       - items:
           - enum:
+              - amlogic,a4-pwm
+              - amlogic,a5-pwm
+              - amlogic,c3-pwm
+              - amlogic,t7-pwm
+              - amlogic,meson-a1-pwm
+          - const: amlogic,meson-s4-pwm
+      - items:
+          - enum:
               - amlogic,meson8b-pwm-v2
               - amlogic,meson-gxbb-pwm-v2
               - amlogic,meson-axg-pwm-v2
@@ -55,6 +63,9 @@ properties:
   clock-names:
     minItems: 1
     maxItems: 2
+
+  power-domains:
+    maxItems: 1
 
   "#pwm-cells":
     const: 3
@@ -135,6 +146,16 @@ allOf:
         clock-names: false
       required:
         - clocks
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - amlogic,meson-a1-pwm
+    then:
+      required:
+        - power-domains
 
 additionalProperties: false
 

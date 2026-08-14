@@ -41,7 +41,7 @@ qtnf_event_handle_sta_assoc(struct qtnf_wmac *mac, struct qtnf_vif *vif,
 		return -EPROTO;
 	}
 
-	sinfo = kzalloc(sizeof(*sinfo), GFP_KERNEL);
+	sinfo = kzalloc_obj(*sinfo);
 	if (!sinfo)
 		return -ENOMEM;
 
@@ -90,8 +90,8 @@ qtnf_event_handle_sta_assoc(struct qtnf_wmac *mac, struct qtnf_vif *vif,
 		goto out;
 	}
 
-	cfg80211_new_sta(vif->netdev, sta_assoc->sta_addr, sinfo,
-			 GFP_KERNEL);
+	cfg80211_new_sta(vif->netdev->ieee80211_ptr, sta_assoc->sta_addr,
+			 sinfo, GFP_KERNEL);
 
 out:
 	kfree(sinfo);
@@ -126,7 +126,7 @@ qtnf_event_handle_sta_deauth(struct qtnf_wmac *mac, struct qtnf_vif *vif,
 		 sta_addr, reason);
 
 	if (qtnf_sta_list_del(vif, sta_addr))
-		cfg80211_del_sta(vif->netdev, sta_deauth->sta_addr,
+		cfg80211_del_sta(&vif->wdev, sta_deauth->sta_addr,
 				 GFP_KERNEL);
 
 	return 0;
@@ -520,21 +520,21 @@ static int qtnf_event_handle_radar(struct qtnf_vif *vif,
 		cfg80211_radar_event(wiphy, &chandef, GFP_KERNEL);
 		break;
 	case QLINK_RADAR_CAC_FINISHED:
-		if (!vif->wdev.cac_started)
+		if (!vif->wdev.links[0].cac_started)
 			break;
 
 		cfg80211_cac_event(vif->netdev, &chandef,
-				   NL80211_RADAR_CAC_FINISHED, GFP_KERNEL);
+				   NL80211_RADAR_CAC_FINISHED, GFP_KERNEL, 0);
 		break;
 	case QLINK_RADAR_CAC_ABORTED:
-		if (!vif->wdev.cac_started)
+		if (!vif->wdev.links[0].cac_started)
 			break;
 
 		cfg80211_cac_event(vif->netdev, &chandef,
-				   NL80211_RADAR_CAC_ABORTED, GFP_KERNEL);
+				   NL80211_RADAR_CAC_ABORTED, GFP_KERNEL, 0);
 		break;
 	case QLINK_RADAR_CAC_STARTED:
-		if (vif->wdev.cac_started)
+		if (vif->wdev.links[0].cac_started)
 			break;
 
 		if (!wiphy_ext_feature_isset(wiphy,
@@ -542,7 +542,7 @@ static int qtnf_event_handle_radar(struct qtnf_vif *vif,
 			break;
 
 		cfg80211_cac_event(vif->netdev, &chandef,
-				   NL80211_RADAR_CAC_STARTED, GFP_KERNEL);
+				   NL80211_RADAR_CAC_STARTED, GFP_KERNEL, 0);
 		break;
 	default:
 		pr_warn("%s: unhandled radar event %u\n",

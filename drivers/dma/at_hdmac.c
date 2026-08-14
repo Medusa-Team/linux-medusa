@@ -339,7 +339,7 @@ static inline u8 convert_buswidth(enum dma_slave_buswidth addr_width)
  * @regs: memory mapped register base
  * @clk: dma controller clock
  * @save_imr: interrupt mask register that is saved on suspend/resume cycle
- * @all_chan_mask: all channels availlable in a mask
+ * @all_chan_mask: all channels available in a mask
  * @lli_pool: hw lli table
  * @memset_pool: hw memset pool
  * @chan: channels table to store at_dma_chan structures
@@ -668,7 +668,7 @@ static inline u32 atc_calc_bytes_left(u32 current_len, u32 ctrla)
  * CTRLA is read in turn, next the DSCR is read a second time. If the two
  * consecutive read values of the DSCR are the same then we assume both refers
  * to the very same LLI as well as the CTRLA value read inbetween does. For
- * cyclic tranfers, the assumption is that a full loop is "not so fast". If the
+ * cyclic transfers, the assumption is that a full loop is "not so fast". If the
  * two DSCR values are different, we read again the CTRLA then the DSCR till two
  * consecutive read values from DSCR are equal or till the maximum trials is
  * reach. This algorithm is very unlikely not to find a stable value for DSCR.
@@ -700,7 +700,7 @@ static int atc_get_llis_residue(struct at_dma_chan *atchan,
 			break;
 
 		/*
-		 * DSCR has changed inside the DMA controller, so the previouly
+		 * DSCR has changed inside the DMA controller, so the previously
 		 * read value of CTRLA may refer to an already processed
 		 * descriptor hence could be outdated. We need to update ctrla
 		 * to match the current descriptor.
@@ -887,7 +887,7 @@ atc_prep_dma_interleaved(struct dma_chan *chan,
 	first = xt->sgl;
 
 	dev_info(chan2dev(chan),
-		 "%s: src=%pad, dest=%pad, numf=%d, frame_size=%d, flags=0x%lx\n",
+		 "%s: src=%pad, dest=%pad, numf=%zu, frame_size=%zu, flags=0x%lx\n",
 		__func__, &xt->src_start, &xt->dst_start, xt->numf,
 		xt->frame_size, flags);
 
@@ -929,7 +929,7 @@ atc_prep_dma_interleaved(struct dma_chan *chan,
 		ATC_SRC_PIP | ATC_DST_PIP |
 		FIELD_PREP(ATC_FC, ATC_FC_MEM2MEM);
 
-	desc = kzalloc(struct_size(desc, sg, 1), GFP_ATOMIC);
+	desc = kzalloc_flex(*desc, sg, 1, GFP_ATOMIC);
 	if (!desc)
 		return NULL;
 	desc->sglen = 1;
@@ -992,7 +992,7 @@ atc_prep_dma_memcpy(struct dma_chan *chan, dma_addr_t dest, dma_addr_t src,
 	}
 
 	sg_len = DIV_ROUND_UP(len, ATC_BTSIZE_MAX);
-	desc = kzalloc(struct_size(desc, sg, sg_len), GFP_ATOMIC);
+	desc = kzalloc_flex(*desc, sg, sg_len, GFP_ATOMIC);
 	if (!desc)
 		return NULL;
 	desc->sglen = sg_len;
@@ -1131,7 +1131,7 @@ atc_prep_dma_memset(struct dma_chan *chan, dma_addr_t dest, int value,
 		       (fill_pattern << 8) |
 		       fill_pattern;
 
-	desc = kzalloc(struct_size(desc, sg, 1), GFP_ATOMIC);
+	desc = kzalloc_flex(*desc, sg, 1, GFP_ATOMIC);
 	if (!desc)
 		goto err_free_buffer;
 	desc->sglen = 1;
@@ -1174,7 +1174,7 @@ atc_prep_dma_memset_sg(struct dma_chan *chan,
 	int			i;
 	int			ret;
 
-	dev_vdbg(chan2dev(chan), "%s: v0x%x l0x%zx f0x%lx\n", __func__,
+	dev_vdbg(chan2dev(chan), "%s: v0x%x l0x%x f0x%lx\n", __func__,
 		 value, sg_len, flags);
 
 	if (unlikely(!sgl || !sg_len)) {
@@ -1191,7 +1191,7 @@ atc_prep_dma_memset_sg(struct dma_chan *chan,
 	}
 	*(u32*)vaddr = value;
 
-	desc = kzalloc(struct_size(desc, sg, sg_len), GFP_ATOMIC);
+	desc = kzalloc_flex(*desc, sg, sg_len, GFP_ATOMIC);
 	if (!desc)
 		goto err_free_dma_buf;
 	desc->sglen = sg_len;
@@ -1274,7 +1274,7 @@ atc_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
 		return NULL;
 	}
 
-	desc = kzalloc(struct_size(desc, sg, sg_len), GFP_ATOMIC);
+	desc = kzalloc_flex(*desc, sg, sg_len, GFP_ATOMIC);
 	if (!desc)
 		return NULL;
 	desc->sglen = sg_len;
@@ -1503,7 +1503,7 @@ atc_prep_dma_cyclic(struct dma_chan *chan, dma_addr_t buf_addr, size_t buf_len,
 	unsigned int		periods = buf_len / period_len;
 	unsigned int		i;
 
-	dev_vdbg(chan2dev(chan), "prep_dma_cyclic: %s buf@%pad - %d (%d/%d)\n",
+	dev_vdbg(chan2dev(chan), "prep_dma_cyclic: %s buf@%pad - %d (%zu/%zu)\n",
 			direction == DMA_MEM_TO_DEV ? "TO DEVICE" : "FROM DEVICE",
 			&buf_addr,
 			periods, buf_len, period_len);
@@ -1531,7 +1531,7 @@ atc_prep_dma_cyclic(struct dma_chan *chan, dma_addr_t buf_addr, size_t buf_len,
 	if (atc_dma_cyclic_check_values(reg_width, buf_addr, period_len))
 		goto err_out;
 
-	desc = kzalloc(struct_size(desc, sg, periods), GFP_ATOMIC);
+	desc = kzalloc_flex(*desc, sg, periods, GFP_ATOMIC);
 	if (!desc)
 		goto err_out;
 	desc->sglen = periods;
@@ -1765,6 +1765,7 @@ static int atc_alloc_chan_resources(struct dma_chan *chan)
 static void atc_free_chan_resources(struct dma_chan *chan)
 {
 	struct at_dma_chan	*atchan = to_at_dma_chan(chan);
+	struct at_dma_slave	*atslave;
 
 	BUG_ON(atc_chan_is_enabled(atchan));
 
@@ -1774,8 +1775,12 @@ static void atc_free_chan_resources(struct dma_chan *chan)
 	/*
 	 * Free atslave allocated in at_dma_xlate()
 	 */
-	kfree(chan->private);
-	chan->private = NULL;
+	atslave = chan->private;
+	if (atslave) {
+		put_device(atslave->dma_dev);
+		kfree(atslave);
+		chan->private = NULL;
+	}
 
 	dev_vdbg(chan2dev(chan), "free_chan_resources: done\n");
 }
@@ -1813,7 +1818,7 @@ static struct dma_chan *at_dma_xlate(struct of_phandle_args *dma_spec,
 	dma_cap_zero(mask);
 	dma_cap_set(DMA_SLAVE, mask);
 
-	atslave = kmalloc(sizeof(*atslave), GFP_KERNEL);
+	atslave = kmalloc_obj(*atslave);
 	if (!atslave) {
 		put_device(&dmac_pdev->dev);
 		return NULL;
@@ -2250,7 +2255,7 @@ static const struct dev_pm_ops __maybe_unused at_dma_dev_pm_ops = {
 };
 
 static struct platform_driver at_dma_driver = {
-	.remove_new	= at_dma_remove,
+	.remove		= at_dma_remove,
 	.shutdown	= at_dma_shutdown,
 	.id_table	= atdma_devtypes,
 	.driver = {

@@ -699,7 +699,7 @@ static u32 qedf_get_login_failures(void *cookie)
 }
 
 static struct qed_fcoe_cb_ops qedf_cb_ops = {
-	{
+	.common = {
 		.link_update = qedf_link_update,
 		.bw_update = qedf_bw_update,
 		.schedule_recovery_handler = qedf_schedule_recovery_handler,
@@ -982,7 +982,8 @@ static int qedf_eh_host_reset(struct scsi_cmnd *sc_cmd)
 	return SUCCESS;
 }
 
-static int qedf_slave_configure(struct scsi_device *sdev)
+static int qedf_sdev_configure(struct scsi_device *sdev,
+			       struct queue_limits *lim)
 {
 	if (qedf_queue_depth) {
 		scsi_change_queue_depth(sdev, qedf_queue_depth);
@@ -1003,7 +1004,7 @@ static const struct scsi_host_template qedf_host_template = {
 	.eh_device_reset_handler = qedf_eh_device_reset, /* lun reset */
 	.eh_target_reset_handler = qedf_eh_target_reset, /* target reset */
 	.eh_host_reset_handler  = qedf_eh_host_reset,
-	.slave_configure	= qedf_slave_configure,
+	.sdev_configure	= qedf_sdev_configure,
 	.dma_boundary = QED_HW_DMA_BOUNDARY,
 	.sg_tablesize = QEDF_MAX_BDS_PER_CMD,
 	.can_queue = FCOE_PARAMS_NUM_TASKS,
@@ -2081,7 +2082,7 @@ static struct fc_host_statistics *qedf_fc_get_host_stats(struct Scsi_Host
 	if (lport->vport)
 		goto out;
 
-	fw_fcoe_stats = kmalloc(sizeof(struct qed_fcoe_stats), GFP_KERNEL);
+	fw_fcoe_stats = kmalloc_obj(struct qed_fcoe_stats);
 	if (!fw_fcoe_stats) {
 		QEDF_ERR(&(qedf->dbg_ctx), "Could not allocate memory for "
 		    "fw_fcoe_stats.\n");
@@ -2673,7 +2674,7 @@ static int qedf_ll2_rx(void *cookie, struct sk_buff *skb,
 		return 0;
 	}
 
-	skb_work = kzalloc(sizeof(struct qedf_skb_work), GFP_ATOMIC);
+	skb_work = kzalloc_obj(struct qedf_skb_work, GFP_ATOMIC);
 	if (!skb_work) {
 		QEDF_WARN(&(qedf->dbg_ctx), "Could not allocate skb_work so "
 			   "dropping frame.\n");
@@ -2738,6 +2739,7 @@ static int qedf_alloc_and_init_sb(struct qedf_ctx *qedf,
 	    sb_id, QED_SB_TYPE_STORAGE);
 
 	if (ret) {
+		dma_free_coherent(&qedf->pdev->dev, sizeof(*sb_virt), sb_virt, sb_phys);
 		QEDF_ERR(&qedf->dbg_ctx,
 			 "Status block initialization failed (0x%x) for id = %d.\n",
 			 ret, sb_id);
@@ -2776,8 +2778,7 @@ static int qedf_prepare_sb(struct qedf_ctx *qedf)
 	int ret;
 
 	qedf->fp_array =
-	    kcalloc(qedf->num_queues, sizeof(struct qedf_fastpath),
-		GFP_KERNEL);
+	    kzalloc_objs(struct qedf_fastpath, qedf->num_queues);
 
 	if (!qedf->fp_array) {
 		QEDF_ERR(&(qedf->dbg_ctx), "fastpath array allocation "
@@ -2788,7 +2789,7 @@ static int qedf_prepare_sb(struct qedf_ctx *qedf)
 	for (id = 0; id < qedf->num_queues; id++) {
 		fp = &(qedf->fp_array[id]);
 		fp->sb_id = QEDF_SB_ID_NULL;
-		fp->sb_info = kcalloc(1, sizeof(*fp->sb_info), GFP_KERNEL);
+		fp->sb_info = kzalloc_objs(*fp->sb_info, 1);
 		if (!fp->sb_info) {
 			QEDF_ERR(&(qedf->dbg_ctx), "SB info struct "
 				  "allocation failed.\n");
@@ -3081,8 +3082,7 @@ static int qedf_alloc_global_queues(struct qedf_ctx *qedf)
 
 	/* Allocate a CQ and an associated PBL for each MSI-X vector */
 	for (i = 0; i < qedf->num_queues; i++) {
-		qedf->global_queues[i] = kzalloc(sizeof(struct global_queue),
-		    GFP_KERNEL);
+		qedf->global_queues[i] = kzalloc_obj(struct global_queue);
 		if (!qedf->global_queues[i]) {
 			QEDF_WARN(&(qedf->dbg_ctx), "Unable to allocate "
 				   "global queue %d.\n", i);
@@ -3372,9 +3372,9 @@ retry_probe:
 	QEDF_INFO(&(qedf->dbg_ctx), QEDF_LOG_INFO, "qedf->io_mempool=%p.\n",
 	    qedf->io_mempool);
 
-	sprintf(host_buf, "qedf_%u_link",
-	    qedf->lport->host->host_no);
-	qedf->link_update_wq = create_workqueue(host_buf);
+	qedf->link_update_wq = alloc_workqueue("qedf_%u_link",
+					       WQ_MEM_RECLAIM | WQ_PERCPU,
+					       1, qedf->lport->host->host_no);
 	INIT_DELAYED_WORK(&qedf->link_update, qedf_handle_link_update);
 	INIT_DELAYED_WORK(&qedf->link_recovery, qedf_link_recovery);
 	INIT_DELAYED_WORK(&qedf->grcdump_work, qedf_wq_grcdump);
@@ -3584,9 +3584,9 @@ retry_probe:
 	ether_addr_copy(params.ll2_mac_address, qedf->mac);
 
 	/* Start LL2 processing thread */
-	snprintf(host_buf, 20, "qedf_%d_ll2", host->host_no);
-	qedf->ll2_recv_wq =
-		create_workqueue(host_buf);
+	qedf->ll2_recv_wq = alloc_workqueue("qedf_%d_ll2",
+					    WQ_MEM_RECLAIM | WQ_PERCPU, 1,
+					    host->host_no);
 	if (!qedf->ll2_recv_wq) {
 		QEDF_ERR(&(qedf->dbg_ctx), "Failed to LL2 workqueue.\n");
 		rc = -ENOMEM;
@@ -3627,9 +3627,9 @@ retry_probe:
 		}
 	}
 
-	sprintf(host_buf, "qedf_%u_timer", qedf->lport->host->host_no);
-	qedf->timer_work_queue =
-		create_workqueue(host_buf);
+	qedf->timer_work_queue = alloc_workqueue("qedf_%u_timer",
+				WQ_MEM_RECLAIM | WQ_PERCPU, 1,
+				qedf->lport->host->host_no);
 	if (!qedf->timer_work_queue) {
 		QEDF_ERR(&(qedf->dbg_ctx), "Failed to start timer "
 			  "workqueue.\n");
@@ -3641,7 +3641,9 @@ retry_probe:
 	if (mode != QEDF_MODE_RECOVERY) {
 		sprintf(host_buf, "qedf_%u_dpc",
 		    qedf->lport->host->host_no);
-		qedf->dpc_wq = create_workqueue(host_buf);
+		qedf->dpc_wq =
+			alloc_workqueue("%s", WQ_MEM_RECLAIM | WQ_PERCPU, 1,
+					host_buf);
 	}
 	INIT_DELAYED_WORK(&qedf->recovery_work, qedf_recovery_handler);
 
@@ -4020,11 +4022,6 @@ void qedf_stag_change_work(struct work_struct *work)
 	struct qedf_ctx *qedf =
 	    container_of(work, struct qedf_ctx, stag_work.work);
 
-	if (!qedf) {
-		QEDF_ERR(&qedf->dbg_ctx, "qedf is NULL");
-		return;
-	}
-
 	if (test_bit(QEDF_IN_RECOVERY, &qedf->flags)) {
 		QEDF_ERR(&qedf->dbg_ctx,
 			 "Already is in recovery, hence not calling software context reset.\n");
@@ -4182,7 +4179,8 @@ static int __init qedf_init(void)
 		goto err3;
 	}
 
-	qedf_io_wq = create_workqueue("qedf_io_wq");
+	qedf_io_wq = alloc_workqueue("%s", WQ_MEM_RECLAIM | WQ_PERCPU, 1,
+				     "qedf_io_wq");
 	if (!qedf_io_wq) {
 		QEDF_ERR(NULL, "Could not create qedf_io_wq.\n");
 		goto err4;

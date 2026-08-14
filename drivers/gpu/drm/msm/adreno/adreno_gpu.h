@@ -12,13 +12,14 @@
 #include <linux/firmware.h>
 #include <linux/iopoll.h>
 
+#include <linux/soc/qcom/ubwc.h>
+
 #include "msm_gpu.h"
 
 #include "adreno_common.xml.h"
 #include "adreno_pm4.xml.h"
 
 extern bool snapshot_debugbus;
-extern bool allow_vram_carveout;
 
 enum {
 	ADRENO_FW_PM4 = 0,
@@ -26,6 +27,7 @@ enum {
 	ADRENO_FW_PFP = 1,
 	ADRENO_FW_GMU = 1, /* a6xx */
 	ADRENO_FW_GPMU = 2,
+	ADRENO_FW_AQE = 3,
 	ADRENO_FW_MAX,
 };
 
@@ -49,6 +51,8 @@ enum adreno_family {
 	ADRENO_7XX_GEN1,  /* a730 family */
 	ADRENO_7XX_GEN2,  /* a740 family */
 	ADRENO_7XX_GEN3,  /* a750 family */
+	ADRENO_8XX_GEN1,  /* a830 family */
+	ADRENO_8XX_GEN2,  /* a840 family */
 };
 
 #define ADRENO_QUIRK_TWO_PASS_USE_WFI		BIT(0)
@@ -56,25 +60,39 @@ enum adreno_family {
 #define ADRENO_QUIRK_LMLOADKILL_DISABLE		BIT(2)
 #define ADRENO_QUIRK_HAS_HW_APRIV		BIT(3)
 #define ADRENO_QUIRK_HAS_CACHED_COHERENT	BIT(4)
+#define ADRENO_QUIRK_PREEMPTION			BIT(5)
+#define ADRENO_QUIRK_4GB_VA			BIT(6)
+#define ADRENO_QUIRK_IFPC			BIT(7)
+#define ADRENO_QUIRK_SOFTFUSE			BIT(8)
 
 /* Helper for formating the chip_id in the way that userspace tools like
  * crashdec expect.
  */
-#define ADRENO_CHIPID_FMT "u.%u.%u.%u"
-#define ADRENO_CHIPID_ARGS(_c) \
-	(((_c) >> 24) & 0xff), \
-	(((_c) >> 16) & 0xff), \
-	(((_c) >> 8)  & 0xff), \
-	((_c) & 0xff)
+#define ADRENO_CHIPID_FMT "08x"
+#define ADRENO_CHIPID_ARGS(_c) (_c)
+
+struct adreno_gpu;
 
 struct adreno_gpu_funcs {
 	struct msm_gpu_funcs base;
-	int (*get_timestamp)(struct msm_gpu *gpu, uint64_t *value);
+	struct msm_gpu *(*init)(struct drm_device *dev);
+	u64 (*get_timestamp)(struct msm_gpu *gpu);
+	void (*bus_halt)(struct adreno_gpu *adreno_gpu, bool gx_off);
+	int (*mmu_fault_handler)(void *arg, unsigned long iova, int flags, void *data);
+	bool (*gx_is_on)(struct adreno_gpu *adreno_gpu);
+	bool (*aqe_is_enabled)(struct adreno_gpu *adreno_gpu);
 };
 
 struct adreno_reglist {
 	u32 offset;
 	u32 value;
+};
+
+/* Reglist with pipe information */
+struct adreno_reglist_pipe {
+	u32 offset;
+	u32 value;
+	u32 pipe;
 };
 
 struct adreno_speedbin {
@@ -97,13 +115,12 @@ struct adreno_info {
 	const char *fw[ADRENO_FW_MAX];
 	uint32_t gmem;
 	u64 quirks;
-	struct msm_gpu *(*init)(struct drm_device *dev);
+	const struct adreno_gpu_funcs *funcs;
 	const char *zapfw;
 	u32 inactive_period;
 	union {
 		const struct a6xx_info *a6xx;
 	};
-	u64 address_space_size;
 	/**
 	 * @speedbins: Optional table of fuse to speedbin mappings
 	 *
@@ -111,6 +128,7 @@ struct adreno_info {
 	 * {SHRT_MAX, 0} sentinal.
 	 */
 	struct adreno_speedbin *speedbins;
+	u64 preempt_record_size;
 };
 
 #define ADRENO_CHIP_IDS(tbl...) (uint32_t[]) { tbl, 0 }
@@ -156,12 +174,40 @@ static const struct adreno_protect name = {		\
 	.count_max = __count_max,			\
 };
 
+struct adreno_reglist_list {
+	/** @reg: List of register **/
+	const u32 *regs;
+	/** @count: Number of registers in the list **/
+	u32 count;
+};
+
+#define DECLARE_ADRENO_REGLIST_LIST(name)	\
+static const struct adreno_reglist_list name = {		\
+	.regs = name ## _regs,				\
+	.count = ARRAY_SIZE(name ## _regs),		\
+};
+
+struct adreno_reglist_pipe_list {
+	/** @reg: List of register **/
+	const struct adreno_reglist_pipe *regs;
+	/** @count: Number of registers in the list **/
+	u32 count;
+};
+
+#define DECLARE_ADRENO_REGLIST_PIPE_LIST(name)	\
+static const struct adreno_reglist_pipe_list name = {		\
+	.regs = name ## _regs,				\
+	.count = ARRAY_SIZE(name ## _regs),		\
+};
+
 struct adreno_gpu {
 	struct msm_gpu base;
 	const struct adreno_info *info;
 	uint32_t chip_id;
 	uint16_t speedbin;
 	const struct adreno_gpu_funcs *funcs;
+
+	struct completion fault_coredump_done;
 
 	/* interesting register offsets to dump: */
 	const unsigned int *registers;
@@ -190,14 +236,12 @@ struct adreno_gpu {
 	/* firmware: */
 	const struct firmware *fw[ADRENO_FW_MAX];
 
-	struct {
-		u32 rgb565_predicator;
-		u32 uavflagprd_inv;
-		u32 min_acc_len;
-		u32 ubwc_mode;
-		u32 highest_bank_bit;
-		u32 amsbc;
-	} ubwc_config;
+	/*
+	 * The migration to the central UBWC config db is still in flight - keep
+	 * a copy containing some local fixups until that's done.
+	 */
+	const struct qcom_ubwc_cfg_data *ubwc_config;
+	struct qcom_ubwc_cfg_data _ubwc_config;
 
 	/*
 	 * Register offsets are different between some GPUs.
@@ -208,6 +252,8 @@ struct adreno_gpu {
 	bool gmu_is_wrapper;
 
 	bool has_ray_tracing;
+
+	u64 uche_trap_base;
 };
 #define to_adreno_gpu(x) container_of(x, struct adreno_gpu, base)
 
@@ -294,6 +340,12 @@ static inline bool adreno_is_a306(const struct adreno_gpu *gpu)
 	return adreno_is_revn(gpu, 307);
 }
 
+static inline bool adreno_is_a306a(const struct adreno_gpu *gpu)
+{
+	/* a306a (marketing name is a308) */
+	return adreno_is_revn(gpu, 308);
+}
+
 static inline bool adreno_is_a320(const struct adreno_gpu *gpu)
 {
 	return adreno_is_revn(gpu, 320);
@@ -369,6 +421,16 @@ static inline int adreno_is_a610(const struct adreno_gpu *gpu)
 	return adreno_is_revn(gpu, 610);
 }
 
+static inline int adreno_is_a612(const struct adreno_gpu *gpu)
+{
+	return gpu->info->chip_ids[0] == 0x06010200;
+}
+
+static inline bool adreno_has_rgmu(const struct adreno_gpu *gpu)
+{
+	return adreno_is_a612(gpu);
+}
+
 static inline int adreno_is_a618(const struct adreno_gpu *gpu)
 {
 	return adreno_is_revn(gpu, 618);
@@ -382,6 +444,16 @@ static inline int adreno_is_a619(const struct adreno_gpu *gpu)
 static inline int adreno_is_a619_holi(const struct adreno_gpu *gpu)
 {
 	return adreno_is_a619(gpu) && adreno_has_gmu_wrapper(gpu);
+}
+
+static inline int adreno_is_a621(const struct adreno_gpu *gpu)
+{
+	return gpu->info->chip_ids[0] == 0x06020100;
+}
+
+static inline int adreno_is_a623(const struct adreno_gpu *gpu)
+{
+	return gpu->info->chip_ids[0] == 0x06020300;
 }
 
 static inline int adreno_is_a630(const struct adreno_gpu *gpu)
@@ -414,6 +486,11 @@ static inline int adreno_is_a680(const struct adreno_gpu *gpu)
 	return adreno_is_revn(gpu, 680);
 }
 
+static inline int adreno_is_a663(const struct adreno_gpu *gpu)
+{
+	return gpu->info->chip_ids[0] == 0x06060300;
+}
+
 static inline int adreno_is_a690(const struct adreno_gpu *gpu)
 {
 	return gpu->info->chip_ids[0] == 0x06090000;
@@ -428,12 +505,18 @@ static inline int adreno_is_a610_family(const struct adreno_gpu *gpu)
 {
 	if (WARN_ON_ONCE(!gpu->info))
 		return false;
-
-	/* TODO: A612 */
-	return adreno_is_a610(gpu) || adreno_is_a702(gpu);
+	return adreno_is_a610(gpu) ||
+	       adreno_is_a612(gpu) ||
+	       adreno_is_a702(gpu);
 }
 
-/* check for a615, a616, a618, a619 or any a630 derivatives */
+/* TODO: 615/616 */
+static inline int adreno_is_a615_family(const struct adreno_gpu *gpu)
+{
+	return adreno_is_a618(gpu) ||
+	       adreno_is_a619(gpu);
+}
+
 static inline int adreno_is_a630_family(const struct adreno_gpu *gpu)
 {
 	if (WARN_ON_ONCE(!gpu->info))
@@ -492,6 +575,11 @@ static inline int adreno_is_a740_family(struct adreno_gpu *gpu)
 	       gpu->info->family == ADRENO_7XX_GEN3;
 }
 
+static inline int adreno_is_a750_family(struct adreno_gpu *gpu)
+{
+	return gpu->info->family == ADRENO_7XX_GEN3;
+}
+
 static inline int adreno_is_a7xx(struct adreno_gpu *gpu)
 {
 	/* Update with non-fake (i.e. non-A702) Gen 7 GPUs */
@@ -499,10 +587,27 @@ static inline int adreno_is_a7xx(struct adreno_gpu *gpu)
 	       adreno_is_a740_family(gpu);
 }
 
-u64 adreno_private_address_space_size(struct msm_gpu *gpu);
-int adreno_get_param(struct msm_gpu *gpu, struct msm_file_private *ctx,
+static inline int adreno_is_a8xx(struct adreno_gpu *gpu)
+{
+	return gpu->info->family >= ADRENO_8XX_GEN1;
+}
+
+static inline int adreno_is_x285(struct adreno_gpu *gpu)
+{
+	return gpu->info->chip_ids[0] == 0x44070001;
+}
+
+static inline int adreno_is_a840(struct adreno_gpu *gpu)
+{
+	return gpu->info->chip_ids[0] == 0x44050a01;
+}
+
+/* Put vm_start above 32b to catch issues with not setting xyz_BASE_HI */
+#define ADRENO_VM_START 0x100000000ULL
+u64 adreno_private_vm_size(struct msm_gpu *gpu);
+int adreno_get_param(struct msm_gpu *gpu, struct msm_context *ctx,
 		     uint32_t param, uint64_t *value, uint32_t *len);
-int adreno_set_param(struct msm_gpu *gpu, struct msm_file_private *ctx,
+int adreno_set_param(struct msm_gpu *gpu, struct msm_context *ctx,
 		     uint32_t param, uint64_t value, uint32_t len);
 const struct firmware *adreno_request_fw(struct adreno_gpu *adreno_gpu,
 		const char *fwname);
@@ -542,18 +647,20 @@ void adreno_show_object(struct drm_printer *p, void **ptr, int len,
  * Common helper function to initialize the default address space for arm-smmu
  * attached targets
  */
-struct msm_gem_address_space *
-adreno_create_address_space(struct msm_gpu *gpu,
-			    struct platform_device *pdev);
+struct drm_gpuvm *
+adreno_create_vm(struct msm_gpu *gpu,
+		 struct platform_device *pdev);
 
-struct msm_gem_address_space *
-adreno_iommu_create_address_space(struct msm_gpu *gpu,
-				  struct platform_device *pdev,
-				  unsigned long quirks);
+struct drm_gpuvm *
+adreno_iommu_create_vm(struct msm_gpu *gpu,
+		       struct platform_device *pdev,
+		       unsigned long quirks);
 
 int adreno_fault_handler(struct msm_gpu *gpu, unsigned long iova, int flags,
 			 struct adreno_smmu_fault_info *info, const char *block,
 			 u32 scratch[4]);
+
+void adreno_check_and_reenable_stall(struct adreno_gpu *gpu);
 
 int adreno_read_speedbin(struct device *dev, u32 *speedbin);
 
@@ -609,19 +716,16 @@ OUT_PKT4(struct msm_ringbuffer *ring, uint16_t regindx, uint16_t cnt)
 	OUT_RING(ring, PKT4(regindx, cnt));
 }
 
+#define PKT7(opcode, cnt) \
+	(CP_TYPE7_PKT | (cnt << 0) | (PM4_PARITY(cnt) << 15) | \
+		((opcode & 0x7F) << 16) | (PM4_PARITY(opcode) << 23))
+
 static inline void
 OUT_PKT7(struct msm_ringbuffer *ring, uint8_t opcode, uint16_t cnt)
 {
 	adreno_wait_ring(ring, cnt + 1);
-	OUT_RING(ring, CP_TYPE7_PKT | (cnt << 0) | (PM4_PARITY(cnt) << 15) |
-		((opcode & 0x7F) << 16) | (PM4_PARITY(opcode) << 23));
+	OUT_RING(ring, PKT7(opcode, cnt));
 }
-
-struct msm_gpu *a2xx_gpu_init(struct drm_device *dev);
-struct msm_gpu *a3xx_gpu_init(struct drm_device *dev);
-struct msm_gpu *a4xx_gpu_init(struct drm_device *dev);
-struct msm_gpu *a5xx_gpu_init(struct drm_device *dev);
-struct msm_gpu *a6xx_gpu_init(struct drm_device *dev);
 
 static inline uint32_t get_wptr(struct msm_ringbuffer *ring)
 {

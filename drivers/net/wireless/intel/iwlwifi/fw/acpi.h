@@ -1,18 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
  * Copyright (C) 2017 Intel Deutschland GmbH
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2023, 2025 Intel Corporation
  */
 #ifndef __iwl_fw_acpi__
 #define __iwl_fw_acpi__
 
 #include <linux/acpi.h>
 #include "fw/regulatory.h"
-#include "fw/api/commands.h"
-#include "fw/api/power.h"
-#include "fw/api/phy.h"
-#include "fw/api/nvm-reg.h"
-#include "fw/api/config.h"
 #include "fw/img.h"
 #include "iwl-trans.h"
 
@@ -28,6 +23,7 @@
 #define ACPI_WPFC_METHOD	"WPFC"
 #define ACPI_GLAI_METHOD	"GLAI"
 #define ACPI_WBEM_METHOD	"WBEM"
+#define ACPI_DSBR_METHOD	"DSBR"
 
 #define ACPI_WIFI_DOMAIN	(0x07)
 
@@ -43,6 +39,7 @@
 #define ACPI_SAR_NUM_SUB_BANDS_REV0	5
 #define ACPI_SAR_NUM_SUB_BANDS_REV1	11
 #define ACPI_SAR_NUM_SUB_BANDS_REV2	11
+#define ACPI_SAR_NUM_SUB_BANDS_REV3	12
 
 #define ACPI_WRDS_WIFI_DATA_SIZE_REV0	(ACPI_SAR_NUM_CHAINS_REV0 * \
 					 ACPI_SAR_NUM_SUB_BANDS_REV0 + 2)
@@ -50,6 +47,8 @@
 					 ACPI_SAR_NUM_SUB_BANDS_REV1 + 2)
 #define ACPI_WRDS_WIFI_DATA_SIZE_REV2	(ACPI_SAR_NUM_CHAINS_REV2 * \
 					 ACPI_SAR_NUM_SUB_BANDS_REV2 + 2)
+#define ACPI_WRDS_WIFI_DATA_SIZE_REV3	(ACPI_SAR_NUM_CHAINS_REV2 * \
+					 ACPI_SAR_NUM_SUB_BANDS_REV3 + 2)
 #define ACPI_EWRD_WIFI_DATA_SIZE_REV0	((ACPI_SAR_PROFILE_NUM - 1) * \
 					 ACPI_SAR_NUM_CHAINS_REV0 * \
 					 ACPI_SAR_NUM_SUB_BANDS_REV0 + 3)
@@ -59,11 +58,15 @@
 #define ACPI_EWRD_WIFI_DATA_SIZE_REV2	((ACPI_SAR_PROFILE_NUM - 1) * \
 					 ACPI_SAR_NUM_CHAINS_REV2 * \
 					 ACPI_SAR_NUM_SUB_BANDS_REV2 + 3)
+#define ACPI_EWRD_WIFI_DATA_SIZE_REV3	((ACPI_SAR_PROFILE_NUM - 1) * \
+					 ACPI_SAR_NUM_CHAINS_REV2 * \
+					 ACPI_SAR_NUM_SUB_BANDS_REV3 + 3)
 #define ACPI_WPFC_WIFI_DATA_SIZE	5 /* domain and 4 filter config words */
 
 /* revision 0 and 1 are identical, except for the semantics in the FW */
 #define ACPI_GEO_NUM_BANDS_REV0		2
 #define ACPI_GEO_NUM_BANDS_REV2		3
+#define ACPI_GEO_NUM_BANDS_REV4		4
 
 #define ACPI_WRDD_WIFI_DATA_SIZE	2
 #define ACPI_SPLC_WIFI_DATA_SIZE	2
@@ -74,6 +77,13 @@
  * and one for enablement of Wi-Fi 320MHz per MCC
  */
 #define ACPI_WBEM_WIFI_DATA_SIZE	2
+/*
+ * One element for domain type,
+ * and one for DSBR response data
+ */
+#define ACPI_DSBR_WIFI_DATA_SIZE	2
+#define ACPI_DSBR_WIFI_DATA_REV		1
+
 /*
  * One element for domain type,
  * and one for the status
@@ -88,10 +98,18 @@
  */
 #define ACPI_WTAS_WIFI_DATA_SIZE	(3 + IWL_WTAS_BLACK_LIST_MAX)
 
-#define ACPI_PPAG_WIFI_DATA_SIZE_V1	((IWL_NUM_CHAIN_LIMITS * \
-					  IWL_NUM_SUB_BANDS_V1) + 2)
-#define ACPI_PPAG_WIFI_DATA_SIZE_V2	((IWL_NUM_CHAIN_LIMITS * \
-					  IWL_NUM_SUB_BANDS_V2) + 2)
+#define ACPI_PPAG_NUM_CHAINS		2
+#define ACPI_PPAG_NUM_BANDS_V1		5
+#define ACPI_PPAG_NUM_BANDS_V2		11
+#define ACPI_PPAG_NUM_BANDS_V3		12
+#define ACPI_PPAG_WIFI_DATA_SIZE_V1	((ACPI_PPAG_NUM_CHAINS * \
+					  ACPI_PPAG_NUM_BANDS_V1) + 2)
+#define ACPI_PPAG_WIFI_DATA_SIZE_V2	((ACPI_PPAG_NUM_CHAINS * \
+					  ACPI_PPAG_NUM_BANDS_V2) + 2)
+
+/* used for ACPI PPAG table rev 5 */
+#define ACPI_PPAG_WIFI_DATA_SIZE_V3	((ACPI_PPAG_NUM_CHAINS * \
+					  ACPI_PPAG_NUM_BANDS_V3) + 2)
 
 #define IWL_SAR_ENABLE_MSK		BIT(0)
 #define IWL_REDUCE_POWER_FLAGS_POS	1
@@ -101,6 +119,30 @@
 
 #define ACPI_DSM_REV 0
 
+#define DSM_INTERNAL_FUNC_GET_PLAT_INFO	1
+/* TBD: VPRO is BIT(0) in the result, but what's the result? */
+
+#define DSM_INTERNAL_FUNC_PRODUCT_RESET	2
+
+/* DSM_INTERNAL_FUNC_PRODUCT_RESET - product reset (aka "PLDR") */
+enum iwl_dsm_internal_product_reset_cmds {
+	DSM_INTERNAL_PLDR_CMD_GET_MODE = 1,
+	DSM_INTERNAL_PLDR_CMD_SET_MODE = 2,
+	DSM_INTERNAL_PLDR_CMD_GET_STATUS = 3,
+};
+
+enum iwl_dsm_internal_product_reset_mode {
+	DSM_INTERNAL_PLDR_MODE_EN_PROD_RESET	= BIT(0),
+	DSM_INTERNAL_PLDR_MODE_EN_WIFI_FLR	= BIT(1),
+	DSM_INTERNAL_PLDR_MODE_EN_BT_OFF_ON	= BIT(2),
+};
+
+struct iwl_dsm_internal_product_reset_cmd {
+	/* cmd is from enum iwl_dsm_internal_product_reset_cmds */
+	u16 cmd;
+	u16 value;
+} __packed;
+
 #define IWL_ACPI_WBEM_REV0_MASK (BIT(0) | BIT(1))
 #define IWL_ACPI_WBEM_REVISION 0
 
@@ -108,7 +150,9 @@
 
 struct iwl_fw_runtime;
 
-extern const guid_t iwl_guid;
+union acpi_object *iwl_acpi_get_dsm_object(struct device *dev, int rev,
+					   int func, union acpi_object *args,
+					   const guid_t *guid);
 
 /**
  * iwl_acpi_get_mcc - read MCC from ACPI, if available
@@ -117,6 +161,7 @@ extern const guid_t iwl_guid;
  * @mcc: output buffer (3 bytes) that will get the MCC
  *
  * This function tries to read the current MCC from ACPI if available.
+ * Return: 0 on success, or a negative error code
  */
 int iwl_acpi_get_mcc(struct iwl_fw_runtime *fwrt, char *mcc);
 
@@ -144,8 +189,7 @@ int iwl_acpi_get_tas_table(struct iwl_fw_runtime *fwrt,
 
 int iwl_acpi_get_ppag_table(struct iwl_fw_runtime *fwrt);
 
-void iwl_acpi_get_phy_filters(struct iwl_fw_runtime *fwrt,
-			      struct iwl_phy_specific_cfg *filters);
+int iwl_acpi_get_phy_filters(struct iwl_fw_runtime *fwrt);
 
 void iwl_acpi_get_guid_lock_status(struct iwl_fw_runtime *fwrt);
 
@@ -153,10 +197,14 @@ int iwl_acpi_get_dsm(struct iwl_fw_runtime *fwrt,
 		     enum iwl_dsm_funcs func, u32 *value);
 
 int iwl_acpi_get_wbem(struct iwl_fw_runtime *fwrt, u32 *value);
+
+int iwl_acpi_get_dsbr(struct iwl_fw_runtime *fwrt, u32 *value);
+
 #else /* CONFIG_ACPI */
 
-static inline void *iwl_acpi_get_dsm_object(struct device *dev, int rev,
-					    int func, union acpi_object *args)
+static inline union acpi_object *
+iwl_acpi_get_dsm_object(struct device *dev, int rev, int func,
+			union acpi_object *args, const guid_t *guid)
 {
 	return ERR_PTR(-ENOENT);
 }
@@ -204,8 +252,10 @@ static inline int iwl_acpi_get_ppag_table(struct iwl_fw_runtime *fwrt)
 	return -ENOENT;
 }
 
-/* macro since the second argument doesn't always exist */
-#define iwl_acpi_get_phy_filters(fwrt, filters) do { } while (0)
+static inline int iwl_acpi_get_phy_filters(struct iwl_fw_runtime *fwrt)
+{
+	return -ENOENT;
+}
 
 static inline void iwl_acpi_get_guid_lock_status(struct iwl_fw_runtime *fwrt)
 {
@@ -218,6 +268,11 @@ static inline int iwl_acpi_get_dsm(struct iwl_fw_runtime *fwrt,
 }
 
 static inline int iwl_acpi_get_wbem(struct iwl_fw_runtime *fwrt, u32 *value)
+{
+	return -ENOENT;
+}
+
+static inline int iwl_acpi_get_dsbr(struct iwl_fw_runtime *fwrt, u32 *value)
 {
 	return -ENOENT;
 }

@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <linux/reboot.h>
 #include <linux/serial_8250.h>
+#include <linux/acpi.h>
 #include <asm/apic.h>
 #include <asm/io_apic.h>
 #include <asm/acpi.h>
@@ -48,7 +49,7 @@ static uint32_t jailhouse_cpuid_base(void)
 	    !boot_cpu_has(X86_FEATURE_HYPERVISOR))
 		return 0;
 
-	return hypervisor_cpuid_base("Jailhouse\0\0\0", 0);
+	return cpuid_base_hypervisor("Jailhouse\0\0\0", 0);
 }
 
 static uint32_t __init jailhouse_detect(void)

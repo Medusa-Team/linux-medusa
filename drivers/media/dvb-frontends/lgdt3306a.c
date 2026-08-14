@@ -1802,7 +1802,7 @@ struct dvb_frontend *lgdt3306a_attach(const struct lgdt3306a_config *config,
 	       i2c_adap ? i2c_adapter_id(i2c_adap) : 0,
 	       config ? config->i2c_addr : 0);
 
-	state = kzalloc(sizeof(struct lgdt3306a_state), GFP_KERNEL);
+	state = kzalloc_obj(struct lgdt3306a_state);
 	if (state == NULL)
 		goto fail;
 
@@ -2244,7 +2244,7 @@ static void lgdt3306a_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id lgdt3306a_id_table[] = {
-	{"lgdt3306a", 0},
+	{ "lgdt3306a" },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, lgdt3306a_id_table);

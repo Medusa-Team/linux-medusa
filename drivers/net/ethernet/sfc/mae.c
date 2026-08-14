@@ -76,17 +76,6 @@ void efx_mae_mport_uplink(struct efx_nic *efx __always_unused, u32 *out)
 	*out = EFX_DWORD_VAL(mport);
 }
 
-void efx_mae_mport_vf(struct efx_nic *efx __always_unused, u32 vf_id, u32 *out)
-{
-	efx_dword_t mport;
-
-	EFX_POPULATE_DWORD_3(mport,
-			     MAE_MPORT_SELECTOR_TYPE, MAE_MPORT_SELECTOR_TYPE_FUNC,
-			     MAE_MPORT_SELECTOR_FUNC_PF_ID, MAE_MPORT_SELECTOR_FUNC_PF_ID_CALLER,
-			     MAE_MPORT_SELECTOR_FUNC_VF_ID, vf_id);
-	*out = EFX_DWORD_VAL(mport);
-}
-
 /* Constructs an mport selector from an mport ID, because they're not the same */
 void efx_mae_mport_mport(struct efx_nic *efx __always_unused, u32 mport_id, u32 *out)
 {
@@ -266,14 +255,12 @@ more:
 		if (desc->scheme)
 			goto fail;
 		rc = -ENOMEM;
-		desc->keys = kcalloc(desc->n_keys,
-				     sizeof(struct efx_tc_table_field_fmt),
-				     GFP_KERNEL);
+		desc->keys = kzalloc_objs(struct efx_tc_table_field_fmt,
+					  desc->n_keys);
 		if (!desc->keys)
 			goto fail;
-		desc->resps = kcalloc(desc->n_resps,
-				      sizeof(struct efx_tc_table_field_fmt),
-				      GFP_KERNEL);
+		desc->resps = kzalloc_objs(struct efx_tc_table_field_fmt,
+					   desc->n_resps);
 		if (!desc->resps)
 			goto fail;
 	}
@@ -766,7 +753,7 @@ int efx_mae_match_check_caps_lhs(struct efx_nic *efx,
 	rc = efx_mae_match_check_cap_typ(supported_fields[MAE_FIELD_INGRESS_PORT],
 					 ingress_port_mask_type);
 	if (rc) {
-		NL_SET_ERR_MSG_FMT_MOD(extack, "No support for %s mask in field %s\n",
+		NL_SET_ERR_MSG_FMT_MOD(extack, "No support for %s mask in field %s",
 				       mask_type_name(ingress_port_mask_type),
 				       "ingress_port");
 		return rc;
@@ -1101,6 +1088,9 @@ void efx_mae_remove_mport(void *desc, void *arg)
 	kfree(mport);
 }
 
+/*
+ * Takes ownership of @desc, even if it returns an error
+ */
 static int efx_mae_process_mport(struct efx_nic *efx,
 				 struct mae_mport_desc *desc)
 {
@@ -1111,6 +1101,7 @@ static int efx_mae_process_mport(struct efx_nic *efx,
 	if (!IS_ERR_OR_NULL(mport)) {
 		netif_err(efx, drv, efx->net_dev,
 			  "mport with id %u does exist!!!\n", desc->mport_id);
+		kfree(desc);
 		return -EEXIST;
 	}
 
@@ -1167,7 +1158,7 @@ int efx_mae_enumerate_mports(struct efx_nic *efx)
 		for (i = 0; i < count; i++) {
 			struct mae_mport_desc *d;
 
-			d = kzalloc(sizeof(*d), GFP_KERNEL);
+			d = kzalloc_obj(*d);
 			if (!d) {
 				rc = -ENOMEM;
 				goto fail;
@@ -2322,7 +2313,7 @@ int efx_init_mae(struct efx_nic *efx)
 	if (!nic_data->have_mport)
 		return -EINVAL;
 
-	mae = kmalloc(sizeof(*mae), GFP_KERNEL);
+	mae = kmalloc_obj(*mae);
 	if (!mae)
 		return -ENOMEM;
 

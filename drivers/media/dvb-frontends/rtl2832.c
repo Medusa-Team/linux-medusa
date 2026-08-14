@@ -983,7 +983,7 @@ static int rtl2832_pid_filter(struct dvb_frontend *fe, u8 index, u16 pid,
 		index, pid, onoff, dev->slave_ts);
 
 	/* skip invalid PIDs (0x2000) */
-	if (pid > 0x1fff || index > 32)
+	if (pid > 0x1fff || index >= 32)
 		return 0;
 
 	if (onoff)
@@ -1043,7 +1043,7 @@ static int rtl2832_probe(struct i2c_client *client)
 	dev_dbg(&client->dev, "\n");
 
 	/* allocate memory for the internal state */
-	dev = kzalloc(sizeof(struct rtl2832_dev), GFP_KERNEL);
+	dev = kzalloc_obj(struct rtl2832_dev);
 	if (dev == NULL) {
 		ret = -ENOMEM;
 		goto err;
@@ -1125,7 +1125,7 @@ static void rtl2832_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id rtl2832_id_table[] = {
-	{"rtl2832", 0},
+	{ "rtl2832" },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, rtl2832_id_table);

@@ -129,7 +129,7 @@ int snd_device_alloc(struct device **dev_p, struct snd_card *card)
 	struct device *dev;
 
 	*dev_p = NULL;
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (!dev)
 		return -ENOMEM;
 	device_initialize(dev);
@@ -315,7 +315,7 @@ static int snd_card_init(struct snd_card *card, struct device *parent,
 	card->module = module;
 	INIT_LIST_HEAD(&card->devices);
 	init_rwsem(&card->controls_rwsem);
-	rwlock_init(&card->ctl_files_rwlock);
+	rwlock_init(&card->controls_rwlock);
 	INIT_LIST_HEAD(&card->controls);
 	INIT_LIST_HEAD(&card->ctl_files);
 #ifdef CONFIG_SND_CTL_FAST_LOOKUP
@@ -362,6 +362,11 @@ static int snd_card_init(struct snd_card *card, struct device *parent,
 #ifdef CONFIG_SND_DEBUG
 	card->debugfs_root = debugfs_create_dir(dev_name(&card->card_dev),
 						sound_debugfs_root);
+#endif
+#ifdef CONFIG_SND_CTL_DEBUG
+	card->value_buf = kmalloc(sizeof(*card->value_buf), GFP_KERNEL);
+	if (!card->value_buf)
+		return -ENOMEM;
 #endif
 	return 0;
 
@@ -587,6 +592,9 @@ static int snd_card_do_free(struct snd_card *card)
 	snd_device_free_all(card);
 	if (card->private_free)
 		card->private_free(card);
+#ifdef CONFIG_SND_CTL_DEBUG
+	kfree(card->value_buf);
+#endif
 	if (snd_info_card_free(card) < 0) {
 		dev_warn(card->dev, "unable to free card info\n");
 		/* Not fatal error */
@@ -654,13 +662,19 @@ void snd_card_free(struct snd_card *card)
 }
 EXPORT_SYMBOL(snd_card_free);
 
+/* check, if the character is in the valid ASCII range */
+static inline bool safe_ascii_char(char c)
+{
+	return isascii(c) && isalnum(c);
+}
+
 /* retrieve the last word of shortname or longname */
 static const char *retrieve_id_from_card_name(const char *name)
 {
 	const char *spos = name;
 
 	while (*name) {
-		if (isspace(*name) && isalnum(name[1]))
+		if (isspace(*name) && safe_ascii_char(name[1]))
 			spos = name + 1;
 		name++;
 	}
@@ -687,12 +701,12 @@ static void copy_valid_id_string(struct snd_card *card, const char *src,
 {
 	char *id = card->id;
 
-	while (*nid && !isalnum(*nid))
+	while (*nid && !safe_ascii_char(*nid))
 		nid++;
 	if (isdigit(*nid))
 		*id++ = isalpha(*src) ? *src : 'D';
 	while (*nid && (size_t)(id - card->id) < sizeof(card->id) - 1) {
-		if (isalnum(*nid))
+		if (safe_ascii_char(*nid))
 			*id++ = *nid;
 		nid++;
 	}
@@ -717,27 +731,25 @@ static void snd_card_set_id_no_lock(struct snd_card *card, const char *src,
 	 * ("card" conflicts with proc directories)
 	 */
 	if (!*id || !strncmp(id, "card", 4)) {
-		strcpy(id, "Default");
+		strscpy(card->id, "Default");
 		is_default = true;
 	}
 
 	len = strlen(id);
 	for (loops = 0; loops < SNDRV_CARDS; loops++) {
-		char *spos;
 		char sfxstr[5]; /* "_012" */
-		int sfxlen;
+		int sfxlen, slen;
 
 		if (card_id_ok(card, id))
 			return; /* OK */
 
 		/* Add _XYZ suffix */
-		sprintf(sfxstr, "_%X", loops + 1);
-		sfxlen = strlen(sfxstr);
+		sfxlen = scnprintf(sfxstr, sizeof(sfxstr), "_%X", loops + 1);
 		if (len + sfxlen >= sizeof(card->id))
-			spos = id + sizeof(card->id) - sfxlen - 1;
+			slen = sizeof(card->id) - sfxlen - 1;
 		else
-			spos = id + len;
-		strcpy(spos, sfxstr);
+			slen = len;
+		strscpy(id + slen, sfxstr, sizeof(card->id) - slen);
 	}
 	/* fallback to the default id */
 	if (!is_default) {
@@ -787,7 +799,7 @@ static ssize_t id_store(struct device *dev, struct device_attribute *attr,
 
 	for (idx = 0; idx < copy; idx++) {
 		c = buf[idx];
-		if (!isalnum(c) && c != '_' && c != '-')
+		if (!safe_ascii_char(c) && c != '_' && c != '-')
 			return -EINVAL;
 	}
 	memcpy(buf1, buf, copy);
@@ -795,7 +807,7 @@ static ssize_t id_store(struct device *dev, struct device_attribute *attr,
 	guard(mutex)(&snd_card_mutex);
 	if (!card_id_ok(NULL, buf1))
 		return -EEXIST;
-	strcpy(card->id, buf1);
+	strscpy(card->id, buf1);
 	snd_info_card_id_change(card);
 
 	return count;
@@ -1056,7 +1068,7 @@ int snd_card_file_add(struct snd_card *card, struct file *file)
 {
 	struct snd_monitor_file *mfile;
 
-	mfile = kmalloc(sizeof(*mfile), GFP_KERNEL);
+	mfile = kmalloc_obj(*mfile);
 	if (mfile == NULL)
 		return -ENOMEM;
 	mfile->file = file;

@@ -4,12 +4,13 @@
 
 #include <linux/types.h>
 
+struct thread;
 struct maps;
 struct map;
 struct symbol;
 
 struct map_symbol {
-	struct maps   *maps;
+	struct thread *thread;
 	struct map    *map;
 	struct symbol *sym;
 };
@@ -25,5 +26,8 @@ struct addr_map_symbol {
 
 void map_symbol__exit(struct map_symbol *ms);
 void addr_map_symbol__exit(struct addr_map_symbol *ams);
+
+void map_symbol__copy(struct map_symbol *dst, struct map_symbol *src);
+void addr_map_symbol__copy(struct addr_map_symbol *dst, struct addr_map_symbol *src);
 
 #endif // __PERF_MAP_SYMBOL

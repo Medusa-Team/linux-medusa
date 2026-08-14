@@ -3,15 +3,19 @@
  * Copyright © 2023 Intel Corporation
  */
 
+#include <linux/fault-inject.h>
+
 #include <drm/drm_managed.h>
 
-#include "regs/xe_sriov_regs.h"
+#include "regs/xe_regs.h"
 
 #include "xe_assert.h"
 #include "xe_device.h"
 #include "xe_mmio.h"
 #include "xe_sriov.h"
 #include "xe_sriov_pf.h"
+#include "xe_sriov_vf.h"
+#include "xe_sriov_vf_ccs.h"
 
 /**
  * xe_sriov_mode_to_string - Convert enum value to string.
@@ -35,7 +39,7 @@ const char *xe_sriov_mode_to_string(enum xe_sriov_mode mode)
 
 static bool test_is_vf(struct xe_device *xe)
 {
-	u32 value = xe_mmio_read32(xe_root_mmio_gt(xe), VF_CAP_REG);
+	u32 value = xe_mmio_read32(xe_root_tile_mmio(xe), VF_CAP_REG);
 
 	return value & VF_CAP;
 }
@@ -78,7 +82,7 @@ void xe_sriov_probe_early(struct xe_device *xe)
 	xe->sriov.__mode = mode;
 	xe_assert(xe, xe->sriov.__mode);
 
-	if (has_sriov)
+	if (IS_SRIOV(xe))
 		drm_info(&xe->drm, "Running in %s mode\n",
 			 xe_sriov_mode_to_string(xe_device_sriov_mode(xe)));
 }
@@ -112,13 +116,17 @@ int xe_sriov_init(struct xe_device *xe)
 			return err;
 	}
 
+	if (IS_SRIOV_VF(xe))
+		xe_sriov_vf_init_early(xe);
+
 	xe_assert(xe, !xe->sriov.wq);
-	xe->sriov.wq = alloc_workqueue("xe-sriov-wq", 0, 0);
+	xe->sriov.wq = alloc_workqueue("xe-sriov-wq", WQ_PERCPU, 0);
 	if (!xe->sriov.wq)
 		return -ENOMEM;
 
 	return drmm_add_action_or_reset(&xe->drm, fini_sriov, xe);
 }
+ALLOW_ERROR_INJECTION(xe_sriov_init, ERRNO); /* See xe_pci_probe() */
 
 /**
  * xe_sriov_print_info - Print basic SR-IOV information.
@@ -149,4 +157,20 @@ const char *xe_sriov_function_name(unsigned int n, char *buf, size_t size)
 	else
 		strscpy(buf, "PF", size);
 	return buf;
+}
+
+/**
+ * xe_sriov_init_late() - SR-IOV late initialization functions.
+ * @xe: the &xe_device to initialize
+ *
+ * Return: 0 on success or a negative error code on failure.
+ */
+int xe_sriov_init_late(struct xe_device *xe)
+{
+	if (IS_SRIOV_PF(xe))
+		return xe_sriov_pf_init_late(xe);
+	if (IS_SRIOV_VF(xe))
+		return xe_sriov_vf_init_late(xe);
+
+	return 0;
 }

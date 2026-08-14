@@ -8,7 +8,7 @@
 #include <os.h>
 
 static void kmsg_dumper_stdout(struct kmsg_dumper *dumper,
-				enum kmsg_dump_reason reason)
+				struct kmsg_dump_detail *detail)
 {
 	static struct kmsg_dump_iter iter;
 	static DEFINE_SPINLOCK(lock);
@@ -31,7 +31,7 @@ static void kmsg_dumper_stdout(struct kmsg_dumper *dumper,
 		 * expected to output the crash information.
 		 */
 		if (strcmp(con->name, "ttynull") != 0 &&
-		    (console_srcu_read_flags(con) & CON_ENABLED)) {
+		    console_is_usable(con, console_srcu_read_flags(con), true)) {
 			break;
 		}
 	}

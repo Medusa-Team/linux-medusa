@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/bpf.h>
 #include <linux/vmalloc.h>
-#include <linux/fdtable.h>
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -104,102 +104,82 @@ static void bpf_token_show_fdinfo(struct seq_file *m, struct file *filp)
 
 static const struct inode_operations bpf_token_iops = { };
 
-static const struct file_operations bpf_token_fops = {
+const struct file_operations bpf_token_fops = {
 	.release	= bpf_token_release,
 	.show_fdinfo	= bpf_token_show_fdinfo,
 };
 
 int bpf_token_create(union bpf_attr *attr)
 {
+	struct bpf_token *token __free(kfree) = NULL;
 	struct bpf_mount_opts *mnt_opts;
-	struct bpf_token *token = NULL;
 	struct user_namespace *userns;
 	struct inode *inode;
-	struct file *file;
+	CLASS(fd, f)(attr->token_create.bpffs_fd);
 	struct path path;
-	struct fd f;
+	struct super_block *sb;
 	umode_t mode;
-	int err, fd;
+	int err;
 
-	f = fdget(attr->token_create.bpffs_fd);
-	if (!f.file)
+	if (fd_empty(f))
 		return -EBADF;
 
-	path = f.file->f_path;
-	path_get(&path);
-	fdput(f);
+	path = fd_file(f)->f_path;
+	sb = path.dentry->d_sb;
 
-	if (path.dentry != path.mnt->mnt_sb->s_root) {
-		err = -EINVAL;
-		goto out_path;
-	}
-	if (path.mnt->mnt_sb->s_op != &bpf_super_ops) {
-		err = -EINVAL;
-		goto out_path;
-	}
+	if (path.dentry != sb->s_root)
+		return -EINVAL;
+	if (sb->s_op != &bpf_super_ops)
+		return -EINVAL;
 	err = path_permission(&path, MAY_ACCESS);
 	if (err)
-		goto out_path;
+		return err;
 
-	userns = path.dentry->d_sb->s_user_ns;
+	userns = sb->s_user_ns;
 	/*
 	 * Enforce that creators of BPF tokens are in the same user
 	 * namespace as the BPF FS instance. This makes reasoning about
 	 * permissions a lot easier and we can always relax this later.
 	 */
-	if (current_user_ns() != userns) {
-		err = -EPERM;
-		goto out_path;
-	}
-	if (!ns_capable(userns, CAP_BPF)) {
-		err = -EPERM;
-		goto out_path;
-	}
+	if (current_user_ns() != userns)
+		return -EPERM;
+	if (!ns_capable(userns, CAP_BPF))
+		return -EPERM;
 
 	/* Creating BPF token in init_user_ns doesn't make much sense. */
-	if (current_user_ns() == &init_user_ns) {
-		err = -EOPNOTSUPP;
-		goto out_path;
-	}
+	if (current_user_ns() == &init_user_ns)
+		return -EOPNOTSUPP;
 
-	mnt_opts = path.dentry->d_sb->s_fs_info;
+	mnt_opts = sb->s_fs_info;
 	if (mnt_opts->delegate_cmds == 0 &&
 	    mnt_opts->delegate_maps == 0 &&
 	    mnt_opts->delegate_progs == 0 &&
-	    mnt_opts->delegate_attachs == 0) {
-		err = -ENOENT; /* no BPF token delegation is set up */
-		goto out_path;
-	}
+	    mnt_opts->delegate_attachs == 0)
+		return -ENOENT; /* no BPF token delegation is set up */
 
 	mode = S_IFREG | ((S_IRUSR | S_IWUSR) & ~current_umask());
-	inode = bpf_get_inode(path.mnt->mnt_sb, NULL, mode);
-	if (IS_ERR(inode)) {
-		err = PTR_ERR(inode);
-		goto out_path;
-	}
+	inode = bpf_get_inode(sb, NULL, mode);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
 
 	inode->i_op = &bpf_token_iops;
 	inode->i_fop = &bpf_token_fops;
 	clear_nlink(inode); /* make sure it is unlinked */
 
-	file = alloc_file_pseudo(inode, path.mnt, BPF_TOKEN_INODE_NAME, O_RDWR, &bpf_token_fops);
-	if (IS_ERR(file)) {
-		iput(inode);
-		err = PTR_ERR(file);
-		goto out_path;
-	}
+	FD_PREPARE(fdf, O_CLOEXEC,
+		   alloc_file_pseudo(inode, path.mnt, BPF_TOKEN_INODE_NAME,
+				     O_RDWR, &bpf_token_fops));
+	if (fdf.err)
+		return fdf.err;
 
-	token = kzalloc(sizeof(*token), GFP_USER);
-	if (!token) {
-		err = -ENOMEM;
-		goto out_file;
-	}
+	token = kzalloc_obj(*token, GFP_USER);
+	if (!token)
+		return -ENOMEM;
 
 	atomic64_set(&token->refcnt, 1);
 
-	/* remember bpffs owning userns for future ns_capable() checks */
-	token->userns = get_user_ns(userns);
-
+	/* remember bpffs owning userns for future ns_capable() checks. */
+	token->userns = userns;
 	token->allowed_cmds = mnt_opts->delegate_cmds;
 	token->allowed_maps = mnt_opts->delegate_maps;
 	token->allowed_progs = mnt_opts->delegate_progs;
@@ -207,44 +187,48 @@ int bpf_token_create(union bpf_attr *attr)
 
 	err = security_bpf_token_create(token, attr, &path);
 	if (err)
-		goto out_token;
+		return err;
 
-	fd = get_unused_fd_flags(O_CLOEXEC);
-	if (fd < 0) {
-		err = fd;
-		goto out_token;
-	}
+	get_user_ns(token->userns);
+	fd_prepare_file(fdf)->private_data = no_free_ptr(token);
+	return fd_publish(fdf);
+}
 
-	file->private_data = token;
-	fd_install(fd, file);
+int bpf_token_get_info_by_fd(struct bpf_token *token,
+			     const union bpf_attr *attr,
+			     union bpf_attr __user *uattr)
+{
+	struct bpf_token_info __user *uinfo = u64_to_user_ptr(attr->info.info);
+	struct bpf_token_info info;
+	u32 info_len = attr->info.info_len;
 
-	path_put(&path);
-	return fd;
+	info_len = min_t(u32, info_len, sizeof(info));
+	memset(&info, 0, sizeof(info));
 
-out_token:
-	bpf_token_free(token);
-out_file:
-	fput(file);
-out_path:
-	path_put(&path);
-	return err;
+	info.allowed_cmds = token->allowed_cmds;
+	info.allowed_maps = token->allowed_maps;
+	info.allowed_progs = token->allowed_progs;
+	info.allowed_attachs = token->allowed_attachs;
+
+	if (copy_to_user(uinfo, &info, info_len) ||
+	    put_user(info_len, &uattr->info.info_len))
+		return -EFAULT;
+
+	return 0;
 }
 
 struct bpf_token *bpf_token_get_from_fd(u32 ufd)
 {
-	struct fd f = fdget(ufd);
+	CLASS(fd, f)(ufd);
 	struct bpf_token *token;
 
-	if (!f.file)
+	if (fd_empty(f))
 		return ERR_PTR(-EBADF);
-	if (f.file->f_op != &bpf_token_fops) {
-		fdput(f);
+	if (fd_file(f)->f_op != &bpf_token_fops)
 		return ERR_PTR(-EINVAL);
-	}
 
-	token = f.file->private_data;
+	token = fd_file(f)->private_data;
 	bpf_token_inc(token);
-	fdput(f);
 
 	return token;
 }

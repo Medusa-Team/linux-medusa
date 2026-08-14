@@ -63,8 +63,11 @@ License identifier syntax
    The SPDX license identifier in kernel files shall be added at the first
    possible line in a file which can contain a comment.  For the majority
    of files this is the first line, except for scripts which require the
-   '#!PATH_TO_INTERPRETER' in the first line.  For those scripts the SPDX
-   identifier goes into the second line.
+   '#!PATH_TO_INTERPRETER' in the first line.  For those scripts, the SPDX
+   license identifier goes into the second line.
+
+   The license identifier line can then be followed by one or multiple
+   SPDX-FileCopyrightText lines if desired.
 
 |
 
@@ -471,14 +474,16 @@ _`MODULE_LICENSE`
 				  source files.
 
     "Proprietary"		  The module is under a proprietary license.
-				  This string is solely for proprietary third
-				  party modules and cannot be used for modules
-				  which have their source code in the kernel
-				  tree. Modules tagged that way are tainting
-				  the kernel with the 'P' flag when loaded and
-				  the kernel module loader refuses to link such
-				  modules against symbols which are exported
-				  with EXPORT_SYMBOL_GPL().
+				  "Proprietary" is to be understood only as
+				  "The license is not compatible to GPLv2".
+                                  This string is solely for non-GPL2 compatible
+                                  third party modules and cannot be used for
+                                  modules which have their source code in the
+                                  kernel tree. Modules tagged that way are
+                                  tainting the kernel with the 'P' flag when
+                                  loaded and the kernel module loader refuses
+                                  to link such modules against symbols which
+                                  are exported with EXPORT_SYMBOL_GPL().
     ============================= =============================================
 
 

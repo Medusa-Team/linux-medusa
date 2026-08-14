@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: ISC */
+/* SPDX-License-Identifier: BSD-3-Clause-Clear */
 /* Copyright (C) 2020 MediaTek Inc. */
 
 #ifndef __MT7921_H
@@ -7,6 +7,8 @@
 #include "../mt792x.h"
 #include "regs.h"
 
+#define MT7921_MAX_AID                  20
+
 #define MT7921_TX_RING_SIZE		2048
 #define MT7921_TX_MCU_RING_SIZE		256
 #define MT7921_TX_FWDL_RING_SIZE	128
@@ -14,6 +16,9 @@
 #define MT7921_RX_RING_SIZE		1536
 #define MT7921_RX_MCU_RING_SIZE		8
 #define MT7921_RX_MCU_WA_RING_SIZE	512
+
+/* MT7902 Rx Ring0 is for both Rx Event and Tx Done Event */
+#define MT7902_RX_MCU_RING_SIZE		512
 
 #define MT7921_EEPROM_SIZE		3584
 #define MT7921_TOKEN_SIZE		8192
@@ -30,6 +35,9 @@
 #define EXT_CMD_RADIO_LED_CTRL_ENABLE   0x1
 #define EXT_CMD_RADIO_ON_LED            0x2
 #define EXT_CMD_RADIO_OFF_LED           0x3
+
+#define WF_RF_PIN_INIT		0x0
+#define WF_RF_PIN_POLL		0x1
 
 enum {
 	UNI_ROC_ACQUIRE,
@@ -114,6 +122,17 @@ enum mt7921_rxq_id {
 	MT7921_RXQ_MCU_WM = 0,
 };
 
+/* MT7902 assigns its MCU-WM TXQ at index 15 */
+enum mt7902_txq_id {
+	MT7902_TXQ_MCU_WM = 15,
+};
+
+struct mt7921_dma_layout {
+	u8 mcu_wm_txq;
+	u16 mcu_rxdone_ring_size;
+	bool has_mcu_wa;
+};
+
 enum {
 	MT7921_CLC_POWER,
 	MT7921_CLC_CHAN,
@@ -186,6 +205,7 @@ int __mt7921_start(struct mt792x_phy *phy);
 int mt7921_register_device(struct mt792x_dev *dev);
 void mt7921_unregister_device(struct mt792x_dev *dev);
 int mt7921_run_firmware(struct mt792x_dev *dev);
+int mt7921_set_channel(struct mt76_phy *mphy);
 int mt7921_mcu_set_bss_pm(struct mt792x_dev *dev, struct ieee80211_vif *vif,
 			  bool enable);
 int mt7921_mcu_sta_update(struct mt792x_dev *dev, struct ieee80211_sta *sta,
@@ -201,6 +221,7 @@ void mt7921_mcu_rx_event(struct mt792x_dev *dev, struct sk_buff *skb);
 int mt7921_mcu_set_rxfilter(struct mt792x_dev *dev, u32 fif,
 			    u8 bit_op, u32 bit_map);
 int mt7921_mcu_radio_led_ctrl(struct mt792x_dev *dev, u8 value);
+int mt7921_mcu_wf_rf_pin_ctrl(struct mt792x_phy *phy, u8 action);
 
 static inline u32
 mt7921_reg_map_l1(struct mt792x_dev *dev, u32 addr)
@@ -244,8 +265,8 @@ int mt7921_mac_init(struct mt792x_dev *dev);
 bool mt7921_mac_wtbl_update(struct mt792x_dev *dev, int idx, u32 mask);
 int mt7921_mac_sta_add(struct mt76_dev *mdev, struct ieee80211_vif *vif,
 		       struct ieee80211_sta *sta);
-void mt7921_mac_sta_assoc(struct mt76_dev *mdev, struct ieee80211_vif *vif,
-			  struct ieee80211_sta *sta);
+int mt7921_mac_sta_event(struct mt76_dev *mdev, struct ieee80211_vif *vif,
+			 struct ieee80211_sta *sta, enum mt76_sta_event ev);
 void mt7921_mac_sta_remove(struct mt76_dev *mdev, struct ieee80211_vif *vif,
 			   struct ieee80211_sta *sta);
 void mt7921_mac_reset_work(struct work_struct *work);
@@ -272,6 +293,7 @@ int mt7921_mcu_uni_rx_ba(struct mt792x_dev *dev,
 			 bool enable);
 void mt7921_scan_work(struct work_struct *work);
 void mt7921_roc_work(struct work_struct *work);
+void mt7921_csa_work(struct work_struct *work);
 int mt7921_mcu_uni_bss_ps(struct mt792x_dev *dev, struct ieee80211_vif *vif);
 void mt7921_coredump_work(struct work_struct *work);
 int mt7921_get_txpwr_info(struct mt792x_dev *dev, struct mt7921_txpwr *txpwr);

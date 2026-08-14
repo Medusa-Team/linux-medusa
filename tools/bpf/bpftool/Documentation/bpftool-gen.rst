@@ -16,7 +16,7 @@ SYNOPSIS
 
 **bpftool** [*OPTIONS*] **gen** *COMMAND*
 
-*OPTIONS* := { |COMMON_OPTIONS| | { **-L** | **--use-loader** } }
+*OPTIONS* := { |COMMON_OPTIONS| | { **-L** | **--use-loader** } | [ { **-S** | **--sign** } {**-k** <private_key.pem>} **-i** <certificate.x509> ] }
 
 *COMMAND* := { **object** | **skeleton** | **help** }
 
@@ -104,7 +104,7 @@ bpftool gen skeleton *FILE*
 
     - **example__load**.
       This function creates maps, loads and verifies BPF programs, initializes
-      global data maps. It corresponds to libppf's **bpf_object__load**\ ()
+      global data maps. It corresponds to libbpf's **bpf_object__load**\ ()
       API.
 
     - **example__open_and_load** combines **example__open** and
@@ -172,7 +172,7 @@ bpftool gen min_core_btf *INPUT* *OUTPUT* *OBJECT* [*OBJECT*...]
     CO-RE based application, turning the application portable to different
     kernel versions.
 
-    Check examples bellow for more information how to use it.
+    Check examples below for more information on how to use it.
 
 bpftool gen help
     Print short help message.
@@ -185,6 +185,17 @@ OPTIONS
     For skeletons, generate a "light" skeleton (also known as "loader"
     skeleton). A light skeleton contains a loader eBPF program. It does not use
     the majority of the libbpf infrastructure, and does not need libelf.
+
+-S, --sign
+    For skeletons, generate a signed skeleton. This option must be used with
+    **-k** and **-i**. Using this flag implicitly enables **--use-loader**.
+
+-k <private_key.pem>
+    Path to the private key file in PEM format, required for signing.
+
+-i <certificate.x509>
+    Path to the X.509 certificate file in PEM or DER format, required for
+    signing.
 
 EXAMPLES
 ========

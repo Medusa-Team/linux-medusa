@@ -301,7 +301,7 @@ static struct dma_async_tx_descriptor *moxart_prep_slave_sg(
 		return NULL;
 	}
 
-	d = kzalloc(struct_size(d, sg, sg_len), GFP_ATOMIC);
+	d = kzalloc_flex(*d, sg, sg_len, GFP_ATOMIC);
 	if (!d)
 		return NULL;
 	d->sglen = sg_len;
@@ -644,7 +644,7 @@ MODULE_DEVICE_TABLE(of, moxart_dma_match);
 
 static struct platform_driver moxart_driver = {
 	.probe	= moxart_probe,
-	.remove_new = moxart_remove,
+	.remove = moxart_remove,
 	.driver = {
 		.name		= "moxart-dma-engine",
 		.of_match_table	= moxart_dma_match,

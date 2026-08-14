@@ -33,6 +33,7 @@
 #include "amdgpu_hmm.h"
 #include "amdgpu.h"
 #include "amdgpu_xgmi.h"
+#include "amdgpu_reset.h"
 #include "kfd_priv.h"
 #include "kfd_svm.h"
 #include "kfd_migrate.h"
@@ -167,7 +168,7 @@ svm_range_dma_map_dev(struct amdgpu_device *adev, struct svm_range *prange,
 	int i, r;
 
 	if (!addr) {
-		addr = kvcalloc(prange->npages, sizeof(*addr), GFP_KERNEL);
+		addr = kvzalloc_objs(*addr, prange->npages);
 		if (!addr)
 			return -ENOMEM;
 		prange->dma_addr[gpuidx] = addr;
@@ -309,12 +310,13 @@ static void svm_range_free(struct svm_range *prange, bool do_unmap)
 }
 
 static void
-svm_range_set_default_attributes(int32_t *location, int32_t *prefetch_loc,
-				 uint8_t *granularity, uint32_t *flags)
+svm_range_set_default_attributes(struct svm_range_list *svms, int32_t *location,
+				 int32_t *prefetch_loc, uint8_t *granularity,
+				 uint32_t *flags)
 {
 	*location = KFD_IOCTL_SVM_LOCATION_UNDEFINED;
 	*prefetch_loc = KFD_IOCTL_SVM_LOCATION_UNDEFINED;
-	*granularity = 9;
+	*granularity = svms->default_granularity;
 	*flags =
 		KFD_IOCTL_SVM_FLAG_HOST_ACCESS | KFD_IOCTL_SVM_FLAG_COHERENT;
 }
@@ -327,7 +329,7 @@ svm_range *svm_range_new(struct svm_range_list *svms, uint64_t start,
 	struct svm_range *prange;
 	struct kfd_process *p;
 
-	prange = kzalloc(sizeof(*prange), GFP_KERNEL);
+	prange = kzalloc_obj(*prange);
 	if (!prange)
 		return NULL;
 
@@ -358,7 +360,7 @@ svm_range *svm_range_new(struct svm_range_list *svms, uint64_t start,
 		bitmap_copy(prange->bitmap_access, svms->bitmap_supported,
 			    MAX_GPU_INSTANCE);
 
-	svm_range_set_default_attributes(&prange->preferred_loc,
+	svm_range_set_default_attributes(svms, &prange->preferred_loc,
 					 &prange->prefetch_loc,
 					 &prange->granularity, &prange->flags);
 
@@ -404,6 +406,27 @@ static void svm_range_bo_release(struct kref *kref)
 		spin_lock(&svm_bo->list_lock);
 	}
 	spin_unlock(&svm_bo->list_lock);
+
+	if (mmget_not_zero(svm_bo->eviction_fence->mm)) {
+		struct kfd_process_device *pdd;
+		struct kfd_process *p;
+		struct mm_struct *mm;
+
+		mm = svm_bo->eviction_fence->mm;
+		/*
+		 * The forked child process takes svm_bo device pages ref, svm_bo could be
+		 * released after parent process is gone.
+		 */
+		p = kfd_lookup_process_by_mm(mm);
+		if (p) {
+			pdd = kfd_get_process_device_data(svm_bo->node, p);
+			if (pdd)
+				atomic64_sub(amdgpu_bo_size(svm_bo->bo), &pdd->vram_usage);
+			kfd_unref_process(p);
+		}
+		mmput(mm);
+	}
+
 	if (!dma_fence_is_signaled(&svm_bo->eviction_fence->base))
 		/* We're not in the eviction worker. Signal the fence. */
 		dma_fence_signal(&svm_bo->eviction_fence->base);
@@ -516,7 +539,7 @@ static struct svm_range_bo *svm_range_bo_new(void)
 {
 	struct svm_range_bo *svm_bo;
 
-	svm_bo = kzalloc(sizeof(*svm_bo), GFP_KERNEL);
+	svm_bo = kzalloc_obj(*svm_bo);
 	if (!svm_bo)
 		return NULL;
 
@@ -531,6 +554,7 @@ int
 svm_range_vram_node_new(struct kfd_node *node, struct svm_range *prange,
 			bool clear)
 {
+	struct kfd_process_device *pdd;
 	struct amdgpu_bo_param bp;
 	struct svm_range_bo *svm_bo;
 	struct amdgpu_bo_user *ubo;
@@ -540,7 +564,8 @@ svm_range_vram_node_new(struct kfd_node *node, struct svm_range *prange,
 	int r;
 
 	p = container_of(prange->svms, struct kfd_process, svms);
-	pr_debug("pasid: %x svms 0x%p [0x%lx 0x%lx]\n", p->pasid, prange->svms,
+	pr_debug("process pid: %d svms 0x%p [0x%lx 0x%lx]\n",
+		 p->lead_thread->pid, prange->svms,
 		 prange->start, prange->last);
 
 	if (svm_range_validate_svm_bo(node, prange))
@@ -561,7 +586,7 @@ svm_range_vram_node_new(struct kfd_node *node, struct svm_range *prange,
 	svm_bo->eviction_fence =
 		amdgpu_amdkfd_fence_create(dma_fence_context_alloc(1),
 					   mm,
-					   svm_bo);
+					   svm_bo, p->context_id);
 	mmput(mm);
 	INIT_WORK(&svm_bo->eviction_work, svm_range_evict_svm_bo_worker);
 	svm_bo->evicting = 0;
@@ -603,9 +628,8 @@ svm_range_vram_node_new(struct kfd_node *node, struct svm_range *prange,
 		}
 	}
 
-	r = dma_resv_reserve_fences(bo->tbo.base.resv, 1);
+	r = dma_resv_reserve_fences(bo->tbo.base.resv, TTM_NUM_MOVE_FENCES);
 	if (r) {
-		pr_debug("failed %d to reserve bo\n", r);
 		amdgpu_bo_unreserve(bo);
 		goto reserve_bo_failed;
 	}
@@ -621,6 +645,10 @@ svm_range_vram_node_new(struct kfd_node *node, struct svm_range *prange,
 	spin_lock(&svm_bo->list_lock);
 	list_add(&prange->svm_bo_list, &svm_bo->range_list);
 	spin_unlock(&svm_bo->list_lock);
+
+	pdd = svm_range_get_pdd_by_node(prange, node);
+	if (pdd)
+		atomic64_add(amdgpu_bo_size(bo), &pdd->vram_usage);
 
 	return 0;
 
@@ -1051,6 +1079,7 @@ svm_range_split_adjust(struct svm_range *new, struct svm_range *old,
 	new->mapped_to_gpu = old->mapped_to_gpu;
 	bitmap_copy(new->bitmap_access, old->bitmap_access, MAX_GPU_INSTANCE);
 	bitmap_copy(new->bitmap_aip, old->bitmap_aip, MAX_GPU_INSTANCE);
+	atomic_set(&new->queue_refcount, atomic_read(&old->queue_refcount));
 
 	return 0;
 }
@@ -1115,40 +1144,57 @@ static int
 svm_range_split_tail(struct svm_range *prange, uint64_t new_last,
 		     struct list_head *insert_list, struct list_head *remap_list)
 {
+	unsigned long last_align_down = ALIGN_DOWN(prange->last, 512);
+	unsigned long start_align = ALIGN(prange->start, 512);
+	bool huge_page_mapping = last_align_down > start_align;
 	struct svm_range *tail = NULL;
-	int r = svm_range_split(prange, prange->start, new_last, &tail);
+	int r;
 
-	if (!r) {
-		list_add(&tail->list, insert_list);
-		if (!IS_ALIGNED(new_last + 1, 1UL << prange->granularity))
-			list_add(&tail->update_list, remap_list);
-	}
-	return r;
+	r = svm_range_split(prange, prange->start, new_last, &tail);
+
+	if (r)
+		return r;
+
+	list_add(&tail->list, insert_list);
+
+	if (huge_page_mapping && tail->start > start_align &&
+	    tail->start < last_align_down && (!IS_ALIGNED(tail->start, 512)))
+		list_add(&tail->update_list, remap_list);
+
+	return 0;
 }
 
 static int
 svm_range_split_head(struct svm_range *prange, uint64_t new_start,
 		     struct list_head *insert_list, struct list_head *remap_list)
 {
+	unsigned long last_align_down = ALIGN_DOWN(prange->last, 512);
+	unsigned long start_align = ALIGN(prange->start, 512);
+	bool huge_page_mapping = last_align_down > start_align;
 	struct svm_range *head = NULL;
-	int r = svm_range_split(prange, new_start, prange->last, &head);
+	int r;
 
-	if (!r) {
-		list_add(&head->list, insert_list);
-		if (!IS_ALIGNED(new_start, 1UL << prange->granularity))
-			list_add(&head->update_list, remap_list);
-	}
-	return r;
+	r = svm_range_split(prange, new_start, prange->last, &head);
+
+	if (r)
+		return r;
+
+	list_add(&head->list, insert_list);
+
+	if (huge_page_mapping && head->last + 1 > start_align &&
+	    head->last + 1 < last_align_down && (!IS_ALIGNED(head->last, 512)))
+		list_add(&head->update_list, remap_list);
+
+	return 0;
 }
 
 static void
-svm_range_add_child(struct svm_range *prange, struct mm_struct *mm,
-		    struct svm_range *pchild, enum svm_work_list_ops op)
+svm_range_add_child(struct svm_range *prange, struct svm_range *pchild, enum svm_work_list_ops op)
 {
 	pr_debug("add child 0x%p [0x%lx 0x%lx] to prange 0x%p child list %d\n",
 		 pchild, pchild->start, pchild->last, prange, op);
 
-	pchild->work_item.mm = mm;
+	pchild->work_item.mm = NULL;
 	pchild->work_item.op = op;
 	list_add_tail(&pchild->child_list, &prange->child_list);
 }
@@ -1161,22 +1207,24 @@ svm_nodes_in_same_hive(struct kfd_node *node_a, struct kfd_node *node_b)
 }
 
 static uint64_t
-svm_range_get_pte_flags(struct kfd_node *node,
+svm_range_get_pte_flags(struct kfd_node *node, struct amdgpu_vm *vm,
 			struct svm_range *prange, int domain)
 {
 	struct kfd_node *bo_node;
 	uint32_t flags = prange->flags;
 	uint32_t mapping_flags = 0;
+	uint32_t gc_ip_version = KFD_GC_VERSION(node);
 	uint64_t pte_flags;
 	bool snoop = (domain != SVM_RANGE_VRAM_DOMAIN);
 	bool coherent = flags & (KFD_IOCTL_SVM_FLAG_COHERENT | KFD_IOCTL_SVM_FLAG_EXT_COHERENT);
 	bool ext_coherent = flags & KFD_IOCTL_SVM_FLAG_EXT_COHERENT;
-	unsigned int mtype_local;
+	unsigned int mtype_local, mtype_remote;
+	bool is_aid_a1, is_local;
 
 	if (domain == SVM_RANGE_VRAM_DOMAIN)
 		bo_node = prange->svm_bo->node;
 
-	switch (amdgpu_ip_version(node->adev, GC_HWIP, 0)) {
+	switch (gc_ip_version) {
 	case IP_VERSION(9, 4, 1):
 		if (domain == SVM_RANGE_VRAM_DOMAIN) {
 			if (bo_node == node) {
@@ -1213,8 +1261,9 @@ svm_range_get_pte_flags(struct kfd_node *node,
 		break;
 	case IP_VERSION(9, 4, 3):
 	case IP_VERSION(9, 4, 4):
+	case IP_VERSION(9, 5, 0):
 		if (ext_coherent)
-			mtype_local = node->adev->rev_id ? AMDGPU_VM_MTYPE_CC : AMDGPU_VM_MTYPE_UC;
+			mtype_local = AMDGPU_VM_MTYPE_CC;
 		else
 			mtype_local = amdgpu_mtype_local == 1 ? AMDGPU_VM_MTYPE_NC :
 				amdgpu_mtype_local == 2 ? AMDGPU_VM_MTYPE_CC : AMDGPU_VM_MTYPE_RW;
@@ -1229,9 +1278,13 @@ svm_range_get_pte_flags(struct kfd_node *node,
 			 */
 			else if (svm_nodes_in_same_hive(bo_node, node) && !ext_coherent)
 				mapping_flags |= AMDGPU_VM_MTYPE_NC;
-			/* PCIe P2P or extended system scope coherence */
-			else
+			/* PCIe P2P on GPUs pre-9.5.0 */
+			else if (gc_ip_version < IP_VERSION(9, 5, 0) &&
+				 !svm_nodes_in_same_hive(bo_node, node))
 				mapping_flags |= AMDGPU_VM_MTYPE_UC;
+			/* Other remote memory */
+			else
+				mapping_flags |= ext_coherent ? AMDGPU_VM_MTYPE_UC : AMDGPU_VM_MTYPE_NC;
 		/* system memory accessed by the APU */
 		} else if (node->adev->flags & AMD_IS_APU) {
 			/* On NUMA systems, locality is determined per-page
@@ -1243,17 +1296,34 @@ svm_range_get_pte_flags(struct kfd_node *node,
 				mapping_flags |= ext_coherent ? AMDGPU_VM_MTYPE_UC : AMDGPU_VM_MTYPE_NC;
 		/* system memory accessed by the dGPU */
 		} else {
-			mapping_flags |= AMDGPU_VM_MTYPE_UC;
+			if (gc_ip_version < IP_VERSION(9, 5, 0) || ext_coherent)
+				mapping_flags |= AMDGPU_VM_MTYPE_UC;
+			else
+				mapping_flags |= AMDGPU_VM_MTYPE_NC;
 		}
 		break;
 	case IP_VERSION(12, 0, 0):
 	case IP_VERSION(12, 0, 1):
-		if (domain == SVM_RANGE_VRAM_DOMAIN) {
-			if (bo_node != node)
-				mapping_flags |= AMDGPU_VM_MTYPE_NC;
+		mapping_flags |= AMDGPU_VM_MTYPE_NC;
+		break;
+	case IP_VERSION(12, 1, 0):
+		is_aid_a1 = (node->adev->rev_id & 0x10);
+		is_local = (domain == SVM_RANGE_VRAM_DOMAIN) &&
+				(bo_node->adev == node->adev);
+
+		mtype_local = amdgpu_mtype_local == 0 ? AMDGPU_VM_MTYPE_RW :
+				amdgpu_mtype_local == 1 ? AMDGPU_VM_MTYPE_NC :
+				is_aid_a1 ? AMDGPU_VM_MTYPE_RW : AMDGPU_VM_MTYPE_NC;
+		mtype_remote = is_aid_a1 ? AMDGPU_VM_MTYPE_NC : AMDGPU_VM_MTYPE_UC;
+		snoop = true;
+
+		if (is_local) /* local HBM  */ {
+			mapping_flags |= mtype_local;
+		} else if (ext_coherent) {
+			mapping_flags |= AMDGPU_VM_MTYPE_UC;
 		} else {
-			mapping_flags |= coherent ?
-				AMDGPU_VM_MTYPE_UC : AMDGPU_VM_MTYPE_NC;
+			/* system memory or remote VRAM */
+			mapping_flags |= mtype_remote;
 		}
 		break;
 	default:
@@ -1261,20 +1331,24 @@ svm_range_get_pte_flags(struct kfd_node *node,
 			AMDGPU_VM_MTYPE_UC : AMDGPU_VM_MTYPE_NC;
 	}
 
-	mapping_flags |= AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-
-	if (flags & KFD_IOCTL_SVM_FLAG_GPU_RO)
-		mapping_flags &= ~AMDGPU_VM_PAGE_WRITEABLE;
 	if (flags & KFD_IOCTL_SVM_FLAG_GPU_EXEC)
 		mapping_flags |= AMDGPU_VM_PAGE_EXECUTABLE;
 
 	pte_flags = AMDGPU_PTE_VALID;
 	pte_flags |= (domain == SVM_RANGE_VRAM_DOMAIN) ? 0 : AMDGPU_PTE_SYSTEM;
 	pte_flags |= snoop ? AMDGPU_PTE_SNOOPED : 0;
-	if (KFD_GC_VERSION(node) >= IP_VERSION(12, 0, 0))
+	if (gc_ip_version >= IP_VERSION(12, 0, 0))
 		pte_flags |= AMDGPU_PTE_IS_PTE;
 
-	pte_flags |= amdgpu_gem_va_map_flags(node->adev, mapping_flags);
+	amdgpu_gmc_get_vm_pte(node->adev, vm, NULL, mapping_flags, &pte_flags);
+	pte_flags |= AMDGPU_PTE_READABLE;
+	if (!(flags & KFD_IOCTL_SVM_FLAG_GPU_RO))
+		pte_flags |= AMDGPU_PTE_WRITEABLE;
+
+	if ((gc_ip_version == IP_VERSION(12, 1, 0)) &&
+	    node->adev->have_atomics_support)
+		pte_flags |= AMDGPU_PTE_BUS_ATOMICS;
+
 	return pte_flags;
 }
 
@@ -1283,12 +1357,23 @@ svm_range_unmap_from_gpu(struct amdgpu_device *adev, struct amdgpu_vm *vm,
 			 uint64_t start, uint64_t last,
 			 struct dma_fence **fence)
 {
-	uint64_t init_pte_value = 0;
+	uint64_t init_pte_value = adev->gmc.init_pte_flags;
+	uint64_t gpu_start, gpu_end;
 
-	pr_debug("[0x%llx 0x%llx]\n", start, last);
+	/* Convert CPU page range to GPU page range */
+	gpu_start = start * AMDGPU_GPU_PAGES_IN_CPU_PAGE;
+	gpu_end = (last + 1) * AMDGPU_GPU_PAGES_IN_CPU_PAGE - 1;
 
-	return amdgpu_vm_update_range(adev, vm, false, true, true, false, NULL, start,
-				      last, init_pte_value, 0, 0, NULL, NULL,
+	pr_debug("CPU[0x%llx 0x%llx] -> GPU[0x%llx 0x%llx]\n", start, last,
+		gpu_start, gpu_end);
+
+	if (!amdgpu_vm_ready(vm)) {
+		pr_debug("VM not ready, canceling unmap\n");
+		return -EINVAL;
+	}
+
+	return amdgpu_vm_update_range(adev, vm, false, true, true, false, NULL, gpu_start,
+				      gpu_end, init_pte_value, 0, 0, NULL, NULL,
 				      fence);
 }
 
@@ -1296,7 +1381,6 @@ static int
 svm_range_unmap_from_gpus(struct svm_range *prange, unsigned long start,
 			  unsigned long last, uint32_t trigger)
 {
-	DECLARE_BITMAP(bitmap, MAX_GPU_INSTANCE);
 	struct kfd_process_device *pdd;
 	struct dma_fence *fence = NULL;
 	struct kfd_process *p;
@@ -1314,11 +1398,9 @@ svm_range_unmap_from_gpus(struct svm_range *prange, unsigned long start,
 		prange->mapped_to_gpu = false;
 	}
 
-	bitmap_or(bitmap, prange->bitmap_access, prange->bitmap_aip,
-		  MAX_GPU_INSTANCE);
 	p = container_of(prange->svms, struct kfd_process, svms);
 
-	for_each_set_bit(gpuidx, bitmap, MAX_GPU_INSTANCE) {
+	for_each_or_bit(gpuidx, prange->bitmap_access, prange->bitmap_aip, MAX_GPU_INSTANCE) {
 		pr_debug("unmap from gpu idx 0x%x\n", gpuidx);
 		pdd = kfd_process_device_from_gpuidx(p, gpuidx);
 		if (!pdd) {
@@ -1342,7 +1424,7 @@ svm_range_unmap_from_gpus(struct svm_range *prange, unsigned long start,
 			if (r)
 				break;
 		}
-		kfd_flush_tlb(pdd, TLB_FLUSH_HEAVYWEIGHT);
+		kfd_flush_tlb(pdd);
 	}
 
 	return r;
@@ -1367,7 +1449,15 @@ svm_range_map_to_gpu(struct kfd_process_device *pdd, struct svm_range *prange,
 	pr_debug("svms 0x%p [0x%lx 0x%lx] readonly %d\n", prange->svms,
 		 last_start, last_start + npages - 1, readonly);
 
+	if (!amdgpu_vm_ready(vm)) {
+		pr_debug("VM not ready, canceling map\n");
+		return -EINVAL;
+	}
+
 	for (i = offset; i < offset + npages; i++) {
+		uint64_t gpu_start;
+		uint64_t gpu_end;
+
 		last_domain = dma_addr[i] & SVM_RANGE_VRAM_DOMAIN;
 		dma_addr[i] &= ~SVM_RANGE_VRAM_DOMAIN;
 
@@ -1381,21 +1471,26 @@ svm_range_map_to_gpu(struct kfd_process_device *pdd, struct svm_range *prange,
 		pr_debug("Mapping range [0x%lx 0x%llx] on domain: %s\n",
 			 last_start, prange->start + i, last_domain ? "GPU" : "CPU");
 
-		pte_flags = svm_range_get_pte_flags(pdd->dev, prange, last_domain);
+		pte_flags = svm_range_get_pte_flags(pdd->dev, vm, prange, last_domain);
 		if (readonly)
 			pte_flags &= ~AMDGPU_PTE_WRITEABLE;
 
-		pr_debug("svms 0x%p map [0x%lx 0x%llx] vram %d PTE 0x%llx\n",
-			 prange->svms, last_start, prange->start + i,
-			 (last_domain == SVM_RANGE_VRAM_DOMAIN) ? 1 : 0,
-			 pte_flags);
 
 		/* For dGPU mode, we use same vm_manager to allocate VRAM for
 		 * different memory partition based on fpfn/lpfn, we should use
 		 * same vm_manager.vram_base_offset regardless memory partition.
 		 */
+		gpu_start = last_start * AMDGPU_GPU_PAGES_IN_CPU_PAGE;
+		gpu_end = (prange->start + i + 1) * AMDGPU_GPU_PAGES_IN_CPU_PAGE - 1;
+
+		pr_debug("svms 0x%p map CPU[0x%lx 0x%llx] GPU[0x%llx 0x%llx] vram %d PTE 0x%llx\n",
+			 prange->svms, last_start, prange->start + i,
+			 gpu_start, gpu_end,
+			 (last_domain == SVM_RANGE_VRAM_DOMAIN) ? 1 : 0,
+			 pte_flags);
+
 		r = amdgpu_vm_update_range(adev, vm, false, false, flush_tlb, true,
-					   NULL, last_start, prange->start + i,
+					   NULL, gpu_start, gpu_end,
 					   pte_flags,
 					   (last_start - prange->start) << PAGE_SHIFT,
 					   bo_adev ? bo_adev->vm_manager.vram_base_offset : 0,
@@ -1476,7 +1571,7 @@ svm_range_map_to_gpus(struct svm_range *prange, unsigned long offset,
 			}
 		}
 
-		kfd_flush_tlb(pdd, TLB_FLUSH_LEGACY);
+		kfd_flush_tlb(pdd);
 	}
 
 	return r;
@@ -1593,7 +1688,7 @@ static int svm_range_validate_and_map(struct mm_struct *mm,
 	int32_t idx;
 	int r = 0;
 
-	ctx = kzalloc(sizeof(struct svm_validate_context), GFP_KERNEL);
+	ctx = kzalloc_obj(struct svm_validate_context);
 	if (!ctx)
 		return -ENOMEM;
 	ctx->process = container_of(prange->svms, struct kfd_process, svms);
@@ -1668,7 +1763,7 @@ static int svm_range_validate_and_map(struct mm_struct *mm,
 	start = map_start << PAGE_SHIFT;
 	end = (map_last + 1) << PAGE_SHIFT;
 	for (addr = start; !r && addr < end; ) {
-		struct hmm_range *hmm_range = NULL;
+		struct amdgpu_hmm_range *range = NULL;
 		unsigned long map_start_vma;
 		unsigned long map_last_vma;
 		struct vm_area_struct *vma;
@@ -1683,10 +1778,36 @@ static int svm_range_validate_and_map(struct mm_struct *mm,
 
 			next = min(vma->vm_end, end);
 			npages = (next - addr) >> PAGE_SHIFT;
+			/* HMM requires at least READ permissions. If provided with PROT_NONE,
+			 * unmap the memory. If it's not already mapped, this is a no-op
+			 * If PROT_WRITE is provided without READ, warn first then unmap
+			 */
+			if (!(vma->vm_flags & VM_READ)) {
+				unsigned long e, s;
+
+				svm_range_lock(prange);
+				if (vma->vm_flags & VM_WRITE)
+					pr_debug("VM_WRITE without VM_READ is not supported");
+				s = max(start, prange->start);
+				e = min(end, prange->last);
+				if (e >= s)
+					r = svm_range_unmap_from_gpus(prange, s, e,
+						       KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU);
+				svm_range_unlock(prange);
+				/* If unmap returns non-zero, we'll bail on the next for loop
+				 * iteration, so just leave r and continue
+				 */
+				addr = next;
+				continue;
+			}
+
 			WRITE_ONCE(p->svms.faulting_task, current);
-			r = amdgpu_hmm_range_get_pages(&prange->notifier, addr, npages,
-						       readonly, owner, NULL,
-						       &hmm_range);
+			range = amdgpu_hmm_range_alloc(NULL);
+			if (likely(range))
+				r = amdgpu_hmm_range_get_pages(&prange->notifier, addr, npages,
+							       readonly, owner, range);
+			else
+				r = -ENOMEM;
 			WRITE_ONCE(p->svms.faulting_task, NULL);
 			if (r)
 				pr_debug("failed %d to get svm range pages\n", r);
@@ -1697,7 +1818,7 @@ static int svm_range_validate_and_map(struct mm_struct *mm,
 		if (!r) {
 			offset = (addr >> PAGE_SHIFT) - prange->start;
 			r = svm_range_dma_map(prange, ctx->bitmap, offset, npages,
-					      hmm_range->hmm_pfns);
+					      range->hmm_range.hmm_pfns);
 			if (r)
 				pr_debug("failed %d to dma map range\n", r);
 		}
@@ -1705,13 +1826,16 @@ static int svm_range_validate_and_map(struct mm_struct *mm,
 		svm_range_lock(prange);
 
 		/* Free backing memory of hmm_range if it was initialized
-		 * Overrride return value to TRY AGAIN only if prior returns
+		 * Override return value to TRY AGAIN only if prior returns
 		 * were successful
 		 */
-		if (hmm_range && amdgpu_hmm_range_get_pages_done(hmm_range) && !r) {
+		if (range && !amdgpu_hmm_range_valid(range) && !r) {
 			pr_debug("hmm update the range, need validate again\n");
 			r = -EAGAIN;
 		}
+
+		/* Free the hmm range */
+		amdgpu_hmm_range_free(range);
 
 		if (!r && !list_empty(&prange->child_list)) {
 			pr_debug("range split by unmap in parallel, validate again\n");
@@ -1992,6 +2116,7 @@ static struct svm_range *svm_range_clone(struct svm_range *old)
 	new->vram_pages = old->vram_pages;
 	bitmap_copy(new->bitmap_access, old->bitmap_access, MAX_GPU_INSTANCE);
 	bitmap_copy(new->bitmap_aip, old->bitmap_aip, MAX_GPU_INSTANCE);
+	atomic_set(&new->queue_refcount, atomic_read(&old->queue_refcount));
 
 	return new;
 }
@@ -2260,15 +2385,9 @@ static void svm_range_drain_retry_fault(struct svm_range_list *svms)
 {
 	struct kfd_process_device *pdd;
 	struct kfd_process *p;
-	int drain;
 	uint32_t i;
 
 	p = container_of(svms, struct kfd_process, svms);
-
-restart:
-	drain = atomic_read(&svms->drain_pagefaults);
-	if (!drain)
-		return;
 
 	for_each_set_bit(i, svms->bitmap_supported, p->n_pdds) {
 		pdd = p->pdds[i];
@@ -2276,6 +2395,9 @@ restart:
 			continue;
 
 		pr_debug("drain retry fault gpu %d svms %p\n", i, svms);
+
+		if (!down_read_trylock(&pdd->dev->adev->reset_domain->sem))
+			continue;
 
 		amdgpu_ih_wait_on_checkpoint_process_ts(pdd->dev->adev,
 				pdd->dev->adev->irq.retry_cam_enabled ?
@@ -2286,11 +2408,10 @@ restart:
 			amdgpu_ih_wait_on_checkpoint_process_ts(pdd->dev->adev,
 				&pdd->dev->adev->irq.ih_soft);
 
+		up_read(&pdd->dev->adev->reset_domain->sem);
 
 		pr_debug("drain retry fault gpu %d svms 0x%p done\n", i, svms);
 	}
-	if (atomic_cmpxchg(&svms->drain_pagefaults, drain, 0) != drain)
-		goto restart;
 }
 
 static void svm_range_deferred_list_work(struct work_struct *work)
@@ -2312,17 +2433,8 @@ static void svm_range_deferred_list_work(struct work_struct *work)
 			 prange->start, prange->last, prange->work_item.op);
 
 		mm = prange->work_item.mm;
-retry:
-		mmap_write_lock(mm);
 
-		/* Checking for the need to drain retry faults must be inside
-		 * mmap write lock to serialize with munmap notifiers.
-		 */
-		if (unlikely(atomic_read(&svms->drain_pagefaults))) {
-			mmap_write_unlock(mm);
-			svm_range_drain_retry_fault(svms);
-			goto retry;
-		}
+		mmap_write_lock(mm);
 
 		/* Remove from deferred_list must be inside mmap write lock, for
 		 * two race cases:
@@ -2378,15 +2490,17 @@ svm_range_add_list_work(struct svm_range_list *svms, struct svm_range *prange,
 		    prange->work_item.op != SVM_OP_UNMAP_RANGE)
 			prange->work_item.op = op;
 	} else {
-		prange->work_item.op = op;
-
-		/* Pairs with mmput in deferred_list_work */
-		mmget(mm);
-		prange->work_item.mm = mm;
-		list_add_tail(&prange->deferred_list,
-			      &prange->svms->deferred_range_list);
-		pr_debug("add prange 0x%p [0x%lx 0x%lx] to work list op %d\n",
-			 prange, prange->start, prange->last, op);
+		/* Pairs with mmput in deferred_list_work.
+		 * If process is exiting and mm is gone, don't update mmu notifier.
+		 */
+		if (mmget_not_zero(mm)) {
+			prange->work_item.mm = mm;
+			prange->work_item.op = op;
+			list_add_tail(&prange->deferred_list,
+				      &prange->svms->deferred_range_list);
+			pr_debug("add prange 0x%p [0x%lx 0x%lx] to work list op %d\n",
+				 prange, prange->start, prange->last, op);
+		}
 	}
 	spin_unlock(&svms->deferred_list_lock);
 }
@@ -2400,8 +2514,7 @@ void schedule_deferred_list_work(struct svm_range_list *svms)
 }
 
 static void
-svm_range_unmap_split(struct mm_struct *mm, struct svm_range *parent,
-		      struct svm_range *prange, unsigned long start,
+svm_range_unmap_split(struct svm_range *parent, struct svm_range *prange, unsigned long start,
 		      unsigned long last)
 {
 	struct svm_range *head;
@@ -2422,12 +2535,12 @@ svm_range_unmap_split(struct mm_struct *mm, struct svm_range *parent,
 		svm_range_split(tail, last + 1, tail->last, &head);
 
 	if (head != prange && tail != prange) {
-		svm_range_add_child(parent, mm, head, SVM_OP_UNMAP_RANGE);
-		svm_range_add_child(parent, mm, tail, SVM_OP_ADD_RANGE);
+		svm_range_add_child(parent, head, SVM_OP_UNMAP_RANGE);
+		svm_range_add_child(parent, tail, SVM_OP_ADD_RANGE);
 	} else if (tail != prange) {
-		svm_range_add_child(parent, mm, tail, SVM_OP_UNMAP_RANGE);
+		svm_range_add_child(parent, tail, SVM_OP_UNMAP_RANGE);
 	} else if (head != prange) {
-		svm_range_add_child(parent, mm, head, SVM_OP_UNMAP_RANGE);
+		svm_range_add_child(parent, head, SVM_OP_UNMAP_RANGE);
 	} else if (parent != prange) {
 		prange->work_item.op = SVM_OP_UNMAP_RANGE;
 	}
@@ -2443,6 +2556,17 @@ svm_range_unmap_from_cpu(struct mm_struct *mm, struct svm_range *prange,
 	struct kfd_process *p;
 	unsigned long s, l;
 	bool unmap_parent;
+	uint32_t i;
+
+	if (atomic_read(&prange->queue_refcount)) {
+		int r;
+
+		pr_warn("Freeing queue vital buffer 0x%lx, queue evicted\n",
+			prange->start << PAGE_SHIFT);
+		r = kgd2kfd_quiesce_mm(mm, KFD_QUEUE_EVICTION_TRIGGER_SVM);
+		if (r)
+			pr_debug("failed %d to quiesce KFD queues\n", r);
+	}
 
 	p = kfd_lookup_process_by_mm(mm);
 	if (!p)
@@ -2452,11 +2576,38 @@ svm_range_unmap_from_cpu(struct mm_struct *mm, struct svm_range *prange,
 	pr_debug("svms 0x%p prange 0x%p [0x%lx 0x%lx] [0x%lx 0x%lx]\n", svms,
 		 prange, prange->start, prange->last, start, last);
 
-	/* Make sure pending page faults are drained in the deferred worker
-	 * before the range is freed to avoid straggler interrupts on
-	 * unmapped memory causing "phantom faults".
+	/* calculate time stamps that are used to decide which page faults need be
+	 * dropped or handled before unmap pages from gpu vm
 	 */
-	atomic_inc(&svms->drain_pagefaults);
+	for_each_set_bit(i, svms->bitmap_supported, p->n_pdds) {
+		struct kfd_process_device *pdd;
+		struct amdgpu_device *adev;
+		struct amdgpu_ih_ring *ih;
+		uint32_t checkpoint_wptr;
+
+		pdd = p->pdds[i];
+		if (!pdd)
+			continue;
+
+		adev = pdd->dev->adev;
+
+		/* Check and drain ih1 ring if cam not available */
+		if (!adev->irq.retry_cam_enabled && adev->irq.ih1.ring_size) {
+			ih = &adev->irq.ih1;
+			checkpoint_wptr = amdgpu_ih_get_wptr(adev, ih);
+			if (ih->rptr != checkpoint_wptr) {
+				svms->checkpoint_ts[i] =
+					amdgpu_ih_decode_iv_ts(adev, ih, checkpoint_wptr, -1);
+				continue;
+			}
+		}
+
+		/* check if dev->irq.ih_soft is not empty */
+		ih = &adev->irq.ih_soft;
+		checkpoint_wptr = amdgpu_ih_get_wptr(adev, ih);
+		if (ih->rptr != checkpoint_wptr)
+			svms->checkpoint_ts[i] = amdgpu_ih_decode_iv_ts(adev, ih, checkpoint_wptr, -1);
+	}
 
 	unmap_parent = start <= prange->start && last >= prange->last;
 
@@ -2466,14 +2617,14 @@ svm_range_unmap_from_cpu(struct mm_struct *mm, struct svm_range *prange,
 		l = min(last, pchild->last);
 		if (l >= s)
 			svm_range_unmap_from_gpus(pchild, s, l, trigger);
-		svm_range_unmap_split(mm, prange, pchild, start, last);
+		svm_range_unmap_split(prange, pchild, start, last);
 		mutex_unlock(&pchild->lock);
 	}
 	s = max(start, prange->start);
 	l = min(last, prange->last);
 	if (l >= s)
 		svm_range_unmap_from_gpus(prange, s, l, trigger);
-	svm_range_unmap_split(mm, prange, prange, start, last);
+	svm_range_unmap_split(prange, prange, start, last);
 
 	if (unmap_parent)
 		svm_range_add_list_work(svms, prange, mm, SVM_OP_UNMAP_RANGE);
@@ -2516,8 +2667,6 @@ svm_range_cpu_invalidate_pagetables(struct mmu_interval_notifier *mni,
 
 	if (range->event == MMU_NOTIFY_RELEASE)
 		return true;
-	if (!mmget_not_zero(mni->mm))
-		return true;
 
 	start = mni->interval_tree.start;
 	last = mni->interval_tree.last;
@@ -2544,7 +2693,6 @@ svm_range_cpu_invalidate_pagetables(struct mmu_interval_notifier *mni,
 	}
 
 	svm_range_unlock(prange);
-	mmput(mni->mm);
 
 	return true;
 }
@@ -2631,7 +2779,7 @@ svm_range_best_restore_location(struct svm_range *prange,
 		return -1;
 	}
 
-	if (node->adev->flags & AMD_IS_APU)
+	if (node->adev->apu_prefer_gtt)
 		return 0;
 
 	if (prange->preferred_loc == gpuid ||
@@ -2680,9 +2828,10 @@ svm_range_get_range_boundaries(struct kfd_process *p, int64_t addr,
 	*is_heap_stack = vma_is_initial_heap(vma) || vma_is_initial_stack(vma);
 
 	start_limit = max(vma->vm_start >> PAGE_SHIFT,
-		      (unsigned long)ALIGN_DOWN(addr, 2UL << 8));
+		      (unsigned long)ALIGN_DOWN(addr, 1UL << p->svms.default_granularity));
 	end_limit = min(vma->vm_end >> PAGE_SHIFT,
-		    (unsigned long)ALIGN(addr + 1, 2UL << 8));
+		    (unsigned long)ALIGN(addr + 1, 1UL << p->svms.default_granularity));
+
 	/* First range that starts after the fault address */
 	node = interval_tree_iter_first(&p->svms.objects, addr + 1, ULONG_MAX);
 	if (node) {
@@ -2897,7 +3046,7 @@ svm_fault_allowed(struct vm_area_struct *vma, bool write_fault)
 int
 svm_range_restore_pages(struct amdgpu_device *adev, unsigned int pasid,
 			uint32_t vmid, uint32_t node_id,
-			uint64_t addr, bool write_fault)
+			uint64_t addr, uint64_t ts, bool write_fault)
 {
 	unsigned long start, last, size;
 	struct mm_struct *mm = NULL;
@@ -2907,7 +3056,7 @@ svm_range_restore_pages(struct amdgpu_device *adev, unsigned int pasid,
 	ktime_t timestamp = ktime_get_boottime();
 	struct kfd_node *node;
 	int32_t best_loc;
-	int32_t gpuidx = MAX_GPU_INSTANCE;
+	int32_t gpuid, gpuidx = MAX_GPU_INSTANCE;
 	bool write_locked = false;
 	struct vm_area_struct *vma;
 	bool migration = false;
@@ -2918,7 +3067,7 @@ svm_range_restore_pages(struct amdgpu_device *adev, unsigned int pasid,
 		return -EFAULT;
 	}
 
-	p = kfd_lookup_process_by_pasid(pasid);
+	p = kfd_lookup_process_by_pasid(pasid, NULL);
 	if (!p) {
 		pr_debug("kfd process not founded pasid 0x%x\n", pasid);
 		return 0;
@@ -2928,8 +3077,22 @@ svm_range_restore_pages(struct amdgpu_device *adev, unsigned int pasid,
 	pr_debug("restoring svms 0x%p fault address 0x%llx\n", svms, addr);
 
 	if (atomic_read(&svms->drain_pagefaults)) {
-		pr_debug("draining retry fault, drop fault 0x%llx\n", addr);
+		pr_debug("page fault handling disabled, drop fault 0x%llx\n", addr);
 		r = 0;
+		goto out;
+	}
+
+	node = kfd_node_by_irq_ids(adev, node_id, vmid);
+	if (!node) {
+		pr_debug("kfd node does not exist node_id: %d, vmid: %d\n", node_id,
+			 vmid);
+		r = -EFAULT;
+		goto out;
+	}
+
+	if (kfd_process_gpuid_from_node(p, node, &gpuid, &gpuidx)) {
+		pr_debug("failed to get gpuid/gpuidex for node_id: %d\n", node_id);
+		r = -EFAULT;
 		goto out;
 	}
 
@@ -2949,16 +3112,26 @@ svm_range_restore_pages(struct amdgpu_device *adev, unsigned int pasid,
 		goto out;
 	}
 
-	node = kfd_node_by_irq_ids(adev, node_id, vmid);
-	if (!node) {
-		pr_debug("kfd node does not exist node_id: %d, vmid: %d\n", node_id,
-			 vmid);
-		r = -EFAULT;
-		goto out;
-	}
 	mmap_read_lock(mm);
 retry_write_locked:
 	mutex_lock(&svms->lock);
+
+	/* check if this page fault time stamp is before svms->checkpoint_ts */
+	if (svms->checkpoint_ts[gpuidx] != 0) {
+		if (amdgpu_ih_ts_after_or_equal(ts,  svms->checkpoint_ts[gpuidx])) {
+			pr_debug("draining retry fault, drop fault 0x%llx\n", addr);
+			if (write_locked)
+				mmap_write_downgrade(mm);
+			r = -EAGAIN;
+			goto out_unlock_svms;
+		} else {
+			/* ts is after svms->checkpoint_ts now, reset svms->checkpoint_ts
+			 * to zero to avoid following ts wrap around give wrong comparing
+			 */
+			svms->checkpoint_ts[gpuidx] = 0;
+		}
+	}
+
 	prange = svm_range_from_addr(svms, addr, NULL);
 	if (!prange) {
 		pr_debug("failed to find prange svms 0x%p address [0x%llx]\n",
@@ -3040,8 +3213,6 @@ retry_write_locked:
 	start = max_t(unsigned long, ALIGN_DOWN(addr, size), prange->start);
 	last = min_t(unsigned long, ALIGN(addr + 1, size) - 1, prange->last);
 	if (prange->actual_loc != 0 || best_loc != 0) {
-		migration = true;
-
 		if (best_loc) {
 			r = svm_migrate_to_vram(prange, best_loc, start, last,
 					mm, KFD_MIGRATE_TRIGGER_PAGEFAULT_GPU);
@@ -3064,7 +3235,9 @@ retry_write_locked:
 		if (r) {
 			pr_debug("failed %d to migrate svms %p [0x%lx 0x%lx]\n",
 				 r, svms, start, last);
-			goto out_unlock_range;
+			goto out_migrate_fail;
+		} else {
+			migration = true;
 		}
 	}
 
@@ -3074,6 +3247,7 @@ retry_write_locked:
 		pr_debug("failed %d to map svms 0x%p [0x%lx 0x%lx] to gpus\n",
 			 r, svms, start, last);
 
+out_migrate_fail:
 	kfd_smi_event_page_fault_end(node, p->lead_thread->pid, addr,
 				     migration);
 
@@ -3083,7 +3257,8 @@ out_unlock_svms:
 	mutex_unlock(&svms->lock);
 	mmap_read_unlock(mm);
 
-	svm_range_count_fault(node, p, gpuidx);
+	if (r != -EAGAIN)
+		svm_range_count_fault(node, p, gpuidx);
 
 	mmput(mm);
 out:
@@ -3160,7 +3335,8 @@ void svm_range_list_fini(struct kfd_process *p)
 	struct svm_range *prange;
 	struct svm_range *next;
 
-	pr_debug("pasid 0x%x svms 0x%p\n", p->pasid, &p->svms);
+	pr_debug("process pid %d svms 0x%p\n", p->lead_thread->pid,
+		 &p->svms);
 
 	cancel_delayed_work_sync(&p->svms.restore_work);
 
@@ -3170,8 +3346,9 @@ void svm_range_list_fini(struct kfd_process *p)
 	/*
 	 * Ensure no retry fault comes in afterwards, as page fault handler will
 	 * not find kfd process and take mm lock to recover fault.
+	 * stop kfd page fault handing, then wait pending page faults got drained
 	 */
-	atomic_inc(&p->svms.drain_pagefaults);
+	atomic_set(&p->svms.drain_pagefaults, 1);
 	svm_range_drain_retry_fault(&p->svms);
 
 	list_for_each_entry_safe(prange, next, &p->svms.list, list) {
@@ -3182,7 +3359,8 @@ void svm_range_list_fini(struct kfd_process *p)
 
 	mutex_destroy(&p->svms.lock);
 
-	pr_debug("pasid 0x%x svms 0x%p done\n", p->pasid, &p->svms);
+	pr_debug("process pid %d svms 0x%p done\n",
+		p->lead_thread->pid, &p->svms);
 }
 
 int svm_range_list_init(struct kfd_process *p)
@@ -3204,6 +3382,12 @@ int svm_range_list_init(struct kfd_process *p)
 	for (i = 0; i < p->n_pdds; i++)
 		if (KFD_IS_SVM_API_SUPPORTED(p->pdds[i]->dev->adev))
 			bitmap_set(svms->bitmap_supported, i, 1);
+
+	 /* Value of default granularity cannot exceed 0x1B, the
+	  * number of pages supported by a 4-level paging table
+	  */
+	svms->default_granularity = min_t(u8, amdgpu_svm_default_granularity, 0x1B);
+	pr_debug("Default SVM Granularity to use: %d\n", svms->default_granularity);
 
 	return 0;
 }
@@ -3349,7 +3533,7 @@ svm_range_best_prefetch_location(struct svm_range *prange)
 		goto out;
 	}
 
-	if (bo_node->adev->flags & AMD_IS_APU) {
+	if (bo_node->adev->apu_prefer_gtt) {
 		best_loc = 0;
 		goto out;
 	}
@@ -3539,14 +3723,17 @@ svm_range_set_attr(struct kfd_process *p, struct mm_struct *mm,
 	bool flush_tlb;
 	int r, ret = 0;
 
-	pr_debug("pasid 0x%x svms 0x%p [0x%llx 0x%llx] pages 0x%llx\n",
-		 p->pasid, &p->svms, start, start + size - 1, size);
+	pr_debug("process pid %d svms 0x%p [0x%llx 0x%llx] pages 0x%llx\n",
+		 p->lead_thread->pid, &p->svms, start, start + size - 1, size);
 
 	r = svm_range_check_attr(p, nattr, attrs);
 	if (r)
 		return r;
 
 	svms = &p->svms;
+
+	if (!process_info)
+		return -EINVAL;
 
 	mutex_lock(&process_info->lock);
 
@@ -3578,6 +3765,8 @@ svm_range_set_attr(struct kfd_process *p, struct mm_struct *mm,
 		svm_range_apply_attrs(p, prange, nattr, attrs, &update_mapping);
 		/* TODO: unmap ranges from GPU that lost access */
 	}
+	update_mapping |= !p->xnack_enabled && !list_empty(&remap_list);
+
 	list_for_each_entry_safe(prange, next, &remove_list, update_list) {
 		pr_debug("unlink old 0x%p prange 0x%p [0x%lx 0x%lx]\n",
 			 prange->svms, prange, prange->start,
@@ -3648,8 +3837,8 @@ out_unlock_range:
 out:
 	mutex_unlock(&process_info->lock);
 
-	pr_debug("pasid 0x%x svms 0x%p [0x%llx 0x%llx] done, r=%d\n", p->pasid,
-		 &p->svms, start, start + size - 1, r);
+	pr_debug("process pid %d svms 0x%p [0x%llx 0x%llx] done, r=%d\n",
+		 p->lead_thread->pid, &p->svms, start, start + size - 1, r);
 
 	return ret ? ret : r;
 }
@@ -3732,7 +3921,7 @@ svm_range_get_attr(struct kfd_process *p, struct mm_struct *mm,
 	node = interval_tree_iter_first(&svms->objects, start, last);
 	if (!node) {
 		pr_debug("range attrs not found return default values\n");
-		svm_range_set_default_attributes(&location, &prefetch_loc,
+		svm_range_set_default_attributes(svms, &location, &prefetch_loc,
 						 &granularity, &flags_and);
 		flags_or = flags_and;
 		if (p->xnack_enabled)
@@ -3987,8 +4176,8 @@ exit:
 	return ret;
 }
 
-int svm_range_get_info(struct kfd_process *p, uint32_t *num_svm_ranges,
-		       uint64_t *svm_priv_data_size)
+void svm_range_get_info(struct kfd_process *p, uint32_t *num_svm_ranges,
+			uint64_t *svm_priv_data_size)
 {
 	uint64_t total_size, accessibility_size, common_attr_size;
 	int nattr_common = 4, nattr_accessibility = 1;
@@ -4000,8 +4189,6 @@ int svm_range_get_info(struct kfd_process *p, uint32_t *num_svm_ranges,
 	*svm_priv_data_size = 0;
 
 	svms = &p->svms;
-	if (!svms)
-		return -EINVAL;
 
 	mutex_lock(&svms->lock);
 	list_for_each_entry(prange, &svms->list, list) {
@@ -4043,7 +4230,6 @@ int svm_range_get_info(struct kfd_process *p, uint32_t *num_svm_ranges,
 
 	pr_debug("num_svm_ranges %u total_priv_size %llu\n", *num_svm_ranges,
 		 *svm_priv_data_size);
-	return 0;
 }
 
 int kfd_criu_checkpoint_svm(struct kfd_process *p,
@@ -4060,8 +4246,6 @@ int kfd_criu_checkpoint_svm(struct kfd_process *p,
 	struct mm_struct *mm;
 
 	svms = &p->svms;
-	if (!svms)
-		return -EINVAL;
 
 	mm = get_task_mm(p->lead_thread);
 	if (!mm) {
@@ -4159,7 +4343,7 @@ svm_ioctl(struct kfd_process *p, enum kfd_ioctl_svm_op op, uint64_t start,
 		r = svm_range_get_attr(p, mm, start, size, nattrs, attrs);
 		break;
 	default:
-		r = EINVAL;
+		r = -EINVAL;
 		break;
 	}
 

@@ -17,8 +17,11 @@ description:
 properties:
   compatible:
     enum:
-      - awinic,aw88395
+      - awinic,aw88081
+      - awinic,aw88083
+      - awinic,aw88166
       - awinic,aw88261
+      - awinic,aw88395
       - awinic,aw88399
 
   reg:
@@ -29,6 +32,12 @@ properties:
 
   reset-gpios:
     maxItems: 1
+
+  dvdd-supply: true
+
+  firmware-name:
+    maxItems: 1
+    description: Name of the *_acf.bin file used for amplifier initialization
 
   awinic,audio-channel:
     description:
@@ -56,10 +65,23 @@ allOf:
         compatible:
           contains:
             enum:
+              - awinic,aw88081
+              - awinic,aw88083
               - awinic,aw88261
     then:
       properties:
         reset-gpios: false
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: awinic,aw88261
+    then:
+      required:
+        - dvdd-supply
+    else:
+      properties:
+        dvdd-supply: false
 
 unevaluatedProperties: false
 

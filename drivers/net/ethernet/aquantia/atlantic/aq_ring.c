@@ -138,7 +138,7 @@ static int aq_ring_alloc(struct aq_ring_s *self,
 	int err = 0;
 
 	self->buff_ring =
-		kcalloc(self->size, sizeof(struct aq_ring_buff_s), GFP_KERNEL);
+		kzalloc_objs(struct aq_ring_buff_s, self->size);
 
 	if (!self->buff_ring) {
 		err = -ENOMEM;
@@ -547,6 +547,11 @@ static int __aq_ring_rx_clean(struct aq_ring_s *self, struct napi_struct *napi,
 
 		if (!buff->is_eop) {
 			unsigned int frag_cnt = 0U;
+
+			/* There will be an extra fragment */
+			if (buff->len > AQ_CFG_RX_HDR_SIZE)
+				frag_cnt++;
+
 			buff_ = buff;
 			do {
 				bool is_rsc_completed = true;
@@ -557,7 +562,7 @@ static int __aq_ring_rx_clean(struct aq_ring_s *self, struct napi_struct *napi,
 				}
 
 				frag_cnt++;
-				next_ = buff_->next,
+				next_ = buff_->next;
 				buff_ = &self->buff_ring[next_];
 				is_rsc_completed =
 					aq_ring_dx_in_range(self->sw_head,
@@ -583,7 +588,7 @@ static int __aq_ring_rx_clean(struct aq_ring_s *self, struct napi_struct *napi,
 						err = -EIO;
 						goto err_exit;
 					}
-					next_ = buff_->next,
+					next_ = buff_->next;
 					buff_ = &self->buff_ring[next_];
 
 					buff_->is_cleaned = true;

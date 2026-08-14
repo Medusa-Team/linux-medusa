@@ -90,7 +90,6 @@ static int xtfpga_spi_probe(struct platform_device *pdev)
 	host->flags = SPI_CONTROLLER_NO_RX;
 	host->bits_per_word_mask = SPI_BPW_RANGE_MASK(1, 16);
 	host->bus_num = pdev->dev.id;
-	host->dev.of_node = pdev->dev.of_node;
 
 	xspi = spi_controller_get_devdata(host);
 	xspi->bitbang.ctlr = host;
@@ -138,7 +137,7 @@ MODULE_DEVICE_TABLE(of, xtfpga_spi_of_match);
 
 static struct platform_driver xtfpga_spi_driver = {
 	.probe = xtfpga_spi_probe,
-	.remove_new = xtfpga_spi_remove,
+	.remove = xtfpga_spi_remove,
 	.driver = {
 		.name = XTFPGA_SPI_NAME,
 		.of_match_table = of_match_ptr(xtfpga_spi_of_match),

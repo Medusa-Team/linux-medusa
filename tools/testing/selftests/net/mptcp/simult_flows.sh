@@ -28,14 +28,14 @@ size=0
 
 usage() {
 	echo "Usage: $0 [ -b ] [ -c ] [ -d ] [ -i]"
-	echo -e "\t-b: bail out after first error, otherwise runs al testcases"
+	echo -e "\t-b: bail out after first error, otherwise runs all testcases"
 	echo -e "\t-c: capture packets for each test using tcpdump (default: no capture)"
 	echo -e "\t-d: debug this script"
 	echo -e "\t-i: use 'ip mptcp' instead of 'pm_nl_ctl'"
 }
 
 # This function is used in the cleanup trap
-#shellcheck disable=SC2317
+#shellcheck disable=SC2317,SC2329
 cleanup()
 {
 	rm -f "$cout" "$sout"
@@ -155,24 +155,35 @@ do_transfer()
 		sleep 1
 	fi
 
-	timeout ${timeout_test} \
-		ip netns exec ${ns3} \
-			./mptcp_connect -jt ${timeout_poll} -l -p $port -T $max_time \
-				0.0.0.0 < "$sin" > "$sout" &
+	mptcp_lib_nstat_init "${ns3}"
+	mptcp_lib_nstat_init "${ns1}"
+
+	ip netns exec ${ns3} \
+		./mptcp_connect -jt ${timeout_poll} -l -p $port -T $max_time \
+			0.0.0.0 < "$sin" > "$sout" &
 	local spid=$!
 
 	mptcp_lib_wait_local_port_listen "${ns3}" "${port}"
 
-	timeout ${timeout_test} \
-		ip netns exec ${ns1} \
-			./mptcp_connect -jt ${timeout_poll} -p $port -T $max_time \
-				10.0.3.3 < "$cin" > "$cout" &
+	ip netns exec ${ns1} \
+		./mptcp_connect -jt ${timeout_poll} -p $port -T $max_time \
+			10.0.3.3 < "$cin" > "$cout" &
 	local cpid=$!
+
+	mptcp_lib_wait_timeout "${timeout_test}" "${ns3}" "${ns1}" "${port}" \
+		"${cpid}" "${spid}" &
+	local timeout_pid=$!
 
 	wait $cpid
 	local retc=$?
 	wait $spid
 	local rets=$?
+
+	if kill -0 $timeout_pid; then
+		# Finished before the timeout: kill the background job
+		mptcp_lib_kill_group_wait $timeout_pid
+		timeout_pid=0
+	fi
 
 	if $capture; then
 		sleep 1
@@ -180,25 +191,25 @@ do_transfer()
 		kill ${cappid_connector}
 	fi
 
+	mptcp_lib_nstat_get "${ns3}"
+	mptcp_lib_nstat_get "${ns1}"
+
 	cmp $sin $cout > /dev/null 2>&1
 	local cmps=$?
 	cmp $cin $sout > /dev/null 2>&1
 	local cmpc=$?
 
-	printf "%-16s" " max $max_time "
-	if [ $retc -eq 0 ] && [ $rets -eq 0 ] && \
-	   [ $cmpc -eq 0 ] && [ $cmps -eq 0 ]; then
+	if [ $retc -eq 0 ] && [ $rets -eq 0 ] &&
+	   [ $cmpc -eq 0 ] && [ $cmps -eq 0 ] &&
+	   [ $timeout_pid -eq 0 ]; then
+		printf "%-16s" " max $max_time "
 		mptcp_lib_pr_ok
 		cat "$capout"
 		return 0
 	fi
 
-	mptcp_lib_pr_fail
-	echo "client exit code $retc, server $rets" 1>&2
-	echo -e "\nnetns ${ns3} socket stat for $port:" 1>&2
-	ip netns exec ${ns3} ss -nita 1>&2 -o "sport = :$port"
-	echo -e "\nnetns ${ns1} socket stat for $port:" 1>&2
-	ip netns exec ${ns1} ss -nita 1>&2 -o "dport = :$port"
+	mptcp_lib_pr_fail "client exit code $retc, server $rets"
+	mptcp_lib_pr_err_stats "${ns3}" "${ns1}" "${port}"
 	ls -l $sin $cout
 	ls -l $cin $sout
 
@@ -226,10 +237,13 @@ run_test()
 	for dev in ns2eth1 ns2eth2; do
 		tc -n $ns2 qdisc del dev $dev root >/dev/null 2>&1
 	done
-	tc -n $ns1 qdisc add dev ns1eth1 root netem rate ${rate1}mbit $delay1
-	tc -n $ns1 qdisc add dev ns1eth2 root netem rate ${rate2}mbit $delay2
-	tc -n $ns2 qdisc add dev ns2eth1 root netem rate ${rate1}mbit $delay1
-	tc -n $ns2 qdisc add dev ns2eth2 root netem rate ${rate2}mbit $delay2
+
+	# keep the queued pkts number low, or the RTT estimator will see
+	# increasing latency over time.
+	tc -n $ns1 qdisc add dev ns1eth1 root netem rate ${rate1}mbit $delay1 limit 50
+	tc -n $ns1 qdisc add dev ns1eth2 root netem rate ${rate2}mbit $delay2 limit 50
+	tc -n $ns2 qdisc add dev ns2eth1 root netem rate ${rate1}mbit $delay1 limit 50
+	tc -n $ns2 qdisc add dev ns2eth2 root netem rate ${rate2}mbit $delay2 limit 50
 
 	# time is measured in ms, account for transfer size, aggregated link speed
 	# and header overhead (10%)
@@ -286,6 +300,7 @@ while getopts "bcdhi" option;do
 done
 
 setup
+mptcp_lib_subtests_last_ts_reset
 run_test 10 10 0 0 "balanced bwidth"
 run_test 10 10 1 25 "balanced bwidth with unbalanced delay"
 

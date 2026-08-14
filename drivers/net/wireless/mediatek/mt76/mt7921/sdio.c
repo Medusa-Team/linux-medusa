@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: ISC
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 /* Copyright (C) 2021 MediaTek Inc.
  *
  */
@@ -19,6 +19,8 @@
 static const struct sdio_device_id mt7921s_table[] = {
 	{ SDIO_DEVICE(SDIO_VENDOR_ID_MEDIATEK, 0x7901),
 		.driver_data = (kernel_ulong_t)MT7921_FIRMWARE_WM },
+	{ SDIO_DEVICE(SDIO_VENDOR_ID_MEDIATEK, 0x7902),
+		.driver_data = (kernel_ulong_t)MT7902_FIRMWARE_WM },
 	{ }	/* Terminating entry */
 };
 
@@ -100,9 +102,10 @@ static int mt7921s_probe(struct sdio_func *func,
 		.rx_skb = mt7921_queue_rx_skb,
 		.rx_check = mt7921_rx_check,
 		.sta_add = mt7921_mac_sta_add,
-		.sta_assoc = mt7921_mac_sta_assoc,
+		.sta_event = mt7921_mac_sta_event,
 		.sta_remove = mt7921_mac_sta_remove,
 		.update_survey = mt792x_update_channel,
+		.set_channel = mt7921_set_channel,
 	};
 	static const struct mt76_bus_ops mt7921s_ops = {
 		.rr = mt76s_rr,
@@ -148,6 +151,8 @@ static int mt7921s_probe(struct sdio_func *func,
 	ret = mt76s_hw_init(mdev, func, MT76_CONNAC2_SDIO);
 	if (ret)
 		goto error;
+
+	atomic_set(&mdev->bus_hung, false);
 
 	mdev->rev = (mt76_rr(dev, MT_HW_CHIPID) << 16) |
 		    (mt76_rr(dev, MT_HW_REV) & 0xff);
@@ -239,7 +244,7 @@ static int mt7921s_suspend(struct device *__dev)
 			   mt76s_txqs_empty(&dev->mt76), 5 * HZ);
 
 	/* It is supposed that SDIO bus is idle at the point */
-	err = mt76_connac_mcu_set_hif_suspend(mdev, true);
+	err = mt76_connac_mcu_set_hif_suspend(mdev, true, true);
 	if (err)
 		goto restore_worker;
 
@@ -257,7 +262,7 @@ static int mt7921s_suspend(struct device *__dev)
 restore_txrx_worker:
 	mt76_worker_enable(&mdev->sdio.net_worker);
 	mt76_worker_enable(&mdev->sdio.txrx_worker);
-	mt76_connac_mcu_set_hif_suspend(mdev, false);
+	mt76_connac_mcu_set_hif_suspend(mdev, false, true);
 
 restore_worker:
 	mt76_worker_enable(&mdev->tx_worker);
@@ -301,7 +306,7 @@ static int mt7921s_resume(struct device *__dev)
 	if (!pm->ds_enable)
 		mt76_connac_mcu_set_deep_sleep(mdev, false);
 
-	err = mt76_connac_mcu_set_hif_suspend(mdev, false);
+	err = mt76_connac_mcu_set_hif_suspend(mdev, false, true);
 failed:
 	pm->suspended = false;
 
@@ -314,6 +319,8 @@ failed:
 MODULE_DEVICE_TABLE(sdio, mt7921s_table);
 MODULE_FIRMWARE(MT7921_FIRMWARE_WM);
 MODULE_FIRMWARE(MT7921_ROM_PATCH);
+MODULE_FIRMWARE(MT7902_FIRMWARE_WM);
+MODULE_FIRMWARE(MT7902_ROM_PATCH);
 
 static DEFINE_SIMPLE_DEV_PM_OPS(mt7921s_pm_ops, mt7921s_suspend, mt7921s_resume);
 

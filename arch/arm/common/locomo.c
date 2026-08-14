@@ -222,7 +222,7 @@ locomo_init_one_child(struct locomo *lchip, struct locomo_dev_info *info)
 	struct locomo_dev *dev;
 	int ret;
 
-	dev = kzalloc(sizeof(struct locomo_dev), GFP_KERNEL);
+	dev = kzalloc_obj(struct locomo_dev);
 	if (!dev) {
 		ret = -ENOMEM;
 		goto out;
@@ -277,7 +277,7 @@ static int locomo_suspend(struct platform_device *dev, pm_message_t state)
 	struct locomo_save_data *save;
 	unsigned long flags;
 
-	save = kmalloc(sizeof(struct locomo_save_data), GFP_KERNEL);
+	save = kmalloc_obj(struct locomo_save_data);
 	if (!save)
 		return -ENOMEM;
 
@@ -360,7 +360,7 @@ __locomo_probe(struct device *me, struct resource *mem, int irq)
 	unsigned long r;
 	int i, ret = -ENODEV;
 
-	lchip = kzalloc(sizeof(struct locomo), GFP_KERNEL);
+	lchip = kzalloc_obj(struct locomo);
 	if (!lchip)
 		return -ENOMEM;
 
@@ -516,7 +516,7 @@ static void locomo_remove(struct platform_device *dev)
  */
 static struct platform_driver locomo_device_driver = {
 	.probe		= locomo_probe,
-	.remove_new	= locomo_remove,
+	.remove		= locomo_remove,
 #ifdef CONFIG_PM
 	.suspend	= locomo_suspend,
 	.resume		= locomo_resume,

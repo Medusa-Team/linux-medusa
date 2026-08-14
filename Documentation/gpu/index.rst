@@ -9,10 +9,12 @@ GPU Driver Developer's Guide
    drm-mm
    drm-kms
    drm-kms-helpers
+   drm-ras
    drm-uapi
    drm-usage-stats
    driver-uapi
    drm-client
+   drm-compute
    drivers
    backlight
    vga-switcheroo
@@ -21,10 +23,3 @@ GPU Driver Developer's Guide
    implementation_guidelines
    todo
    rfc/index
-
-.. only::  subproject and html
-
-   Indices
-   =======
-
-   * :ref:`genindex`

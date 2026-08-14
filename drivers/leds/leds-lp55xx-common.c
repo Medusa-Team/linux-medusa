@@ -212,7 +212,7 @@ int lp55xx_update_program_memory(struct lp55xx_chip *chip,
 	 * For LED chip that support page, PAGE is already set in load_engine.
 	 */
 	if (!cfg->pages_per_engine)
-		start_addr += LP55xx_BYTES_PER_PAGE * idx;
+		start_addr += LP55xx_BYTES_PER_PAGE * (idx - 1);
 
 	for (page = 0; page < program_length / LP55xx_BYTES_PER_PAGE; page++) {
 		/* Write to the next page each 32 bytes (if supported) */
@@ -965,24 +965,16 @@ EXPORT_SYMBOL_GPL(lp55xx_update_bits);
 bool lp55xx_is_extclk_used(struct lp55xx_chip *chip)
 {
 	struct clk *clk;
-	int err;
 
-	clk = devm_clk_get(&chip->cl->dev, "32k_clk");
+	clk = devm_clk_get_enabled(&chip->cl->dev, "32k_clk");
 	if (IS_ERR(clk))
 		goto use_internal_clk;
 
-	err = clk_prepare_enable(clk);
-	if (err)
+	if (clk_get_rate(clk) != LP55XX_CLK_32K)
 		goto use_internal_clk;
-
-	if (clk_get_rate(clk) != LP55XX_CLK_32K) {
-		clk_disable_unprepare(clk);
-		goto use_internal_clk;
-	}
 
 	dev_info(&chip->cl->dev, "%dHz external clock used\n",	LP55XX_CLK_32K);
 
-	chip->clk = clk;
 	return true;
 
 use_internal_clk:
@@ -994,9 +986,6 @@ EXPORT_SYMBOL_GPL(lp55xx_is_extclk_used);
 static void lp55xx_deinit_device(struct lp55xx_chip *chip)
 {
 	struct lp55xx_platform_data *pdata = chip->pdata;
-
-	if (chip->clk)
-		clk_disable_unprepare(chip->clk);
 
 	if (pdata->enable_gpiod)
 		gpiod_set_value(pdata->enable_gpiod, 0);
@@ -1143,9 +1132,6 @@ static int lp55xx_parse_common_child(struct device_node *np,
 	if (ret)
 		return ret;
 
-	if (*chan_nr < 0 || *chan_nr > cfg->max_channel)
-		return -EINVAL;
-
 	return 0;
 }
 
@@ -1173,16 +1159,13 @@ static int lp55xx_parse_multi_led(struct device_node *np,
 				  struct lp55xx_led_config *cfg,
 				  int child_number)
 {
-	struct device_node *child;
 	int num_colors = 0, ret;
 
-	for_each_available_child_of_node(np, child) {
+	for_each_available_child_of_node_scoped(np, child) {
 		ret = lp55xx_parse_multi_led_child(child, cfg, child_number,
 						   num_colors);
-		if (ret) {
-			of_node_put(child);
+		if (ret)
 			return ret;
-		}
 		num_colors++;
 	}
 
@@ -1221,7 +1204,6 @@ static struct lp55xx_platform_data *lp55xx_of_populate_pdata(struct device *dev,
 							     struct device_node *np,
 							     struct lp55xx_chip *chip)
 {
-	struct device_node *child;
 	struct lp55xx_platform_data *pdata;
 	struct lp55xx_led_config *cfg;
 	int num_channels;
@@ -1246,12 +1228,10 @@ static struct lp55xx_platform_data *lp55xx_of_populate_pdata(struct device *dev,
 	pdata->num_channels = num_channels;
 	cfg->max_channel = chip->cfg->max_channel;
 
-	for_each_available_child_of_node(np, child) {
+	for_each_available_child_of_node_scoped(np, child) {
 		ret = lp55xx_parse_logical_led(child, cfg, i);
-		if (ret) {
-			of_node_put(child);
+		if (ret)
 			return ERR_PTR(-EINVAL);
-		}
 		i++;
 	}
 

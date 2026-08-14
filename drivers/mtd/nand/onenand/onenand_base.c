@@ -2923,6 +2923,7 @@ static int do_otp_read(struct mtd_info *mtd, loff_t from, size_t len,
 	ret = ONENAND_IS_4KB_PAGE(this) ?
 		onenand_mlc_read_ops_nolock(mtd, from, &ops) :
 		onenand_read_ops_nolock(mtd, from, &ops);
+	*retlen = ops.retlen;
 
 	/* Exit OTP access mode */
 	this->command(mtd, ONENAND_CMD_RESET, 0, 0);
@@ -3727,9 +3728,8 @@ static int onenand_probe(struct mtd_info *mtd)
 		/* Maximum possible erase regions */
 		mtd->numeraseregions = this->dies << 1;
 		mtd->eraseregions =
-			kcalloc(this->dies << 1,
-				sizeof(struct mtd_erase_region_info),
-				GFP_KERNEL);
+			kzalloc_objs(struct mtd_erase_region_info,
+				     this->dies << 1);
 		if (!mtd->eraseregions)
 			return -ENOMEM;
 	}

@@ -31,7 +31,6 @@
 
 struct lpc18xx_rgu_data {
 	struct reset_controller_dev rcdev;
-	struct notifier_block restart_nb;
 	struct clk *clk_delay;
 	struct clk *clk_reg;
 	void __iomem *base;
@@ -41,11 +40,9 @@ struct lpc18xx_rgu_data {
 
 #define to_rgu_data(p) container_of(p, struct lpc18xx_rgu_data, rcdev)
 
-static int lpc18xx_rgu_restart(struct notifier_block *nb, unsigned long mode,
-			       void *cmd)
+static int lpc18xx_rgu_restart(struct sys_off_data *data)
 {
-	struct lpc18xx_rgu_data *rc = container_of(nb, struct lpc18xx_rgu_data,
-						   restart_nb);
+	struct lpc18xx_rgu_data *rc = data->cb_data;
 
 	writel(BIT(LPC18XX_RGU_CORE_RST), rc->base + LPC18XX_RGU_CTRL0);
 	mdelay(2000);
@@ -150,29 +147,15 @@ static int lpc18xx_rgu_probe(struct platform_device *pdev)
 	if (IS_ERR(rc->base))
 		return PTR_ERR(rc->base);
 
-	rc->clk_reg = devm_clk_get(&pdev->dev, "reg");
-	if (IS_ERR(rc->clk_reg)) {
-		dev_err(&pdev->dev, "reg clock not found\n");
-		return PTR_ERR(rc->clk_reg);
-	}
+	rc->clk_reg = devm_clk_get_enabled(&pdev->dev, "reg");
+	if (IS_ERR(rc->clk_reg))
+		return dev_err_probe(&pdev->dev, PTR_ERR(rc->clk_reg),
+				     "reg clock not found\n");
 
-	rc->clk_delay = devm_clk_get(&pdev->dev, "delay");
-	if (IS_ERR(rc->clk_delay)) {
-		dev_err(&pdev->dev, "delay clock not found\n");
-		return PTR_ERR(rc->clk_delay);
-	}
-
-	ret = clk_prepare_enable(rc->clk_reg);
-	if (ret) {
-		dev_err(&pdev->dev, "unable to enable reg clock\n");
-		return ret;
-	}
-
-	ret = clk_prepare_enable(rc->clk_delay);
-	if (ret) {
-		dev_err(&pdev->dev, "unable to enable delay clock\n");
-		goto dis_clk_reg;
-	}
+	rc->clk_delay = devm_clk_get_enabled(&pdev->dev, "delay");
+	if (IS_ERR(rc->clk_delay))
+		return dev_err_probe(&pdev->dev, PTR_ERR(rc->clk_delay),
+				     "delay clock not found\n");
 
 	fcclk = clk_get_rate(rc->clk_reg) / USEC_PER_SEC;
 	firc = clk_get_rate(rc->clk_delay) / USEC_PER_SEC;
@@ -189,25 +172,15 @@ static int lpc18xx_rgu_probe(struct platform_device *pdev)
 	rc->rcdev.of_node = pdev->dev.of_node;
 
 	ret = reset_controller_register(&rc->rcdev);
-	if (ret) {
-		dev_err(&pdev->dev, "unable to register device\n");
-		goto dis_clks;
-	}
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "unable to register device\n");
 
-	rc->restart_nb.priority = 192,
-	rc->restart_nb.notifier_call = lpc18xx_rgu_restart,
-	ret = register_restart_handler(&rc->restart_nb);
+	ret = devm_register_sys_off_handler(&pdev->dev, SYS_OFF_MODE_RESTART, 192,
+					    lpc18xx_rgu_restart, rc);
 	if (ret)
 		dev_warn(&pdev->dev, "failed to register restart handler\n");
 
 	return 0;
-
-dis_clks:
-	clk_disable_unprepare(rc->clk_delay);
-dis_clk_reg:
-	clk_disable_unprepare(rc->clk_reg);
-
-	return ret;
 }
 
 static const struct of_device_id lpc18xx_rgu_match[] = {

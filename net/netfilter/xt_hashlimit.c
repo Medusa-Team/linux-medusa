@@ -15,7 +15,6 @@
 #include <linux/random.h>
 #include <linux/jhash.h>
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/list.h>
@@ -294,8 +293,7 @@ static int htable_create(struct net *net, struct hashlimit_cfg3 *cfg,
 		if (size < 16)
 			size = 16;
 	}
-	/* FIXME: don't use vmalloc() here or anywhere else -HW */
-	hinfo = vmalloc(struct_size(hinfo, hash, size));
+	hinfo = kvmalloc_flex(*hinfo, hash, size);
 	if (hinfo == NULL)
 		return -ENOMEM;
 	*out_hinfo = hinfo;
@@ -303,7 +301,7 @@ static int htable_create(struct net *net, struct hashlimit_cfg3 *cfg,
 	/* copy match config into hashtable config */
 	ret = cfg_copy(&hinfo->cfg, (void *)cfg, 3);
 	if (ret) {
-		vfree(hinfo);
+		kvfree(hinfo);
 		return ret;
 	}
 
@@ -322,7 +320,7 @@ static int htable_create(struct net *net, struct hashlimit_cfg3 *cfg,
 	hinfo->rnd_initialized = false;
 	hinfo->name = kstrdup(name, GFP_KERNEL);
 	if (!hinfo->name) {
-		vfree(hinfo);
+		kvfree(hinfo);
 		return -ENOMEM;
 	}
 	spin_lock_init(&hinfo->lock);
@@ -344,7 +342,7 @@ static int htable_create(struct net *net, struct hashlimit_cfg3 *cfg,
 		ops, hinfo);
 	if (hinfo->pde == NULL) {
 		kfree(hinfo->name);
-		vfree(hinfo);
+		kvfree(hinfo);
 		return -ENOMEM;
 	}
 	hinfo->net = net;
@@ -363,11 +361,15 @@ static void htable_selective_cleanup(struct xt_hashlimit_htable *ht, bool select
 	unsigned int i;
 
 	for (i = 0; i < ht->cfg.size; i++) {
+		struct hlist_head *head = &ht->hash[i];
 		struct dsthash_ent *dh;
 		struct hlist_node *n;
 
+		if (hlist_empty(head))
+			continue;
+
 		spin_lock_bh(&ht->lock);
-		hlist_for_each_entry_safe(dh, n, &ht->hash[i], node) {
+		hlist_for_each_entry_safe(dh, n, head, node) {
 			if (time_after_eq(jiffies, dh->expires) || select_all)
 				dsthash_free(ht, dh);
 		}
@@ -429,7 +431,7 @@ static void htable_put(struct xt_hashlimit_htable *hinfo)
 		cancel_delayed_work_sync(&hinfo->gc_work);
 		htable_selective_cleanup(hinfo, true);
 		kfree(hinfo->name);
-		vfree(hinfo);
+		kvfree(hinfo);
 	}
 }
 
@@ -656,6 +658,8 @@ hashlimit_init_dst(const struct xt_hashlimit_htable *hinfo,
 		if (!(hinfo->cfg.mode &
 		      (XT_HASHLIMIT_HASH_DPT | XT_HASHLIMIT_HASH_SPT)))
 			return 0;
+		if (ntohs(ip_hdr(skb)->frag_off) & IP_OFFSET)
+			return -1;
 		nexthdr = ip_hdr(skb)->protocol;
 		break;
 #if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
@@ -679,7 +683,7 @@ hashlimit_init_dst(const struct xt_hashlimit_htable *hinfo,
 			return 0;
 		nexthdr = ipv6_hdr(skb)->nexthdr;
 		protoff = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &nexthdr, &frag_off);
-		if ((int)protoff < 0)
+		if ((int)protoff < 0 || ntohs(frag_off) & IP6_OFFSET)
 			return -1;
 		break;
 	}

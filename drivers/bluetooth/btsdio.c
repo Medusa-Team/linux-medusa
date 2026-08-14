@@ -295,6 +295,7 @@ static int btsdio_probe(struct sdio_func *func,
 		case SDIO_DEVICE_ID_BROADCOM_4345:
 		case SDIO_DEVICE_ID_BROADCOM_43455:
 		case SDIO_DEVICE_ID_BROADCOM_4356:
+		case SDIO_DEVICE_ID_BROADCOM_CYPRESS_4373:
 			return -ENODEV;
 		}
 	}
@@ -326,7 +327,7 @@ static int btsdio_probe(struct sdio_func *func,
 	hdev->send     = btsdio_send_frame;
 
 	if (func->vendor == 0x0104 && func->device == 0x00c5)
-		set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
+		hci_set_quirk(hdev, HCI_QUIRK_RESET_ON_CLOSE);
 
 	err = hci_register_dev(hdev);
 	if (err < 0) {

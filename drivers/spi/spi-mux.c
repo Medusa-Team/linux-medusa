@@ -68,9 +68,7 @@ static int spi_mux_select(struct spi_device *spi)
 
 	priv->current_cs = spi_get_chipselect(spi, 0);
 
-	spi_setup(priv->spi);
-
-	return 0;
+	return spi_setup(priv->spi);
 }
 
 static int spi_mux_setup(struct spi_device *spi)
@@ -163,7 +161,6 @@ static int spi_mux_probe(struct spi_device *spi)
 	ctlr->setup = spi_mux_setup;
 	ctlr->num_chipselect = mux_control_states(priv->mux);
 	ctlr->bus_num = -1;
-	ctlr->dev.of_node = spi->dev.of_node;
 	ctlr->must_async = true;
 	ctlr->defer_optimize_message = true;
 

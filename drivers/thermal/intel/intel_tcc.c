@@ -106,7 +106,7 @@ static const struct x86_cpu_id intel_tcc_cpu_ids[] __initconst = {
 	X86_MATCH_VFM(INTEL_ATOM_SILVERMONT_D,		&temp_broadwell),
 	X86_MATCH_VFM(INTEL_ATOM_SILVERMONT_MID,	&temp_broadwell),
 	X86_MATCH_VFM(INTEL_ATOM_AIRMONT,		&temp_broadwell),
-	X86_MATCH_VFM(INTEL_ATOM_AIRMONT_MID,		&temp_broadwell),
+	X86_MATCH_VFM(INTEL_ATOM_SILVERMONT_MID2,	&temp_broadwell),
 	X86_MATCH_VFM(INTEL_ATOM_AIRMONT_NP,		&temp_broadwell),
 	X86_MATCH_VFM(INTEL_ATOM_GOLDMONT,		&temp_goldmont),
 	X86_MATCH_VFM(INTEL_ATOM_GOLDMONT_D,		&temp_goldmont),
@@ -150,7 +150,7 @@ u32 intel_tcc_get_offset_mask(void)
 {
 	return intel_tcc_temp_masks.tcc_offset;
 }
-EXPORT_SYMBOL_NS(intel_tcc_get_offset_mask, INTEL_TCC);
+EXPORT_SYMBOL_NS(intel_tcc_get_offset_mask, "INTEL_TCC");
 
 /**
  * get_temp_mask() - Returns the model-specific bitmask for temperature
@@ -172,7 +172,7 @@ static u32 get_temp_mask(bool pkg)
 
 /**
  * intel_tcc_get_tjmax() - returns the default TCC activation Temperature
- * @cpu: cpu that the MSR should be run on, nagative value means any cpu.
+ * @cpu: cpu that the MSR should be run on, negative value means any cpu.
  *
  * Get the TjMax value, which is the default thermal throttling or TCC
  * activation temperature in degrees C.
@@ -195,11 +195,11 @@ int intel_tcc_get_tjmax(int cpu)
 
 	return val ? val : -ENODATA;
 }
-EXPORT_SYMBOL_NS_GPL(intel_tcc_get_tjmax, INTEL_TCC);
+EXPORT_SYMBOL_NS_GPL(intel_tcc_get_tjmax, "INTEL_TCC");
 
 /**
  * intel_tcc_get_offset() - returns the TCC Offset value to Tjmax
- * @cpu: cpu that the MSR should be run on, nagative value means any cpu.
+ * @cpu: cpu that the MSR should be run on, negative value means any cpu.
  *
  * Get the TCC offset value to Tjmax. The effective thermal throttling or TCC
  * activation temperature equals "Tjmax" - "TCC Offset", in degrees C.
@@ -220,11 +220,11 @@ int intel_tcc_get_offset(int cpu)
 
 	return (low >> 24) & intel_tcc_temp_masks.tcc_offset;
 }
-EXPORT_SYMBOL_NS_GPL(intel_tcc_get_offset, INTEL_TCC);
+EXPORT_SYMBOL_NS_GPL(intel_tcc_get_offset, "INTEL_TCC");
 
 /**
  * intel_tcc_set_offset() - set the TCC offset value to Tjmax
- * @cpu: cpu that the MSR should be run on, nagative value means any cpu.
+ * @cpu: cpu that the MSR should be run on, negative value means any cpu.
  * @offset: TCC offset value in degree C
  *
  * Set the TCC Offset value to Tjmax. The effective thermal throttling or TCC
@@ -263,11 +263,11 @@ int intel_tcc_set_offset(int cpu, int offset)
 	else
 		return wrmsr_safe_on_cpu(cpu, MSR_IA32_TEMPERATURE_TARGET, low, high);
 }
-EXPORT_SYMBOL_NS_GPL(intel_tcc_set_offset, INTEL_TCC);
+EXPORT_SYMBOL_NS_GPL(intel_tcc_set_offset, "INTEL_TCC");
 
 /**
  * intel_tcc_get_temp() - returns the current temperature
- * @cpu: cpu that the MSR should be run on, nagative value means any cpu.
+ * @cpu: cpu that the MSR should be run on, negative value means any cpu.
  * @temp: pointer to the memory for saving cpu temperature.
  * @pkg: true: Package Thermal Sensor. false: Core Thermal Sensor.
  *
@@ -303,4 +303,4 @@ int intel_tcc_get_temp(int cpu, int *temp, bool pkg)
 
 	return 0;
 }
-EXPORT_SYMBOL_NS_GPL(intel_tcc_get_temp, INTEL_TCC);
+EXPORT_SYMBOL_NS_GPL(intel_tcc_get_temp, "INTEL_TCC");

@@ -152,7 +152,7 @@ static int clk_mt6795_apmixed_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	fhctl_parse_dt(fhctl_node, pllfhs, ARRAY_SIZE(pllfhs));
-	ret = mtk_clk_register_pllfhs(node, plls, ARRAY_SIZE(plls),
+	ret = mtk_clk_register_pllfhs(dev, plls, ARRAY_SIZE(plls),
 				      pllfhs, ARRAY_SIZE(pllfhs), clk_data);
 	if (ret)
 		goto free_clk_data;
@@ -201,7 +201,7 @@ static void clk_mt6795_apmixed_remove(struct platform_device *pdev)
 
 static struct platform_driver clk_mt6795_apmixed_drv = {
 	.probe = clk_mt6795_apmixed_probe,
-	.remove_new = clk_mt6795_apmixed_remove,
+	.remove = clk_mt6795_apmixed_remove,
 	.driver = {
 		.name = "clk-mt6795-apmixed",
 		.of_match_table = of_match_clk_mt6795_apmixed,

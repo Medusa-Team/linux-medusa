@@ -11,12 +11,13 @@
 
 #include "amd_iommu_types.h"
 
+extern int amd_iommu_evtlog_size;
+extern int amd_iommu_pprlog_size;
+
 irqreturn_t amd_iommu_int_thread(int irq, void *data);
 irqreturn_t amd_iommu_int_thread_evtlog(int irq, void *data);
 irqreturn_t amd_iommu_int_thread_pprlog(int irq, void *data);
 irqreturn_t amd_iommu_int_thread_galog(int irq, void *data);
-irqreturn_t amd_iommu_int_handler(int irq, void *data);
-void amd_iommu_apply_erratum_63(struct amd_iommu *iommu, u16 devid);
 void amd_iommu_restart_log(struct amd_iommu *iommu, const char *evt_type,
 			   u8 cntrl_intr, u8 cntrl_log,
 			   u32 status_run_mask, u32 status_overflow_mask);
@@ -29,9 +30,9 @@ void *__init iommu_alloc_4k_pages(struct amd_iommu *iommu,
 				  gfp_t gfp, size_t size);
 
 #ifdef CONFIG_AMD_IOMMU_DEBUGFS
-void amd_iommu_debugfs_setup(struct amd_iommu *iommu);
+void amd_iommu_debugfs_setup(void);
 #else
-static inline void amd_iommu_debugfs_setup(struct amd_iommu *iommu) {}
+static inline void amd_iommu_debugfs_setup(void) {}
 #endif
 
 /* Needed for interrupt remapping */
@@ -41,17 +42,21 @@ void amd_iommu_disable(void);
 int amd_iommu_reenable(int mode);
 int amd_iommu_enable_faulting(unsigned int cpu);
 extern int amd_iommu_guest_ir;
-extern enum io_pgtable_fmt amd_iommu_pgtable;
+extern enum protection_domain_mode amd_iommu_pgtable;
 extern int amd_iommu_gpt_level;
+extern u8 amd_iommu_hpt_level;
+extern unsigned long amd_iommu_pgsize_bitmap;
+extern bool amd_iommu_hatdis;
 
 /* Protection domain ops */
-struct protection_domain *protection_domain_alloc(unsigned int type);
-void protection_domain_free(struct protection_domain *domain);
+void amd_iommu_init_identity_domain(void);
+struct protection_domain *protection_domain_alloc(void);
 struct iommu_domain *amd_iommu_domain_alloc_sva(struct device *dev,
 						struct mm_struct *mm);
 void amd_iommu_domain_free(struct iommu_domain *dom);
 int iommu_sva_set_dev_pasid(struct iommu_domain *domain,
-			    struct device *dev, ioasid_t pasid);
+			    struct device *dev, ioasid_t pasid,
+			    struct iommu_domain *old);
 void amd_iommu_remove_dev_pasid(struct device *dev, ioasid_t pasid,
 				struct iommu_domain *domain);
 
@@ -85,16 +90,10 @@ int amd_iommu_complete_ppr(struct device *dev, u32 pasid, int status, int tag);
  * the IOMMU used by this driver.
  */
 void amd_iommu_flush_all_caches(struct amd_iommu *iommu);
-void amd_iommu_update_and_flush_device_table(struct protection_domain *domain);
-void amd_iommu_domain_update(struct protection_domain *domain);
-void amd_iommu_dev_update_dte(struct iommu_dev_data *dev_data, bool set);
-void amd_iommu_domain_flush_complete(struct protection_domain *domain);
 void amd_iommu_domain_flush_pages(struct protection_domain *domain,
 				  u64 address, size_t size);
 void amd_iommu_dev_flush_pasid_pages(struct iommu_dev_data *dev_data,
 				     ioasid_t pasid, u64 address, size_t size);
-void amd_iommu_dev_flush_pasid_all(struct iommu_dev_data *dev_data,
-				   ioasid_t pasid);
 
 #ifdef CONFIG_IRQ_REMAP
 int amd_iommu_create_irq_domain(struct amd_iommu *iommu);
@@ -121,14 +120,14 @@ static inline bool check_feature2(u64 mask)
 	return (amd_iommu_efr2 & mask);
 }
 
-static inline int check_feature_gpt_level(void)
+static inline bool amd_iommu_v2_pgtbl_supported(void)
 {
-	return ((amd_iommu_efr >> FEATURE_GATS_SHIFT) & FEATURE_GATS_MASK);
+	return (check_feature(FEATURE_GIOSUP) && check_feature(FEATURE_GT));
 }
 
 static inline bool amd_iommu_gt_ppr_supported(void)
 {
-	return (check_feature(FEATURE_GT) &&
+	return (amd_iommu_v2_pgtbl_supported() &&
 		check_feature(FEATURE_PPR) &&
 		check_feature(FEATURE_EPHSUP));
 }
@@ -143,19 +142,6 @@ static inline void *iommu_phys_to_virt(unsigned long paddr)
 	return phys_to_virt(__sme_clr(paddr));
 }
 
-static inline
-void amd_iommu_domain_set_pt_root(struct protection_domain *domain, u64 root)
-{
-	domain->iop.root = (u64 *)(root & PAGE_MASK);
-	domain->iop.mode = root & 7; /* lowest 3 bits encode pgtable mode */
-}
-
-static inline
-void amd_iommu_domain_clr_pt_root(struct protection_domain *domain)
-{
-	amd_iommu_domain_set_pt_root(domain, 0);
-}
-
 static inline int get_pci_sbdf_id(struct pci_dev *pdev)
 {
 	int seg = pci_domain_nr(pdev->bus);
@@ -163,6 +149,8 @@ static inline int get_pci_sbdf_id(struct pci_dev *pdev)
 
 	return PCI_SEG_DEVID_TO_SBDF(seg, devid);
 }
+
+bool amd_iommu_ht_range_ignore(void);
 
 /*
  * This must be called after device probe completes. During probe
@@ -185,17 +173,56 @@ static inline struct protection_domain *to_pdomain(struct iommu_domain *dom)
 }
 
 bool translation_pre_enabled(struct amd_iommu *iommu);
-bool amd_iommu_is_attach_deferred(struct device *dev);
 int __init add_special_device(u8 type, u8 id, u32 *devid, bool cmd_line);
+
+int amd_iommu_pdom_id_alloc(void);
+int amd_iommu_pdom_id_reserve(u16 id, gfp_t gfp);
+void amd_iommu_pdom_id_free(int id);
+void amd_iommu_pdom_id_destroy(void);
 
 #ifdef CONFIG_DMI
 void amd_iommu_apply_ivrs_quirks(void);
 #else
 static inline void amd_iommu_apply_ivrs_quirks(void) { }
 #endif
+struct dev_table_entry *amd_iommu_get_ivhd_dte_flags(u16 segid, u16 devid);
 
 void amd_iommu_domain_set_pgtable(struct protection_domain *domain,
 				  u64 *root, int mode);
 struct dev_table_entry *get_dev_table(struct amd_iommu *iommu);
+struct iommu_dev_data *search_dev_data(struct amd_iommu *iommu, u16 devid);
 
-#endif
+void amd_iommu_set_dte_v1(struct iommu_dev_data *dev_data,
+			  struct protection_domain *domain, u16 domid,
+			  struct pt_iommu_amdv1_hw_info *pt_info,
+			  struct dev_table_entry *new);
+void amd_iommu_update_dte(struct amd_iommu *iommu,
+			  struct iommu_dev_data *dev_data,
+			  struct dev_table_entry *new);
+
+static inline void
+amd_iommu_make_clear_dte(struct iommu_dev_data *dev_data, struct dev_table_entry *new)
+{
+	struct dev_table_entry *initial_dte;
+	struct amd_iommu *iommu = get_amd_iommu_from_dev(dev_data->dev);
+
+	/* All existing DTE must have V bit set */
+	new->data128[0] = DTE_FLAG_V;
+	new->data128[1] = 0;
+
+	/*
+	 * Restore cached persistent DTE bits, which can be set by information
+	 * in IVRS table. See set_dev_entry_from_acpi().
+	 */
+	initial_dte = amd_iommu_get_ivhd_dte_flags(iommu->pci_seg->id, dev_data->devid);
+	if (initial_dte) {
+		new->data128[0] |= initial_dte->data128[0];
+		new->data128[1] |= initial_dte->data128[1];
+	}
+}
+
+/* NESTED */
+struct iommu_domain *
+amd_iommu_alloc_domain_nested(struct iommufd_viommu *viommu, u32 flags,
+			      const struct iommu_user_data *user_data);
+#endif /* AMD_IOMMU_H */

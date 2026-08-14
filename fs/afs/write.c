@@ -10,7 +10,6 @@
 #include <linux/fs.h>
 #include <linux/pagemap.h>
 #include <linux/writeback.h>
-#include <linux/pagevec.h>
 #include <linux/netfs.h>
 #include <trace/events/netfs.h>
 #include "internal.h"
@@ -89,10 +88,12 @@ static const struct afs_operation_ops afs_store_data_operation = {
  */
 void afs_prepare_write(struct netfs_io_subrequest *subreq)
 {
+	struct netfs_io_stream *stream = &subreq->rreq->io_streams[subreq->stream_nr];
+
 	//if (test_bit(NETFS_SREQ_RETRYING, &subreq->flags))
 	//	subreq->max_len = 512 * 1024;
 	//else
-	subreq->max_len = 256 * 1024 * 1024;
+	stream->sreq_max_len = 256 * 1024 * 1024;
 }
 
 /*
@@ -118,17 +119,17 @@ static void afs_issue_write_worker(struct work_struct *work)
 
 #if 0 // Error injection
 	if (subreq->debug_index == 3)
-		return netfs_write_subrequest_terminated(subreq, -ENOANO, false);
+		return netfs_write_subrequest_terminated(subreq, -ENOANO);
 
-	if (!test_bit(NETFS_SREQ_RETRYING, &subreq->flags)) {
+	if (!subreq->retry_count) {
 		set_bit(NETFS_SREQ_NEED_RETRY, &subreq->flags);
-		return netfs_write_subrequest_terminated(subreq, -EAGAIN, false);
+		return netfs_write_subrequest_terminated(subreq, -EAGAIN);
 	}
 #endif
 
 	op = afs_alloc_operation(wreq->netfs_priv, vnode->volume);
 	if (IS_ERR(op))
-		return netfs_write_subrequest_terminated(subreq, -EAGAIN, false);
+		return netfs_write_subrequest_terminated(subreq, -EAGAIN);
 
 	afs_op_set_vnode(op, 0, vnode);
 	op->file[0].dv_delta	= 1;
@@ -141,12 +142,15 @@ static void afs_issue_write_worker(struct work_struct *work)
 	afs_begin_vnode_operation(op);
 
 	op->store.write_iter	= &subreq->io_iter;
-	op->store.i_size	= umax(pos + len, vnode->netfs.remote_i_size);
+	op->store.i_size	= umax(pos + len, netfs_read_remote_i_size(&vnode->netfs.inode));
 	op->mtime		= inode_get_mtime(&vnode->netfs.inode);
 
 	afs_wait_for_operation(op);
 	ret = afs_put_operation(op);
 	switch (ret) {
+	case 0:
+		__set_bit(NETFS_SREQ_MADE_PROGRESS, &subreq->flags);
+		break;
 	case -EACCES:
 	case -EPERM:
 	case -ENOKEY:
@@ -161,13 +165,13 @@ static void afs_issue_write_worker(struct work_struct *work)
 		break;
 	}
 
-	netfs_write_subrequest_terminated(subreq, ret < 0 ? ret : subreq->len, false);
+	netfs_write_subrequest_terminated(subreq, ret < 0 ? ret : subreq->len);
 }
 
 void afs_issue_write(struct netfs_io_subrequest *subreq)
 {
 	subreq->work.func = afs_issue_write_worker;
-	if (!queue_work(system_unbound_wq, &subreq->work))
+	if (!queue_work(system_dfl_wq, &subreq->work))
 		WARN_ON_ONCE(1);
 }
 
@@ -177,8 +181,8 @@ void afs_issue_write(struct netfs_io_subrequest *subreq)
  */
 void afs_begin_writeback(struct netfs_io_request *wreq)
 {
-	afs_get_writeback_key(wreq);
-	wreq->io_streams[0].avail = true;
+	if (S_ISREG(wreq->inode->i_mode))
+		afs_get_writeback_key(wreq);
 }
 
 /*
@@ -190,6 +194,19 @@ void afs_retry_request(struct netfs_io_request *wreq, struct netfs_io_stream *st
 	struct netfs_io_subrequest *subreq =
 		list_first_entry(&stream->subrequests,
 				 struct netfs_io_subrequest, rreq_link);
+
+	switch (wreq->origin) {
+	case NETFS_READAHEAD:
+	case NETFS_READPAGE:
+	case NETFS_READ_GAPS:
+	case NETFS_READ_SINGLE:
+	case NETFS_READ_FOR_WRITE:
+	case NETFS_UNBUFFERED_READ:
+	case NETFS_DIO_READ:
+		return;
+	default:
+		break;
+	}
 
 	switch (subreq->error) {
 	case -EACCES:

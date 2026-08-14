@@ -77,6 +77,8 @@ struct snd_seq_client_port {
 	unsigned char direction;
 	unsigned char ump_group;
 
+	bool is_midi1;	/* keep MIDI 1.0 protocol */
+
 #if IS_ENABLED(CONFIG_SND_SEQ_UMP)
 	struct ump_cvt_to_ump_bank midi2_bank[16]; /* per channel */
 #endif
@@ -93,6 +95,8 @@ struct snd_seq_client_port *snd_seq_port_query_nearest(struct snd_seq_client *cl
 
 /* unlock the port */
 #define snd_seq_port_unlock(port) snd_use_lock_free(&(port)->use_lock)
+
+DEFINE_FREE(snd_seq_port, struct snd_seq_client_port *, if (!IS_ERR_OR_NULL(_T)) snd_seq_port_unlock(_T))
 
 /* create a port, port number or a negative error code is returned */
 int snd_seq_create_port(struct snd_seq_client *client, int port_index,

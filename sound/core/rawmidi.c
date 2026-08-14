@@ -159,7 +159,7 @@ static int snd_rawmidi_runtime_create(struct snd_rawmidi_substream *substream)
 {
 	struct snd_rawmidi_runtime *runtime;
 
-	runtime = kzalloc(sizeof(*runtime), GFP_KERNEL);
+	runtime = kzalloc_obj(*runtime);
 	if (!runtime)
 		return -ENOMEM;
 	runtime->substream = substream;
@@ -472,7 +472,7 @@ static int snd_rawmidi_open(struct inode *inode, struct file *file)
 	fflags = snd_rawmidi_file_flags(file);
 	if ((file->f_flags & O_APPEND) || maj == SOUND_MAJOR) /* OSS emul? */
 		fflags |= SNDRV_RAWMIDI_LFLG_APPEND;
-	rawmidi_file = kmalloc(sizeof(*rawmidi_file), GFP_KERNEL);
+	rawmidi_file = kmalloc_obj(*rawmidi_file);
 	if (rawmidi_file == NULL) {
 		err = -ENOMEM;
 		goto __error;
@@ -629,12 +629,15 @@ static int snd_rawmidi_info(struct snd_rawmidi_substream *substream,
 	info->subdevice = substream->number;
 	info->stream = substream->stream;
 	info->flags = rmidi->info_flags;
-	strcpy(info->id, rmidi->id);
-	strcpy(info->name, rmidi->name);
-	strcpy(info->subname, substream->name);
+	if (substream->inactive)
+		info->flags |= SNDRV_RAWMIDI_INFO_STREAM_INACTIVE;
+	strscpy(info->id, rmidi->id);
+	strscpy(info->name, rmidi->name);
+	strscpy(info->subname, substream->name);
 	info->subdevices_count = substream->pstr->substream_count;
 	info->subdevices_avail = (substream->pstr->substream_count -
 				  substream->pstr->substream_opened);
+	info->tied_device = rmidi->tied_device;
 	return 0;
 }
 
@@ -724,8 +727,9 @@ static int resize_runtime_buffer(struct snd_rawmidi_substream *substream,
 		newbuf = kvzalloc(params->buffer_size, GFP_KERNEL);
 		if (!newbuf)
 			return -ENOMEM;
-		guard(spinlock_irq)(&substream->lock);
+		spin_lock_irq(&substream->lock);
 		if (runtime->buffer_ref) {
+			spin_unlock_irq(&substream->lock);
 			kvfree(newbuf);
 			return -EBUSY;
 		}
@@ -733,6 +737,7 @@ static int resize_runtime_buffer(struct snd_rawmidi_substream *substream,
 		runtime->buffer = newbuf;
 		runtime->buffer_size = params->buffer_size;
 		__reset_runtime_ptrs(runtime, is_input);
+		spin_unlock_irq(&substream->lock);
 		kvfree(oldbuf);
 	}
 	runtime->avail_min = params->avail_min;
@@ -1784,7 +1789,6 @@ static const struct file_operations snd_rawmidi_f_ops = {
 	.write =	snd_rawmidi_write,
 	.open =		snd_rawmidi_open,
 	.release =	snd_rawmidi_release,
-	.llseek =	no_llseek,
 	.poll =		snd_rawmidi_poll,
 	.unlocked_ioctl =	snd_rawmidi_ioctl,
 	.compat_ioctl =	snd_rawmidi_ioctl_compat,
@@ -1799,7 +1803,7 @@ static int snd_rawmidi_alloc_substreams(struct snd_rawmidi *rmidi,
 	int idx;
 
 	for (idx = 0; idx < count; idx++) {
-		substream = kzalloc(sizeof(*substream), GFP_KERNEL);
+		substream = kzalloc_obj(*substream);
 		if (!substream)
 			return -ENOMEM;
 		substream->stream = direction;
@@ -1887,7 +1891,7 @@ int snd_rawmidi_new(struct snd_card *card, char *id, int device,
 
 	if (rrawmidi)
 		*rrawmidi = NULL;
-	rmidi = kzalloc(sizeof(*rmidi), GFP_KERNEL);
+	rmidi = kzalloc_obj(*rmidi);
 	if (!rmidi)
 		return -ENOMEM;
 	err = snd_rawmidi_init(rmidi, card, id, device,
@@ -2102,13 +2106,11 @@ EXPORT_SYMBOL(snd_rawmidi_set_ops);
 
 static int __init alsa_rawmidi_init(void)
 {
-
 	snd_ctl_register_ioctl(snd_rawmidi_control_ioctl);
 	snd_ctl_register_ioctl_compat(snd_rawmidi_control_ioctl);
 #ifdef CONFIG_SND_OSSEMUL
-	{ int i;
 	/* check device map table */
-	for (i = 0; i < SNDRV_CARDS; i++) {
+	for (int i = 0; i < SNDRV_CARDS; i++) {
 		if (midi_map[i] < 0 || midi_map[i] >= SNDRV_RAWMIDI_DEVICES) {
 			pr_err("ALSA: rawmidi: invalid midi_map[%d] = %d\n",
 			       i, midi_map[i]);
@@ -2119,7 +2121,6 @@ static int __init alsa_rawmidi_init(void)
 			       i, amidi_map[i]);
 			amidi_map[i] = 1;
 		}
-	}
 	}
 #endif /* CONFIG_SND_OSSEMUL */
 	return 0;

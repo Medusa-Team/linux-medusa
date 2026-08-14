@@ -17,6 +17,15 @@ config CPU_MITIGATIONS
 	def_bool y
 endif
 
+#
+# Selected by architectures that need custom DMA operations for e.g. legacy
+# IOMMUs not handled by dma-iommu.  Drivers must never select this symbol.
+#
+config ARCH_HAS_DMA_OPS
+	depends on HAS_DMA
+	select DMA_OPS_HELPERS
+	bool
+
 menu "General architecture-dependent options"
 
 config ARCH_HAS_SUBPAGE_FAULTS
@@ -31,6 +40,44 @@ config HOTPLUG_SMT
 
 config SMT_NUM_THREADS_DYNAMIC
 	bool
+
+config ARCH_SUPPORTS_SCHED_SMT
+	bool
+
+config ARCH_SUPPORTS_SCHED_CLUSTER
+	bool
+
+config ARCH_SUPPORTS_SCHED_MC
+	bool
+
+config SCHED_SMT
+	bool "SMT (Hyperthreading) scheduler support"
+	depends on ARCH_SUPPORTS_SCHED_SMT
+	default y
+	help
+	  Improves the CPU scheduler's decision making when dealing with
+	  MultiThreading at a cost of slightly increased overhead in some
+	  places. If unsure say N here.
+
+config SCHED_CLUSTER
+	bool "Cluster scheduler support"
+	depends on ARCH_SUPPORTS_SCHED_CLUSTER
+	default y
+	help
+	  Cluster scheduler support improves the CPU scheduler's decision
+	  making when dealing with machines that have clusters of CPUs.
+	  Cluster usually means a couple of CPUs which are placed closely
+	  by sharing mid-level caches, last-level cache tags or internal
+	  busses.
+
+config SCHED_MC
+	bool "Multi-Core Cache (MC) scheduler support"
+	depends on ARCH_SUPPORTS_SCHED_MC
+	default y
+	help
+	  Multi-core scheduler support improves the CPU scheduler's decision
+	  making when dealing with multi-core CPU chips at a cost of slightly
+	  increased overhead in some places. If unsure say N here.
 
 # Selected by HOTPLUG_CORE_SYNC_DEAD or HOTPLUG_CORE_SYNC_FULL
 config HOTPLUG_CORE_SYNC
@@ -55,8 +102,17 @@ config HOTPLUG_PARALLEL
 	bool
 	select HOTPLUG_SPLIT_STARTUP
 
+config GENERIC_IRQ_ENTRY
+	bool
+
+config GENERIC_SYSCALL
+	bool
+	depends on GENERIC_IRQ_ENTRY
+
 config GENERIC_ENTRY
 	bool
+	select GENERIC_IRQ_ENTRY
+	select GENERIC_SYSCALL
 
 config KPROBES
 	bool "Kprobes"
@@ -126,6 +182,7 @@ config KPROBES_ON_FTRACE
 config UPROBES
 	def_bool n
 	depends on ARCH_SUPPORTS_UPROBES
+	select TASKS_TRACE_RCU
 	help
 	  Uprobes is the user-space counterpart to kprobes: they
 	  enable instrumentation applications (such as 'perf probe')
@@ -175,17 +232,14 @@ config HAVE_EFFICIENT_UNALIGNED_ACCESS
 config ARCH_USE_BUILTIN_BSWAP
 	bool
 	help
-	  Modern versions of GCC (since 4.4) have builtin functions
-	  for handling byte-swapping. Using these, instead of the old
-	  inline assembler that the architecture code provides in the
-	  __arch_bswapXX() macros, allows the compiler to see what's
-	  happening and offers more opportunity for optimisation. In
-	  particular, the compiler will be able to combine the byteswap
-	  with a nearby load or store and use load-and-swap or
-	  store-and-swap instructions if the architecture has them. It
-	  should almost *never* result in code which is worse than the
-	  hand-coded assembler in <asm/swab.h>.  But just in case it
-	  does, the use of the builtins is optional.
+	  GCC and Clang have builtin functions for handling byte-swapping.
+	  Using these allows the compiler to see what's happening and
+	  offers more opportunity for optimisation. In particular, the
+	  compiler will be able to combine the byteswap with a nearby load
+	  or store and use load-and-swap or store-and-swap instructions if
+	  the architecture has them. It should almost *never* result in code
+	  which is worse than the hand-coded assembler in <asm/swab.h>.
+	  But just in case it does, the use of the builtins is optional.
 
 	  Any architecture with load-and-swap or store-and-swap
 	  instructions should set this. And it shouldn't hurt to set it
@@ -425,6 +479,13 @@ config HAVE_HARDLOCKUP_DETECTOR_ARCH
 	  It uses the same command line parameters, and sysctl interface,
 	  as the generic hardlockup detectors.
 
+config UNWIND_USER
+	bool
+
+config HAVE_UNWIND_USER_FP
+	bool
+	select UNWIND_USER
+
 config HAVE_PERF_REGS
 	bool
 	help
@@ -620,11 +681,11 @@ config SECCOMP_CACHE_DEBUG
 
 	  If unsure, say N.
 
-config HAVE_ARCH_STACKLEAK
+config HAVE_ARCH_KSTACK_ERASE
 	bool
 	help
 	  An architecture should select this if it has the code which
-	  fills the used part of the kernel stack with the STACKLEAK_POISON
+	  fills the used part of the kernel stack with the KSTACK_ERASE_POISON
 	  value before returning from system calls.
 
 config HAVE_STACKPROTECTOR
@@ -802,22 +863,72 @@ config LTO_CLANG_THIN
 	  If unsure, say Y.
 endchoice
 
-config ARCH_SUPPORTS_CFI_CLANG
+config ARCH_SUPPORTS_AUTOFDO_CLANG
+	bool
+
+config AUTOFDO_CLANG
+	bool "Enable Clang's AutoFDO build (EXPERIMENTAL)"
+	depends on ARCH_SUPPORTS_AUTOFDO_CLANG
+	depends on CC_IS_CLANG && CLANG_VERSION >= 170000
+	help
+	  This option enables Clang’s AutoFDO build. When
+	  an AutoFDO profile is specified in variable
+	  CLANG_AUTOFDO_PROFILE during the build process,
+	  Clang uses the profile to optimize the kernel.
+
+	  If no profile is specified, AutoFDO options are
+	  still passed to Clang to facilitate the collection
+	  of perf data for creating an AutoFDO profile in
+	  subsequent builds.
+
+	  If unsure, say N.
+
+config ARCH_SUPPORTS_PROPELLER_CLANG
+	bool
+
+config PROPELLER_CLANG
+	bool "Enable Clang's Propeller build"
+	depends on ARCH_SUPPORTS_PROPELLER_CLANG
+	depends on CC_IS_CLANG && CLANG_VERSION >= 190000
+	help
+	  This option enables Clang’s Propeller build. When the Propeller
+	  profiles is specified in variable CLANG_PROPELLER_PROFILE_PREFIX
+	  during the build process, Clang uses the profiles to optimize
+	  the kernel.
+
+	  If no profile is specified, Propeller options are still passed
+	  to Clang to facilitate the collection of perf data for creating
+	  the Propeller profiles in subsequent builds.
+
+	  If unsure, say N.
+
+config ARCH_SUPPORTS_CFI
 	bool
 	help
-	  An architecture should select this option if it can support Clang's
-	  Control-Flow Integrity (CFI) checking.
+	  An architecture should select this option if it can support Kernel
+	  Control-Flow Integrity (CFI) checking (-fsanitize=kcfi).
 
 config ARCH_USES_CFI_TRAPS
 	bool
+	help
+	  An architecture should select this option if it requires the
+	  .kcfi_traps section for KCFI trap handling.
 
-config CFI_CLANG
-	bool "Use Clang's Control Flow Integrity (CFI)"
-	depends on ARCH_SUPPORTS_CFI_CLANG
+config ARCH_USES_CFI_GENERIC_LLVM_PASS
+	bool
+	help
+	  An architecture should select this option if it uses the generic
+	  KCFIPass in LLVM to expand kCFI bundles instead of architecture-specific
+	  lowering.
+
+config CFI
+	bool "Use Kernel Control Flow Integrity (kCFI)"
+	default CFI_CLANG
+	depends on ARCH_SUPPORTS_CFI
 	depends on $(cc-option,-fsanitize=kcfi)
 	help
-	  This option enables Clang's forward-edge Control Flow Integrity
-	  (CFI) checking, where the compiler injects a runtime check to each
+	  This option enables forward-edge Control Flow Integrity (CFI)
+	  checking, where the compiler injects a runtime check to each
 	  indirect function call to ensure the target is a valid function with
 	  the correct static type. This restricts possible call targets and
 	  makes it more difficult for an attacker to exploit bugs that allow
@@ -826,9 +937,45 @@ config CFI_CLANG
 
 	    https://clang.llvm.org/docs/ControlFlowIntegrity.html
 
+config CFI_CLANG
+	bool
+	transitional
+	help
+	  Transitional config for CFI_CLANG to CFI migration.
+
+config CFI_ICALL_NORMALIZE_INTEGERS
+	bool "Normalize CFI tags for integers"
+	depends on CFI
+	depends on HAVE_CFI_ICALL_NORMALIZE_INTEGERS
+	help
+	  This option normalizes the CFI tags for integer types so that all
+	  integer types of the same size and signedness receive the same CFI
+	  tag.
+
+	  The option is separate from CONFIG_RUST because it affects the ABI.
+	  When working with build systems that care about the ABI, it is
+	  convenient to be able to turn on this flag first, before Rust is
+	  turned on.
+
+	  This option is necessary for using CFI with Rust. If unsure, say N.
+
+config HAVE_CFI_ICALL_NORMALIZE_INTEGERS
+	def_bool y
+	depends on $(cc-option,-fsanitize=kcfi -fsanitize-cfi-icall-experimental-normalize-integers)
+	# With GCOV/KASAN we need this fix: https://github.com/llvm/llvm-project/pull/104826
+	depends on CLANG_VERSION >= 190103 || (!GCOV_KERNEL && !KASAN_GENERIC && !KASAN_SW_TAGS)
+
+config HAVE_CFI_ICALL_NORMALIZE_INTEGERS_RUSTC
+	def_bool y
+	depends on HAVE_CFI_ICALL_NORMALIZE_INTEGERS
+	depends on ARM64 || X86_64
+	# With GCOV/KASAN we need this fix: https://github.com/rust-lang/rust/pull/129373
+	depends on RUSTC_LLVM_VERSION >= 190103 || \
+		(!GCOV_KERNEL && !KASAN_GENERIC && !KASAN_SW_TAGS)
+
 config CFI_PERMISSIVE
 	bool "Use CFI in permissive mode"
-	depends on CFI_CLANG
+	depends on CFI
 	help
 	  When selected, Control Flow Integrity (CFI) violations result in a
 	  warning instead of a kernel panic. This option should only be used
@@ -862,7 +1009,7 @@ config HAVE_CONTEXT_TRACKING_USER_OFFSTACK
 	  Architecture neither relies on exception_enter()/exception_exit()
 	  nor on schedule_user(). Also preempt_schedule_notrace() and
 	  preempt_schedule_irq() can't be called in a preemptible section
-	  while context tracking is CONTEXT_USER. This feature reflects a sane
+	  while context tracking is CT_STATE_USER. This feature reflects a sane
 	  entry implementation where the following requirements are met on
 	  critical entry code, ie: before user_exit() or after user_enter():
 
@@ -907,6 +1054,9 @@ config HAVE_IRQ_TIME_ACCOUNTING
 	help
 	  Archs need to ensure they use a high enough resolution clock to
 	  support irq time accounting and then call enable_sched_clock_irqtime().
+
+config HAVE_PV_STEAL_CLOCK_GEN
+	bool
 
 config HAVE_MOVE_PUD
 	bool
@@ -977,6 +1127,13 @@ config ARCH_WANTS_MODULES_DATA_IN_VMALLOC
 	  For architectures like powerpc/32 which have constraints on module
 	  allocation and need to allocate module data outside of module area.
 
+config ARCH_WANTS_MODULES_TEXT_SECTIONS
+	bool
+	help
+	  For architectures like 32-bit parisc which require that functions in
+	  modules have to keep code in own text sections (-ffunction-sections)
+	  and to avoid merging all text into one big text section,
+
 config ARCH_WANTS_EXECMEM_LATE
 	bool
 	help
@@ -984,6 +1141,14 @@ config ARCH_WANTS_EXECMEM_LATE
 	  boot, but rather require its initialization late when there is
 	  enough entropy for module space randomization, for instance
 	  arm64.
+
+config ARCH_HAS_EXECMEM_ROX
+	bool
+	depends on MMU && !HIGHMEM
+	help
+	  For architectures that support allocations of executable memory
+	  with read-only execute permissions. Architecture must implement
+	  execmem_fill_trapping_insns() callback to enable this.
 
 config HAVE_IRQ_EXIT_ON_IRQ_STACK
 	bool
@@ -1360,9 +1525,8 @@ config HAVE_ARCH_RANDOMIZE_KSTACK_OFFSET
 	def_bool n
 	help
 	  An arch should select this symbol if it can support kernel stack
-	  offset randomization with calls to add_random_kstack_offset()
-	  during syscall entry and choose_random_kstack_offset() during
-	  syscall exit. Careful removal of -fstack-protector-strong and
+	  offset randomization with a call to add_random_kstack_offset()
+	  during syscall entry. Careful removal of -fstack-protector-strong and
 	  -fstack-protector should also be applied to the entry code and
 	  closely examined, as the artificial stack bump looks like an array
 	  to the compiler, so it will attempt to add canary checks regardless
@@ -1372,7 +1536,6 @@ config RANDOMIZE_KSTACK_OFFSET
 	bool "Support for randomizing kernel stack offset on syscall entry" if EXPERT
 	default y
 	depends on HAVE_ARCH_RANDOMIZE_KSTACK_OFFSET
-	depends on INIT_STACK_NONE || !CC_IS_CLANG || CLANG_VERSION >= 140000
 	help
 	  The kernel stack offset can be randomized (after pt_regs) by
 	  roughly 5 bits of entropy, frustrating memory corruption
@@ -1431,6 +1594,14 @@ config STRICT_MODULE_RWX
 config ARCH_HAS_PHYS_TO_DMA
 	bool
 
+config ARCH_HAS_CPU_RESCTRL
+	bool
+	help
+	  An architecture selects this option to indicate that the necessary
+	  hooks are provided to support the common memory system usage
+	  monitoring and control interfaces provided by the 'resctrl'
+	  filesystem (see RESCTRL_FS).
+
 config HAVE_ARCH_COMPILER_H
 	bool
 	help
@@ -1438,6 +1609,14 @@ config HAVE_ARCH_COMPILER_H
 	  asm/compiler.h header that should be included after
 	  linux/compiler-*.h in order to override macro definitions that those
 	  headers generally provide.
+
+config HAVE_ARCH_LIBGCC_H
+	bool
+	help
+	  An architecture can select this if it provides an
+	  asm/libgcc.h header that should be included after
+	  linux/libgcc.h in order to override macro definitions that
+	  header generally provides.
 
 config HAVE_ARCH_PREL32_RELOCATIONS
 	bool
@@ -1489,7 +1668,11 @@ config HAVE_SPARSE_SYSCALL_NR
 	  entries at 4000, 5000 and 6000 locations. This option turns on syscall
 	  related optimizations for a given architecture.
 
-config ARCH_HAS_VDSO_DATA
+config ARCH_HAS_VDSO_ARCH_DATA
+	depends on HAVE_GENERIC_VDSO
+	bool
+
+config ARCH_HAS_VDSO_TIME_DATA
 	bool
 
 config HAVE_STATIC_CALL
@@ -1600,6 +1783,17 @@ config ARCH_HAS_KERNEL_FPU_SUPPORT
 	  Architectures that select this option can run floating-point code in
 	  the kernel, as described in Documentation/core-api/floating-point.rst.
 
+config ARCH_VMLINUX_NEEDS_RELOCS
+	bool
+	help
+	  Whether the architecture needs vmlinux to be built with static
+	  relocations preserved. This is used by some architectures to
+	  construct bespoke relocation tables for KASLR.
+
+# Select if architecture uses the common generic TIF bits
+config HAVE_GENERIC_TIF_BITS
+       bool
+
 source "kernel/gcov/Kconfig"
 
 source "scripts/gcc-plugins/Kconfig"
@@ -1642,5 +1836,17 @@ config CC_HAS_SANE_FUNCTION_ALIGNMENT
 
 config ARCH_NEED_CMPXCHG_1_EMU
 	bool
+
+config ARCH_WANTS_PRE_LINK_VMLINUX
+	bool
+	help
+	  An architecture can select this if it provides arch/<arch>/tools/Makefile
+	  with .arch.vmlinux.o target to be linked into vmlinux.
+
+config ARCH_HAS_CPU_ATTACK_VECTORS
+	bool
+
+config HAVE_ARCH_GET_SECUREBOOT
+	def_bool EFI
 
 endmenu

@@ -29,12 +29,13 @@ of many distributions, e.g. :
  - Ubuntu
  - OpenSUSE
  - Arch Linux
+ - Gentoo
  - NetBSD
  - FreeBSD
 
 Some distribution packages are obsolete and it is recommended
 to use the latest version released from the Coccinelle homepage at
-http://coccinelle.lip6.fr/
+https://coccinelle.gitlabpages.inria.fr/website
 
 Or from Github at:
 
@@ -60,7 +61,7 @@ Supplemental documentation
 
 For supplemental documentation refer to the wiki:
 
-https://bottest.wiki.kernel.org/coccicheck
+https://bottest.wiki.kernel.org/coccicheck.html
 
 The wiki documentation always refers to the linux-next version of the script.
 
@@ -126,6 +127,18 @@ reviewed.
 To enable verbose messages set the V= variable, for example::
 
    make coccicheck MODE=report V=1
+
+By default, coccicheck will print debug logs to stdout and redirect stderr to
+/dev/null. This can make coccicheck output difficult to read and understand.
+Debug and error messages can instead be written to a debug file instead by
+setting the ``DEBUG_FILE`` variable::
+
+    make coccicheck MODE=report DEBUG_FILE="cocci.log"
+
+Coccinelle cannot overwrite a debug file. Instead of repeatedly deleting a log
+file, you could include the datetime in the debug file name::
+
+    make coccicheck MODE=report DEBUG_FILE="cocci-$(date -Iseconds).log"
 
 Coccinelle parallelization
 --------------------------
@@ -208,11 +221,10 @@ include options matching the options used when we compile the kernel.
 You can learn what these options are by using V=1; you could then
 manually run Coccinelle with debug options added.
 
-Alternatively you can debug running Coccinelle against SmPL patches
-by asking for stderr to be redirected to stderr. By default stderr
-is redirected to /dev/null; if you'd like to capture stderr you
-can specify the ``DEBUG_FILE="file.txt"`` option to coccicheck. For
-instance::
+An easier approach to debug running Coccinelle against SmPL patches is to ask
+coccicheck to redirect stderr to a debug file. As mentioned in the examples, by
+default stderr is redirected to /dev/null; if you'd like to capture stderr you
+can specify the ``DEBUG_FILE="file.txt"`` option to coccicheck. For instance::
 
     rm -f cocci.err
     make coccicheck COCCI=scripts/coccinelle/free/kfree.cocci MODE=report DEBUG_FILE=cocci.err
@@ -250,25 +262,17 @@ variables for .cocciconfig is as follows:
 - Your directory from which spatch is called is processed next
 - The directory provided with the ``--dir`` option is processed last, if used
 
-Since coccicheck runs through make, it naturally runs from the kernel
-proper dir; as such the second rule above would be implied for picking up a
-.cocciconfig when using ``make coccicheck``.
-
 ``make coccicheck`` also supports using M= targets. If you do not supply
 any M= target, it is assumed you want to target the entire kernel.
 The kernel coccicheck script has::
 
-    if [ "$KBUILD_EXTMOD" = "" ] ; then
-        OPTIONS="--dir $srctree $COCCIINCLUDE"
-    else
-        OPTIONS="--dir $KBUILD_EXTMOD $COCCIINCLUDE"
-    fi
+    OPTIONS="--dir $srcroot $COCCIINCLUDE"
 
-KBUILD_EXTMOD is set when an explicit target with M= is used. For both cases
-the spatch ``--dir`` argument is used, as such third rule applies when whether
-M= is used or not, and when M= is used the target directory can have its own
-.cocciconfig file. When M= is not passed as an argument to coccicheck the
-target directory is the same as the directory from where spatch was called.
+Here, $srcroot refers to the source directory of the target: it points to the
+external module's source directory when M= used, and otherwise, to the kernel
+source directory. The third rule ensures the spatch reads the .cocciconfig from
+the target directory, allowing external modules to have their own .cocciconfig
+file.
 
 If not using the kernel's coccicheck target, keep the above precedence
 order logic of .cocciconfig reading. If using the kernel's coccicheck target,

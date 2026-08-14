@@ -12,13 +12,12 @@ void __io_uring_free(struct task_struct *tsk);
 void io_uring_unreg_ringfd(void);
 const char *io_uring_get_opcode(u8 opcode);
 bool io_is_uring_fops(struct file *file);
+int __io_uring_fork(struct task_struct *tsk);
 
 static inline void io_uring_files_cancel(void)
 {
-	if (current->io_uring) {
-		io_uring_unreg_ringfd();
+	if (current->io_uring)
 		__io_uring_cancel(false);
-	}
 }
 static inline void io_uring_task_cancel(void)
 {
@@ -27,8 +26,15 @@ static inline void io_uring_task_cancel(void)
 }
 static inline void io_uring_free(struct task_struct *tsk)
 {
-	if (tsk->io_uring)
+	if (tsk->io_uring || tsk->io_uring_restrict)
 		__io_uring_free(tsk);
+}
+static inline int io_uring_fork(struct task_struct *tsk)
+{
+	if (tsk->io_uring_restrict)
+		return __io_uring_fork(tsk);
+
+	return 0;
 }
 #else
 static inline void io_uring_task_cancel(void)
@@ -47,6 +53,10 @@ static inline const char *io_uring_get_opcode(u8 opcode)
 static inline bool io_is_uring_fops(struct file *file)
 {
 	return false;
+}
+static inline int io_uring_fork(struct task_struct *tsk)
+{
+	return 0;
 }
 #endif
 

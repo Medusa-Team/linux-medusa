@@ -186,7 +186,7 @@ static int adis16209_read_raw(struct iio_dev *indio_dev,
 		/*
 		 * The raw ADC value is 0x4FE when the temperature
 		 * is 45 degrees and the scale factor per milli
-		 * degree celcius is -470.
+		 * degree Celsius is -470.
 		 */
 		*val = 25000 / -470 - 0x4FE;
 		return IIO_VAL_INT;
@@ -310,4 +310,4 @@ MODULE_AUTHOR("Barry Song <21cnbao@gmail.com>");
 MODULE_DESCRIPTION("Analog Devices ADIS16209 Dual-Axis Digital Inclinometer and Accelerometer");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("spi:adis16209");
-MODULE_IMPORT_NS(IIO_ADISLIB);
+MODULE_IMPORT_NS("IIO_ADISLIB");

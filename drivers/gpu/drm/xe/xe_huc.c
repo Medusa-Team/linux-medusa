@@ -12,7 +12,6 @@
 #include "abi/gsc_pxp_commands_abi.h"
 #include "regs/xe_gsc_regs.h"
 #include "regs/xe_guc_regs.h"
-#include "xe_assert.h"
 #include "xe_bo.h"
 #include "xe_device.h"
 #include "xe_force_wake.h"
@@ -43,14 +42,6 @@ huc_to_guc(struct xe_huc *huc)
 	return &container_of(huc, struct xe_uc, huc)->guc;
 }
 
-static void free_gsc_pkt(struct drm_device *drm, void *arg)
-{
-	struct xe_huc *huc = arg;
-
-	xe_bo_unpin_map_no_vm(huc->gsc_pkt);
-	huc->gsc_pkt = NULL;
-}
-
 #define PXP43_HUC_AUTH_INOUT_SIZE SZ_4K
 static int huc_alloc_gsc_pkt(struct xe_huc *huc)
 {
@@ -59,30 +50,33 @@ static int huc_alloc_gsc_pkt(struct xe_huc *huc)
 	struct xe_bo *bo;
 
 	/* we use a single object for both input and output */
-	bo = xe_bo_create_pin_map(xe, gt_to_tile(gt), NULL,
-				  PXP43_HUC_AUTH_INOUT_SIZE * 2,
-				  ttm_bo_type_kernel,
-				  XE_BO_FLAG_SYSTEM |
-				  XE_BO_FLAG_GGTT);
+	bo = xe_managed_bo_create_pin_map(xe, gt_to_tile(gt),
+					  PXP43_HUC_AUTH_INOUT_SIZE * 2,
+					  XE_BO_FLAG_SYSTEM |
+					  XE_BO_FLAG_GGTT);
 	if (IS_ERR(bo))
 		return PTR_ERR(bo);
 
 	huc->gsc_pkt = bo;
 
-	return drmm_add_action_or_reset(&xe->drm, free_gsc_pkt, huc);
+	return 0;
 }
 
 int xe_huc_init(struct xe_huc *huc)
 {
 	struct xe_gt *gt = huc_to_gt(huc);
-	struct xe_tile *tile = gt_to_tile(gt);
 	struct xe_device *xe = gt_to_xe(gt);
 	int ret;
 
 	huc->fw.type = XE_UC_FW_TYPE_HUC;
 
-	/* On platforms with a media GT the HuC is only available there */
-	if (tile->media_gt && (gt != tile->media_gt)) {
+	/*
+	 * The HuC is only available on the media GT on most platforms.  The
+	 * exception to that rule are the old Xe1 platforms where there was
+	 * no separate GT for media IP, so the HuC was part of the primary
+	 * GT.  Such platforms have graphics versions 12.55 and earlier.
+	 */
+	if (!xe_gt_is_media_type(gt) && GRAPHICS_VERx100(xe) > 1255) {
 		xe_uc_fw_change_status(&huc->fw, XE_UC_FIRMWARE_NOT_SUPPORTED);
 		return 0;
 	}
@@ -180,7 +174,7 @@ static int huc_auth_via_gsccs(struct xe_huc *huc)
 				       sizeof(struct pxp43_new_huc_auth_in));
 	wr_offset = huc_emit_pxp_auth_msg(xe, &pkt->vmap, wr_offset,
 					  xe_bo_ggtt_addr(huc->fw.bo),
-					  huc->fw.bo->size);
+					  xe_bo_size(huc->fw.bo));
 	do {
 		err = xe_gsc_pkt_submit_kernel(&gt->uc.gsc, ggtt_offset, wr_offset,
 					       ggtt_offset + PXP43_HUC_AUTH_INOUT_SIZE,
@@ -238,7 +232,7 @@ bool xe_huc_is_authenticated(struct xe_huc *huc, enum xe_huc_auth_types type)
 {
 	struct xe_gt *gt = huc_to_gt(huc);
 
-	return xe_mmio_read32(gt, huc_auth_modes[type].reg) & huc_auth_modes[type].val;
+	return xe_mmio_read32(&gt->mmio, huc_auth_modes[type].reg) & huc_auth_modes[type].val;
 }
 
 int xe_huc_auth(struct xe_huc *huc, enum xe_huc_auth_types type)
@@ -277,7 +271,7 @@ int xe_huc_auth(struct xe_huc *huc, enum xe_huc_auth_types type)
 		goto fail;
 	}
 
-	ret = xe_mmio_wait32(gt, huc_auth_modes[type].reg, huc_auth_modes[type].val,
+	ret = xe_mmio_wait32(&gt->mmio, huc_auth_modes[type].reg, huc_auth_modes[type].val,
 			     huc_auth_modes[type].val, 100000, NULL, false);
 	if (ret) {
 		xe_gt_err(gt, "HuC: firmware not verified: %pe\n", ERR_PTR(ret));
@@ -305,19 +299,16 @@ void xe_huc_sanitize(struct xe_huc *huc)
 void xe_huc_print_info(struct xe_huc *huc, struct drm_printer *p)
 {
 	struct xe_gt *gt = huc_to_gt(huc);
-	int err;
 
 	xe_uc_fw_print(&huc->fw, p);
 
 	if (!xe_uc_fw_is_enabled(&huc->fw))
 		return;
 
-	err = xe_force_wake_get(gt_to_fw(gt), XE_FW_GT);
-	if (err)
+	CLASS(xe_force_wake, fw_ref)(gt_to_fw(gt), XE_FW_GT);
+	if (!fw_ref.domains)
 		return;
 
 	drm_printf(p, "\nHuC status: 0x%08x\n",
-		   xe_mmio_read32(gt, HUC_KERNEL_LOAD_INFO));
-
-	xe_force_wake_put(gt_to_fw(gt), XE_FW_GT);
+		   xe_mmio_read32(&gt->mmio, HUC_KERNEL_LOAD_INFO));
 }

@@ -58,7 +58,7 @@ struct kmem_cache *inotify_inode_mark_cachep __ro_after_init;
 static long it_zero = 0;
 static long it_int_max = INT_MAX;
 
-static struct ctl_table inotify_table[] = {
+static const struct ctl_table inotify_table[] = {
 	{
 		.procname	= "max_user_instances",
 		.data		= &init_user_ns.ucount_max[UCOUNT_INOTIFY_INSTANCES],
@@ -569,11 +569,11 @@ static int inotify_update_existing_watch(struct fsnotify_group *group,
 		/* more bits in old than in new? */
 		int dropped = (old_mask & ~new_mask);
 		/* more bits in this fsn_mark than the inode's mask? */
-		int do_inode = (new_mask & ~inode->i_fsnotify_mask);
+		int do_inode = (new_mask & ~READ_ONCE(inode->i_fsnotify_mask));
 
 		/* update the inode with this new fsn_mark */
 		if (dropped || do_inode)
-			fsnotify_recalc_mask(inode->i_fsnotify_marks);
+			fsnotify_recalc_mask(fsn_mark->connector);
 
 	}
 
@@ -621,6 +621,7 @@ static int inotify_new_watch(struct fsnotify_group *group,
 	if (ret) {
 		/* we failed to get on the inode, get off the idr */
 		inotify_remove_from_idr(group, tmp_i_mark);
+		dec_inotify_watches(group->inotify_data.ucounts);
 		goto out_err;
 	}
 
@@ -660,7 +661,7 @@ static struct fsnotify_group *inotify_new_group(unsigned int max_events)
 	if (IS_ERR(group))
 		return group;
 
-	oevent = kmalloc(sizeof(struct inotify_event_info), GFP_KERNEL_ACCOUNT);
+	oevent = kmalloc_obj(struct inotify_event_info, GFP_KERNEL_ACCOUNT);
 	if (unlikely(!oevent)) {
 		fsnotify_destroy_group(group);
 		return ERR_PTR(-ENOMEM);
@@ -732,7 +733,6 @@ SYSCALL_DEFINE3(inotify_add_watch, int, fd, const char __user *, pathname,
 	struct fsnotify_group *group;
 	struct inode *inode;
 	struct path path;
-	struct fd f;
 	int ret;
 	unsigned flags = 0;
 
@@ -752,21 +752,17 @@ SYSCALL_DEFINE3(inotify_add_watch, int, fd, const char __user *, pathname,
 	if (unlikely(!(mask & ALL_INOTIFY_BITS)))
 		return -EINVAL;
 
-	f = fdget(fd);
-	if (unlikely(!f.file))
+	CLASS(fd, f)(fd);
+	if (fd_empty(f))
 		return -EBADF;
 
 	/* IN_MASK_ADD and IN_MASK_CREATE don't make sense together */
-	if (unlikely((mask & IN_MASK_ADD) && (mask & IN_MASK_CREATE))) {
-		ret = -EINVAL;
-		goto fput_and_out;
-	}
+	if (unlikely((mask & IN_MASK_ADD) && (mask & IN_MASK_CREATE)))
+		return -EINVAL;
 
 	/* verify that this is indeed an inotify instance */
-	if (unlikely(f.file->f_op != &inotify_fops)) {
-		ret = -EINVAL;
-		goto fput_and_out;
-	}
+	if (unlikely(fd_file(f)->f_op != &inotify_fops))
+		return -EINVAL;
 
 	if (!(mask & IN_DONT_FOLLOW))
 		flags |= LOOKUP_FOLLOW;
@@ -776,17 +772,15 @@ SYSCALL_DEFINE3(inotify_add_watch, int, fd, const char __user *, pathname,
 	ret = inotify_find_inode(pathname, &path, flags,
 			(mask & IN_ALL_EVENTS));
 	if (ret)
-		goto fput_and_out;
+		return ret;
 
 	/* inode held in place by reference to path; group by fget on fd */
 	inode = path.dentry->d_inode;
-	group = f.file->private_data;
+	group = fd_file(f)->private_data;
 
 	/* create/update an inode mark */
 	ret = inotify_update_watch(group, inode, mask);
 	path_put(&path);
-fput_and_out:
-	fdput(f);
 	return ret;
 }
 
@@ -794,33 +788,26 @@ SYSCALL_DEFINE2(inotify_rm_watch, int, fd, __s32, wd)
 {
 	struct fsnotify_group *group;
 	struct inotify_inode_mark *i_mark;
-	struct fd f;
-	int ret = -EINVAL;
+	CLASS(fd, f)(fd);
 
-	f = fdget(fd);
-	if (unlikely(!f.file))
+	if (fd_empty(f))
 		return -EBADF;
 
 	/* verify that this is indeed an inotify instance */
-	if (unlikely(f.file->f_op != &inotify_fops))
-		goto out;
+	if (unlikely(fd_file(f)->f_op != &inotify_fops))
+		return -EINVAL;
 
-	group = f.file->private_data;
+	group = fd_file(f)->private_data;
 
 	i_mark = inotify_idr_find(group, wd);
 	if (unlikely(!i_mark))
-		goto out;
-
-	ret = 0;
+		return -EINVAL;
 
 	fsnotify_destroy_mark(&i_mark->fsn_mark, group);
 
 	/* match ref taken by inotify_idr_find */
 	fsnotify_put_mark(&i_mark->fsn_mark);
-
-out:
-	fdput(f);
-	return ret;
+	return 0;
 }
 
 /*

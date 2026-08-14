@@ -529,7 +529,7 @@ static int hv_probe(struct platform_device *op)
 	if (op->archdata.irqs[0] == 0xffffffff)
 		return -ENODEV;
 
-	port = kzalloc(sizeof(struct uart_port), GFP_KERNEL);
+	port = kzalloc_obj(struct uart_port);
 	if (unlikely(!port))
 		return -ENOMEM;
 
@@ -633,7 +633,7 @@ static struct platform_driver hv_driver = {
 		.of_match_table = hv_match,
 	},
 	.probe		= hv_probe,
-	.remove_new	= hv_remove,
+	.remove		= hv_remove,
 };
 
 static int __init sunhv_init(void)

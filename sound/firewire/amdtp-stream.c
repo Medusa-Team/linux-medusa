@@ -172,6 +172,9 @@ static int apply_constraint_to_size(struct snd_pcm_hw_params *params,
 			step = max(step, amdtp_syt_intervals[i]);
 	}
 
+	if (step == 0)
+		return -EINVAL;
+
 	t.min = roundup(s->min, step);
 	t.max = rounddown(s->max, step);
 	t.integer = 1;
@@ -188,8 +191,6 @@ int amdtp_stream_add_pcm_hw_constraints(struct amdtp_stream *s,
 					struct snd_pcm_runtime *runtime)
 {
 	struct snd_pcm_hardware *hw = &runtime->hw;
-	unsigned int ctx_header_size;
-	unsigned int maximum_usec_per_period;
 	int err;
 
 	hw->info = SNDRV_PCM_INFO_BLOCK_TRANSFER |
@@ -209,21 +210,6 @@ int amdtp_stream_add_pcm_hw_constraints(struct amdtp_stream *s,
 	hw->period_bytes_max = hw->period_bytes_min * 2048;
 	hw->buffer_bytes_max = hw->period_bytes_max * hw->periods_min;
 
-	// Linux driver for 1394 OHCI controller voluntarily flushes isoc
-	// context when total size of accumulated context header reaches
-	// PAGE_SIZE. This kicks work for the isoc context and brings
-	// callback in the middle of scheduled interrupts.
-	// Although AMDTP streams in the same domain use the same events per
-	// IRQ, use the largest size of context header between IT/IR contexts.
-	// Here, use the value of context header in IR context is for both
-	// contexts.
-	if (!(s->flags & CIP_NO_HEADER))
-		ctx_header_size = IR_CTX_HEADER_SIZE_CIP;
-	else
-		ctx_header_size = IR_CTX_HEADER_SIZE_NO_CIP;
-	maximum_usec_per_period = USEC_PER_SEC * PAGE_SIZE /
-				  CYCLES_PER_SECOND / ctx_header_size;
-
 	// In IEC 61883-6, one isoc packet can transfer events up to the value
 	// of syt interval. This comes from the interval of isoc cycle. As 1394
 	// OHCI controller can generate hardware IRQ per isoc packet, the
@@ -236,9 +222,10 @@ int amdtp_stream_add_pcm_hw_constraints(struct amdtp_stream *s,
 	// Due to the above protocol design, the minimum PCM frames per
 	// interrupt should be double of the value of syt interval, thus it is
 	// 250 usec.
+	// There is no reason, but up to 250 msec to avoid consuming resources so much.
 	err = snd_pcm_hw_constraint_minmax(runtime,
 					   SNDRV_PCM_HW_PARAM_PERIOD_TIME,
-					   250, maximum_usec_per_period);
+					   250, USEC_PER_SEC / 4);
 	if (err < 0)
 		goto end;
 
@@ -258,6 +245,7 @@ int amdtp_stream_add_pcm_hw_constraints(struct amdtp_stream *s,
 				  SNDRV_PCM_HW_PARAM_RATE, -1);
 	if (err < 0)
 		goto end;
+
 	err = snd_pcm_hw_rule_add(runtime, 0, SNDRV_PCM_HW_PARAM_BUFFER_SIZE,
 				  apply_constraint_to_size, NULL,
 				  SNDRV_PCM_HW_PARAM_BUFFER_SIZE,
@@ -615,6 +603,22 @@ static void update_pcm_pointers(struct amdtp_stream *s,
 		// The program in user process should periodically check the status of intermediate
 		// buffer associated to PCM substream to process PCM frames in the buffer, instead
 		// of receiving notification of period elapsed by poll wait.
+		//
+		// Use another work item for period elapsed event to prevent the following AB/BA
+		// deadlock:
+		//
+		//             thread 1                            thread 2
+		// =================================   =================================
+		//       A.work item (process)                pcm ioctl (process)
+		//                 v                                   v
+		//       process_rx_packets()                  B.PCM stream lock
+		//       process_tx_packets()                          v
+		//                 v                        callbacks in snd_pcm_ops
+		//       update_pcm_pointers()                         v
+		//         snd_pcm_elapsed()           fw_iso_context_flush_completions()
+		//  snd_pcm_stream_lock_irqsave()             disable_work_sync()
+		//                 v                                   v
+		//     wait until release of B                wait until A exits
 		if (!pcm->runtime->no_period_wakeup)
 			queue_work(system_highpri_wq, &s->period_work);
 	}
@@ -1055,8 +1059,15 @@ static void generate_rx_packet_descs(struct amdtp_stream *s, struct pkt_desc *de
 
 static inline void cancel_stream(struct amdtp_stream *s)
 {
+	struct work_struct *work = current_work();
+
 	s->packet_index = -1;
-	if (in_softirq())
+
+	// Detect work items for any isochronous context. The work item for pcm_period_work()
+	// should be avoided since the call of snd_pcm_period_elapsed() can reach via
+	// snd_pcm_ops.pointer() under acquiring PCM stream(group) lock and causes dead lock at
+	// snd_pcm_stop_xrun().
+	if (work && work != &s->period_work)
 		amdtp_stream_pcm_abort(s);
 	WRITE_ONCE(s->pcm_buffer_pointer, SNDRV_PCM_POS_XRUN);
 }
@@ -1153,7 +1164,7 @@ static void process_rx_packets(struct fw_iso_context *context, u32 tstamp, size_
 	struct pkt_desc *desc = s->packet_descs_cursor;
 	unsigned int pkt_header_length;
 	unsigned int packets;
-	u32 curr_cycle_time;
+	u32 curr_cycle_time = 0;
 	bool need_hw_irq;
 	int i;
 
@@ -1662,20 +1673,16 @@ static int amdtp_stream_start(struct amdtp_stream *s, int channel, int speed,
 	struct pkt_desc *descs;
 	int i, type, tag, err;
 
-	mutex_lock(&s->mutex);
+	guard(mutex)(&s->mutex);
 
 	if (WARN_ON(amdtp_stream_running(s) ||
-		    (s->data_block_quadlets < 1))) {
-		err = -EBADFD;
-		goto err_unlock;
-	}
+		    (s->data_block_quadlets < 1)))
+		return -EBADFD;
 
 	if (s->direction == AMDTP_IN_STREAM) {
 		// NOTE: IT context should be used for constant IRQ.
-		if (is_irq_target) {
-			err = -EINVAL;
-			goto err_unlock;
-		}
+		if (is_irq_target)
+			return -EINVAL;
 
 		s->data_block_counter = UINT_MAX;
 	} else {
@@ -1693,18 +1700,20 @@ static int amdtp_stream_start(struct amdtp_stream *s, int channel, int speed,
 	} else {
 		dir = DMA_TO_DEVICE;
 		type = FW_ISO_CONTEXT_TRANSMIT;
-		ctx_header_size = 0;	// No effect for IT context.
+		// Although no effect for IT context, this value is required to compute the size
+		// of header storage correctly.
+		ctx_header_size = sizeof(__be32);
 	}
 	max_ctx_payload_size = amdtp_stream_get_max_ctx_payload_size(s);
 
 	err = iso_packets_buffer_init(&s->buffer, s->unit, queue_size, max_ctx_payload_size, dir);
 	if (err < 0)
-		goto err_unlock;
+		return err;
 	s->queue_size = queue_size;
 
-	s->context = fw_iso_context_create(fw_parent_device(s->unit)->card,
-					  type, channel, speed, ctx_header_size,
-					  amdtp_stream_first_callback, s);
+	s->context = fw_iso_context_create_with_header_storage_size(
+			fw_parent_device(s->unit)->card, type, channel, speed, ctx_header_size,
+			ctx_header_size * queue_size, amdtp_stream_first_callback, s);
 	if (IS_ERR(s->context)) {
 		err = PTR_ERR(s->context);
 		if (err == -EBUSY)
@@ -1726,8 +1735,8 @@ static int amdtp_stream_start(struct amdtp_stream *s, int channel, int speed,
 			s->ctx_data.tx.cache.size = max_t(unsigned int, s->syt_interval * 2,
 							  queue_size * 3 / 2);
 			s->ctx_data.tx.cache.pos = 0;
-			s->ctx_data.tx.cache.descs = kcalloc(s->ctx_data.tx.cache.size,
-						sizeof(*s->ctx_data.tx.cache.descs), GFP_KERNEL);
+			s->ctx_data.tx.cache.descs = kzalloc_objs(*s->ctx_data.tx.cache.descs,
+								  s->ctx_data.tx.cache.size);
 			if (!s->ctx_data.tx.cache.descs) {
 				err = -ENOMEM;
 				goto err_context;
@@ -1747,7 +1756,8 @@ static int amdtp_stream_start(struct amdtp_stream *s, int channel, int speed,
 			[CIP_SFC_176400] = {  0,   67 },
 		};
 
-		s->ctx_data.rx.seq.descs = kcalloc(queue_size, sizeof(*s->ctx_data.rx.seq.descs), GFP_KERNEL);
+		s->ctx_data.rx.seq.descs = kzalloc_objs(*s->ctx_data.rx.seq.descs,
+							queue_size);
 		if (!s->ctx_data.rx.seq.descs) {
 			err = -ENOMEM;
 			goto err_context;
@@ -1772,7 +1782,7 @@ static int amdtp_stream_start(struct amdtp_stream *s, int channel, int speed,
 	// for runtime of PCM substream in the interval equivalent to the size of PCM buffer. It
 	// could take a round over queue of AMDTP packet descriptors and small loss of history. For
 	// safe, keep more 8 elements for the queue, equivalent to 1 ms.
-	descs = kcalloc(s->queue_size + 8, sizeof(*descs), GFP_KERNEL);
+	descs = kzalloc_objs(*descs, s->queue_size + 8);
 	if (!descs) {
 		err = -ENOMEM;
 		goto err_context;
@@ -1820,8 +1830,6 @@ static int amdtp_stream_start(struct amdtp_stream *s, int channel, int speed,
 	if (err < 0)
 		goto err_pkt_descs;
 
-	mutex_unlock(&s->mutex);
-
 	return 0;
 err_pkt_descs:
 	kfree(s->packet_descs);
@@ -1837,8 +1845,6 @@ err_context:
 	s->context = ERR_PTR(-1);
 err_buffer:
 	iso_packets_buffer_destroy(&s->buffer, s->unit);
-err_unlock:
-	mutex_unlock(&s->mutex);
 
 	return err;
 }
@@ -1856,12 +1862,9 @@ unsigned long amdtp_domain_stream_pcm_pointer(struct amdtp_domain *d,
 	struct amdtp_stream *irq_target = d->irq_target;
 
 	if (irq_target && amdtp_stream_running(irq_target)) {
-		// use wq to prevent AB/BA deadlock competition for
-		// substream lock:
-		// fw_iso_context_flush_completions() acquires
-		// lock by ohci_flush_iso_completions(),
-		// amdtp-stream process_rx_packets() attempts to
-		// acquire same lock by snd_pcm_elapsed()
+		// The work item to call snd_pcm_period_elapsed() can reach here by the call of
+		// snd_pcm_ops.pointer(), however less packets would be available then. Therefore
+		// the following call is just for user process contexts.
 		if (current_work() != &s->period_work)
 			fw_iso_context_flush_completions(irq_target->context);
 	}
@@ -1911,12 +1914,10 @@ EXPORT_SYMBOL(amdtp_stream_update);
  */
 static void amdtp_stream_stop(struct amdtp_stream *s)
 {
-	mutex_lock(&s->mutex);
+	guard(mutex)(&s->mutex);
 
-	if (!amdtp_stream_running(s)) {
-		mutex_unlock(&s->mutex);
+	if (!amdtp_stream_running(s))
 		return;
-	}
 
 	cancel_work_sync(&s->period_work);
 	fw_iso_context_stop(s->context);
@@ -1932,8 +1933,6 @@ static void amdtp_stream_stop(struct amdtp_stream *s)
 		if (s->domain->replay.enable)
 			kfree(s->ctx_data.tx.cache.descs);
 	}
-
-	mutex_unlock(&s->mutex);
 }
 
 /**

@@ -31,6 +31,7 @@
 #include <linux/if_vlan.h>
 #include <linux/prefetch.h>
 #include <linux/random.h>
+#include <linux/workqueue.h>
 #if IS_ENABLED(CONFIG_VLAN_8021Q)
 #define BCM_VLAN 1
 #endif
@@ -1061,7 +1062,7 @@ static int cnic_alloc_uio_rings(struct cnic_dev *dev, int pages)
 		}
 	}
 
-	udev = kzalloc(sizeof(struct cnic_uio_dev), GFP_ATOMIC);
+	udev = kzalloc_obj(struct cnic_uio_dev, GFP_ATOMIC);
 	if (!udev)
 		return -ENOMEM;
 
@@ -1207,7 +1208,7 @@ static int cnic_alloc_bnx2x_context(struct cnic_dev *dev)
 	if (blks > cp->ethdev->ctx_tbl_len)
 		return -ENOMEM;
 
-	cp->ctx_arr = kcalloc(blks, sizeof(struct cnic_ctx), GFP_KERNEL);
+	cp->ctx_arr = kzalloc_objs(struct cnic_ctx, blks);
 	if (cp->ctx_arr == NULL)
 		return -ENOMEM;
 
@@ -1260,13 +1261,11 @@ static int cnic_alloc_bnx2x_resc(struct cnic_dev *dev)
 			cp->fcoe_init_cid = 0x10;
 	}
 
-	cp->iscsi_tbl = kcalloc(MAX_ISCSI_TBL_SZ, sizeof(struct cnic_iscsi),
-				GFP_KERNEL);
+	cp->iscsi_tbl = kzalloc_objs(struct cnic_iscsi, MAX_ISCSI_TBL_SZ);
 	if (!cp->iscsi_tbl)
 		goto error;
 
-	cp->ctx_tbl = kcalloc(cp->max_cid_space, sizeof(struct cnic_context),
-			      GFP_KERNEL);
+	cp->ctx_tbl = kzalloc_objs(struct cnic_context, cp->max_cid_space);
 	if (!cp->ctx_tbl)
 		goto error;
 
@@ -3015,9 +3014,9 @@ static int cnic_service_bnx2(void *data, void *status_blk)
 	return cnic_service_bnx2_queues(dev);
 }
 
-static void cnic_service_bnx2_msix(struct tasklet_struct *t)
+static void cnic_service_bnx2_msix(struct work_struct *work)
 {
-	struct cnic_local *cp = from_tasklet(cp, t, cnic_irq_task);
+	struct cnic_local *cp = from_work(cp, work, cnic_irq_bh_work);
 	struct cnic_dev *dev = cp->dev;
 
 	cp->last_status_idx = cnic_service_bnx2_queues(dev);
@@ -3036,7 +3035,7 @@ static void cnic_doirq(struct cnic_dev *dev)
 		prefetch(cp->status_blk.gen);
 		prefetch(&cp->kcq1.kcq[KCQ_PG(prod)][KCQ_IDX(prod)]);
 
-		tasklet_schedule(&cp->cnic_irq_task);
+		queue_work(system_bh_wq, &cp->cnic_irq_bh_work);
 	}
 }
 
@@ -3140,9 +3139,9 @@ static u32 cnic_service_bnx2x_kcq(struct cnic_dev *dev, struct kcq_info *info)
 	return last_status;
 }
 
-static void cnic_service_bnx2x_bh(struct tasklet_struct *t)
+static void cnic_service_bnx2x_bh_work(struct work_struct *work)
 {
-	struct cnic_local *cp = from_tasklet(cp, t, cnic_irq_task);
+	struct cnic_local *cp = from_work(cp, work, cnic_irq_bh_work);
 	struct cnic_dev *dev = cp->dev;
 	struct bnx2x *bp = netdev_priv(dev->netdev);
 	u32 status_idx, new_status_idx;
@@ -4104,8 +4103,7 @@ static int cnic_cm_alloc_mem(struct cnic_dev *dev)
 	u32 port_id;
 	int i;
 
-	cp->csk_tbl = kvcalloc(MAX_CM_SK_TBL_SZ, sizeof(struct cnic_sock),
-			       GFP_KERNEL);
+	cp->csk_tbl = kvzalloc_objs(struct cnic_sock, MAX_CM_SK_TBL_SZ);
 	if (!cp->csk_tbl)
 		return -ENOMEM;
 
@@ -4229,8 +4227,7 @@ static void cnic_cm_stop_bnx2x_hw(struct cnic_dev *dev)
 
 	cnic_bnx2x_delete_wait(dev, 0);
 
-	cancel_delayed_work(&cp->delete_task);
-	flush_workqueue(cnic_wq);
+	cancel_delayed_work_sync(&cp->delete_task);
 
 	if (atomic_read(&cp->iscsi_conn) != 0)
 		netdev_warn(dev->netdev, "%d iSCSI connections not destroyed\n",
@@ -4428,7 +4425,7 @@ static void cnic_free_irq(struct cnic_dev *dev)
 
 	if (ethdev->drv_state & CNIC_DRV_STATE_USING_MSIX) {
 		cp->disable_int_sync(dev);
-		tasklet_kill(&cp->cnic_irq_task);
+		cancel_work_sync(&cp->cnic_irq_bh_work);
 		free_irq(ethdev->irq_arr[0].vector, dev);
 	}
 }
@@ -4441,7 +4438,7 @@ static int cnic_request_irq(struct cnic_dev *dev)
 
 	err = request_irq(ethdev->irq_arr[0].vector, cnic_irq, 0, "cnic", dev);
 	if (err)
-		tasklet_disable(&cp->cnic_irq_task);
+		disable_work_sync(&cp->cnic_irq_bh_work);
 
 	return err;
 }
@@ -4464,7 +4461,7 @@ static int cnic_init_bnx2_irq(struct cnic_dev *dev)
 		CNIC_WR(dev, base + BNX2_HC_CMD_TICKS_OFF, (64 << 16) | 220);
 
 		cp->last_status_idx = cp->status_blk.bnx2->status_idx;
-		tasklet_setup(&cp->cnic_irq_task, cnic_service_bnx2_msix);
+		INIT_WORK(&cp->cnic_irq_bh_work, cnic_service_bnx2_msix);
 		err = cnic_request_irq(dev);
 		if (err)
 			return err;
@@ -4873,7 +4870,7 @@ static int cnic_init_bnx2x_irq(struct cnic_dev *dev)
 	struct cnic_eth_dev *ethdev = cp->ethdev;
 	int err = 0;
 
-	tasklet_setup(&cp->cnic_irq_task, cnic_service_bnx2x_bh);
+	INIT_WORK(&cp->cnic_irq_bh_work, cnic_service_bnx2x_bh_work);
 	if (ethdev->drv_state & CNIC_DRV_STATE_USING_MSIX)
 		err = cnic_request_irq(dev);
 

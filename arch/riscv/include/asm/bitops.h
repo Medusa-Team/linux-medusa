@@ -11,11 +11,10 @@
 #endif /* _LINUX_BITOPS_H */
 
 #include <linux/compiler.h>
-#include <linux/irqflags.h>
 #include <asm/barrier.h>
 #include <asm/bitsperlong.h>
 
-#if !defined(CONFIG_RISCV_ISA_ZBB) || defined(NO_ALTERNATIVE)
+#if !(defined(CONFIG_RISCV_ISA_ZBB) && defined(CONFIG_TOOLCHAIN_HAS_ZBB)) || defined(NO_ALTERNATIVE)
 #include <asm-generic/bitops/__ffs.h>
 #include <asm-generic/bitops/__fls.h>
 #include <asm-generic/bitops/ffs.h>
@@ -45,11 +44,10 @@
 #error "Unexpected BITS_PER_LONG"
 #endif
 
-static __always_inline unsigned long variable__ffs(unsigned long word)
+static __always_inline __attribute_const__ unsigned long variable__ffs(unsigned long word)
 {
-	asm goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
-				      RISCV_ISA_EXT_ZBB, 1)
-			  : : : : legacy);
+	if (!riscv_has_extension_likely(RISCV_ISA_EXT_ZBB))
+		return generic___ffs(word);
 
 	asm volatile (".option push\n"
 		      ".option arch,+zbb\n"
@@ -58,9 +56,6 @@ static __always_inline unsigned long variable__ffs(unsigned long word)
 		      : "=r" (word) : "r" (word) :);
 
 	return word;
-
-legacy:
-	return generic___ffs(word);
 }
 
 /**
@@ -74,11 +69,10 @@ legacy:
 	 (unsigned long)__builtin_ctzl(word) :	\
 	 variable__ffs(word))
 
-static __always_inline unsigned long variable__fls(unsigned long word)
+static __always_inline __attribute_const__ unsigned long variable__fls(unsigned long word)
 {
-	asm goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
-				      RISCV_ISA_EXT_ZBB, 1)
-			  : : : : legacy);
+	if (!riscv_has_extension_likely(RISCV_ISA_EXT_ZBB))
+		return generic___fls(word);
 
 	asm volatile (".option push\n"
 		      ".option arch,+zbb\n"
@@ -87,9 +81,6 @@ static __always_inline unsigned long variable__fls(unsigned long word)
 		      : "=r" (word) : "r" (word) :);
 
 	return BITS_PER_LONG - 1 - word;
-
-legacy:
-	return generic___fls(word);
 }
 
 /**
@@ -103,11 +94,10 @@ legacy:
 	 (unsigned long)(BITS_PER_LONG - 1 - __builtin_clzl(word)) :	\
 	 variable__fls(word))
 
-static __always_inline int variable_ffs(int x)
+static __always_inline __attribute_const__ int variable_ffs(int x)
 {
-	asm goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
-				      RISCV_ISA_EXT_ZBB, 1)
-			  : : : : legacy);
+	if (!riscv_has_extension_likely(RISCV_ISA_EXT_ZBB))
+		return generic_ffs(x);
 
 	if (!x)
 		return 0;
@@ -119,9 +109,6 @@ static __always_inline int variable_ffs(int x)
 		      : "=r" (x) : "r" (x) :);
 
 	return x + 1;
-
-legacy:
-	return generic_ffs(x);
 }
 
 /**
@@ -137,9 +124,8 @@ legacy:
 
 static __always_inline int variable_fls(unsigned int x)
 {
-	asm goto(ALTERNATIVE("j %l[legacy]", "nop", 0,
-				      RISCV_ISA_EXT_ZBB, 1)
-			  : : : : legacy);
+	if (!riscv_has_extension_likely(RISCV_ISA_EXT_ZBB))
+		return generic_fls(x);
 
 	if (!x)
 		return 0;
@@ -151,9 +137,6 @@ static __always_inline int variable_fls(unsigned int x)
 		      : "=r" (x) : "r" (x) :);
 
 	return 32 - x;
-
-legacy:
-	return generic_fls(x);
 }
 
 /**
@@ -175,7 +158,7 @@ legacy:
 	 variable_fls(x_);					\
 })
 
-#endif /* !defined(CONFIG_RISCV_ISA_ZBB) || defined(NO_ALTERNATIVE) */
+#endif /* !(defined(CONFIG_RISCV_ISA_ZBB) && defined(CONFIG_TOOLCHAIN_HAS_ZBB)) || defined(NO_ALTERNATIVE) */
 
 #include <asm-generic/bitops/ffz.h>
 #include <asm-generic/bitops/fls64.h>
@@ -222,44 +205,44 @@ legacy:
 #define __NOT(x)	(~(x))
 
 /**
- * test_and_set_bit - Set a bit and return its old value
+ * arch_test_and_set_bit - Set a bit and return its old value
  * @nr: Bit to set
  * @addr: Address to count from
  *
- * This operation may be reordered on other architectures than x86.
+ * This is an atomic fully-ordered operation (implied full memory barrier).
  */
-static inline int test_and_set_bit(int nr, volatile unsigned long *addr)
+static __always_inline int arch_test_and_set_bit(int nr, volatile unsigned long *addr)
 {
 	return __test_and_op_bit(or, __NOP, nr, addr);
 }
 
 /**
- * test_and_clear_bit - Clear a bit and return its old value
+ * arch_test_and_clear_bit - Clear a bit and return its old value
  * @nr: Bit to clear
  * @addr: Address to count from
  *
- * This operation can be reordered on other architectures other than x86.
+ * This is an atomic fully-ordered operation (implied full memory barrier).
  */
-static inline int test_and_clear_bit(int nr, volatile unsigned long *addr)
+static __always_inline int arch_test_and_clear_bit(int nr, volatile unsigned long *addr)
 {
 	return __test_and_op_bit(and, __NOT, nr, addr);
 }
 
 /**
- * test_and_change_bit - Change a bit and return its old value
+ * arch_test_and_change_bit - Change a bit and return its old value
  * @nr: Bit to change
  * @addr: Address to count from
  *
  * This operation is atomic and cannot be reordered.
  * It also implies a memory barrier.
  */
-static inline int test_and_change_bit(int nr, volatile unsigned long *addr)
+static __always_inline int arch_test_and_change_bit(int nr, volatile unsigned long *addr)
 {
 	return __test_and_op_bit(xor, __NOP, nr, addr);
 }
 
 /**
- * set_bit - Atomically set a bit in memory
+ * arch_set_bit - Atomically set a bit in memory
  * @nr: the bit to set
  * @addr: the address to start counting from
  *
@@ -270,13 +253,13 @@ static inline int test_and_change_bit(int nr, volatile unsigned long *addr)
  * Note that @nr may be almost arbitrarily large; this function is not
  * restricted to acting on a single-word quantity.
  */
-static inline void set_bit(int nr, volatile unsigned long *addr)
+static __always_inline void arch_set_bit(int nr, volatile unsigned long *addr)
 {
 	__op_bit(or, __NOP, nr, addr);
 }
 
 /**
- * clear_bit - Clears a bit in memory
+ * arch_clear_bit - Clears a bit in memory
  * @nr: Bit to clear
  * @addr: Address to start counting from
  *
@@ -284,13 +267,13 @@ static inline void set_bit(int nr, volatile unsigned long *addr)
  * on non x86 architectures, so if you are writing portable code,
  * make sure not to rely on its reordering guarantees.
  */
-static inline void clear_bit(int nr, volatile unsigned long *addr)
+static __always_inline void arch_clear_bit(int nr, volatile unsigned long *addr)
 {
 	__op_bit(and, __NOT, nr, addr);
 }
 
 /**
- * change_bit - Toggle a bit in memory
+ * arch_change_bit - Toggle a bit in memory
  * @nr: Bit to change
  * @addr: Address to start counting from
  *
@@ -298,40 +281,40 @@ static inline void clear_bit(int nr, volatile unsigned long *addr)
  * Note that @nr may be almost arbitrarily large; this function is not
  * restricted to acting on a single-word quantity.
  */
-static inline void change_bit(int nr, volatile unsigned long *addr)
+static __always_inline void arch_change_bit(int nr, volatile unsigned long *addr)
 {
 	__op_bit(xor, __NOP, nr, addr);
 }
 
 /**
- * test_and_set_bit_lock - Set a bit and return its old value, for lock
+ * arch_test_and_set_bit_lock - Set a bit and return its old value, for lock
  * @nr: Bit to set
  * @addr: Address to count from
  *
  * This operation is atomic and provides acquire barrier semantics.
  * It can be used to implement bit locks.
  */
-static inline int test_and_set_bit_lock(
+static __always_inline int arch_test_and_set_bit_lock(
 	unsigned long nr, volatile unsigned long *addr)
 {
 	return __test_and_op_bit_ord(or, __NOP, nr, addr, .aq);
 }
 
 /**
- * clear_bit_unlock - Clear a bit in memory, for unlock
+ * arch_clear_bit_unlock - Clear a bit in memory, for unlock
  * @nr: the bit to set
  * @addr: the address to start counting from
  *
  * This operation is atomic and provides release barrier semantics.
  */
-static inline void clear_bit_unlock(
+static __always_inline void arch_clear_bit_unlock(
 	unsigned long nr, volatile unsigned long *addr)
 {
 	__op_bit_ord(and, __NOT, nr, addr, .rl);
 }
 
 /**
- * __clear_bit_unlock - Clear a bit in memory, for unlock
+ * arch___clear_bit_unlock - Clear a bit in memory, for unlock
  * @nr: the bit to set
  * @addr: the address to start counting from
  *
@@ -345,13 +328,13 @@ static inline void clear_bit_unlock(
  * non-atomic property here: it's a lot more instructions and we still have to
  * provide release semantics anyway.
  */
-static inline void __clear_bit_unlock(
+static __always_inline void arch___clear_bit_unlock(
 	unsigned long nr, volatile unsigned long *addr)
 {
-	clear_bit_unlock(nr, addr);
+	arch_clear_bit_unlock(nr, addr);
 }
 
-static inline bool xor_unlock_is_negative_byte(unsigned long mask,
+static __always_inline bool arch_xor_unlock_is_negative_byte(unsigned long mask,
 		volatile unsigned long *addr)
 {
 	unsigned long res;
@@ -368,6 +351,9 @@ static inline bool xor_unlock_is_negative_byte(unsigned long mask,
 #undef __NOP
 #undef __NOT
 #undef __AMO
+
+#include <asm-generic/bitops/instrumented-atomic.h>
+#include <asm-generic/bitops/instrumented-lock.h>
 
 #include <asm-generic/bitops/non-atomic.h>
 #include <asm-generic/bitops/le.h>

@@ -2,7 +2,7 @@
 // Copyright (c) 2012-2017 ASPEED Technology Inc.
 // Copyright (c) 2018-2021 Intel Corporation
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <linux/bitfield.h>
 #include <linux/clk.h>
@@ -362,12 +362,14 @@ static int clk_aspeed_peci_set_rate(struct clk_hw *hw, unsigned long rate,
 	return 0;
 }
 
-static long clk_aspeed_peci_round_rate(struct clk_hw *hw, unsigned long rate,
-				       unsigned long *prate)
+static int clk_aspeed_peci_determine_rate(struct clk_hw *hw,
+					  struct clk_rate_request *req)
 {
-	int div = clk_aspeed_peci_get_div(rate, prate);
+	int div = clk_aspeed_peci_get_div(req->rate, &req->best_parent_rate);
 
-	return DIV_ROUND_UP_ULL(*prate, div);
+	req->rate = DIV_ROUND_UP_ULL(req->best_parent_rate, div);
+
+	return 0;
 }
 
 static unsigned long clk_aspeed_peci_recalc_rate(struct clk_hw *hw, unsigned long prate)
@@ -394,7 +396,7 @@ static unsigned long clk_aspeed_peci_recalc_rate(struct clk_hw *hw, unsigned lon
 
 static const struct clk_ops clk_aspeed_peci_ops = {
 	.set_rate = clk_aspeed_peci_set_rate,
-	.round_rate = clk_aspeed_peci_round_rate,
+	.determine_rate = clk_aspeed_peci_determine_rate,
 	.recalc_rate = clk_aspeed_peci_recalc_rate,
 };
 
@@ -597,4 +599,4 @@ MODULE_AUTHOR("Ryan Chen <ryan_chen@aspeedtech.com>");
 MODULE_AUTHOR("Jae Hyun Yoo <jae.hyun.yoo@linux.intel.com>");
 MODULE_DESCRIPTION("ASPEED PECI driver");
 MODULE_LICENSE("GPL");
-MODULE_IMPORT_NS(PECI);
+MODULE_IMPORT_NS("PECI");

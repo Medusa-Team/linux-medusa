@@ -7,6 +7,8 @@
 #include "test_unpriv_bpf_disabled.skel.h"
 
 #include "cap_helpers.h"
+#include "bpf_util.h"
+#include "sysctl_helpers.h"
 
 /* Using CAP_LAST_CAP is risky here, since it can get pulled in from
  * an old /usr/include/linux/capability.h and be < CAP_BPF; as a result
@@ -33,26 +35,6 @@ static void process_perfbuf(void *ctx, int cpu, void *data, __u32 len)
 {
 	if (ASSERT_EQ(len, sizeof(__u32), "perfbuf_size_valid"))
 		got_perfbuf_val = *(__u32 *)data;
-}
-
-static int sysctl_set(const char *sysctl_path, char *old_val, const char *new_val)
-{
-	int ret = 0;
-	FILE *fp;
-
-	fp = fopen(sysctl_path, "r+");
-	if (!fp)
-		return -errno;
-	if (old_val && fscanf(fp, "%s", old_val) <= 0) {
-		ret = -ENOENT;
-	} else if (!old_val || strcmp(old_val, new_val) != 0) {
-		fseek(fp, 0, SEEK_SET);
-		if (fprintf(fp, "%s", new_val) < 0)
-			ret = -errno;
-	}
-	fclose(fp);
-
-	return ret;
 }
 
 static void test_unpriv_bpf_disabled_positive(struct test_unpriv_bpf_disabled *skel,
@@ -146,7 +128,7 @@ static void test_unpriv_bpf_disabled_negative(struct test_unpriv_bpf_disabled *s
 		BPF_MOV64_IMM(BPF_REG_0, 0),
 		BPF_EXIT_INSN(),
 	};
-	const size_t prog_insn_cnt = sizeof(prog_insns) / sizeof(struct bpf_insn);
+	const size_t prog_insn_cnt = ARRAY_SIZE(prog_insns);
 	LIBBPF_OPTS(bpf_prog_load_opts, load_opts);
 	struct bpf_map_info map_info = {};
 	__u32 map_info_len = sizeof(map_info);

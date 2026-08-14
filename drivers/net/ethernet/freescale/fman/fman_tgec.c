@@ -505,7 +505,7 @@ static int tgec_add_hash_mac_address(struct fman_mac *tgec,
 	hash = (crc >> TGEC_HASH_MCAST_SHIFT) & TGEC_HASH_ADR_MSK;
 
 	/* Create element to be added to the driver hash table */
-	hash_entry = kmalloc(sizeof(*hash_entry), GFP_ATOMIC);
+	hash_entry = kmalloc_obj(*hash_entry, GFP_ATOMIC);
 	if (!hash_entry)
 		return -ENOMEM;
 	hash_entry->addr = addr;
@@ -711,12 +711,12 @@ static struct fman_mac *tgec_config(struct mac_device *mac_dev,
 	struct tgec_cfg *cfg;
 
 	/* allocate memory for the UCC GETH data structure. */
-	tgec = kzalloc(sizeof(*tgec), GFP_KERNEL);
+	tgec = kzalloc_obj(*tgec);
 	if (!tgec)
 		return NULL;
 
 	/* allocate memory for the 10G MAC driver parameters data structure. */
-	cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+	cfg = kzalloc_obj(*cfg);
 	if (!cfg) {
 		tgec_free(tgec);
 		return NULL;
@@ -771,7 +771,6 @@ int tgec_initialization(struct mac_device *mac_dev,
 	mac_dev->set_exception		= tgec_set_exception;
 	mac_dev->set_allmulti		= tgec_set_allmulti;
 	mac_dev->set_tstamp		= tgec_set_tstamp;
-	mac_dev->set_multi		= fman_set_multi;
 	mac_dev->enable			= tgec_enable;
 	mac_dev->disable		= tgec_disable;
 

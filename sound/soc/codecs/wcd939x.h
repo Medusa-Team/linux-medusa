@@ -842,27 +842,14 @@
 #define WCD939X_DSD_HPHR_CFG5				   (0x35a6)
 #define WCD939X_MAX_REGISTER				   (WCD939X_DSD_HPHR_CFG5)
 
-#define WCD939X_MAX_SWR_PORTS		(6)
-#define WCD939X_MAX_RX_SWR_PORTS	(6)
-#define WCD939X_MAX_TX_SWR_PORTS	(4)
 #define WCD939X_MAX_SWR_CH_IDS		(15)
-
-struct wcd939x_sdw_ch_info {
-	int port_num;
-	unsigned int ch_mask;
-};
-
-#define WCD_SDW_CH(id, pn, cmask)	\
-	[id] = {			\
-		.port_num = pn,		\
-		.ch_mask = cmask,	\
-	}
 
 enum wcd939x_tx_sdw_ports {
 	WCD939X_ADC_1_4_PORT = 1,
 	WCD939X_ADC_DMIC_1_2_PORT,
 	WCD939X_DMIC_0_3_MBHC_PORT,
 	WCD939X_DMIC_3_7_PORT,
+	WCD939X_MAX_TX_SWR_PORTS = WCD939X_DMIC_3_7_PORT,
 };
 
 enum wcd939x_tx_sdw_channels {
@@ -888,6 +875,8 @@ enum wcd939x_rx_sdw_ports {
 	WCD939X_LO_PORT,
 	WCD939X_DSD_PORT,
 	WCD939X_HIFI_PCM_PORT,
+	WCD939X_MAX_RX_SWR_PORTS = WCD939X_HIFI_PCM_PORT,
+	WCD939X_MAX_SWR_PORTS = WCD939X_MAX_RX_SWR_PORTS,
 };
 
 enum wcd939x_rx_sdw_channels {
@@ -909,7 +898,7 @@ struct wcd939x_sdw_priv {
 	struct sdw_stream_config sconfig;
 	struct sdw_stream_runtime *sruntime;
 	struct sdw_port_config port_config[WCD939X_MAX_SWR_PORTS];
-	const struct wcd939x_sdw_ch_info *ch_info;
+	const struct wcd_sdw_ch_info *ch_info;
 	bool port_enable[WCD939X_MAX_SWR_CH_IDS];
 	int active_ports;
 	bool is_tx;
@@ -929,11 +918,6 @@ int wcd939x_sdw_hw_params(struct wcd939x_sdw_priv *wcd,
 			  struct snd_pcm_substream *substream,
 			  struct snd_pcm_hw_params *params,
 			  struct snd_soc_dai *dai);
-
-struct device *wcd939x_sdw_device_get(struct device_node *np);
-unsigned int wcd939x_swr_get_current_bank(struct sdw_slave *sdev);
-
-struct regmap *wcd939x_swr_get_regmap(struct wcd939x_sdw_priv *wcd);
 #else
 
 static inline int wcd939x_sdw_free(struct wcd939x_sdw_priv *wcd,
@@ -958,20 +942,6 @@ static inline int wcd939x_sdw_hw_params(struct wcd939x_sdw_priv *wcd,
 	return -EOPNOTSUPP;
 }
 
-static inline struct device *wcd939x_sdw_device_get(struct device_node *np)
-{
-	return NULL;
-}
-
-static inline unsigned int wcd939x_swr_get_current_bank(struct sdw_slave *sdev)
-{
-	return 0;
-}
-
-struct regmap *wcd939x_swr_get_regmap(struct wcd939x_sdw_priv *wcd)
-{
-	return PTR_ERR(-EINVAL);
-}
 #endif /* CONFIG_SND_SOC_WCD939X_SDW */
 
 #endif /* __WCD939X_H__ */

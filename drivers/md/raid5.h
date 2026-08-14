@@ -358,7 +358,6 @@ enum {
 	STRIPE_REPLACED,
 	STRIPE_PREREAD_ACTIVE,
 	STRIPE_DELAYED,
-	STRIPE_DEGRADED,
 	STRIPE_BIT_DELAY,
 	STRIPE_EXPANDING,
 	STRIPE_EXPAND_SOURCE,
@@ -372,9 +371,6 @@ enum {
 	STRIPE_ON_RELEASE_LIST,
 	STRIPE_BATCH_READY,
 	STRIPE_BATCH_ERR,
-	STRIPE_BITMAP_PENDING,	/* Being added to bitmap, don't add
-				 * to batch yet.
-				 */
 	STRIPE_LOG_TRAPPED,	/* trapped into log (see raid5-cache.c)
 				 * this bit is used in two scenarios:
 				 *
@@ -633,7 +629,7 @@ struct r5conf {
 	 * two caches.
 	 */
 	int			active_name;
-	char			cache_name[2][32];
+	char			cache_name[2][48];
 	struct kmem_cache	*slab_cache; /* for allocating stripes */
 	struct mutex		cache_size_mutex; /* Protect changes to cache size */
 
@@ -644,7 +640,6 @@ struct r5conf {
 					    * (fresh device added).
 					    * Cleared when a sync completes.
 					    */
-	int			recovery_disabled;
 	/* per cpu variables */
 	struct raid5_percpu __percpu *percpu;
 	int scribble_disks;
@@ -668,7 +663,7 @@ struct r5conf {
 	struct llist_head	released_stripes;
 	wait_queue_head_t	wait_for_quiescent;
 	wait_queue_head_t	wait_for_stripe;
-	wait_queue_head_t	wait_for_overlap;
+	wait_queue_head_t	wait_for_reshape;
 	unsigned long		cache_state;
 	struct shrinker		*shrinker;
 	int			pool_size; /* number of disks in stripeheads in pool */
@@ -694,6 +689,9 @@ struct r5conf {
 	struct list_head	pending_list;
 	int			pending_data_cnt;
 	struct r5pending_data	*next_pending_data;
+
+	mempool_t		*ctx_pool;
+	int			ctx_size;
 };
 
 #if PAGE_SIZE == DEFAULT_STRIPE_SIZE
@@ -803,7 +801,6 @@ raid5_get_dev_page(struct stripe_head *sh, int disk_idx)
 }
 #endif
 
-void md_raid5_kick_device(struct r5conf *conf);
 int raid5_set_cache_size(struct mddev *mddev, int size);
 sector_t raid5_compute_blocknr(struct stripe_head *sh, int i, int previous);
 void raid5_release_stripe(struct stripe_head *sh);

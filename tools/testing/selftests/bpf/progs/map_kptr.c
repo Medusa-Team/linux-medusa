@@ -2,7 +2,7 @@
 #include <vmlinux.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_helpers.h>
-#include "../bpf_testmod/bpf_testmod_kfunc.h"
+#include "../test_kmods/bpf_testmod_kfunc.h"
 
 struct map_value {
 	struct prog_test_ref_kfunc __kptr_untrusted *unref_ptr;
@@ -484,6 +484,24 @@ int test_map_kptr_ref3(struct __sk_buff *ctx)
 	}
 	bpf_kfunc_call_test_release(p);
 	ref--;
+	return 0;
+}
+
+int num_of_refs;
+
+SEC("syscall")
+int count_ref(void *ctx)
+{
+	struct prog_test_ref_kfunc *p;
+	unsigned long arg = 0;
+
+	p = bpf_kfunc_call_test_acquire(&arg);
+	if (!p)
+		return 1;
+
+	num_of_refs = p->cnt.refs.counter;
+
+	bpf_kfunc_call_test_release(p);
 	return 0;
 }
 

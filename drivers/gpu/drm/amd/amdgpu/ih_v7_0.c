@@ -279,6 +279,23 @@ static int ih_v7_0_enable_ring(struct amdgpu_device *adev,
 	return 0;
 }
 
+static uint32_t ih_v7_0_setup_retry_doorbell(u32 doorbell_index)
+{
+	u32 val = 0;
+
+	val = REG_SET_FIELD(val, IH_DOORBELL_RPTR, OFFSET, doorbell_index);
+	val = REG_SET_FIELD(val, IH_DOORBELL_RPTR, ENABLE, 1);
+
+	return val;
+}
+
+#define regIH_RING1_CLIENT_CFG_INDEX_V7_1             0x122
+#define regIH_RING1_CLIENT_CFG_INDEX_V7_1_BASE_IDX    0
+#define regIH_RING1_CLIENT_CFG_DATA_V7_1              0x123
+#define regIH_RING1_CLIENT_CFG_DATA_V7_1_BASE_IDX     0
+#define regIH_CHICKEN_V7_1                            0x129
+#define regIH_CHICKEN_V7_1_BASE_IDX                   0
+
 /**
  * ih_v7_0_irq_init - init and enable the interrupt ring
  *
@@ -297,6 +314,7 @@ static int ih_v7_0_irq_init(struct amdgpu_device *adev)
 	u32 tmp;
 	int ret;
 	int i;
+	u32 reg_addr;
 
 	/* disable irqs */
 	ret = ih_v7_0_toggle_interrupts(adev, false);
@@ -308,10 +326,15 @@ static int ih_v7_0_irq_init(struct amdgpu_device *adev)
 	if (unlikely((adev->firmware.load_type == AMDGPU_FW_LOAD_DIRECT) ||
 		     (adev->firmware.load_type == AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO))) {
 		if (ih[0]->use_bus_addr) {
-			ih_chicken = RREG32_SOC15(OSSSYS, 0, regIH_CHICKEN);
+			if (amdgpu_ip_version(adev, OSSSYS_HWIP, 0) == IP_VERSION(7, 1, 0))
+				reg_addr = SOC15_REG_OFFSET(OSSSYS, 0, regIH_CHICKEN_V7_1);
+			else
+				reg_addr = SOC15_REG_OFFSET(OSSSYS, 0, regIH_CHICKEN);
+			ih_chicken = RREG32(reg_addr);
+			/* The reg fields definitions are identical in ih v7_0 and ih v7_1 */
 			ih_chicken = REG_SET_FIELD(ih_chicken,
 					IH_CHICKEN, MC_SPACE_GPA_ENABLE, 1);
-			WREG32_SOC15(OSSSYS, 0, regIH_CHICKEN, ih_chicken);
+			WREG32(reg_addr, ih_chicken);
 		}
 	}
 
@@ -348,20 +371,44 @@ static int ih_v7_0_irq_init(struct amdgpu_device *adev)
 
 	/* Redirect the interrupts to IH RB1 for dGPU */
 	if (adev->irq.ih1.ring_size) {
-		tmp = RREG32_SOC15(OSSSYS, 0, regIH_RING1_CLIENT_CFG_INDEX);
+		if (amdgpu_ip_version(adev, OSSSYS_HWIP, 0) == IP_VERSION(7, 1, 0))
+			reg_addr = SOC15_REG_OFFSET(OSSSYS, 0, regIH_RING1_CLIENT_CFG_INDEX_V7_1);
+		else
+			reg_addr = SOC15_REG_OFFSET(OSSSYS, 0, regIH_RING1_CLIENT_CFG_INDEX);
+		tmp = RREG32(reg_addr);
+		/* The reg fields definitions are identical in ih v7_0 and ih v7_1 */
 		tmp = REG_SET_FIELD(tmp, IH_RING1_CLIENT_CFG_INDEX, INDEX, 0);
-		WREG32_SOC15(OSSSYS, 0, regIH_RING1_CLIENT_CFG_INDEX, tmp);
+		WREG32(reg_addr, tmp);
 
-		tmp = RREG32_SOC15(OSSSYS, 0, regIH_RING1_CLIENT_CFG_DATA);
+		if (amdgpu_ip_version(adev, OSSSYS_HWIP, 0) == IP_VERSION(7, 1, 0))
+			reg_addr = SOC15_REG_OFFSET(OSSSYS, 0, regIH_RING1_CLIENT_CFG_DATA_V7_1);
+		else
+			reg_addr = SOC15_REG_OFFSET(OSSSYS, 0, regIH_RING1_CLIENT_CFG_DATA);
+		tmp = RREG32(reg_addr);
+		/* The reg fields definitions are identical in ih v7_0 and ih v7_1 */
 		tmp = REG_SET_FIELD(tmp, IH_RING1_CLIENT_CFG_DATA, CLIENT_ID, 0xa);
 		tmp = REG_SET_FIELD(tmp, IH_RING1_CLIENT_CFG_DATA, SOURCE_ID, 0x0);
 		tmp = REG_SET_FIELD(tmp, IH_RING1_CLIENT_CFG_DATA,
 				    SOURCE_ID_MATCH_ENABLE, 0x1);
-
-		WREG32_SOC15(OSSSYS, 0, regIH_RING1_CLIENT_CFG_DATA, tmp);
+		WREG32(reg_addr, tmp);
 	}
 
 	pci_set_master(adev->pdev);
+
+	if (amdgpu_ip_version(adev, OSSSYS_HWIP, 0) == IP_VERSION(7, 1, 0)) {
+		/* Allocate the doorbell for IH Retry CAM */
+		adev->irq.retry_cam_doorbell_index = (adev->doorbell_index.ih + 2) << 1;
+		WREG32_SOC15(OSSSYS, 0, regIH_DOORBELL_RETRY_CAM,
+				ih_v7_0_setup_retry_doorbell(adev->irq.retry_cam_doorbell_index));
+
+		/* Enable IH Retry CAM */
+		tmp = RREG32_SOC15(OSSSYS, 0, regIH_RETRY_INT_CAM_CNTL);
+		tmp = REG_SET_FIELD(tmp, IH_RETRY_INT_CAM_CNTL, ENABLE, 1);
+		tmp = REG_SET_FIELD(tmp, IH_RETRY_INT_CAM_CNTL, CAM_SIZE, 0xF);
+		WREG32_SOC15(OSSSYS, 0, regIH_RETRY_INT_CAM_CNTL, tmp);
+
+		adev->irq.retry_cam_enabled = true;
+	}
 
 	/* enable interrupts */
 	ret = ih_v7_0_toggle_interrupts(adev, true);
@@ -528,20 +575,21 @@ static void ih_v7_0_set_self_irq_funcs(struct amdgpu_device *adev)
 	adev->irq.self_irq.funcs = &ih_v7_0_self_irq_funcs;
 }
 
-static int ih_v7_0_early_init(void *handle)
+static int ih_v7_0_early_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	ih_v7_0_set_interrupt_funcs(adev);
 	ih_v7_0_set_self_irq_funcs(adev);
 	return 0;
 }
 
-static int ih_v7_0_sw_init(void *handle)
+static int ih_v7_0_sw_init(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	bool use_bus_addr;
+	unsigned int sw_ring_size;
 
 	r = amdgpu_irq_add_id(adev, SOC21_IH_CLIENTID_IH, 0,
 			      &adev->irq.self_irq);
@@ -552,8 +600,7 @@ static int ih_v7_0_sw_init(void *handle)
 	/* use gpu virtual address for ih ring
 	 * until ih_checken is programmed to allow
 	 * use bus address for ih ring by psp bl */
-	use_bus_addr =
-		(adev->firmware.load_type == AMDGPU_FW_LOAD_PSP) ? false : true;
+	use_bus_addr = adev->firmware.load_type != AMDGPU_FW_LOAD_PSP;
 	r = amdgpu_ih_ring_init(adev, &adev->irq.ih, 256 * 1024, use_bus_addr);
 	if (r)
 		return r;
@@ -574,7 +621,9 @@ static int ih_v7_0_sw_init(void *handle)
 	/* initialize ih control register offset */
 	ih_v7_0_init_register_offset(adev);
 
-	r = amdgpu_ih_ring_init(adev, &adev->irq.ih_soft, PAGE_SIZE, true);
+	sw_ring_size = (amdgpu_ip_version(adev, OSSSYS_HWIP, 0) == IP_VERSION(7, 1, 0)) ?
+			IH_SW_RING_SIZE : PAGE_SIZE;
+	r = amdgpu_ih_ring_init(adev, &adev->irq.ih_soft, sw_ring_size, true);
 	if (r)
 		return r;
 
@@ -583,19 +632,19 @@ static int ih_v7_0_sw_init(void *handle)
 	return r;
 }
 
-static int ih_v7_0_sw_fini(void *handle)
+static int ih_v7_0_sw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	amdgpu_irq_fini_sw(adev);
 
 	return 0;
 }
 
-static int ih_v7_0_hw_init(void *handle)
+static int ih_v7_0_hw_init(struct amdgpu_ip_block *ip_block)
 {
 	int r;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	r = ih_v7_0_irq_init(adev);
 	if (r)
@@ -604,42 +653,36 @@ static int ih_v7_0_hw_init(void *handle)
 	return 0;
 }
 
-static int ih_v7_0_hw_fini(void *handle)
+static int ih_v7_0_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	ih_v7_0_irq_disable(adev);
+	ih_v7_0_irq_disable(ip_block->adev);
 
 	return 0;
 }
 
-static int ih_v7_0_suspend(void *handle)
+static int ih_v7_0_suspend(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return ih_v7_0_hw_fini(adev);
+	return ih_v7_0_hw_fini(ip_block);
 }
 
-static int ih_v7_0_resume(void *handle)
+static int ih_v7_0_resume(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	return ih_v7_0_hw_init(adev);
+	return ih_v7_0_hw_init(ip_block);
 }
 
-static bool ih_v7_0_is_idle(void *handle)
+static bool ih_v7_0_is_idle(struct amdgpu_ip_block *ip_block)
 {
 	/* todo */
 	return true;
 }
 
-static int ih_v7_0_wait_for_idle(void *handle)
+static int ih_v7_0_wait_for_idle(struct amdgpu_ip_block *ip_block)
 {
 	/* todo */
 	return -ETIMEDOUT;
 }
 
-static int ih_v7_0_soft_reset(void *handle)
+static int ih_v7_0_soft_reset(struct amdgpu_ip_block *ip_block)
 {
 	/* todo */
 	return 0;
@@ -670,10 +713,10 @@ static void ih_v7_0_update_clockgating_state(struct amdgpu_device *adev,
 	return;
 }
 
-static int ih_v7_0_set_clockgating_state(void *handle,
+static int ih_v7_0_set_clockgating_state(struct amdgpu_ip_block *ip_block,
 					   enum amd_clockgating_state state)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	ih_v7_0_update_clockgating_state(adev,
 				state == AMD_CG_STATE_GATE);
@@ -733,10 +776,10 @@ static void ih_v7_0_update_ih_mem_power_gating(struct amdgpu_device *adev,
 	WREG32_SOC15(OSSSYS, 0, regIH_MEM_POWER_CTRL, ih_mem_pwr_cntl);
 }
 
-static int ih_v7_0_set_powergating_state(void *handle,
+static int ih_v7_0_set_powergating_state(struct amdgpu_ip_block *ip_block,
 					 enum amd_powergating_state state)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 	bool enable = (state == AMD_PG_STATE_GATE);
 
 	if (adev->pg_flags & AMD_PG_SUPPORT_IH_SRAM_PG)
@@ -745,9 +788,9 @@ static int ih_v7_0_set_powergating_state(void *handle,
 	return 0;
 }
 
-static void ih_v7_0_get_clockgating_state(void *handle, u64 *flags)
+static void ih_v7_0_get_clockgating_state(struct amdgpu_ip_block *ip_block, u64 *flags)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	if (!RREG32_SOC15(OSSSYS, 0, regIH_CLK_CTRL))
 		*flags |= AMD_CG_SUPPORT_IH_CG;
@@ -758,7 +801,6 @@ static void ih_v7_0_get_clockgating_state(void *handle, u64 *flags)
 static const struct amd_ip_funcs ih_v7_0_ip_funcs = {
 	.name = "ih_v7_0",
 	.early_init = ih_v7_0_early_init,
-	.late_init = NULL,
 	.sw_init = ih_v7_0_sw_init,
 	.sw_fini = ih_v7_0_sw_fini,
 	.hw_init = ih_v7_0_hw_init,
@@ -771,8 +813,6 @@ static const struct amd_ip_funcs ih_v7_0_ip_funcs = {
 	.set_clockgating_state = ih_v7_0_set_clockgating_state,
 	.set_powergating_state = ih_v7_0_set_powergating_state,
 	.get_clockgating_state = ih_v7_0_get_clockgating_state,
-	.dump_ip_state = NULL,
-	.print_ip_state = NULL,
 };
 
 static const struct amdgpu_ih_funcs ih_v7_0_funcs = {

@@ -585,7 +585,6 @@ static int tegra_vde_decode_begin(struct tegra_vde *vde,
 	return 0;
 
 put_runtime_pm:
-	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 
 unlock:
@@ -612,7 +611,6 @@ static void tegra_vde_decode_abort(struct tegra_vde *vde)
 	if (err)
 		dev_err(dev, "DEC end: Failed to assert HW reset: %d\n", err);
 
-	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put_autosuspend(dev);
 
 	mutex_unlock(&vde->lock);
@@ -623,14 +621,14 @@ static int tegra_vde_decode_end(struct tegra_vde *vde)
 	unsigned int read_bytes, macroblocks_nb;
 	struct device *dev = vde->dev;
 	dma_addr_t bsev_ptr;
-	long timeout;
+	long time_left;
 	int ret;
 
-	timeout = wait_for_completion_interruptible_timeout(
+	time_left = wait_for_completion_interruptible_timeout(
 			&vde->decode_completion, msecs_to_jiffies(1000));
-	if (timeout < 0) {
-		ret = timeout;
-	} else if (timeout == 0) {
+	if (time_left < 0) {
+		ret = time_left;
+	} else if (time_left == 0) {
 		bsev_ptr = tegra_vde_readl(vde, vde->bsev, 0x10);
 		macroblocks_nb = tegra_vde_readl(vde, vde->sxe, 0xC8) & 0x1FFF;
 		read_bytes = bsev_ptr ? bsev_ptr - vde->bitstream_data_addr : 0;
@@ -778,7 +776,7 @@ static int tegra_vde_h264_setup_frames(struct tegra_ctx *ctx,
 	 * If userspace doesn't tell us frame's type, then we will try decode
 	 * as-is.
 	 */
-	v4l2_m2m_buf_copy_metadata(src, dst, true);
+	v4l2_m2m_buf_copy_metadata(src, dst);
 
 	if (h->decode_params->flags & V4L2_H264_DECODE_PARAM_FLAG_BFRAME)
 		tb->b_frame = true;

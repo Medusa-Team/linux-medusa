@@ -14,7 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include "htc.h"
 
 MODULE_FIRMWARE(HTC_7010_MODULE_FW);
@@ -107,7 +107,7 @@ static int hif_usb_send_regout(struct hif_device_usb *hif_dev,
 	if (urb == NULL)
 		return -ENOMEM;
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (cmd == NULL) {
 		usb_free_urb(urb);
 		return -ENOMEM;
@@ -190,7 +190,7 @@ static int hif_usb_send_mgmt(struct hif_device_usb *hif_dev,
 	if (urb == NULL)
 		return -ENOMEM;
 
-	cmd = kzalloc(sizeof(*cmd), GFP_ATOMIC);
+	cmd = kzalloc_obj(*cmd, GFP_ATOMIC);
 	if (cmd == NULL) {
 		usb_free_urb(urb);
 		return -ENOMEM;
@@ -716,8 +716,7 @@ static void ath9k_hif_usb_rx_cb(struct urb *urb)
 	}
 
 resubmit:
-	skb_reset_tail_pointer(skb);
-	skb_trim(skb, 0);
+	__skb_set_length(skb, 0);
 
 	usb_anchor_urb(urb, &hif_dev->rx_submitted);
 	ret = usb_submit_urb(urb, GFP_ATOMIC);
@@ -754,8 +753,7 @@ static void ath9k_hif_usb_reg_in_cb(struct urb *urb)
 	case -ESHUTDOWN:
 		goto free_skb;
 	default:
-		skb_reset_tail_pointer(skb);
-		skb_trim(skb, 0);
+		__skb_set_length(skb, 0);
 
 		goto resubmit;
 	}
@@ -851,7 +849,7 @@ static int ath9k_hif_usb_alloc_tx_urbs(struct hif_device_usb *hif_dev)
 	init_usb_anchor(&hif_dev->mgmt_submitted);
 
 	for (i = 0; i < MAX_TX_URB_NUM; i++) {
-		tx_buf = kzalloc(sizeof(*tx_buf), GFP_KERNEL);
+		tx_buf = kzalloc_obj(*tx_buf);
 		if (!tx_buf)
 			goto err;
 
@@ -899,7 +897,7 @@ static int ath9k_hif_usb_alloc_rx_urbs(struct hif_device_usb *hif_dev)
 
 	for (i = 0; i < MAX_RX_URB_NUM; i++) {
 
-		rx_buf = kzalloc(sizeof(*rx_buf), GFP_KERNEL);
+		rx_buf = kzalloc_obj(*rx_buf);
 		if (!rx_buf) {
 			ret = -ENOMEM;
 			goto err_rxb;
@@ -974,7 +972,7 @@ static int ath9k_hif_usb_alloc_reg_in_urbs(struct hif_device_usb *hif_dev)
 
 	for (i = 0; i < MAX_REG_IN_URB_NUM; i++) {
 
-		rx_buf = kzalloc(sizeof(*rx_buf), GFP_KERNEL);
+		rx_buf = kzalloc_obj(*rx_buf);
 		if (!rx_buf) {
 			ret = -ENOMEM;
 			goto err_rxb;
@@ -1200,7 +1198,7 @@ static int ath9k_hif_request_firmware(struct hif_device_usb *hif_dev,
 			filename = FIRMWARE_AR9271;
 
 		/* expected fw locations:
-		 * - htc_9271.fw   (stable version 1.3, depricated)
+		 * - htc_9271.fw   (stable version 1.3, deprecated)
 		 */
 		snprintf(hif_dev->fw_name, sizeof(hif_dev->fw_name),
 			 "%s", filename);
@@ -1378,13 +1376,11 @@ static int ath9k_hif_usb_probe(struct usb_interface *interface,
 	if (id->driver_info == STORAGE_DEVICE)
 		return send_eject_command(interface);
 
-	hif_dev = kzalloc(sizeof(struct hif_device_usb), GFP_KERNEL);
+	hif_dev = kzalloc_obj(struct hif_device_usb);
 	if (!hif_dev) {
 		ret = -ENOMEM;
 		goto err_alloc;
 	}
-
-	usb_get_dev(udev);
 
 	hif_dev->udev = udev;
 	hif_dev->interface = interface;
@@ -1405,7 +1401,6 @@ static int ath9k_hif_usb_probe(struct usb_interface *interface,
 err_fw_req:
 	usb_set_intfdata(interface, NULL);
 	kfree(hif_dev);
-	usb_put_dev(udev);
 err_alloc:
 	return ret;
 }
@@ -1453,7 +1448,6 @@ static void ath9k_hif_usb_disconnect(struct usb_interface *interface)
 
 	kfree(hif_dev);
 	dev_info(&udev->dev, "ath9k_htc: USB layer deinitialized\n");
-	usb_put_dev(udev);
 }
 
 #ifdef CONFIG_PM

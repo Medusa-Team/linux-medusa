@@ -1098,7 +1098,7 @@ static struct cvmx_usb_pipe *cvmx_usb_open_pipe(struct octeon_hcd *usb,
 {
 	struct cvmx_usb_pipe *pipe;
 
-	pipe = kzalloc(sizeof(*pipe), GFP_ATOMIC);
+	pipe = kzalloc_obj(*pipe, GFP_ATOMIC);
 	if (!pipe)
 		return NULL;
 	if ((device_speed == CVMX_USB_SPEED_HIGH) &&
@@ -2138,7 +2138,7 @@ static struct cvmx_usb_transaction *cvmx_usb_submit_transaction(
 	if (unlikely(pipe->transfer_type != type))
 		return NULL;
 
-	transaction = kzalloc(sizeof(*transaction), GFP_ATOMIC);
+	transaction = kzalloc_obj(*transaction, GFP_ATOMIC);
 	if (unlikely(!transaction))
 		return NULL;
 
@@ -3180,9 +3180,8 @@ static int octeon_usb_urb_enqueue(struct usb_hcd *hcd,
 		 * Allocate a structure to use for our private list of
 		 * isochronous packets.
 		 */
-		iso_packet = kmalloc_array(urb->number_of_packets,
-					   sizeof(struct cvmx_usb_iso_packet),
-					   GFP_ATOMIC);
+		iso_packet = kmalloc_objs(struct cvmx_usb_iso_packet,
+					  urb->number_of_packets, GFP_ATOMIC);
 		if (iso_packet) {
 			int i;
 			/* Fill the list with the data from the URB */
@@ -3346,7 +3345,7 @@ static int octeon_usb_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 			break;
 		case USB_PORT_FEAT_INDICATOR:
 			dev_dbg(dev, " INDICATOR\n");
-			/* Port inidicator not supported */
+			/* Port indicator not supported */
 			break;
 		case USB_PORT_FEAT_C_CONNECTION:
 			dev_dbg(dev, " C_CONNECTION\n");
@@ -3711,8 +3710,8 @@ static struct platform_driver octeon_usb_driver = {
 		.name		= "octeon-hcd",
 		.of_match_table = octeon_usb_match,
 	},
-	.probe      = octeon_usb_probe,
-	.remove_new = octeon_usb_remove,
+	.probe = octeon_usb_probe,
+	.remove = octeon_usb_remove,
 };
 
 static int __init octeon_usb_driver_init(void)

@@ -114,13 +114,13 @@ Enabling the driver and kconfig options
 **CONFIG_MLX5_SF=(y/n)**
 
 |    Build support for subfunction.
-|    Subfunctons are more light weight than PCI SRIOV VFs. Choosing this option
+|    Subfunctions are more light weight than PCI SRIOV VFs. Choosing this option
 |    will enable support for creating subfunction devices.
 
 
 **CONFIG_MLX5_SF_MANAGER=(y/n)**
 
-|    Build support for subfuction port in the NIC. A Mellanox subfunction
+|    Build support for subfunction port in the NIC. A Mellanox subfunction
 |    port is managed through devlink.  A subfunction supports RDMA, netdevice
 |    and vdpa device. It is similar to a SRIOV VF but it doesn't require
 |    SRIOV support.
@@ -130,6 +130,9 @@ Enabling the driver and kconfig options
 
 |    Build support for software-managed steering in the NIC.
 
+**CONFIG_MLX5_HW_STEERING=(y/n)**
+
+|    Build support for hardware-managed steering in the NIC.
 
 **CONFIG_MLX5_TC_CT=(y/n)**
 

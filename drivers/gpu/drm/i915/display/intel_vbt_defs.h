@@ -37,7 +37,7 @@
 #ifndef _INTEL_VBT_DEFS_H_
 #define _INTEL_VBT_DEFS_H_
 
-#include "intel_bios.h"
+#include "intel_dsi_vbt_defs.h"
 
 /* EDID derived structures */
 struct bdb_edid_pnp_id {
@@ -437,6 +437,22 @@ enum vbt_gmbus_ddi {
 #define BDB_230_VBT_DP_MAX_LINK_RATE_UHBR13P5	6
 #define BDB_230_VBT_DP_MAX_LINK_RATE_UHBR20	7
 
+/* EDP link rate 263+ */
+#define BDB_263_VBT_EDP_LINK_RATE_1_62		BIT_U32(0)
+#define BDB_263_VBT_EDP_LINK_RATE_2_16		BIT_U32(1)
+#define BDB_263_VBT_EDP_LINK_RATE_2_43		BIT_U32(2)
+#define BDB_263_VBT_EDP_LINK_RATE_2_7		BIT_U32(3)
+#define BDB_263_VBT_EDP_LINK_RATE_3_24		BIT_U32(4)
+#define BDB_263_VBT_EDP_LINK_RATE_4_32		BIT_U32(5)
+#define BDB_263_VBT_EDP_LINK_RATE_5_4		BIT_U32(6)
+#define BDB_263_VBT_EDP_LINK_RATE_6_75		BIT_U32(7)
+#define BDB_263_VBT_EDP_LINK_RATE_8_1		BIT_U32(8)
+#define BDB_263_VBT_EDP_LINK_RATE_10		BIT_U32(9)
+#define BDB_263_VBT_EDP_LINK_RATE_13_5		BIT_U32(10)
+#define BDB_263_VBT_EDP_LINK_RATE_20		BIT_U32(11)
+#define BDB_263_VBT_EDP_NUM_RATES		12
+#define BDB_263_VBT_EDP_RATES_MASK		GENMASK(BDB_263_VBT_EDP_NUM_RATES - 1, 0)
+
 /*
  * The child device config, aka the display device data structure, provides a
  * description of a port and its configuration on the platform.
@@ -446,7 +462,7 @@ enum vbt_gmbus_ddi {
  * basically any of the fields to ensure the correct interpretation for the BDB
  * version in question.
  *
- * When we copy the child device configs to dev_priv->display.vbt.child_dev, we
+ * When we copy the child device configs to display->vbt.child_dev, we
  * reserve space for the full structure below, and initialize the tail not
  * actually present in VBT to zeros. Accessing those fields is fine, as long as
  * the default zero is taken into account, again according to the BDB version.
@@ -493,7 +509,7 @@ struct child_device_config {
 	u16 addin_offset;
 	u8 dvo_port; /* See DEVICE_PORT_* and DVO_PORT_* above */
 	u8 i2c_pin;
-	u8 slave_addr;
+	u8 target_addr;
 	u8 ddc_pin;
 	u16 edid_ptr;
 	u8 dvo_cfg; /* See DEVICE_CFG_* above */
@@ -502,7 +518,7 @@ struct child_device_config {
 		struct {
 			u8 dvo2_port;
 			u8 i2c2_pin;
-			u8 slave2_addr;
+			u8 target2_addr;
 			u8 ddc2_pin;
 		} __packed;
 		struct {
@@ -538,7 +554,8 @@ struct child_device_config {
 	u8 dvo_function;
 	u8 dp_usb_type_c:1;					/* 195+ */
 	u8 tbt:1;						/* 209+ */
-	u8 flags2_reserved:2;					/* 195+ */
+	u8 dedicated_external:1;				/* 264+ */
+	u8 dyn_port_over_tc:1;					/* 264+ */
 	u8 dp_port_trace_length:4;				/* 209+ */
 	u8 dp_gpio_index;					/* 195+ */
 	u16 dp_gpio_pin_num;					/* 195+ */
@@ -547,6 +564,8 @@ struct child_device_config {
 	u8 dp_max_link_rate:3;					/* 216+ */
 	u8 dp_max_link_rate_reserved:5;				/* 216+ */
 	u8 efp_index;						/* 256+ */
+	u32 edp_data_rate_override:12;				/* 263+ */
+	u32 edp_data_rate_override_reserved:20;			/* 263+ */
 } __packed;
 
 struct bdb_general_definitions {
@@ -1014,6 +1033,14 @@ struct bdb_tv_options {
  * Block 27 - eDP VBT Block
  */
 
+struct edp_power_seq {
+	u16 t1_t3;
+	u16 t8;
+	u16 t9;
+	u16 t10;
+	u16 t11_t12;
+} __packed;
+
 #define EDP_18BPP	0
 #define EDP_24BPP	1
 #define EDP_30BPP	2
@@ -1080,6 +1107,9 @@ struct bdb_edp {
 	u16 edp_fast_link_training_rate[16];			/* 224+ */
 	u16 edp_max_port_link_rate[16];				/* 244+ */
 	u16 edp_dsc_disable;					/* 251+ */
+	u16 t6_delay_support;					/* 260+ */
+	u16 link_idle_time[16];					/* 260+ */
+	u16 pipe_joiner_enable;					/* 261+ */
 } __packed;
 
 /*
@@ -1321,7 +1351,7 @@ struct als_data_entry {
 } __packed;
 
 struct aggressiveness_profile_entry {
-	u8 dpst_aggressiveness : 4;
+	u8 dpst_aggressiveness : 4;		/* (228/252)-256 */
 	u8 lace_aggressiveness : 4;
 } __packed;
 
@@ -1330,12 +1360,27 @@ struct aggressiveness_profile2_entry {
 	u8 elp_aggressiveness : 4;
 } __packed;
 
+struct aggressiveness_profile3_entry {
+	u8 apd_aggressiveness:4;
+	u8 pixoptix_aggressiveness:4;
+} __packed;
+
+struct aggressiveness_profile4_entry {
+	u8 xpst_aggressiveness:4;
+	u8 tcon_aggressiveness:4;
+} __packed;
+
+struct panel_identification {
+	u8 panel_technology:4;
+	u8 reserved:4;
+} __packed;
+
 struct bdb_lfp_power {
 	struct lfp_power_features features;				/* ???-227 */
 	struct als_data_entry als[5];
 	u8 lace_aggressiveness_profile:3;				/* 210-227 */
 	u8 reserved1:5;
-	u16 dpst;							/* 228+ */
+	u16 dpst;							/* 228-256 */
 	u16 psr;							/* 228+ */
 	u16 drrs;							/* 228+ */
 	u16 lace_support;						/* 228+ */
@@ -1343,12 +1388,20 @@ struct bdb_lfp_power {
 	u16 dmrrs;							/* 228+ */
 	u16 adb;							/* 228+ */
 	u16 lace_enabled_status;					/* 228+ */
-	struct aggressiveness_profile_entry aggressiveness[16];		/* 228+ */
+	struct aggressiveness_profile_entry aggressiveness[16];
 	u16 hobl;							/* 232+ */
 	u16 vrr_feature_enabled;					/* 233+ */
-	u16 elp;							/* 247+ */
-	u16 opst;							/* 247+ */
-	struct aggressiveness_profile2_entry aggressiveness2[16];	/* 247+ */
+	u16 elp;							/* 247-256 */
+	u16 opst;							/* 247-256 */
+	struct aggressiveness_profile2_entry aggressiveness2[16];	/* 247-256 */
+	u16 apd;							/* 253-256 */
+	u16 pixoptix;							/* 253-256 */
+	struct aggressiveness_profile3_entry aggressiveness3[16];	/* 253-256 */
+	struct panel_identification panel_identification[16];		/* 257+ */
+	u16 xpst_support;						/* 257+ */
+	u16 tcon_based_backlight_optimization;				/* 257+ */
+	struct aggressiveness_profile4_entry aggressiveness4[16];	/* 257+ */
+	u16 tcon_backlight_xpst_coexistence;				/* 257+ */
 } __packed;
 
 /*

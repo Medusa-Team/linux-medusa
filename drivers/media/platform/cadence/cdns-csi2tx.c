@@ -573,7 +573,7 @@ static int csi2tx_probe(struct platform_device *pdev)
 	unsigned int i;
 	int ret;
 
-	csi2tx = kzalloc(sizeof(*csi2tx), GFP_KERNEL);
+	csi2tx = kzalloc_obj(*csi2tx);
 	if (!csi2tx)
 		return -ENOMEM;
 	platform_set_drvdata(pdev, csi2tx);
@@ -644,7 +644,7 @@ static void csi2tx_remove(struct platform_device *pdev)
 
 static struct platform_driver csi2tx_driver = {
 	.probe	= csi2tx_probe,
-	.remove_new = csi2tx_remove,
+	.remove = csi2tx_remove,
 
 	.driver	= {
 		.name		= "cdns-csi2tx",

@@ -13,6 +13,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
+#include <linux/hex.h>
 #include <linux/limits.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
@@ -57,7 +58,7 @@ int string_get_size(u64 size, u64 blk_size, const enum string_size_units units,
 	static const unsigned int rounding[] = { 500, 50, 5 };
 	int i = 0, j;
 	u32 remainder = 0, sf_cap;
-	char tmp[8];
+	char tmp[12];
 	const char *unit;
 
 	tmp[0] = '\0';
@@ -138,6 +139,25 @@ int string_get_size(u64 size, u64 blk_size, const enum string_size_units units,
 }
 EXPORT_SYMBOL(string_get_size);
 
+int parse_int_array(const char *buf, size_t count, int **array)
+{
+	int *ints, nints;
+
+	get_options(buf, 0, &nints);
+	if (!nints)
+		return -ENOENT;
+
+	ints = kzalloc_objs(*ints, nints + 1);
+	if (!ints)
+		return -ENOMEM;
+
+	get_options(buf, nints + 1, ints);
+	*array = ints;
+
+	return 0;
+}
+EXPORT_SYMBOL(parse_int_array);
+
 /**
  * parse_int_array_user - Split string into a sequence of integers
  * @from:	The user space buffer to read from
@@ -153,30 +173,14 @@ EXPORT_SYMBOL(string_get_size);
  */
 int parse_int_array_user(const char __user *from, size_t count, int **array)
 {
-	int *ints, nints;
 	char *buf;
-	int ret = 0;
+	int ret;
 
 	buf = memdup_user_nul(from, count);
 	if (IS_ERR(buf))
 		return PTR_ERR(buf);
 
-	get_options(buf, 0, &nints);
-	if (!nints) {
-		ret = -ENOENT;
-		goto free_buf;
-	}
-
-	ints = kcalloc(nints + 1, sizeof(*ints), GFP_KERNEL);
-	if (!ints) {
-		ret = -ENOMEM;
-		goto free_buf;
-	}
-
-	get_options(buf, nints + 1, ints);
-	*array = ints;
-
-free_buf:
+	ret = parse_int_array(buf, count, array);
 	kfree(buf);
 	return ret;
 }
@@ -320,6 +324,9 @@ static bool unescape_special(char **src, char **dst)
 int string_unescape(char *src, char *dst, size_t size, unsigned int flags)
 {
 	char *out = dst;
+
+	if (!size)
+		size = SIZE_MAX;
 
 	while (*src && --size) {
 		if (src[0] == '\\' && src[1] != '\0' && size > 1) {

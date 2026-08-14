@@ -94,7 +94,7 @@ static ssize_t fw_cfg_dma_transfer(void *address, u32 length, u32 control)
 	struct fw_cfg_dma_access *d = NULL;
 	ssize_t ret = length;
 
-	d = kmalloc(sizeof(*d), GFP_KERNEL);
+	d = kmalloc_obj(*d);
 	if (!d) {
 		ret = -ENOMEM;
 		goto end;
@@ -325,7 +325,7 @@ static ssize_t fw_cfg_write_vmcoreinfo(const struct fw_cfg_file *f)
 	static struct fw_cfg_vmcoreinfo *data;
 	ssize_t ret;
 
-	data = kmalloc(sizeof(struct fw_cfg_vmcoreinfo), GFP_KERNEL);
+	data = kmalloc_obj(struct fw_cfg_vmcoreinfo);
 	if (!data)
 		return -ENOMEM;
 
@@ -452,7 +452,7 @@ static void fw_cfg_sysfs_release_entry(struct kobject *kobj)
 }
 
 /* kobj_type: ties together all properties required to register an entry */
-static struct kobj_type fw_cfg_sysfs_entry_ktype = {
+static const struct kobj_type fw_cfg_sysfs_entry_ktype = {
 	.default_groups = fw_cfg_sysfs_entry_groups,
 	.sysfs_ops = &fw_cfg_sysfs_attr_ops,
 	.release = fw_cfg_sysfs_release_entry,
@@ -460,7 +460,7 @@ static struct kobj_type fw_cfg_sysfs_entry_ktype = {
 
 /* raw-read method and attribute */
 static ssize_t fw_cfg_sysfs_read_raw(struct file *filp, struct kobject *kobj,
-				     struct bin_attribute *bin_attr,
+				     const struct bin_attribute *bin_attr,
 				     char *buf, loff_t pos, size_t count)
 {
 	struct fw_cfg_sysfs_entry *entry = to_entry(kobj);
@@ -474,7 +474,7 @@ static ssize_t fw_cfg_sysfs_read_raw(struct file *filp, struct kobject *kobj,
 	return fw_cfg_read_blob(entry->select, buf, pos, count);
 }
 
-static struct bin_attribute fw_cfg_sysfs_attr_raw = {
+static const struct bin_attribute fw_cfg_sysfs_attr_raw = {
 	.attr = { .name = "raw", .mode = S_IRUSR },
 	.read = fw_cfg_sysfs_read_raw,
 };
@@ -530,7 +530,7 @@ static int fw_cfg_build_symlink(struct kset *dir,
 			dir = to_kset(ko);
 		} else {
 			/* create new subdirectory kset */
-			subdir = kzalloc(sizeof(struct kset), GFP_KERNEL);
+			subdir = kzalloc_obj(struct kset);
 			if (!subdir) {
 				ret = -ENOMEM;
 				break;
@@ -593,7 +593,7 @@ static int fw_cfg_register_file(const struct fw_cfg_file *f)
 #endif
 
 	/* allocate new entry */
-	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kzalloc_obj(*entry);
 	if (!entry)
 		return -ENOMEM;
 
@@ -757,7 +757,7 @@ MODULE_DEVICE_TABLE(acpi, fw_cfg_sysfs_acpi_match);
 
 static struct platform_driver fw_cfg_sysfs_driver = {
 	.probe = fw_cfg_sysfs_probe,
-	.remove_new = fw_cfg_sysfs_remove,
+	.remove = fw_cfg_sysfs_remove,
 	.driver = {
 		.name = "fw_cfg",
 		.of_match_table = fw_cfg_sysfs_mmio_match,

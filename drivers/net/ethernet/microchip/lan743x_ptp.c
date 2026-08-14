@@ -401,28 +401,21 @@ static int lan743x_ptpci_settime64(struct ptp_clock_info *ptpci,
 	u32 nano_seconds = 0;
 	u32 seconds = 0;
 
-	if (ts) {
-		if (ts->tv_sec > 0xFFFFFFFFLL ||
-		    ts->tv_sec < 0) {
-			netif_warn(adapter, drv, adapter->netdev,
-				   "ts->tv_sec out of range, %lld\n",
-				   ts->tv_sec);
-			return -ERANGE;
-		}
-		if (ts->tv_nsec >= 1000000000L ||
-		    ts->tv_nsec < 0) {
-			netif_warn(adapter, drv, adapter->netdev,
-				   "ts->tv_nsec out of range, %ld\n",
-				   ts->tv_nsec);
-			return -ERANGE;
-		}
-		seconds = ts->tv_sec;
-		nano_seconds = ts->tv_nsec;
-		lan743x_ptp_clock_set(adapter, seconds, nano_seconds, 0);
-	} else {
-		netif_warn(adapter, drv, adapter->netdev, "ts == NULL\n");
-		return -EINVAL;
+	if (ts->tv_sec > 0xFFFFFFFFLL) {
+		netif_warn(adapter, drv, adapter->netdev,
+			   "ts->tv_sec out of range, %lld\n",
+			   ts->tv_sec);
+		return -ERANGE;
 	}
+	if (ts->tv_nsec < 0) {
+		netif_warn(adapter, drv, adapter->netdev,
+			   "ts->tv_nsec out of range, %ld\n",
+			   ts->tv_nsec);
+		return -ERANGE;
+	}
+	seconds = ts->tv_sec;
+	nano_seconds = ts->tv_nsec;
+	lan743x_ptp_clock_set(adapter, seconds, nano_seconds, 0);
 
 	return 0;
 }
@@ -469,10 +462,6 @@ static int lan743x_ptp_perout(struct lan743x_adapter *adapter, int on,
 	unsigned int index = perout_request->index;
 	struct lan743x_ptp_perout *perout = &ptp->perout[index];
 	int ret = 0;
-
-	/* Reject requests with unsupported flags */
-	if (perout_request->flags & ~PTP_PEROUT_DUTY_CYCLE)
-		return -EOPNOTSUPP;
 
 	if (on) {
 		perout_pin = ptp_find_pin(ptp->ptp_clock, PTP_PF_PEROUT,
@@ -1544,6 +1533,10 @@ int lan743x_ptp_open(struct lan743x_adapter *adapter)
 	ptp->ptp_clock_info.n_per_out = LAN743X_PTP_N_EVENT_CHAN;
 	ptp->ptp_clock_info.n_pins = n_pins;
 	ptp->ptp_clock_info.pps = LAN743X_PTP_N_PPS;
+	ptp->ptp_clock_info.supported_extts_flags = PTP_RISING_EDGE |
+						    PTP_FALLING_EDGE |
+						    PTP_STRICT_FLAGS;
+	ptp->ptp_clock_info.supported_perout_flags = PTP_PEROUT_DUTY_CYCLE;
 	ptp->ptp_clock_info.pin_config = ptp->pin_config;
 	ptp->ptp_clock_info.adjfine = lan743x_ptpci_adjfine;
 	ptp->ptp_clock_info.adjtime = lan743x_ptpci_adjtime;
@@ -1743,23 +1736,32 @@ void lan743x_ptp_tx_timestamp_skb(struct lan743x_adapter *adapter,
 	lan743x_ptp_tx_ts_complete(adapter);
 }
 
-int lan743x_ptp_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
+int lan743x_ptp_hwtstamp_get(struct net_device *netdev,
+			     struct kernel_hwtstamp_config *config)
 {
 	struct lan743x_adapter *adapter = netdev_priv(netdev);
-	struct hwtstamp_config config;
-	int ret = 0;
+	struct lan743x_tx *tx = &adapter->tx[0];
+
+	if (tx->ts_flags & TX_TS_FLAG_ONE_STEP_SYNC)
+		config->tx_type = HWTSTAMP_TX_ONESTEP_SYNC;
+	else if (tx->ts_flags & TX_TS_FLAG_TIMESTAMPING_ENABLED)
+		config->tx_type = HWTSTAMP_TX_ON;
+	else
+		config->tx_type = HWTSTAMP_TX_OFF;
+
+	config->rx_filter = adapter->rx_tstamp_filter;
+
+	return 0;
+}
+
+int lan743x_ptp_hwtstamp_set(struct net_device *netdev,
+			     struct kernel_hwtstamp_config *config,
+			     struct netlink_ext_ack *extack)
+{
+	struct lan743x_adapter *adapter = netdev_priv(netdev);
 	int index;
 
-	if (!ifr) {
-		netif_err(adapter, drv, adapter->netdev,
-			  "SIOCSHWTSTAMP, ifr == NULL\n");
-		return -EINVAL;
-	}
-
-	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
-		return -EFAULT;
-
-	switch (config.tx_type) {
+	switch (config->tx_type) {
 	case HWTSTAMP_TX_OFF:
 		for (index = 0; index < adapter->used_tx_channels;
 		     index++)
@@ -1783,19 +1785,12 @@ int lan743x_ptp_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 		lan743x_ptp_set_sync_ts_insert(adapter, true);
 		break;
 	case HWTSTAMP_TX_ONESTEP_P2P:
-		ret = -ERANGE;
-		break;
+		return -ERANGE;
 	default:
 		netif_warn(adapter, drv, adapter->netdev,
-			   "  tx_type = %d, UNKNOWN\n", config.tx_type);
-		ret = -EINVAL;
-		break;
+			   "  tx_type = %d, UNKNOWN\n", config->tx_type);
+		return -EINVAL;
 	}
 
-	ret = lan743x_rx_set_tstamp_mode(adapter, config.rx_filter);
-
-	if (!ret)
-		return copy_to_user(ifr->ifr_data, &config,
-			sizeof(config)) ? -EFAULT : 0;
-	return ret;
+	return lan743x_rx_set_tstamp_mode(adapter, config->rx_filter);
 }

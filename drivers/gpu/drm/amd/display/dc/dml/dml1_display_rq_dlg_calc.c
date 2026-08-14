@@ -39,7 +39,7 @@
 
 static unsigned int get_bytes_per_element(enum source_format_class source_format, bool is_chroma)
 {
-	unsigned int ret_val = 0;
+	unsigned int ret_val = 1;
 
 	if (source_format == dm_444_16) {
 		if (!is_chroma)
@@ -104,6 +104,7 @@ static double get_refcyc_per_delivery(
 		unsigned int delivery_width,
 		unsigned int req_per_swath_ub)
 {
+	(void)mode_lib;
 	double refcyc_per_delivery = 0.0;
 
 	if (vratio <= 1.0) {
@@ -133,6 +134,7 @@ static double get_vratio_pre(
 		double vinit,
 		double l_sw)
 {
+	(void)mode_lib;
 	double prefill = dml_floor(vinit, 1);
 	double vratio_pre = 1.0;
 
@@ -174,6 +176,7 @@ static void get_swath_need(
 		unsigned int swath_height,
 		double vinit)
 {
+	(void)mode_lib;
 	double prefill = dml_floor(vinit, 1);
 	unsigned int max_partial_sw_int;
 
@@ -559,12 +562,11 @@ static void get_surf_rq_param(
 		const struct _vcs_dpi_display_pipe_source_params_st *pipe_src_param,
 		bool is_chroma)
 {
-	bool mode_422 = 0;
 	unsigned int vp_width = 0;
 	unsigned int vp_height = 0;
 	unsigned int data_pitch = 0;
 	unsigned int meta_pitch = 0;
-	unsigned int ppe = mode_422 ? 2 : 1;
+	unsigned int ppe = 1;
 	bool surf_linear;
 	bool surf_vert;
 	unsigned int bytes_per_element;

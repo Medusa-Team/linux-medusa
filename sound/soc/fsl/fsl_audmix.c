@@ -444,6 +444,9 @@ static const struct of_device_id fsl_audmix_ids[] = {
 	{
 		.compatible = "fsl,imx8qm-audmix",
 	},
+	{
+		.compatible = "fsl,imx952-audmix",
+	},
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, fsl_audmix_ids);
@@ -488,11 +491,17 @@ static int fsl_audmix_probe(struct platform_device *pdev)
 		goto err_disable_pm;
 	}
 
-	priv->pdev = platform_device_register_data(dev, "imx-audmix", 0, NULL, 0);
-	if (IS_ERR(priv->pdev)) {
-		ret = PTR_ERR(priv->pdev);
-		dev_err(dev, "failed to register platform: %d\n", ret);
-		goto err_disable_pm;
+	/*
+	 * If dais property exist, then register the imx-audmix card driver.
+	 * otherwise, it should be linked by audio graph card.
+	 */
+	if (of_find_property(pdev->dev.of_node, "dais", NULL)) {
+		priv->pdev = platform_device_register_data(dev, "imx-audmix", 0, NULL, 0);
+		if (IS_ERR(priv->pdev)) {
+			ret = PTR_ERR(priv->pdev);
+			dev_err(dev, "failed to register platform: %d\n", ret);
+			goto err_disable_pm;
+		}
 	}
 
 	return 0;
@@ -512,7 +521,6 @@ static void fsl_audmix_remove(struct platform_device *pdev)
 		platform_device_unregister(priv->pdev);
 }
 
-#ifdef CONFIG_PM
 static int fsl_audmix_runtime_resume(struct device *dev)
 {
 	struct fsl_audmix *priv = dev_get_drvdata(dev);
@@ -540,23 +548,20 @@ static int fsl_audmix_runtime_suspend(struct device *dev)
 
 	return 0;
 }
-#endif /* CONFIG_PM */
 
 static const struct dev_pm_ops fsl_audmix_pm = {
-	SET_RUNTIME_PM_OPS(fsl_audmix_runtime_suspend,
-			   fsl_audmix_runtime_resume,
-			   NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
+	RUNTIME_PM_OPS(fsl_audmix_runtime_suspend, fsl_audmix_runtime_resume,
+		       NULL)
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 };
 
 static struct platform_driver fsl_audmix_driver = {
 	.probe = fsl_audmix_probe,
-	.remove_new = fsl_audmix_remove,
+	.remove = fsl_audmix_remove,
 	.driver = {
 		.name = "fsl-audmix",
 		.of_match_table = fsl_audmix_ids,
-		.pm = &fsl_audmix_pm,
+		.pm = pm_ptr(&fsl_audmix_pm),
 	},
 };
 module_platform_driver(fsl_audmix_driver);

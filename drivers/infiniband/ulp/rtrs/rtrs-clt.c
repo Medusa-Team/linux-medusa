@@ -331,7 +331,7 @@ static void rtrs_clt_fast_reg_done(struct ib_cq *cq, struct ib_wc *wc)
 	struct rtrs_clt_con *con = to_clt_con(wc->qp->qp_context);
 
 	if (wc->status != IB_WC_SUCCESS) {
-		rtrs_err(con->c.path, "Failed IB_WR_REG_MR: %s\n",
+		rtrs_err_rl(con->c.path, "Failed IB_WR_REG_MR: %s\n",
 			  ib_wc_status_msg(wc->status));
 		rtrs_rdma_error_recovery(con);
 	}
@@ -351,11 +351,11 @@ static void rtrs_clt_inv_rkey_done(struct ib_cq *cq, struct ib_wc *wc)
 	struct rtrs_clt_con *con = to_clt_con(wc->qp->qp_context);
 
 	if (wc->status != IB_WC_SUCCESS) {
-		rtrs_err(con->c.path, "Failed IB_WR_LOCAL_INV: %s\n",
+		rtrs_err_rl(con->c.path, "Failed IB_WR_LOCAL_INV: %s\n",
 			  ib_wc_status_msg(wc->status));
 		rtrs_rdma_error_recovery(con);
 	}
-	req->need_inv = false;
+	req->mr->need_inval = false;
 	if (req->need_inv_comp)
 		complete(&req->inv_comp);
 	else
@@ -391,12 +391,13 @@ static void complete_rdma_req(struct rtrs_clt_io_req *req, int errno,
 	clt_path = to_clt_path(con->c.path);
 
 	if (req->sg_cnt) {
-		if (req->dir == DMA_FROM_DEVICE && req->need_inv) {
+		if (req->mr->need_inval) {
 			/*
-			 * We are here to invalidate read requests
+			 * We are here to invalidate read/write requests
 			 * ourselves.  In normal scenario server should
-			 * send INV for all read requests, but
-			 * we are here, thus two things could happen:
+			 * send INV for all read requests, we do local
+			 * invalidate for write requests ourselves, but
+			 * we are here, thus three things could happen:
 			 *
 			 *    1.  this is failover, when errno != 0
 			 *        and can_wait == 1,
@@ -404,6 +405,9 @@ static void complete_rdma_req(struct rtrs_clt_io_req *req, int errno,
 			 *    2.  something totally bad happened and
 			 *        server forgot to send INV, so we
 			 *        should do that ourselves.
+			 *
+			 *    3.  write request finishes, we need to do local
+			 *        invalidate
 			 */
 
 			if (can_wait) {
@@ -418,18 +422,10 @@ static void complete_rdma_req(struct rtrs_clt_io_req *req, int errno,
 			refcount_inc(&req->ref);
 			err = rtrs_inv_rkey(req);
 			if (err) {
-				rtrs_err(con->c.path, "Send INV WR key=%#x: %d\n",
-					  req->mr->rkey, err);
+				rtrs_err_rl(con->c.path, "Send INV WR key=%#x: %pe\n",
+					    req->mr->rkey, ERR_PTR(err));
 			} else if (can_wait) {
 				wait_for_completion(&req->inv_comp);
-			} else {
-				/*
-				 * Something went wrong, so request will be
-				 * completed from INV callback.
-				 */
-				WARN_ON_ONCE(1);
-
-				return;
 			}
 			if (!refcount_dec_and_test(&req->ref))
 				return;
@@ -446,8 +442,10 @@ static void complete_rdma_req(struct rtrs_clt_io_req *req, int errno,
 	req->con = NULL;
 
 	if (errno) {
-		rtrs_err_rl(con->c.path, "IO request failed: error=%d path=%s [%s:%u] notify=%d\n",
-			    errno, kobject_name(&clt_path->kobj), clt_path->hca_name,
+		rtrs_err_rl(con->c.path,
+			    "IO %s request failed: error=%pe path=%s [%s:%u] notify=%d\n",
+			    req->dir == DMA_TO_DEVICE ? "write" : "read", ERR_PTR(errno),
+			    kobject_name(&clt_path->kobj), clt_path->hca_name,
 			    clt_path->hca_port, notify);
 	}
 
@@ -501,7 +499,7 @@ static void process_io_rsp(struct rtrs_clt_path *clt_path, u32 msg_id,
 
 	req = &clt_path->reqs[msg_id];
 	/* Drop need_inv if server responded with send with invalidation */
-	req->need_inv &= !w_inval;
+	req->mr->need_inval &= !w_inval;
 	complete_rdma_req(req, errno, true, false);
 }
 
@@ -516,7 +514,7 @@ static void rtrs_clt_recv_done(struct rtrs_clt_con *con, struct ib_wc *wc)
 			  cqe);
 	err = rtrs_iu_post_recv(&con->c, iu);
 	if (err) {
-		rtrs_err(con->c.path, "post iu failed %d\n", err);
+		rtrs_err(con->c.path, "post iu failed %pe\n", ERR_PTR(err));
 		rtrs_rdma_error_recovery(con);
 	}
 }
@@ -626,6 +624,7 @@ static void rtrs_clt_rdma_done(struct ib_cq *cq, struct ib_wc *wc)
 		 */
 		if (WARN_ON(wc->wr_cqe->done != rtrs_clt_rdma_done))
 			return;
+		clt_path->s.hb_missed_cnt = 0;
 		rtrs_from_imm(be32_to_cpu(wc->ex.imm_data),
 			       &imm_type, &imm_payload);
 		if (imm_type == RTRS_IO_RSP_IMM ||
@@ -643,7 +642,6 @@ static void rtrs_clt_rdma_done(struct ib_cq *cq, struct ib_wc *wc)
 				return  rtrs_clt_recv_done(con, wc);
 		} else if (imm_type == RTRS_HB_ACK_IMM) {
 			WARN_ON(con->c.cid);
-			clt_path->s.hb_missed_cnt = 0;
 			clt_path->s.hb_cur_latency =
 				ktime_sub(ktime_get(), clt_path->s.hb_last_sent);
 			if (clt_path->flags & RTRS_MSG_NEW_RKEY_F)
@@ -661,8 +659,8 @@ static void rtrs_clt_rdma_done(struct ib_cq *cq, struct ib_wc *wc)
 		else
 			err = rtrs_post_recv_empty(&con->c, &io_comp_cqe);
 		if (err) {
-			rtrs_err(con->c.path, "rtrs_post_recv_empty(): %d\n",
-				  err);
+			rtrs_err(con->c.path, "rtrs_post_recv_empty(): %pe\n",
+				 ERR_PTR(err));
 			rtrs_rdma_error_recovery(con);
 		}
 		break;
@@ -670,6 +668,7 @@ static void rtrs_clt_rdma_done(struct ib_cq *cq, struct ib_wc *wc)
 		/*
 		 * Key invalidations from server side
 		 */
+		clt_path->s.hb_missed_cnt = 0;
 		WARN_ON(!(wc->wc_flags & IB_WC_WITH_INVALIDATE ||
 			  wc->wc_flags & IB_WC_WITH_IMM));
 		WARN_ON(wc->wr_cqe->done != rtrs_clt_rdma_done);
@@ -732,8 +731,8 @@ static int post_recv_path(struct rtrs_clt_path *clt_path)
 
 		err = post_recv_io(to_clt_con(clt_path->s.con[cid]), q_size);
 		if (err) {
-			rtrs_err(clt_path->clt, "post_recv_io(), err: %d\n",
-				 err);
+			rtrs_err(clt_path->clt, "post_recv_io(), err: %pe\n",
+				 ERR_PTR(err));
 			return err;
 		}
 	}
@@ -967,7 +966,7 @@ static void rtrs_clt_init_req(struct rtrs_clt_io_req *req,
 	req->dir = dir;
 	req->con = rtrs_permit_to_clt_con(clt_path, permit);
 	req->conf = conf;
-	req->need_inv = false;
+	req->mr->need_inval = false;
 	req->need_inv_comp = false;
 	req->inv_errno = 0;
 	refcount_set(&req->ref, 1);
@@ -1089,7 +1088,6 @@ static int rtrs_clt_write_req(struct rtrs_clt_io_req *req)
 	int ret, count = 0;
 	u32 imm, buf_id;
 	struct ib_reg_wr rwr;
-	struct ib_send_wr inv_wr;
 	struct ib_send_wr *wr = NULL;
 	bool fr_en = false;
 
@@ -1124,19 +1122,12 @@ static int rtrs_clt_write_req(struct rtrs_clt_io_req *req)
 		ret = rtrs_map_sg_fr(req, count);
 		if (ret < 0) {
 			rtrs_err_rl(s,
-				    "Write request failed, failed to map fast reg. data, err: %d\n",
-				    ret);
+				    "Write request failed, failed to map fast reg. data, err: %pe\n",
+				    ERR_PTR(ret));
 			ib_dma_unmap_sg(clt_path->s.dev->ib_dev, req->sglist,
 					req->sg_cnt, req->dir);
 			return ret;
 		}
-		inv_wr = (struct ib_send_wr) {
-			.opcode		    = IB_WR_LOCAL_INV,
-			.wr_cqe		    = &req->inv_cqe,
-			.send_flags	    = IB_SEND_SIGNALED,
-			.ex.invalidate_rkey = req->mr->rkey,
-		};
-		req->inv_cqe.done = rtrs_clt_inv_rkey_done;
 		rwr = (struct ib_reg_wr) {
 			.wr.opcode = IB_WR_REG_MR,
 			.wr.wr_cqe = &fast_reg_cqe,
@@ -1146,7 +1137,7 @@ static int rtrs_clt_write_req(struct rtrs_clt_io_req *req)
 		};
 		wr = &rwr.wr;
 		fr_en = true;
-		refcount_inc(&req->ref);
+		req->mr->need_inval = true;
 	}
 	/*
 	 * Update stats now, after request is successfully sent it is not
@@ -1156,14 +1147,18 @@ static int rtrs_clt_write_req(struct rtrs_clt_io_req *req)
 
 	ret = rtrs_post_rdma_write_sg(req->con, req, rbuf, fr_en, count,
 				      req->usr_len + sizeof(*msg),
-				      imm, wr, &inv_wr);
+				      imm, wr, NULL);
 	if (ret) {
 		rtrs_err_rl(s,
-			    "Write request failed: error=%d path=%s [%s:%u]\n",
-			    ret, kobject_name(&clt_path->kobj), clt_path->hca_name,
-			    clt_path->hca_port);
+			    "Write request failed: error=%pe path=%s [%s:%u]\n",
+			    ERR_PTR(ret), kobject_name(&clt_path->kobj),
+			    clt_path->hca_name, clt_path->hca_port);
 		if (req->mp_policy == MP_POLICY_MIN_INFLIGHT)
 			atomic_dec(&clt_path->stats->inflight);
+		if (req->mr->need_inval) {
+			req->mr->need_inval = false;
+			refcount_dec(&req->ref);
+		}
 		if (req->sg_cnt)
 			ib_dma_unmap_sg(clt_path->s.dev->ib_dev, req->sglist,
 					req->sg_cnt, req->dir);
@@ -1213,8 +1208,8 @@ static int rtrs_clt_read_req(struct rtrs_clt_io_req *req)
 		ret = rtrs_map_sg_fr(req, count);
 		if (ret < 0) {
 			rtrs_err_rl(s,
-				     "Read request failed, failed to map  fast reg. data, err: %d\n",
-				     ret);
+				     "Read request failed, failed to map fast reg. data, err: %pe\n",
+				     ERR_PTR(ret));
 			ib_dma_unmap_sg(dev->ib_dev, req->sglist, req->sg_cnt,
 					req->dir);
 			return ret;
@@ -1237,7 +1232,7 @@ static int rtrs_clt_read_req(struct rtrs_clt_io_req *req)
 		msg->desc[0].len = cpu_to_le32(req->mr->length);
 
 		/* Further invalidation is required */
-		req->need_inv = !!RTRS_MSG_NEED_INVAL_F;
+		req->mr->need_inval = !!RTRS_MSG_NEED_INVAL_F;
 
 	} else {
 		msg->sg_cnt = 0;
@@ -1265,12 +1260,12 @@ static int rtrs_clt_read_req(struct rtrs_clt_io_req *req)
 				   req->data_len, imm, wr);
 	if (ret) {
 		rtrs_err_rl(s,
-			    "Read request failed: error=%d path=%s [%s:%u]\n",
-			    ret, kobject_name(&clt_path->kobj), clt_path->hca_name,
-			    clt_path->hca_port);
+			    "Read request failed: error=%pe path=%s [%s:%u]\n",
+			    ERR_PTR(ret), kobject_name(&clt_path->kobj),
+			    clt_path->hca_name, clt_path->hca_port);
 		if (req->mp_policy == MP_POLICY_MIN_INFLIGHT)
 			atomic_dec(&clt_path->stats->inflight);
-		req->need_inv = false;
+		req->mr->need_inval = false;
 		if (req->sg_cnt)
 			ib_dma_unmap_sg(dev->ib_dev, req->sglist,
 					req->sg_cnt, req->dir);
@@ -1364,14 +1359,19 @@ static void free_path_reqs(struct rtrs_clt_path *clt_path)
 
 static int alloc_path_reqs(struct rtrs_clt_path *clt_path)
 {
+	struct ib_device *ib_dev = clt_path->s.dev->ib_dev;
 	struct rtrs_clt_io_req *req;
+	enum ib_mr_type mr_type;
 	int i, err = -ENOMEM;
 
-	clt_path->reqs = kcalloc(clt_path->queue_depth,
-				 sizeof(*clt_path->reqs),
-				 GFP_KERNEL);
+	clt_path->reqs = kzalloc_objs(*clt_path->reqs, clt_path->queue_depth);
 	if (!clt_path->reqs)
 		return -ENOMEM;
+
+	if (ib_dev->attrs.kernel_cap_flags & IBK_SG_GAPS_REG)
+		mr_type = IB_MR_TYPE_SG_GAPS;
+	else
+		mr_type = IB_MR_TYPE_MEM_REG;
 
 	for (i = 0; i < clt_path->queue_depth; ++i) {
 		req = &clt_path->reqs[i];
@@ -1382,12 +1382,11 @@ static int alloc_path_reqs(struct rtrs_clt_path *clt_path)
 		if (!req->iu)
 			goto out;
 
-		req->sge = kcalloc(2, sizeof(*req->sge), GFP_KERNEL);
+		req->sge = kzalloc_objs(*req->sge, 2);
 		if (!req->sge)
 			goto out;
 
-		req->mr = ib_alloc_mr(clt_path->s.dev->ib_pd,
-				      IB_MR_TYPE_MEM_REG,
+		req->mr = ib_alloc_mr(clt_path->s.dev->ib_pd, mr_type,
 				      clt_path->max_pages_per_mr);
 		if (IS_ERR(req->mr)) {
 			err = PTR_ERR(req->mr);
@@ -1469,6 +1468,7 @@ static void query_fast_reg_mode(struct rtrs_clt_path *clt_path)
 	mr_page_shift      = max(12, ffs(ib_dev->attrs.page_size_cap) - 1);
 	max_pages_per_mr   = ib_dev->attrs.max_mr_size;
 	do_div(max_pages_per_mr, (1ull << mr_page_shift));
+	max_pages_per_mr = min_not_zero((u32)max_pages_per_mr, U32_MAX);
 	clt_path->max_pages_per_mr =
 		min3(clt_path->max_pages_per_mr, (u32)max_pages_per_mr,
 		     ib_dev->attrs.max_fast_reg_page_list_len);
@@ -1494,7 +1494,9 @@ static bool rtrs_clt_change_state_get_old(struct rtrs_clt_path *clt_path,
 static void rtrs_clt_hb_err_handler(struct rtrs_con *c)
 {
 	struct rtrs_clt_con *con = container_of(c, typeof(*con), c);
+	struct rtrs_clt_path *clt_path = to_clt_path(con->c.path);
 
+	rtrs_err(con->c.path, "HB err handler for path=%s\n", kobject_name(&clt_path->kobj));
 	rtrs_rdma_error_recovery(con);
 }
 
@@ -1534,7 +1536,7 @@ static struct rtrs_clt_path *alloc_path(struct rtrs_clt_sess *clt,
 	int cpu;
 	size_t total_con;
 
-	clt_path = kzalloc(sizeof(*clt_path), GFP_KERNEL);
+	clt_path = kzalloc_obj(*clt_path);
 	if (!clt_path)
 		goto err;
 
@@ -1543,15 +1545,14 @@ static struct rtrs_clt_path *alloc_path(struct rtrs_clt_sess *clt,
 	 * +1: Extra connection for user messages
 	 */
 	total_con = con_num + nr_poll_queues + 1;
-	clt_path->s.con = kcalloc(total_con, sizeof(*clt_path->s.con),
-				  GFP_KERNEL);
+	clt_path->s.con = kzalloc_objs(*clt_path->s.con, total_con);
 	if (!clt_path->s.con)
 		goto err_free_path;
 
 	clt_path->s.con_num = total_con;
 	clt_path->s.irq_con_num = con_num + 1;
 
-	clt_path->stats = kzalloc(sizeof(*clt_path->stats), GFP_KERNEL);
+	clt_path->stats = kzalloc_obj(*clt_path->stats);
 	if (!clt_path->stats)
 		goto err_free_con;
 
@@ -1618,7 +1619,7 @@ static int create_con(struct rtrs_clt_path *clt_path, unsigned int cid)
 {
 	struct rtrs_clt_con *con;
 
-	con = kzalloc(sizeof(*con), GFP_KERNEL);
+	con = kzalloc_obj(*con);
 	if (!con)
 		return -ENOMEM;
 
@@ -1777,12 +1778,12 @@ static int rtrs_rdma_addr_resolved(struct rtrs_clt_con *con)
 	err = create_con_cq_qp(con);
 	mutex_unlock(&con->con_mutex);
 	if (err) {
-		rtrs_err(s, "create_con_cq_qp(), err: %d\n", err);
+		rtrs_err(s, "create_con_cq_qp(), err: %pe\n", ERR_PTR(err));
 		return err;
 	}
 	err = rdma_resolve_route(con->c.cm_id, RTRS_CONNECT_TIMEOUT_MS);
 	if (err)
-		rtrs_err(s, "Resolving route failed, err: %d\n", err);
+		rtrs_err(s, "Resolving route failed, err: %pe\n", ERR_PTR(err));
 
 	return err;
 }
@@ -1816,7 +1817,7 @@ static int rtrs_rdma_route_resolved(struct rtrs_clt_con *con)
 
 	err = rdma_connect_locked(con->c.cm_id, &param);
 	if (err)
-		rtrs_err(clt, "rdma_connect_locked(): %d\n", err);
+		rtrs_err(clt, "rdma_connect_locked(): %pe\n", ERR_PTR(err));
 
 	return err;
 }
@@ -1849,8 +1850,8 @@ static int rtrs_rdma_conn_established(struct rtrs_clt_con *con,
 	}
 	errno = le16_to_cpu(msg->errno);
 	if (errno) {
-		rtrs_err(clt, "Invalid RTRS message: errno %d\n",
-			  errno);
+		rtrs_err(clt, "Invalid RTRS message: errno %pe\n",
+			 ERR_PTR(errno));
 		return -ECONNRESET;
 	}
 	if (con->c.cid == 0) {
@@ -1869,9 +1870,8 @@ static int rtrs_rdma_conn_established(struct rtrs_clt_con *con,
 		}
 
 		if (!clt_path->rbufs) {
-			clt_path->rbufs = kcalloc(queue_depth,
-						  sizeof(*clt_path->rbufs),
-						  GFP_KERNEL);
+			clt_path->rbufs = kzalloc_objs(*clt_path->rbufs,
+						       queue_depth);
 			if (!clt_path->rbufs)
 				return -ENOMEM;
 		}
@@ -1925,7 +1925,7 @@ static int rtrs_rdma_conn_rejected(struct rtrs_clt_con *con,
 	struct rtrs_path *s = con->c.path;
 	const struct rtrs_msg_conn_rsp *msg;
 	const char *rej_msg;
-	int status, errno;
+	int status, errno = -ECONNRESET;
 	u8 data_len;
 
 	status = ev->status;
@@ -1939,15 +1939,15 @@ static int rtrs_rdma_conn_rejected(struct rtrs_clt_con *con,
 				  "Previous session is still exists on the server, please reconnect later\n");
 		else
 			rtrs_err(s,
-				  "Connect rejected: status %d (%s), rtrs errno %d\n",
-				  status, rej_msg, errno);
+				  "Connect rejected: status %d (%s), rtrs errno %pe\n",
+				  status, rej_msg, ERR_PTR(errno));
 	} else {
 		rtrs_err(s,
 			  "Connect rejected but with malformed message: status %d (%s)\n",
 			  status, rej_msg);
 	}
 
-	return -ECONNRESET;
+	return errno;
 }
 
 void rtrs_clt_close_conns(struct rtrs_clt_path *clt_path, bool wait)
@@ -2011,27 +2011,53 @@ static int rtrs_clt_rdma_cm_handler(struct rdma_cm_id *cm_id,
 	case RDMA_CM_EVENT_UNREACHABLE:
 	case RDMA_CM_EVENT_ADDR_CHANGE:
 	case RDMA_CM_EVENT_TIMEWAIT_EXIT:
-		rtrs_wrn(s, "CM error (CM event: %s, err: %d)\n",
-			 rdma_event_msg(ev->event), ev->status);
+		if (ev->status < 0) {
+			rtrs_wrn(s, "CM error (CM event: %s, err: %pe)\n",
+				rdma_event_msg(ev->event), ERR_PTR(ev->status));
+		} else if (ev->status > 0) {
+			rtrs_wrn(s, "CM error (CM event: %s, err: %s)\n",
+				rdma_event_msg(ev->event),
+				rdma_reject_msg(cm_id, ev->status));
+		}
 		cm_err = -ECONNRESET;
 		break;
 	case RDMA_CM_EVENT_ADDR_ERROR:
 	case RDMA_CM_EVENT_ROUTE_ERROR:
-		rtrs_wrn(s, "CM error (CM event: %s, err: %d)\n",
-			 rdma_event_msg(ev->event), ev->status);
+		if (ev->status < 0) {
+			rtrs_wrn(s, "CM error (CM event: %s, err: %pe)\n",
+				rdma_event_msg(ev->event),
+				ERR_PTR(ev->status));
+		} else if (ev->status > 0) {
+			rtrs_wrn(s, "CM error (CM event: %s, err: %s)\n",
+				rdma_event_msg(ev->event),
+				rdma_reject_msg(cm_id, ev->status));
+		}
 		cm_err = -EHOSTUNREACH;
 		break;
 	case RDMA_CM_EVENT_DEVICE_REMOVAL:
 		/*
 		 * Device removal is a special case.  Queue close and return 0.
 		 */
-		rtrs_wrn_rl(s, "CM event: %s, status: %d\n", rdma_event_msg(ev->event),
-			    ev->status);
+		if (ev->status < 0) {
+			rtrs_wrn_rl(s, "CM event: %s, status: %pe\n",
+					rdma_event_msg(ev->event),
+					ERR_PTR(ev->status));
+		} else if (ev->status > 0) {
+			rtrs_wrn_rl(s, "CM event: %s, status: %s\n",
+					rdma_event_msg(ev->event),
+					rdma_reject_msg(cm_id, ev->status));
+		}
 		rtrs_clt_close_conns(clt_path, false);
 		return 0;
 	default:
-		rtrs_err(s, "Unexpected RDMA CM error (CM event: %s, err: %d)\n",
-			 rdma_event_msg(ev->event), ev->status);
+		if (ev->status < 0) {
+			rtrs_err(s, "Unexpected RDMA CM error (CM event: %s, err: %pe)\n",
+				rdma_event_msg(ev->event), ERR_PTR(ev->status));
+		} else if (ev->status > 0) {
+			rtrs_err(s, "Unexpected RDMA CM error (CM event: %s, err: %s)\n",
+				rdma_event_msg(ev->event),
+				rdma_reject_msg(cm_id, ev->status));
+		}
 		cm_err = -ECONNRESET;
 		break;
 	}
@@ -2068,14 +2094,14 @@ static int create_cm(struct rtrs_clt_con *con)
 	/* allow the port to be reused */
 	err = rdma_set_reuseaddr(cm_id, 1);
 	if (err != 0) {
-		rtrs_err(s, "Set address reuse failed, err: %d\n", err);
+		rtrs_err(s, "Set address reuse failed, err: %pe\n", ERR_PTR(err));
 		return err;
 	}
 	err = rdma_resolve_addr(cm_id, (struct sockaddr *)&clt_path->s.src_addr,
 				(struct sockaddr *)&clt_path->s.dst_addr,
 				RTRS_CONNECT_TIMEOUT_MS);
 	if (err) {
-		rtrs_err(s, "Failed to resolve address, err: %d\n", err);
+		rtrs_err(s, "Failed to resolve address, err: %pe\n", ERR_PTR(err));
 		return err;
 	}
 	/*
@@ -2346,6 +2372,12 @@ static int init_conns(struct rtrs_clt_path *clt_path)
 		if (err)
 			goto destroy;
 	}
+
+	/*
+	 * Set the cid to con_num - 1, since if we fail later, we want to stay in bounds.
+	 */
+	cid = clt_path->s.con_num - 1;
+
 	err = alloc_path_reqs(clt_path);
 	if (err)
 		goto destroy;
@@ -2544,7 +2576,7 @@ static int rtrs_send_path_info(struct rtrs_clt_path *clt_path)
 	/* Prepare for getting info response */
 	err = rtrs_iu_post_recv(&usr_con->c, rx_iu);
 	if (err) {
-		rtrs_err(clt_path->clt, "rtrs_iu_post_recv(), err: %d\n", err);
+		rtrs_err(clt_path->clt, "rtrs_iu_post_recv(), err: %pe\n", ERR_PTR(err));
 		goto out;
 	}
 	rx_iu = NULL;
@@ -2560,7 +2592,7 @@ static int rtrs_send_path_info(struct rtrs_clt_path *clt_path)
 	/* Send info request */
 	err = rtrs_iu_post_send(&usr_con->c, tx_iu, sizeof(*msg), NULL);
 	if (err) {
-		rtrs_err(clt_path->clt, "rtrs_iu_post_send(), err: %d\n", err);
+		rtrs_err(clt_path->clt, "rtrs_iu_post_send(), err: %pe\n", ERR_PTR(err));
 		goto out;
 	}
 	tx_iu = NULL;
@@ -2611,15 +2643,15 @@ static int init_path(struct rtrs_clt_path *clt_path)
 	err = init_conns(clt_path);
 	if (err) {
 		rtrs_err(clt_path->clt,
-			 "init_conns() failed: err=%d path=%s [%s:%u]\n", err,
-			 str, clt_path->hca_name, clt_path->hca_port);
+			 "init_conns() failed: err=%pe path=%s [%s:%u]\n",
+			 ERR_PTR(err), str, clt_path->hca_name, clt_path->hca_port);
 		goto out;
 	}
 	err = rtrs_send_path_info(clt_path);
 	if (err) {
 		rtrs_err(clt_path->clt,
-			 "rtrs_send_path_info() failed: err=%d path=%s [%s:%u]\n",
-			 err, str, clt_path->hca_name, clt_path->hca_port);
+			 "rtrs_send_path_info() failed: err=%pe path=%s [%s:%u]\n",
+			 ERR_PTR(err), str, clt_path->hca_name, clt_path->hca_port);
 		goto out;
 	}
 	rtrs_clt_path_up(clt_path);
@@ -2694,7 +2726,7 @@ static struct rtrs_clt_sess *alloc_clt(const char *sessname, size_t paths_num,
 	if (strlen(sessname) >= sizeof(clt->sessname))
 		return ERR_PTR(-EINVAL);
 
-	clt = kzalloc(sizeof(*clt), GFP_KERNEL);
+	clt = kzalloc_obj(*clt);
 	if (!clt)
 		return ERR_PTR(-ENOMEM);
 
@@ -3140,8 +3172,23 @@ close_path:
 	return err;
 }
 
+void rtrs_clt_ib_event_handler(struct ib_event_handler *handler,
+			       struct ib_event *ibevent)
+{
+	struct ib_device *idev = ibevent->device;
+	u32 port_num = ibevent->element.port_num;
+
+	pr_info("Handling event: %s (%d). HCA name: %s, port num: %u\n",
+			ib_event_msg(ibevent->event), ibevent->event, idev->name, port_num);
+}
+
+
 static int rtrs_clt_ib_dev_init(struct rtrs_ib_dev *dev)
 {
+	INIT_IB_EVENT_HANDLER(&dev->event_handler, dev->ib_dev,
+			      rtrs_clt_ib_event_handler);
+	ib_register_event_handler(&dev->event_handler);
+
 	if (!(dev->ib_dev->attrs.device_cap_flags &
 	      IB_DEVICE_MEM_MGT_EXTENSIONS)) {
 		pr_err("Memory registrations not supported.\n");
@@ -3151,8 +3198,15 @@ static int rtrs_clt_ib_dev_init(struct rtrs_ib_dev *dev)
 	return 0;
 }
 
+static void rtrs_clt_ib_dev_deinit(struct rtrs_ib_dev *dev)
+{
+	ib_unregister_event_handler(&dev->event_handler);
+}
+
+
 static const struct rtrs_rdma_dev_pd_ops dev_pd_ops = {
-	.init = rtrs_clt_ib_dev_init
+	.init = rtrs_clt_ib_dev_init,
+	.deinit = rtrs_clt_ib_dev_deinit
 };
 
 static int __init rtrs_client_init(void)
@@ -3165,7 +3219,7 @@ static int __init rtrs_client_init(void)
 		pr_err("Failed to create rtrs-client dev class\n");
 		return ret;
 	}
-	rtrs_wq = alloc_workqueue("rtrs_client_wq", 0, 0);
+	rtrs_wq = alloc_workqueue("rtrs_client_wq", WQ_PERCPU, 0);
 	if (!rtrs_wq) {
 		class_unregister(&rtrs_clt_dev_class);
 		return -ENOMEM;

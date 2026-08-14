@@ -119,7 +119,7 @@ static bool tsys01_crc_valid(u16 *n_prom)
 	u8 sum = 0;
 
 	for (cnt = 0; cnt < TSYS01_PROM_WORDS_NB; cnt++)
-		sum += ((n_prom[0] >> 8) + (n_prom[0] & 0xFF));
+		sum += ((n_prom[cnt] >> 8) + (n_prom[cnt] & 0xFF));
 
 	return (sum == 0);
 }
@@ -207,13 +207,13 @@ static int tsys01_i2c_probe(struct i2c_client *client)
 
 static const struct i2c_device_id tsys01_id[] = {
 	{ "tsys01" },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tsys01_id);
 
 static const struct of_device_id tsys01_of_match[] = {
 	{ .compatible = "meas,tsys01", },
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(of, tsys01_of_match);
 
@@ -232,4 +232,4 @@ MODULE_DESCRIPTION("Measurement-Specialties tsys01 temperature driver");
 MODULE_AUTHOR("William Markezana <william.markezana@meas-spec.com>");
 MODULE_AUTHOR("Ludovic Tancerel <ludovic.tancerel@maplehightech.com>");
 MODULE_LICENSE("GPL v2");
-MODULE_IMPORT_NS(IIO_MEAS_SPEC_SENSORS);
+MODULE_IMPORT_NS("IIO_MEAS_SPEC_SENSORS");

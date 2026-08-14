@@ -8,6 +8,33 @@ config INTERCONNECT_QCOM
 config INTERCONNECT_QCOM_BCM_VOTER
 	tristate
 
+config INTERCONNECT_QCOM_ELIZA
+       tristate "Qualcomm Eliza interconnect driver"
+       depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+       select INTERCONNECT_QCOM_RPMH
+       select INTERCONNECT_QCOM_BCM_VOTER
+       help
+         This is a driver for the Qualcomm Network-on-Chip on Eliza-based
+         platforms.
+
+config INTERCONNECT_QCOM_GLYMUR
+       tristate "Qualcomm Glymur interconnect driver"
+       depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+       select INTERCONNECT_QCOM_RPMH
+       select INTERCONNECT_QCOM_BCM_VOTER
+       help
+         This is a driver for the Qualcomm Network-on-Chip on glymur-based
+         platforms.
+
+config INTERCONNECT_QCOM_KAANAPALI
+	tristate "Qualcomm Kaanapali interconnect driver"
+	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+	select INTERCONNECT_QCOM_RPMH
+	select INTERCONNECT_QCOM_BCM_VOTER
+	help
+	  This is a driver for the Qualcomm Network-on-Chip on kaanapali-based
+	  platforms.
+
 config INTERCONNECT_QCOM_MSM8909
 	tristate "Qualcomm MSM8909 interconnect driver"
 	depends on INTERCONNECT_QCOM
@@ -24,6 +51,15 @@ config INTERCONNECT_QCOM_MSM8916
 	select INTERCONNECT_QCOM_SMD_RPM
 	help
 	  This is a driver for the Qualcomm Network-on-Chip on msm8916-based
+	  platforms.
+
+config INTERCONNECT_QCOM_MSM8937
+	tristate "Qualcomm MSM8937 interconnect driver"
+	depends on INTERCONNECT_QCOM
+	depends on QCOM_SMD_RPM
+	select INTERCONNECT_QCOM_SMD_RPM
+	help
+	  This is a driver for the Qualcomm Network-on-Chip on msm8937-based
 	  platforms.
 
 config INTERCONNECT_QCOM_MSM8939
@@ -52,6 +88,15 @@ config INTERCONNECT_QCOM_MSM8974
 	help
 	 This is a driver for the Qualcomm Network-on-Chip on msm8974-based
 	 platforms.
+
+config INTERCONNECT_QCOM_MSM8976
+	tristate "Qualcomm MSM8976 interconnect driver"
+	depends on INTERCONNECT_QCOM
+	depends on QCOM_SMD_RPM
+	select INTERCONNECT_QCOM_SMD_RPM
+	help
+	  This is a driver for the Qualcomm Network-on-Chip on msm8976-based
+	  platforms.
 
 config INTERCONNECT_QCOM_MSM8996
 	tristate "Qualcomm MSM8996 interconnect driver"
@@ -87,6 +132,26 @@ config INTERCONNECT_QCOM_QCS404
 	  This is a driver for the Qualcomm Network-on-Chip on qcs404-based
 	  platforms.
 
+config INTERCONNECT_QCOM_QCS615
+	tristate "Qualcomm QCS615 interconnect driver"
+	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+	select INTERCONNECT_QCOM_RPMH
+	select INTERCONNECT_QCOM_BCM_VOTER
+	help
+	  This is a driver for the Qualcomm Network-on-Chip on qcs615-based
+	  platforms.
+
+config INTERCONNECT_QCOM_QCS8300
+	tristate "Qualcomm QCS8300 interconnect driver"
+	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+	select INTERCONNECT_QCOM_RPMH
+	select INTERCONNECT_QCOM_BCM_VOTER
+	help
+	  This is a driver for the Qualcomm Technologies, Inc. Network-on-Chip
+	  on QCS8300-based platforms. The interconnect provider collects and
+	  aggreagates the cosumer bandwidth requests to satisfy constraints
+	  placed on Network-on-Chip performance states.
+
 config INTERCONNECT_QCOM_QDU1000
 	tristate "Qualcomm QDU1000/QRU1000 interconnect driver"
 	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
@@ -117,6 +182,15 @@ config INTERCONNECT_QCOM_SA8775P
 	select INTERCONNECT_QCOM_BCM_VOTER
 	help
 	  This is a driver for the Qualcomm Network-on-Chip on sa8775p-based
+	  platforms.
+
+config INTERCONNECT_QCOM_SAR2130P
+	tristate "Qualcomm SAR2130P interconnect driver"
+	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+	select INTERCONNECT_QCOM_RPMH
+	select INTERCONNECT_QCOM_BCM_VOTER
+	help
+	  This is a driver for the Qualcomm Network-on-Chip on SAR2130P-based
 	  platforms.
 
 config INTERCONNECT_QCOM_SC7180
@@ -236,6 +310,15 @@ config INTERCONNECT_QCOM_SM7150
 	  This is a driver for the Qualcomm Network-on-Chip on sm7150-based
 	  platforms.
 
+config INTERCONNECT_QCOM_MILOS
+	tristate "Qualcomm Milos interconnect driver"
+	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+	select INTERCONNECT_QCOM_RPMH
+	select INTERCONNECT_QCOM_BCM_VOTER
+	help
+	  This is a driver for the Qualcomm Network-on-Chip on Milos-based
+	  platforms.
+
 config INTERCONNECT_QCOM_SM8150
 	tristate "Qualcomm SM8150 interconnect driver"
 	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
@@ -288,6 +371,15 @@ config INTERCONNECT_QCOM_SM8650
 	select INTERCONNECT_QCOM_BCM_VOTER
 	help
 	  This is a driver for the Qualcomm Network-on-Chip on SM8650-based
+	  platforms.
+
+config INTERCONNECT_QCOM_SM8750
+	tristate "Qualcomm SM8750 interconnect driver"
+	depends on INTERCONNECT_QCOM_RPMH_POSSIBLE
+	select INTERCONNECT_QCOM_RPMH
+	select INTERCONNECT_QCOM_BCM_VOTER
+	help
+	  This is a driver for the Qualcomm Network-on-Chip on SM8750-based
 	  platforms.
 
 config INTERCONNECT_QCOM_X1E80100

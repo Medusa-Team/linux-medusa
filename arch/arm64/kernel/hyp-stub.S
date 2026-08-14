@@ -54,6 +54,11 @@ SYM_CODE_START_LOCAL(elx_sync)
 1:	cmp	x0, #HVC_FINALISE_EL2
 	b.eq	__finalise_el2
 
+	cmp	x0, #HVC_GET_ICH_VTR_EL2
+	b.ne	2f
+	mrs_s	x1, SYS_ICH_VTR_EL2
+	b	9f
+
 2:	cmp	x0, #HVC_SOFT_RESTART
 	b.ne	3f
 	mov	x0, x2
@@ -97,8 +102,7 @@ SYM_CODE_START_LOCAL(__finalise_el2)
 2:
 	// Engage the VHE magic!
 	mov_q	x0, HCR_HOST_VHE_FLAGS
-	msr	hcr_el2, x0
-	isb
+	msr_hcr_el2 x0
 
 	// Use the EL1 allocated stack, per-cpu offset
 	mrs	x0, sp_el1
@@ -114,8 +118,8 @@ SYM_CODE_START_LOCAL(__finalise_el2)
 
 	// Use EL2 translations for SPE & TRBE and disable access from EL1
 	mrs	x0, mdcr_el2
-	bic	x0, x0, #(MDCR_EL2_E2PB_MASK << MDCR_EL2_E2PB_SHIFT)
-	bic	x0, x0, #(MDCR_EL2_E2TB_MASK << MDCR_EL2_E2TB_SHIFT)
+	bic	x0, x0, #MDCR_EL2_E2PB_MASK
+	bic	x0, x0, #MDCR_EL2_E2TB_MASK
 	msr	mdcr_el2, x0
 
 	// Transfer the MM state from EL1 to EL2

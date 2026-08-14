@@ -35,6 +35,8 @@
  * actually fairly low.
  */
 
+#include <drm/drm_print.h>
+
 #include "uapi/drm/vc4_drm.h"
 #include "vc4_drv.h"
 #include "vc4_packet.h"
@@ -599,7 +601,7 @@ int vc4_get_rcl(struct drm_device *dev, struct vc4_exec_info *exec)
 	bool has_bin = args->bin_cl_size != 0;
 	int ret;
 
-	if (WARN_ON_ONCE(vc4->is_vc5))
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
 		return -ENODEV;
 
 	if (args->min_x_tile > args->max_x_tile ||

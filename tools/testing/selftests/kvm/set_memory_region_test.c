@@ -8,18 +8,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/mman.h>
 
 #include <linux/compiler.h>
 
 #include <test_util.h>
+#include <kvm_syscalls.h>
 #include <kvm_util.h>
 #include <processor.h>
 
 /*
- * s390x needs at least 1MB alignment, and the x86_64 MOVE/DELETE tests need a
- * 2MB sized and aligned region so that the initial region corresponds to
- * exactly one large page.
+ * s390 needs at least 1MB alignment, and the x86 MOVE/DELETE tests need a 2MB
+ * sized and aligned region so that the initial region corresponds to exactly
+ * one large page.
  */
 #define MEM_REGION_SIZE		0x200000
 
@@ -30,19 +30,19 @@
 #define MEM_REGION_GPA		0xc0000000
 #define MEM_REGION_SLOT		10
 
-static const uint64_t MMIO_VAL = 0xbeefull;
+static const u64 MMIO_VAL = 0xbeefull;
 
-extern const uint64_t final_rip_start;
-extern const uint64_t final_rip_end;
+extern const u64 final_rip_start;
+extern const u64 final_rip_end;
 
 static sem_t vcpu_ready;
 
-static inline uint64_t guest_spin_on_val(uint64_t spin_val)
+static inline u64 guest_spin_on_val(u64 spin_val)
 {
-	uint64_t val;
+	u64 val;
 
 	do {
-		val = READ_ONCE(*((uint64_t *)MEM_REGION_GPA));
+		val = READ_ONCE(*((u64 *)MEM_REGION_GPA));
 	} while (val == spin_val);
 
 	GUEST_SYNC(0);
@@ -54,7 +54,7 @@ static void *vcpu_worker(void *data)
 	struct kvm_vcpu *vcpu = data;
 	struct kvm_run *run = vcpu->run;
 	struct ucall uc;
-	uint64_t cmd;
+	u64 cmd;
 
 	/*
 	 * Loop until the guest is done.  Re-enter the guest on all MMIO exits,
@@ -111,8 +111,8 @@ static struct kvm_vm *spawn_vm(struct kvm_vcpu **vcpu, pthread_t *vcpu_thread,
 			       void *guest_code)
 {
 	struct kvm_vm *vm;
-	uint64_t *hva;
-	uint64_t gpa;
+	u64 *hva;
+	gpa_t gpa;
 
 	vm = vm_create_with_one_vcpu(vcpu, guest_code);
 
@@ -144,7 +144,7 @@ static struct kvm_vm *spawn_vm(struct kvm_vcpu **vcpu, pthread_t *vcpu_thread,
 
 static void guest_code_move_memory_region(void)
 {
-	uint64_t val;
+	u64 val;
 
 	GUEST_SYNC(0);
 
@@ -175,14 +175,17 @@ static void guest_code_move_memory_region(void)
 	GUEST_DONE();
 }
 
-static void test_move_memory_region(void)
+static void test_move_memory_region(bool disable_slot_zap_quirk)
 {
 	pthread_t vcpu_thread;
 	struct kvm_vcpu *vcpu;
 	struct kvm_vm *vm;
-	uint64_t *hva;
+	u64 *hva;
 
 	vm = spawn_vm(&vcpu, &vcpu_thread, guest_code_move_memory_region);
+
+	if (disable_slot_zap_quirk)
+		vm_enable_cap(vm, KVM_CAP_DISABLE_QUIRKS2, KVM_X86_QUIRK_SLOT_ZAP_ALL);
 
 	hva = addr_gpa2hva(vm, MEM_REGION_GPA);
 
@@ -221,7 +224,7 @@ static void test_move_memory_region(void)
 static void guest_code_delete_memory_region(void)
 {
 	struct desc_ptr idt;
-	uint64_t val;
+	u64 val;
 
 	/*
 	 * Clobber the IDT so that a #PF due to the memory region being deleted
@@ -232,7 +235,7 @@ static void guest_code_delete_memory_region(void)
 	 * in the guest will never succeed, and so isn't an option.
 	 */
 	memset(&idt, 0, sizeof(idt));
-	__asm__ __volatile__("lidt %0" :: "m"(idt));
+	set_idt(&idt);
 
 	GUEST_SYNC(0);
 
@@ -266,7 +269,7 @@ static void guest_code_delete_memory_region(void)
 	GUEST_ASSERT(0);
 }
 
-static void test_delete_memory_region(void)
+static void test_delete_memory_region(bool disable_slot_zap_quirk)
 {
 	pthread_t vcpu_thread;
 	struct kvm_vcpu *vcpu;
@@ -275,6 +278,9 @@ static void test_delete_memory_region(void)
 	struct kvm_vm *vm;
 
 	vm = spawn_vm(&vcpu, &vcpu_thread, guest_code_delete_memory_region);
+
+	if (disable_slot_zap_quirk)
+		vm_enable_cap(vm, KVM_CAP_DISABLE_QUIRKS2, KVM_X86_QUIRK_SLOT_ZAP_ALL);
 
 	/* Delete the memory region, the guest should not die. */
 	vm_mem_region_delete(vm, MEM_REGION_SLOT);
@@ -339,12 +345,12 @@ static void test_zero_memory_regions(void)
 
 static void test_invalid_memory_region_flags(void)
 {
-	uint32_t supported_flags = KVM_MEM_LOG_DIRTY_PAGES;
-	const uint32_t v2_only_flags = KVM_MEM_GUEST_MEMFD;
+	u32 supported_flags = KVM_MEM_LOG_DIRTY_PAGES;
+	const u32 v2_only_flags = KVM_MEM_GUEST_MEMFD;
 	struct kvm_vm *vm;
 	int r, i;
 
-#if defined __aarch64__ || defined __riscv || defined __x86_64__
+#if defined __aarch64__ || defined __riscv || defined __x86_64__ || defined __loongarch__
 	supported_flags |= KVM_MEM_READONLY;
 #endif
 
@@ -404,17 +410,10 @@ static void test_add_max_memory_regions(void)
 {
 	int ret;
 	struct kvm_vm *vm;
-	uint32_t max_mem_slots;
-	uint32_t slot;
+	u32 max_mem_slots;
+	u32 slot;
 	void *mem, *mem_aligned, *mem_extra;
-	size_t alignment;
-
-#ifdef __s390x__
-	/* On s390x, the host address must be aligned to 1M (due to PGSTEs) */
-	alignment = 0x100000;
-#else
-	alignment = 1;
-#endif
+	size_t alignment = 1;
 
 	max_mem_slots = kvm_check_cap(KVM_CAP_NR_MEMSLOTS);
 	TEST_ASSERT(max_mem_slots > 0,
@@ -427,31 +426,30 @@ static void test_add_max_memory_regions(void)
 	pr_info("Adding slots 0..%i, each memory region with %dK size\n",
 		(max_mem_slots - 1), MEM_REGION_SIZE >> 10);
 
-	mem = mmap(NULL, (size_t)max_mem_slots * MEM_REGION_SIZE + alignment,
-		   PROT_READ | PROT_WRITE,
-		   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-	TEST_ASSERT(mem != MAP_FAILED, "Failed to mmap() host");
+
+	mem = kvm_mmap((size_t)max_mem_slots * MEM_REGION_SIZE + alignment,
+		       PROT_READ | PROT_WRITE,
+		       MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1);
 	mem_aligned = (void *)(((size_t) mem + alignment - 1) & ~(alignment - 1));
 
 	for (slot = 0; slot < max_mem_slots; slot++)
 		vm_set_user_memory_region(vm, slot, 0,
-					  ((uint64_t)slot * MEM_REGION_SIZE),
+					  ((u64)slot * MEM_REGION_SIZE),
 					  MEM_REGION_SIZE,
-					  mem_aligned + (uint64_t)slot * MEM_REGION_SIZE);
+					  mem_aligned + (u64)slot * MEM_REGION_SIZE);
 
 	/* Check it cannot be added memory slots beyond the limit */
-	mem_extra = mmap(NULL, MEM_REGION_SIZE, PROT_READ | PROT_WRITE,
-			 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-	TEST_ASSERT(mem_extra != MAP_FAILED, "Failed to mmap() host");
+	mem_extra = kvm_mmap(MEM_REGION_SIZE, PROT_READ | PROT_WRITE,
+			     MAP_PRIVATE | MAP_ANONYMOUS, -1);
 
 	ret = __vm_set_user_memory_region(vm, max_mem_slots, 0,
-					  (uint64_t)max_mem_slots * MEM_REGION_SIZE,
+					  (u64)max_mem_slots * MEM_REGION_SIZE,
 					  MEM_REGION_SIZE, mem_extra);
 	TEST_ASSERT(ret == -1 && errno == EINVAL,
 		    "Adding one more memory slot should fail with EINVAL");
 
-	munmap(mem, (size_t)max_mem_slots * MEM_REGION_SIZE + alignment);
-	munmap(mem_extra, MEM_REGION_SIZE);
+	kvm_munmap(mem, (size_t)max_mem_slots * MEM_REGION_SIZE + alignment);
+	kvm_munmap(mem_extra, MEM_REGION_SIZE);
 	kvm_vm_free(vm);
 }
 
@@ -547,18 +545,72 @@ static void test_add_overlapping_private_memory_regions(void)
 	close(memfd);
 	kvm_vm_free(vm);
 }
+
+static void guest_code_mmio_during_vectoring(void)
+{
+	const struct desc_ptr idt_desc = {
+		.address = MEM_REGION_GPA,
+		.size = 0xFFF,
+	};
+
+	set_idt(&idt_desc);
+
+	/* Generate a #GP by dereferencing a non-canonical address */
+	*((u8 *)NONCANONICAL) = 0x1;
+
+	GUEST_ASSERT(0);
+}
+
+/*
+ * This test points the IDT descriptor base to an MMIO address. It should cause
+ * a KVM internal error when an event occurs in the guest.
+ */
+static void test_mmio_during_vectoring(void)
+{
+	struct kvm_vcpu *vcpu;
+	struct kvm_run *run;
+	struct kvm_vm *vm;
+	u64 expected_gpa;
+
+	pr_info("Testing MMIO during vectoring error handling\n");
+
+	vm = vm_create_with_one_vcpu(&vcpu, guest_code_mmio_during_vectoring);
+	virt_map(vm, MEM_REGION_GPA, MEM_REGION_GPA, 1);
+
+	run = vcpu->run;
+
+	vcpu_run(vcpu);
+	TEST_ASSERT_KVM_EXIT_REASON(vcpu, KVM_EXIT_INTERNAL_ERROR);
+	TEST_ASSERT(run->internal.suberror == KVM_INTERNAL_ERROR_DELIVERY_EV,
+		    "Unexpected suberror = %d", vcpu->run->internal.suberror);
+	TEST_ASSERT(run->internal.ndata != 4, "Unexpected internal error data array size = %d",
+		    run->internal.ndata);
+
+	/* The reported GPA should be IDT base + offset of the GP vector */
+	expected_gpa = MEM_REGION_GPA + GP_VECTOR * sizeof(struct idt_entry);
+
+	TEST_ASSERT(run->internal.data[3] == expected_gpa,
+		    "Unexpected GPA = %llx (expected %lx)",
+		    vcpu->run->internal.data[3], expected_gpa);
+
+	kvm_vm_free(vm);
+}
 #endif
 
 int main(int argc, char *argv[])
 {
 #ifdef __x86_64__
 	int i, loops;
+	int j, disable_slot_zap_quirk = 0;
 
+	if (kvm_check_cap(KVM_CAP_DISABLE_QUIRKS2) & KVM_X86_QUIRK_SLOT_ZAP_ALL)
+		disable_slot_zap_quirk = 1;
 	/*
 	 * FIXME: the zero-memslot test fails on aarch64 and s390x because
 	 * KVM_RUN fails with ENOEXEC or EFAULT.
 	 */
 	test_zero_memory_regions();
+	test_mmio_during_vectoring();
 #endif
 
 	test_invalid_memory_region_flags();
@@ -579,13 +631,17 @@ int main(int argc, char *argv[])
 	else
 		loops = 10;
 
-	pr_info("Testing MOVE of in-use region, %d loops\n", loops);
-	for (i = 0; i < loops; i++)
-		test_move_memory_region();
+	for (j = 0; j <= disable_slot_zap_quirk; j++) {
+		pr_info("Testing MOVE of in-use region, %d loops, slot zap quirk %s\n",
+			loops, j ? "disabled" : "enabled");
+		for (i = 0; i < loops; i++)
+			test_move_memory_region(!!j);
 
-	pr_info("Testing DELETE of in-use region, %d loops\n", loops);
-	for (i = 0; i < loops; i++)
-		test_delete_memory_region();
+		pr_info("Testing DELETE of in-use region, %d loops, slot zap quirk %s\n",
+			loops, j ? "disabled" : "enabled");
+		for (i = 0; i < loops; i++)
+			test_delete_memory_region(!!j);
+	}
 #endif
 
 	return 0;

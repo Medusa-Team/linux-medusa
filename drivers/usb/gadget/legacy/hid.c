@@ -227,7 +227,7 @@ static int hidg_plat_driver_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kzalloc_obj(*entry);
 	if (!entry)
 		return -ENOMEM;
 
@@ -261,7 +261,7 @@ static struct usb_composite_driver hidg_driver = {
 };
 
 static struct platform_driver hidg_plat_driver = {
-	.remove_new	= hidg_plat_driver_remove,
+	.remove		= hidg_plat_driver_remove,
 	.driver		= {
 		.name	= "hidg",
 	},

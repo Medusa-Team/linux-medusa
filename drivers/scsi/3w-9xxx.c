@@ -1184,7 +1184,7 @@ static int twa_initialize_device_extension(TW_Device_Extension *tw_dev)
 	}
 
 	/* Allocate event info space */
-	tw_dev->event_queue[0] = kcalloc(TW_Q_LENGTH, sizeof(TW_Event), GFP_KERNEL);
+	tw_dev->event_queue[0] = kzalloc_objs(TW_Event, TW_Q_LENGTH);
 	if (!tw_dev->event_queue[0]) {
 		TW_PRINTK(tw_dev->host, TW_DRIVER, 0x18, "Event info memory allocation failed");
 		goto out;
@@ -1695,7 +1695,7 @@ out:
 } /* End twa_reset_sequence() */
 
 /* This funciton returns unit geometry in cylinders/heads/sectors */
-static int twa_scsi_biosparam(struct scsi_device *sdev, struct block_device *bdev, sector_t capacity, int geom[])
+static int twa_scsi_biosparam(struct scsi_device *sdev, struct gendisk *unused, sector_t capacity, int geom[])
 {
 	int heads, sectors, cylinders;
 
@@ -1746,7 +1746,7 @@ out:
 } /* End twa_scsi_eh_reset() */
 
 /* This is the main scsi queue function to handle scsi opcodes */
-static int twa_scsi_queue_lck(struct scsi_cmnd *SCpnt)
+static enum scsi_qc_status twa_scsi_queue_lck(struct scsi_cmnd *SCpnt)
 {
 	void (*done)(struct scsi_cmnd *) = scsi_done;
 	int request_id, retval;
@@ -1968,13 +1968,14 @@ static char *twa_string_lookup(twa_message_type *table, unsigned int code)
 } /* End twa_string_lookup() */
 
 /* This function gets called when a disk is coming on-line */
-static int twa_slave_configure(struct scsi_device *sdev)
+static int twa_sdev_configure(struct scsi_device *sdev,
+			      struct queue_limits *lim)
 {
 	/* Force 60 second timeout */
 	blk_queue_rq_timeout(sdev->request_queue, 60 * HZ);
 
 	return 0;
-} /* End twa_slave_configure() */
+} /* End twa_sdev_configure() */
 
 static const struct scsi_host_template driver_template = {
 	.module			= THIS_MODULE,
@@ -1984,7 +1985,7 @@ static const struct scsi_host_template driver_template = {
 	.bios_param		= twa_scsi_biosparam,
 	.change_queue_depth	= scsi_change_queue_depth,
 	.can_queue		= TW_Q_LENGTH-2,
-	.slave_configure	= twa_slave_configure,
+	.sdev_configure		= twa_sdev_configure,
 	.this_id		= -1,
 	.sg_tablesize		= TW_APACHE_MAX_SGL_LENGTH,
 	.max_sectors		= TW_MAX_SECTORS,
@@ -2260,7 +2261,7 @@ out_disable_device:
 } /* End twa_resume() */
 
 /* PCI Devices supported by this driver */
-static struct pci_device_id twa_pci_tbl[] = {
+static const struct pci_device_id twa_pci_tbl[] = {
 	{ PCI_VENDOR_ID_3WARE, PCI_DEVICE_ID_3WARE_9000,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{ PCI_VENDOR_ID_3WARE, PCI_DEVICE_ID_3WARE_9550SX,

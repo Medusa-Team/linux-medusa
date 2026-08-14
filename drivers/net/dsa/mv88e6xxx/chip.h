@@ -13,7 +13,9 @@
 #include <linux/irq.h>
 #include <linux/gpio/consumer.h>
 #include <linux/kthread.h>
+#include <linux/leds.h>
 #include <linux/phy.h>
+#include <linux/property.h>
 #include <linux/ptp_clock_kernel.h>
 #include <linux/timecounter.h>
 #include <net/dsa.h>
@@ -133,15 +135,18 @@ struct mv88e6xxx_info {
 	unsigned int num_ports;
 	unsigned int num_internal_phys;
 	unsigned int num_gpio;
+	unsigned int num_tcam_entries;
 	unsigned int max_vid;
 	unsigned int max_sid;
 	unsigned int port_base_addr;
 	unsigned int phy_base_addr;
 	unsigned int global1_addr;
 	unsigned int global2_addr;
+	unsigned int tcam_addr;
 	unsigned int age_time_coeff;
 	unsigned int g1_irqs;
 	unsigned int g2_irqs;
+	int stats_type;
 	bool pvt;
 
 	/* Mark certain ports as invalid. This is required for example for the
@@ -206,6 +211,8 @@ struct mv88e6xxx_gpio_ops;
 struct mv88e6xxx_avb_ops;
 struct mv88e6xxx_ptp_ops;
 struct mv88e6xxx_pcs_ops;
+struct mv88e6xxx_cc_coeffs;
+struct mv88e6xxx_tcam_ops;
 
 struct mv88e6xxx_irq {
 	u16 masked;
@@ -237,7 +244,7 @@ struct mv88e6xxx_port_hwtstamp {
 	u16 tx_seq_id;
 
 	/* Current timestamp configuration */
-	struct hwtstamp_config tstamp_config;
+	struct kernel_hwtstamp_config tstamp_config;
 };
 
 enum mv88e6xxx_policy_mapping {
@@ -275,6 +282,7 @@ struct mv88e6xxx_vlan {
 struct mv88e6xxx_port {
 	struct mv88e6xxx_chip *chip;
 	int port;
+	struct fwnode_handle *fwnode;
 	struct mv88e6xxx_vlan bridge_pvid;
 	u64 serdes_stats[2];
 	u64 atu_member_violation;
@@ -288,6 +296,11 @@ struct mv88e6xxx_port {
 	bool mirror_egress;
 	struct devlink_region *region;
 	void *pcs_private;
+
+	/* LED related information */
+	bool fiber;
+	struct led_classdev led0;
+	struct led_classdev led1;
 
 	/* MacAuth Bypass control flag */
 	bool mab;
@@ -327,6 +340,10 @@ struct mv88e6xxx_hw_stat {
 	size_t size;
 	int reg;
 	int type;
+};
+
+struct mv88e6xxx_tcam {
+	struct list_head entries;
 };
 
 struct mv88e6xxx_chip {
@@ -408,13 +425,12 @@ struct mv88e6xxx_chip {
 	struct cyclecounter	tstamp_cc;
 	struct timecounter	tstamp_tc;
 	struct delayed_work	overflow_work;
+	const struct mv88e6xxx_cc_coeffs *cc_coeffs;
 
 	struct ptp_clock	*ptp_clock;
 	struct ptp_clock_info	ptp_clock_info;
 	struct delayed_work	tai_event_work;
 	struct ptp_pin_desc	pin_config[MV88E6XXX_MAX_GPIO];
-	u16 trig_config;
-	u16 evcap_config;
 	u16 enable_count;
 
 	/* Current ingress and egress monitor ports */
@@ -432,6 +448,38 @@ struct mv88e6xxx_chip {
 
 	/* Bridge MST to SID mappings */
 	struct list_head msts;
+
+	/* FID map */
+	DECLARE_BITMAP(fid_bitmap, MV88E6XXX_N_FID);
+
+	/* TCAM entries */
+	struct mv88e6xxx_tcam tcam;
+};
+
+#define TCAM_MATCH_SIZE 96
+
+struct mv88e6xxx_tcam_key {
+	u16 spv;
+	u16 spv_mask;
+
+	u8 frame_data[TCAM_MATCH_SIZE];
+	u8 frame_mask[TCAM_MATCH_SIZE];
+};
+
+struct mv88e6xxx_tcam_action {
+	u8 dpv_mode;
+	u16 dpv;
+};
+
+struct mv88e6xxx_tcam_entry {
+	struct list_head list;
+	unsigned long cookie;
+	u32 prio;
+	u8 hw_idx;
+
+	struct mv88e6xxx_tcam_key key;
+	struct mv88e6xxx_tcam_action action;
+
 };
 
 struct mv88e6xxx_bus_ops {
@@ -572,6 +620,9 @@ struct mv88e6xxx_ops {
 			      phy_interface_t mode);
 	int (*port_get_cmode)(struct mv88e6xxx_chip *chip, int port, u8 *cmode);
 
+	/* LED control */
+	int (*port_setup_leds)(struct mv88e6xxx_chip *chip, int port);
+
 	/* Some devices have a per port register indicating what is
 	 * the upstream port this port should forward to.
 	 */
@@ -590,7 +641,7 @@ struct mv88e6xxx_ops {
 
 	/* Return the number of strings describing statistics */
 	int (*stats_get_sset_count)(struct mv88e6xxx_chip *chip);
-	int (*stats_get_strings)(struct mv88e6xxx_chip *chip,  uint8_t *data);
+	void (*stats_get_strings)(struct mv88e6xxx_chip *chip, uint8_t **data);
 	size_t (*stats_get_stat)(struct mv88e6xxx_chip *chip, int port,
 				 const struct mv88e6xxx_hw_stat *stat,
 				 uint64_t *data);
@@ -617,8 +668,8 @@ struct mv88e6xxx_ops {
 
 	/* Statistics from the SERDES interface */
 	int (*serdes_get_sset_count)(struct mv88e6xxx_chip *chip, int port);
-	int (*serdes_get_strings)(struct mv88e6xxx_chip *chip,  int port,
-				  uint8_t *data);
+	int (*serdes_get_strings)(struct mv88e6xxx_chip *chip, int port,
+				  uint8_t **data);
 	size_t (*serdes_get_stats)(struct mv88e6xxx_chip *chip, int port,
 				   uint64_t *data);
 
@@ -626,10 +677,6 @@ struct mv88e6xxx_ops {
 	int (*serdes_get_regs_len)(struct mv88e6xxx_chip *chip,  int port);
 	void (*serdes_get_regs)(struct mv88e6xxx_chip *chip, int port,
 				void *_p);
-
-	/* SERDES SGMII/Fiber Output Amplitude */
-	int (*serdes_set_tx_amplitude)(struct mv88e6xxx_chip *chip, int port,
-				       int val);
 
 	/* Address Translation Unit operations */
 	int (*atu_get_hash)(struct mv88e6xxx_chip *chip, u8 *hash);
@@ -667,6 +714,11 @@ struct mv88e6xxx_ops {
 
 	/* Max Frame Size */
 	int (*set_max_frame_size)(struct mv88e6xxx_chip *chip, int mtu);
+
+	int (*port_enable_tcam)(struct mv88e6xxx_chip *chip, int port);
+
+	/* Ternary Content Addressable Memory operations */
+	const struct mv88e6xxx_tcam_ops *tcam_ops;
 };
 
 struct mv88e6xxx_irq_ops {
@@ -715,7 +767,7 @@ struct mv88e6xxx_avb_ops {
 };
 
 struct mv88e6xxx_ptp_ops {
-	u64 (*clock_read)(const struct cyclecounter *cc);
+	u64 (*clock_read)(struct cyclecounter *cc);
 	int (*ptp_enable)(struct ptp_clock_info *ptp,
 			  struct ptp_clock_request *rq, int on);
 	int (*ptp_verify)(struct ptp_clock_info *ptp, unsigned int pin,
@@ -731,10 +783,6 @@ struct mv88e6xxx_ptp_ops {
 	int arr1_sts_reg;
 	int dep_sts_reg;
 	u32 rx_filters;
-	u32 cc_shift;
-	u32 cc_mult;
-	u32 cc_mult_num;
-	u32 cc_mult_dem;
 };
 
 struct mv88e6xxx_pcs_ops {
@@ -743,6 +791,12 @@ struct mv88e6xxx_pcs_ops {
 	struct phylink_pcs *(*pcs_select)(struct mv88e6xxx_chip *chip, int port,
 					  phy_interface_t mode);
 
+};
+
+struct mv88e6xxx_tcam_ops {
+	int (*entry_add)(struct mv88e6xxx_chip *chip,
+			 struct mv88e6xxx_tcam_entry *entry, u8 idx);
+	int (*flush_tcam)(struct mv88e6xxx_chip *chip);
 };
 
 static inline bool mv88e6xxx_has_stu(struct mv88e6xxx_chip *chip)
@@ -760,6 +814,11 @@ static inline bool mv88e6xxx_has_pvt(struct mv88e6xxx_chip *chip)
 static inline bool mv88e6xxx_has_lag(struct mv88e6xxx_chip *chip)
 {
 	return !!chip->info->global2_addr;
+}
+
+static inline bool mv88e6xxx_has_tcam(struct mv88e6xxx_chip *chip)
+{
+	return !!chip->info->tcam_addr;
 }
 
 static inline unsigned int mv88e6xxx_num_databases(struct mv88e6xxx_chip *chip)
@@ -831,7 +890,5 @@ int mv88e6xxx_vtu_walk(struct mv88e6xxx_chip *chip,
 				 const struct mv88e6xxx_vtu_entry *entry,
 				 void *priv),
 		       void *priv);
-
-int mv88e6xxx_fid_map(struct mv88e6xxx_chip *chip, unsigned long *bitmap);
 
 #endif /* _MV88E6XXX_CHIP_H */

@@ -34,8 +34,6 @@
 #include <linux/quotaops.h>
 #include <linux/quota.h>
 
-#ifdef CONFIG_TMPFS_QUOTA
-
 /*
  * The following constants define the amount of time given a user
  * before the soft limits are treated as hard limits (usually resulting
@@ -69,7 +67,7 @@ static int shmem_read_file_info(struct super_block *sb, int type)
 	struct quota_info *dqopt = sb_dqopt(sb);
 	struct mem_dqinfo *info = &dqopt->info[type];
 
-	info->dqi_priv = kzalloc(sizeof(struct rb_root), GFP_NOFS);
+	info->dqi_priv = kzalloc_obj(struct rb_root, GFP_NOFS);
 	if (!info->dqi_priv)
 		return -ENOMEM;
 
@@ -192,7 +190,7 @@ static int shmem_acquire_dquot(struct dquot *dquot)
 	}
 
 	/* We don't have entry for this id yet, create it */
-	new_entry = kzalloc(sizeof(struct quota_id), GFP_NOFS);
+	new_entry = kzalloc_obj(struct quota_id, GFP_NOFS);
 	if (!new_entry) {
 		ret = -ENOMEM;
 		goto out_unlock;
@@ -351,4 +349,3 @@ const struct dquot_operations shmem_quota_operations = {
 	.mark_dirty		= shmem_mark_dquot_dirty,
 	.get_next_id		= shmem_get_next_id,
 };
-#endif /* CONFIG_TMPFS_QUOTA */

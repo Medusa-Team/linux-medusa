@@ -8,19 +8,20 @@
 #ifndef __ASM_MMU_CONTEXT_H
 #define __ASM_MMU_CONTEXT_H
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/compiler.h>
 #include <linux/sched.h>
 #include <linux/sched/hotplug.h>
 #include <linux/mm_types.h>
 #include <linux/pgtable.h>
+#include <linux/pkeys.h>
 
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
 #include <asm/daifflags.h>
+#include <asm/gcs.h>
 #include <asm/proc-fns.h>
-#include <asm-generic/mm_hooks.h>
 #include <asm/cputype.h>
 #include <asm/sysreg.h>
 #include <asm/tlbflush.h>
@@ -61,28 +62,20 @@ static inline void cpu_switch_mm(pgd_t *pgd, struct mm_struct *mm)
 }
 
 /*
- * TCR.T0SZ value to use when the ID map is active.
- */
-#define idmap_t0sz	TCR_T0SZ(IDMAP_VA_BITS)
-
-/*
  * Ensure TCR.T0SZ is set to the provided value.
  */
 static inline void __cpu_set_tcr_t0sz(unsigned long t0sz)
 {
 	unsigned long tcr = read_sysreg(tcr_el1);
 
-	if ((tcr & TCR_T0SZ_MASK) == t0sz)
+	if ((tcr & TCR_EL1_T0SZ_MASK) == t0sz)
 		return;
 
-	tcr &= ~TCR_T0SZ_MASK;
+	tcr &= ~TCR_EL1_T0SZ_MASK;
 	tcr |= t0sz;
 	write_sysreg(tcr, tcr_el1);
 	isb();
 }
-
-#define cpu_set_default_tcr_t0sz()	__cpu_set_tcr_t0sz(TCR_T0SZ(vabits_actual))
-#define cpu_set_idmap_tcr_t0sz()	__cpu_set_tcr_t0sz(idmap_t0sz)
 
 /*
  * Remove the idmap from TTBR0_EL1 and install the pgd of the active mm.
@@ -102,7 +95,7 @@ static inline void cpu_uninstall_idmap(void)
 
 	cpu_set_reserved_ttbr0();
 	local_flush_tlb_all();
-	cpu_set_default_tcr_t0sz();
+	__cpu_set_tcr_t0sz(TCR_T0SZ(vabits_actual));
 
 	if (mm != &init_mm && !system_uses_ttbr0_pan())
 		cpu_switch_mm(mm->pgd, mm);
@@ -112,7 +105,7 @@ static inline void cpu_install_idmap(void)
 {
 	cpu_set_reserved_ttbr0();
 	local_flush_tlb_all();
-	cpu_set_idmap_tcr_t0sz();
+	__cpu_set_tcr_t0sz(TCR_T0SZ(IDMAP_VA_BITS));
 
 	cpu_switch_mm(lm_alias(idmap_pg_dir), &init_mm);
 }
@@ -175,7 +168,34 @@ init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 {
 	atomic64_set(&mm->context.id, 0);
 	refcount_set(&mm->context.pinned, 0);
+
+	/* pkey 0 is the default, so always reserve it. */
+	mm->context.pkey_allocation_map = BIT(0);
+
 	return 0;
+}
+
+static inline void arch_dup_pkeys(struct mm_struct *oldmm,
+				  struct mm_struct *mm)
+{
+	/* Duplicate the oldmm pkey state in mm: */
+	mm->context.pkey_allocation_map = oldmm->context.pkey_allocation_map;
+}
+
+static inline int arch_dup_mmap(struct mm_struct *oldmm, struct mm_struct *mm)
+{
+	arch_dup_pkeys(oldmm, mm);
+
+	return 0;
+}
+
+static inline void arch_exit_mmap(struct mm_struct *mm)
+{
+}
+
+static inline void arch_unmap(struct mm_struct *mm,
+			unsigned long start, unsigned long end)
+{
 }
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
@@ -190,7 +210,8 @@ static inline void update_saved_ttbr0(struct task_struct *tsk,
 	if (mm == &init_mm)
 		ttbr = phys_to_ttbr(__pa_symbol(reserved_pg_dir));
 	else
-		ttbr = phys_to_ttbr(virt_to_phys(mm->pgd)) | ASID(mm) << 48;
+		ttbr = phys_to_ttbr(virt_to_phys(mm->pgd)) |
+		       FIELD_PREP(TTBRx_EL1_ASID_MASK, ASID(mm));
 
 	WRITE_ONCE(task_thread_info(tsk)->ttbr0, ttbr);
 }
@@ -243,17 +264,25 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 }
 
 static inline const struct cpumask *
-task_cpu_possible_mask(struct task_struct *p)
+__task_cpu_possible_mask(struct task_struct *p, const struct cpumask *mask)
 {
 	if (!static_branch_unlikely(&arm64_mismatched_32bit_el0))
-		return cpu_possible_mask;
+		return mask;
 
 	if (!is_compat_thread(task_thread_info(p)))
-		return cpu_possible_mask;
+		return mask;
 
 	return system_32bit_el0_cpumask();
 }
+
+static inline const struct cpumask *
+task_cpu_possible_mask(struct task_struct *p)
+{
+	return __task_cpu_possible_mask(p, cpu_possible_mask);
+}
 #define task_cpu_possible_mask	task_cpu_possible_mask
+
+const struct cpumask *task_cpu_fallback_mask(struct task_struct *p);
 
 void verify_cpu_asid_bits(void);
 void post_ttbr_update_workaround(void);
@@ -267,8 +296,33 @@ static inline unsigned long mm_untag_mask(struct mm_struct *mm)
 	return -1UL >> 8;
 }
 
+/*
+ * Only enforce protection keys on the current process, because there is no
+ * user context to access POR_EL0 for another address space.
+ */
+static inline bool arch_vma_access_permitted(struct vm_area_struct *vma,
+		bool write, bool execute, bool foreign)
+{
+	if (!system_supports_poe())
+		return true;
+
+	/* allow access if the VMA is not one from this process */
+	if (foreign || vma_is_foreign(vma))
+		return true;
+
+	return por_el0_allows_pkey(vma_pkey(vma), write, execute);
+}
+
+#define deactivate_mm deactivate_mm
+static inline void deactivate_mm(struct task_struct *tsk,
+			struct mm_struct *mm)
+{
+	gcs_free(tsk);
+}
+
+
 #include <asm-generic/mmu_context.h>
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 #endif /* !__ASM_MMU_CONTEXT_H */

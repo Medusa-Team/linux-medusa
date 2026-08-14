@@ -1052,7 +1052,7 @@ mwifiex_create_custom_regdomain(struct mwifiex_private *priv,
 	if (WARN_ON_ONCE(num_chan > NL80211_MAX_SUPP_REG_RULES))
 		return ERR_PTR(-EINVAL);
 
-	regd = kzalloc(struct_size(regd, reg_rules, num_chan), GFP_KERNEL);
+	regd = kzalloc_flex(*regd, reg_rules, num_chan);
 	if (!regd)
 		return ERR_PTR(-ENOMEM);
 
@@ -1397,6 +1397,8 @@ int mwifiex_process_sta_cmdresp(struct mwifiex_private *priv, u16 cmdresp_no,
 		priv->bss_started = 0;
 		break;
 	case HostCmd_CMD_UAP_STA_DEAUTH:
+		break;
+	case HostCmd_CMD_ADD_NEW_STATION:
 		break;
 	case HOST_CMD_APCMD_SYS_RESET:
 		break;

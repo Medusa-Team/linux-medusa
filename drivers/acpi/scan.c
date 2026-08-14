@@ -5,12 +5,15 @@
 
 #define pr_fmt(fmt) "ACPI: " fmt
 
+#include <linux/async.h>
+#include <linux/auxiliary_bus.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/acpi.h>
 #include <linux/acpi_iort.h>
+#include <linux/acpi_rimt.h>
 #include <linux/acpi_viot.h>
 #include <linux/iommu.h>
 #include <linux/signal.h>
@@ -41,6 +44,7 @@ static LIST_HEAD(acpi_scan_handlers_list);
 DEFINE_MUTEX(acpi_device_lock);
 LIST_HEAD(acpi_wakeup_device_list);
 static DEFINE_MUTEX(acpi_hp_context_lock);
+static LIST_HEAD(acpi_scan_system_dev_list);
 
 /*
  * The UART device described by the SPCR table is the only object which needs
@@ -723,10 +727,8 @@ int acpi_tie_acpi_dev(struct acpi_device *adev)
 static void acpi_store_pld_crc(struct acpi_device *adev)
 {
 	struct acpi_pld_info *pld;
-	acpi_status status;
 
-	status = acpi_get_physical_device_location(adev->handle, &pld);
-	if (ACPI_FAILURE(status))
+	if (!acpi_get_physical_device_location(adev->handle, &pld))
 		return;
 
 	adev->pld_crc = crc32(~0, pld, sizeof(*pld));
@@ -756,8 +758,7 @@ int acpi_device_add(struct acpi_device *device)
 		if (result)
 			goto err_unlock;
 	} else {
-		acpi_device_bus_id = kzalloc(sizeof(*acpi_device_bus_id),
-					     GFP_KERNEL);
+		acpi_device_bus_id = kzalloc_obj(*acpi_device_bus_id);
 		if (!acpi_device_bus_id) {
 			result = -ENOMEM;
 			goto err_unlock;
@@ -795,10 +796,7 @@ int acpi_device_add(struct acpi_device *device)
 		goto err;
 	}
 
-	result = acpi_device_setup_files(device);
-	if (result)
-		pr_err("Error creating sysfs interface for device %s\n",
-		       dev_name(&device->dev));
+	acpi_device_setup_files(device);
 
 	return 0;
 
@@ -850,6 +848,8 @@ static bool acpi_info_matches_ids(struct acpi_device_info *info,
 static const char * const acpi_ignore_dep_ids[] = {
 	"PNP0D80", /* Windows-compatible System Power Management Controller */
 	"INT33BD", /* Intel Baytrail Mailbox Device */
+	"INTC10DE", /* Intel CVS LNL */
+	"INTC10E0", /* Intel CVS ARL */
 	"LATT2021", /* Lattice FW Update Client Driver */
 	NULL
 };
@@ -861,6 +861,11 @@ static const char * const acpi_honor_dep_ids[] = {
 	"INTC1095", /* IVSC (ADL) driver must be loaded to allow i2c access to camera sensors */
 	"INTC100A", /* IVSC (RPL) driver must be loaded to allow i2c access to camera sensors */
 	"INTC10CF", /* IVSC (MTL) driver must be loaded to allow i2c access to camera sensors */
+	"RSCV0001", /* RISC-V PLIC */
+	"RSCV0002", /* RISC-V APLIC */
+	"RSCV0005", /* RISC-V SBI MPXY MBOX */
+	"RSCV0006", /* RISC-V RPMI SYSMSI */
+	"PNP0C0F",  /* PCI Link Device */
 	NULL
 };
 
@@ -995,15 +1000,11 @@ static int acpi_bus_extract_wakeup_device_power_package(struct acpi_device *dev)
 	return err;
 }
 
-/* Do not use a button for S5 wakeup */
-#define ACPI_AVOID_WAKE_FROM_S5		BIT(0)
-
 static bool acpi_wakeup_gpe_init(struct acpi_device *device)
 {
 	static const struct acpi_device_id button_device_ids[] = {
-		{"PNP0C0C", 0},				/* Power button */
-		{"PNP0C0D", ACPI_AVOID_WAKE_FROM_S5},	/* Lid */
-		{"PNP0C0E", ACPI_AVOID_WAKE_FROM_S5},	/* Sleep button */
+		{"PNP0C0D", 0},	/* Lid */
+		{"PNP0C0E", 0},	/* Sleep button */
 		{"", 0},
 	};
 	struct acpi_device_wakeup *wakeup = &device->wakeup;
@@ -1012,16 +1013,9 @@ static bool acpi_wakeup_gpe_init(struct acpi_device *device)
 
 	wakeup->flags.notifier_present = 0;
 
-	/* Power button, Lid switch always enable wakeup */
 	match = acpi_match_acpi_device(button_device_ids, device);
-	if (match) {
-		if ((match->driver_data & ACPI_AVOID_WAKE_FROM_S5) &&
-		    wakeup->sleep_state == ACPI_STATE_S5)
-			wakeup->sleep_state = ACPI_STATE_S4;
-		acpi_mark_gpe_for_wake(wakeup->gpe_device, wakeup->gpe_number);
-		device_set_wakeup_capable(&device->dev, true);
-		return true;
-	}
+	if (match && wakeup->sleep_state == ACPI_STATE_S5)
+		wakeup->sleep_state = ACPI_STATE_S4;
 
 	status = acpi_setup_gpe_for_wake(device->handle, wakeup->gpe_device,
 					 wakeup->gpe_number);
@@ -1179,19 +1173,19 @@ static void acpi_device_get_busid(struct acpi_device *device)
 	 * TBD: Shouldn't this value be unique (within the ACPI namespace)?
 	 */
 	if (!acpi_dev_parent(device)) {
-		strcpy(device->pnp.bus_id, "ACPI");
+		strscpy(device->pnp.bus_id, "ACPI");
 		return;
 	}
 
 	switch (device->device_type) {
 	case ACPI_BUS_TYPE_POWER_BUTTON:
-		strcpy(device->pnp.bus_id, "PWRF");
+		strscpy(device->pnp.bus_id, "PWRF");
 		break;
 	case ACPI_BUS_TYPE_SLEEP_BUTTON:
-		strcpy(device->pnp.bus_id, "SLPF");
+		strscpy(device->pnp.bus_id, "SLPF");
 		break;
 	case ACPI_BUS_TYPE_ECDT_EC:
-		strcpy(device->pnp.bus_id, "ECDT");
+		strscpy(device->pnp.bus_id, "ECDT");
 		break;
 	default:
 		acpi_get_name(device->handle, ACPI_SINGLE_NAME, &buffer);
@@ -1202,7 +1196,7 @@ static void acpi_device_get_busid(struct acpi_device *device)
 			else
 				break;
 		}
-		strcpy(device->pnp.bus_id, bus_id);
+		strscpy(device->pnp.bus_id, bus_id);
 		break;
 	}
 }
@@ -1291,8 +1285,6 @@ acpi_backlight_cap_match(acpi_handle handle, u32 level, void *context,
  * The device will get a Linux specific CID added in scan.c to
  * identify the device as an ACPI graphics device
  * Be aware that the graphics device may not be physically present
- * Use acpi_video_get_capabilities() to detect general ACPI video
- * capabilities of present cards
  */
 long acpi_is_video_device(acpi_handle handle)
 {
@@ -1338,7 +1330,7 @@ static void acpi_add_id(struct acpi_device_pnp *pnp, const char *dev_id)
 {
 	struct acpi_hardware_id *id;
 
-	id = kmalloc(sizeof(*id), GFP_KERNEL);
+	id = kmalloc_obj(*id);
 	if (!id)
 		return;
 
@@ -1453,8 +1445,8 @@ static void acpi_set_pnp_ids(acpi_handle handle, struct acpi_device_pnp *pnp,
 			 acpi_object_is_system_bus(handle)) {
 			/* \_SB, \_TZ, LNXSYBUS */
 			acpi_add_id(pnp, ACPI_BUS_HID);
-			strcpy(pnp->device_name, ACPI_BUS_DEVICE_NAME);
-			strcpy(pnp->device_class, ACPI_BUS_CLASS);
+			strscpy(pnp->device_name, ACPI_BUS_DEVICE_NAME);
+			strscpy(pnp->device_class, ACPI_BUS_CLASS);
 		}
 
 		break;
@@ -1466,6 +1458,7 @@ static void acpi_set_pnp_ids(acpi_handle handle, struct acpi_device_pnp *pnp,
 		break;
 	case ACPI_BUS_TYPE_THERMAL:
 		acpi_add_id(pnp, ACPI_THERMAL_HID);
+		pnp->type.platform_id = 1;
 		break;
 	case ACPI_BUS_TYPE_POWER_BUTTON:
 		acpi_add_id(pnp, ACPI_BUTTON_HID_POWERF);
@@ -1575,7 +1568,7 @@ int acpi_dma_get_range(struct device *dev, const struct bus_dma_region **map)
 
 	ret = acpi_dev_get_dma_resources(adev, &list);
 	if (ret > 0) {
-		r = kcalloc(ret + 1, sizeof(*r), GFP_KERNEL);
+		r = kzalloc_objs(*r, ret + 1);
 		if (!r) {
 			ret = -ENOMEM;
 			goto out;
@@ -1631,15 +1624,11 @@ static int acpi_iommu_configure_id(struct device *dev, const u32 *id_in)
 
 	err = iort_iommu_configure_id(dev, id_in);
 	if (err && err != -EPROBE_DEFER)
+		err = rimt_iommu_configure_id(dev, id_in);
+	if (err && err != -EPROBE_DEFER)
 		err = viot_iommu_configure(dev);
-	mutex_unlock(&iommu_probe_device_lock);
 
-	/*
-	 * If we have reason to believe the IOMMU driver missed the initial
-	 * iommu_probe_device() call for dev, replay it to get things in order.
-	 */
-	if (!err && dev->bus)
-		err = iommu_probe_device(dev);
+	mutex_unlock(&iommu_probe_device_lock);
 
 	return err;
 }
@@ -1769,6 +1758,7 @@ static bool acpi_device_enumeration_by_parent(struct acpi_device *device)
 		{"CSC3557", },
 		{"INT33FE", },
 		{"INT3515", },
+		{"TXNW2781", },
 		/* Non-conforming _HID for Cirrus Logic already released */
 		{"CLSA0100", },
 		{"CLSA0101", },
@@ -1822,6 +1812,7 @@ void acpi_init_device_object(struct acpi_device *device, acpi_handle handle,
 	device->dev.parent = parent ? &parent->dev : NULL;
 	device->dev.release = release;
 	device->dev.bus = &acpi_bus_type;
+	device->dev.groups = acpi_groups;
 	fwnode_init(&device->fwnode, &acpi_device_fwnode_ops);
 	acpi_set_device_status(device, ACPI_STA_DEFAULT);
 	acpi_device_get_busid(device);
@@ -1872,7 +1863,7 @@ static int acpi_add_single_object(struct acpi_device **child,
 	bool release_dep_lock = false;
 	int result;
 
-	device = kzalloc(sizeof(struct acpi_device), GFP_KERNEL);
+	device = kzalloc_obj(struct acpi_device);
 	if (!device)
 		return -ENOMEM;
 
@@ -1909,7 +1900,7 @@ static int acpi_add_single_object(struct acpi_device **child,
 		result = acpi_device_add(device);
 
 	if (result) {
-		acpi_device_release(&device->dev);
+		acpi_dev_put(device);
 		return result;
 	}
 
@@ -2013,6 +2004,49 @@ void acpi_scan_hotplug_enabled(struct acpi_hotplug_profile *hotplug, bool val)
 	mutex_unlock(&acpi_scan_lock);
 }
 
+int acpi_scan_add_dep(acpi_handle handle, struct acpi_handle_list *dep_devices)
+{
+	u32 count;
+	int i;
+
+	for (count = 0, i = 0; i < dep_devices->count; i++) {
+		struct acpi_device_info *info;
+		struct acpi_dep_data *dep;
+		bool skip, honor_dep;
+		acpi_status status;
+
+		status = acpi_get_object_info(dep_devices->handles[i], &info);
+		if (ACPI_FAILURE(status)) {
+			acpi_handle_debug(handle, "Error reading _DEP device info\n");
+			continue;
+		}
+
+		skip = acpi_info_matches_ids(info, acpi_ignore_dep_ids);
+		honor_dep = acpi_info_matches_ids(info, acpi_honor_dep_ids);
+		kfree(info);
+
+		if (skip)
+			continue;
+
+		dep = kzalloc_obj(*dep);
+		if (!dep)
+			continue;
+
+		count++;
+
+		dep->supplier = dep_devices->handles[i];
+		dep->consumer = handle;
+		dep->honor_dep = honor_dep;
+
+		mutex_lock(&acpi_dep_list_lock);
+		list_add_tail(&dep->node, &acpi_dep_list);
+		mutex_unlock(&acpi_dep_list_lock);
+	}
+
+	acpi_handle_list_free(dep_devices);
+	return count;
+}
+
 static void acpi_scan_init_hotplug(struct acpi_device *adev)
 {
 	struct acpi_hardware_id *hwid;
@@ -2032,11 +2066,21 @@ static void acpi_scan_init_hotplug(struct acpi_device *adev)
 	}
 }
 
+u32 __weak arch_acpi_add_auto_dep(acpi_handle handle) { return 0; }
+
 static u32 acpi_scan_check_dep(acpi_handle handle)
 {
 	struct acpi_handle_list dep_devices;
-	u32 count;
-	int i;
+	u32 count = 0;
+
+	/*
+	 * Some architectures like RISC-V need to add dependencies for
+	 * all devices which use GSI to the interrupt controller so that
+	 * interrupt controller is probed before any of those devices.
+	 * Instead of mandating _DEP on all the devices, detect the
+	 * dependency and add automatically.
+	 */
+	count += arch_acpi_add_auto_dep(handle);
 
 	/*
 	 * Check for _HID here to avoid deferring the enumeration of:
@@ -2045,48 +2089,14 @@ static u32 acpi_scan_check_dep(acpi_handle handle)
 	 * Still, checking for _HID catches more then just these cases ...
 	 */
 	if (!acpi_has_method(handle, "_DEP") || !acpi_has_method(handle, "_HID"))
-		return 0;
+		return count;
 
 	if (!acpi_evaluate_reference(handle, "_DEP", NULL, &dep_devices)) {
 		acpi_handle_debug(handle, "Failed to evaluate _DEP.\n");
-		return 0;
+		return count;
 	}
 
-	for (count = 0, i = 0; i < dep_devices.count; i++) {
-		struct acpi_device_info *info;
-		struct acpi_dep_data *dep;
-		bool skip, honor_dep;
-		acpi_status status;
-
-		status = acpi_get_object_info(dep_devices.handles[i], &info);
-		if (ACPI_FAILURE(status)) {
-			acpi_handle_debug(handle, "Error reading _DEP device info\n");
-			continue;
-		}
-
-		skip = acpi_info_matches_ids(info, acpi_ignore_dep_ids);
-		honor_dep = acpi_info_matches_ids(info, acpi_honor_dep_ids);
-		kfree(info);
-
-		if (skip)
-			continue;
-
-		dep = kzalloc(sizeof(*dep), GFP_KERNEL);
-		if (!dep)
-			continue;
-
-		count++;
-
-		dep->supplier = dep_devices.handles[i];
-		dep->consumer = handle;
-		dep->honor_dep = honor_dep;
-
-		mutex_lock(&acpi_dep_list_lock);
-		list_add_tail(&dep->node , &acpi_dep_list);
-		mutex_unlock(&acpi_dep_list_lock);
-	}
-
-	acpi_handle_list_free(&dep_devices);
+	count += acpi_scan_add_dep(handle, &dep_devices);
 	return count;
 }
 
@@ -2183,19 +2193,92 @@ static acpi_status acpi_bus_check_add_2(acpi_handle handle, u32 lvl_not_used,
 	return acpi_bus_check_add(handle, false, (struct acpi_device **)ret_p);
 }
 
+static void acpi_video_bus_device_release(struct device *dev)
+{
+	struct auxiliary_device *aux_dev = to_auxiliary_dev(dev);
+
+	kfree(aux_dev);
+}
+
+static void acpi_create_video_bus_device(struct acpi_device *adev,
+					 struct acpi_device *parent)
+{
+	struct auxiliary_device *aux_dev;
+	static unsigned int aux_dev_id;
+
+	aux_dev = kzalloc_obj(*aux_dev);
+	if (!aux_dev)
+		return;
+
+	aux_dev->id = aux_dev_id++;
+	aux_dev->name = "video_bus";
+	aux_dev->dev.parent = acpi_get_first_physical_node(parent);
+	if (!aux_dev->dev.parent)
+		goto err;
+
+	aux_dev->dev.release = acpi_video_bus_device_release;
+
+	if (auxiliary_device_init(aux_dev))
+		goto err;
+
+	ACPI_COMPANION_SET(&aux_dev->dev, adev);
+	if (__auxiliary_device_add(aux_dev, "acpi"))
+		auxiliary_device_uninit(aux_dev);
+
+	return;
+
+err:
+	kfree(aux_dev);
+}
+
+struct acpi_scan_system_dev {
+	struct list_head node;
+	struct acpi_device *adev;
+};
+
+static const char * const acpi_system_dev_ids[] = {
+	"PNP0C01", /* Memory controller */
+	"PNP0C02", /* Motherboard resource */
+	NULL
+};
+
 static void acpi_default_enumeration(struct acpi_device *device)
 {
 	/*
 	 * Do not enumerate devices with enumeration_by_parent flag set as
 	 * they will be enumerated by their respective parents.
 	 */
-	if (!device->flags.enumeration_by_parent) {
-		acpi_create_platform_device(device, NULL);
-		acpi_device_set_enumerated(device);
-	} else {
+	if (device->flags.enumeration_by_parent) {
 		blocking_notifier_call_chain(&acpi_reconfig_chain,
 					     ACPI_RECONFIG_DEVICE_ADD, device);
+		return;
 	}
+	if (match_string(acpi_system_dev_ids, -1, acpi_device_hid(device)) >= 0) {
+		struct acpi_scan_system_dev *sd;
+
+		/*
+		 * This is a generic system device, so there is no need to
+		 * create a platform device for it, but its resources need to be
+		 * reserved.  However, that needs to be done after all of the
+		 * other device objects have been processed and PCI has claimed
+		 * BARs in case there are resource conflicts.
+		 */
+		sd = kmalloc_obj(*sd);
+		if (sd) {
+			sd->adev = device;
+			list_add_tail(&sd->node, &acpi_scan_system_dev_list);
+		}
+	} else if (device->pnp.type.backlight) {
+		struct acpi_device *parent;
+
+		parent = acpi_dev_parent(device);
+		if (parent)
+			acpi_create_video_bus_device(device, parent);
+	} else {
+		/* For a regular device object, create a platform device. */
+		acpi_create_platform_device(device, NULL);
+	}
+	acpi_device_set_enumerated(device);
 }
 
 static const struct acpi_device_id generic_device_ids[] = {
@@ -2300,7 +2383,8 @@ static int acpi_bus_attach(struct acpi_device *device, void *first_pass)
 	if (ret < 0)
 		return 0;
 
-	if (device->pnp.type.platform_id || device->flags.enumeration_by_parent)
+	if (device->pnp.type.platform_id || device->pnp.type.backlight ||
+	    device->flags.enumeration_by_parent)
 		acpi_default_enumeration(device);
 	else
 		acpi_device_set_enumerated(device);
@@ -2340,46 +2424,34 @@ static int acpi_dev_get_next_consumer_dev_cb(struct acpi_dep_data *dep, void *da
 	return 0;
 }
 
-struct acpi_scan_clear_dep_work {
-	struct work_struct work;
-	struct acpi_device *adev;
-};
-
-static void acpi_scan_clear_dep_fn(struct work_struct *work)
+static void acpi_scan_clear_dep_fn(void *dev, async_cookie_t cookie)
 {
-	struct acpi_scan_clear_dep_work *cdw;
-
-	cdw = container_of(work, struct acpi_scan_clear_dep_work, work);
+	struct acpi_device *adev = to_acpi_device(dev);
 
 	acpi_scan_lock_acquire();
-	acpi_bus_attach(cdw->adev, (void *)true);
+	acpi_bus_attach(adev, (void *)true);
 	acpi_scan_lock_release();
 
-	acpi_dev_put(cdw->adev);
-	kfree(cdw);
+	acpi_dev_put(adev);
 }
 
 static bool acpi_scan_clear_dep_queue(struct acpi_device *adev)
 {
-	struct acpi_scan_clear_dep_work *cdw;
-
 	if (adev->dep_unmet)
 		return false;
 
-	cdw = kmalloc(sizeof(*cdw), GFP_KERNEL);
-	if (!cdw)
-		return false;
-
-	cdw->adev = adev;
-	INIT_WORK(&cdw->work, acpi_scan_clear_dep_fn);
 	/*
-	 * Since the work function may block on the lock until the entire
-	 * initial enumeration of devices is complete, put it into the unbound
-	 * workqueue.
+	 * Async schedule the deferred acpi_scan_clear_dep_fn() since:
+	 * - acpi_bus_attach() needs to hold acpi_scan_lock which cannot
+	 *   be acquired under acpi_dep_list_lock (held here)
+	 * - the deferred work at boot stage is ensured to be finished
+	 *   before userspace init task by the async_synchronize_full()
+	 *   barrier
+	 *
+	 * Use _nocall variant since it'll return on failure instead of
+	 * run the function synchronously.
 	 */
-	queue_work(system_unbound_wq, &cdw->work);
-
-	return true;
+	return async_schedule_dev_nocall(acpi_scan_clear_dep_fn, &adev->dev);
 }
 
 static void acpi_scan_delete_dep_data(struct acpi_dep_data *dep)
@@ -2551,6 +2623,87 @@ static void acpi_scan_postponed(void)
 	mutex_unlock(&acpi_dep_list_lock);
 }
 
+static void acpi_scan_claim_resources(struct acpi_device *adev)
+{
+	struct resource_entry *rentry;
+	LIST_HEAD(resource_list);
+	unsigned int count = 0;
+	const char *regionid;
+
+	if (acpi_dev_get_resources(adev, &resource_list, NULL, NULL) <= 0)
+		return;
+
+	regionid = kstrdup(dev_name(&adev->dev), GFP_KERNEL);
+	if (!regionid)
+		goto exit;
+
+	list_for_each_entry(rentry, &resource_list, node) {
+		struct resource *res = rentry->res;
+		struct resource *r;
+
+		/* Skip disabled and invalid resources. */
+		if ((res->flags & IORESOURCE_DISABLED) || res->end < res->start)
+			continue;
+
+		if (resource_type(res) == IORESOURCE_IO) {
+			/*
+			 * Follow the PNP system driver and on x86 skip I/O
+			 * resources that start below 0x100 (the "standard PC
+			 * hardware" boundary).
+			 */
+			if (IS_ENABLED(CONFIG_X86) && res->start < 0x100) {
+				dev_info(&adev->dev, "Skipped %pR\n", res);
+				continue;
+			}
+			r = request_region(res->start, resource_size(res), regionid);
+		} else if (resource_type(res) == IORESOURCE_MEM) {
+			r = request_mem_region(res->start, resource_size(res), regionid);
+		} else {
+			continue;
+		}
+
+		if (r) {
+			r->flags &= ~IORESOURCE_BUSY;
+			dev_info(&adev->dev, "Reserved %pR\n", r);
+			count++;
+		} else {
+			/*
+			 * Failures at this point are usually harmless. PCI
+			 * quirks, for example, reserve resources they know
+			 * about too, so there may well be double reservations.
+			 */
+			dev_info(&adev->dev, "Could not reserve %pR\n", res);
+		}
+	}
+
+	if (!count)
+		kfree(regionid);
+
+exit:
+	acpi_dev_free_resource_list(&resource_list);
+}
+
+static int __init acpi_reserve_motherboard_resources(void)
+{
+	struct acpi_scan_system_dev *sd, *tmp;
+
+	guard(mutex)(&acpi_scan_lock);
+
+	list_for_each_entry_safe(sd, tmp, &acpi_scan_system_dev_list, node) {
+		acpi_scan_claim_resources(sd->adev);
+		list_del(&sd->node);
+		kfree(sd);
+	}
+
+	return 0;
+}
+
+/*
+ * Reserve motherboard resources after PCI claims BARs, but before PCI assigns
+ * resources for uninitialized PCI devices.
+ */
+fs_initcall(acpi_reserve_motherboard_resources);
+
 /**
  * acpi_bus_scan - Add ACPI device node objects in a given namespace scope.
  * @handle: Root of the namespace scope to scan.
@@ -2622,38 +2775,27 @@ int acpi_bus_register_early_device(int type)
 	if (result)
 		return result;
 
-	device->flags.match_driver = true;
-	return device_attach(&device->dev);
+	acpi_default_enumeration(device);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(acpi_bus_register_early_device);
 
+static void acpi_bus_add_fixed_device_object(enum acpi_bus_device_type type)
+{
+	struct acpi_device *adev = NULL;
+
+	acpi_add_single_object(&adev, NULL, type, false);
+	if (adev)
+		acpi_default_enumeration(adev);
+}
+
 static void acpi_bus_scan_fixed(void)
 {
-	if (!(acpi_gbl_FADT.flags & ACPI_FADT_POWER_BUTTON)) {
-		struct acpi_device *adev = NULL;
+	if (!(acpi_gbl_FADT.flags & ACPI_FADT_POWER_BUTTON))
+		acpi_bus_add_fixed_device_object(ACPI_BUS_TYPE_POWER_BUTTON);
 
-		acpi_add_single_object(&adev, NULL, ACPI_BUS_TYPE_POWER_BUTTON,
-				       false);
-		if (adev) {
-			adev->flags.match_driver = true;
-			if (device_attach(&adev->dev) >= 0)
-				device_init_wakeup(&adev->dev, true);
-			else
-				dev_dbg(&adev->dev, "No driver\n");
-		}
-	}
-
-	if (!(acpi_gbl_FADT.flags & ACPI_FADT_SLEEP_BUTTON)) {
-		struct acpi_device *adev = NULL;
-
-		acpi_add_single_object(&adev, NULL, ACPI_BUS_TYPE_SLEEP_BUTTON,
-				       false);
-		if (adev) {
-			adev->flags.match_driver = true;
-			if (device_attach(&adev->dev) < 0)
-				dev_dbg(&adev->dev, "No driver\n");
-		}
-	}
+	if (!(acpi_gbl_FADT.flags & ACPI_FADT_SLEEP_BUTTON))
+		acpi_bus_add_fixed_device_object(ACPI_BUS_TYPE_SLEEP_BUTTON);
 }
 
 static void __init acpi_get_spcr_uart_addr(void)
@@ -2690,7 +2832,7 @@ void __init acpi_scan_init(void)
 	acpi_memory_hotplug_init();
 	acpi_watchdog_init();
 	acpi_pnp_init();
-	acpi_int340x_thermal_init();
+	acpi_power_resources_init();
 	acpi_init_lpit();
 
 	acpi_scan_add_handler(&generic_device_handler);
@@ -2757,6 +2899,8 @@ static int __init acpi_match_madt(union acpi_subtable_headers *header,
 	return 0;
 }
 
+void __weak arch_sort_irqchip_probe(struct acpi_probe_entry *ap_head, int nr) { }
+
 int __init __acpi_probe_device_table(struct acpi_probe_entry *ap_head, int nr)
 {
 	int count = 0;
@@ -2765,6 +2909,7 @@ int __init __acpi_probe_device_table(struct acpi_probe_entry *ap_head, int nr)
 		return 0;
 
 	mutex_lock(&acpi_probe_mutex);
+	arch_sort_irqchip_probe(ap_head, nr);
 	for (ape = ap_head; nr; ape++, nr--) {
 		if (ACPI_COMPARE_NAMESEG(ACPI_SIG_MADT, ape->id)) {
 			acpi_probe_count = 0;
@@ -2798,7 +2943,7 @@ void acpi_scan_table_notify(void)
 	if (!acpi_scan_initialized)
 		return;
 
-	work = kmalloc(sizeof(*work), GFP_KERNEL);
+	work = kmalloc_obj(*work);
 	if (!work)
 		return;
 

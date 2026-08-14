@@ -75,6 +75,12 @@
 		enable-gpios = <&gpio6 7 GPIO_ACTIVE_HIGH>;
 	};
 
+	pcie_usb_refclk: clk-x7 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <25000000>;
+	};
+
 	cvbs-in {
 		compatible = "composite-video-connector";
 		label = "CVBS IN";
@@ -353,8 +359,7 @@
 			     "ethernet-phy-ieee802.3-c22";
 		rxc-skew-ps = <1500>;
 		reg = <0>;
-		interrupt-parent = <&gpio2>;
-		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
+		interrupts-extended = <&gpio2 11 IRQ_TYPE_LEVEL_LOW>;
 		reset-gpios = <&gpio2 10 GPIO_ACTIVE_LOW>;
 	};
 };
@@ -502,7 +507,7 @@
 		};
 	};
 
-	cs2000: clk_multiplier@4f {
+	cs2000: clk-multiplier@4f {
 		#clock-cells = <0>;
 		compatible = "cirrus,cs2000-cp";
 		reg = <0x4f>;
@@ -524,6 +529,13 @@
 		#gpio-cells = <2>;
 	};
 
+	pcie_usb_clk: clk@68 {
+		compatible = "renesas,9fgv0841";
+		reg = <0x68>;
+		clocks = <&pcie_usb_refclk>;
+		#clock-cells = <1>;
+	};
+
 	video-receiver@70 {
 		compatible = "adi,adv7482";
 		reg = <0x70 0x71 0x72 0x73 0x74 0x75
@@ -531,10 +543,9 @@
 		reg-names = "main", "dpll", "cp", "hdmi", "edid", "repeater",
 			    "infoframe", "cbus", "cec", "sdp", "txa", "txb" ;
 
-		interrupt-parent = <&gpio6>;
+		interrupts-extended = <&gpio6 30 IRQ_TYPE_LEVEL_LOW>,
+				      <&gpio6 31 IRQ_TYPE_LEVEL_LOW>;
 		interrupt-names = "intrq1", "intrq2";
-		interrupts = <30 IRQ_TYPE_LEVEL_LOW>,
-			     <31 IRQ_TYPE_LEVEL_LOW>;
 
 		ports {
 			#address-cells = <1>;
@@ -594,6 +605,7 @@
 };
 
 &i2c_dvfs {
+	bootph-all;
 	status = "okay";
 
 	clock-frequency = <400000>;
@@ -604,8 +616,7 @@
 
 		compatible = "rohm,bd9571mwv";
 		reg = <0x30>;
-		interrupt-parent = <&intc_ex>;
-		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+		interrupts-extended = <&intc_ex 0 IRQ_TYPE_LEVEL_LOW>;
 		interrupt-controller;
 		#interrupt-cells = <2>;
 		gpio-controller;
@@ -628,6 +639,7 @@
 		compatible = "rohm,br24t01", "atmel,24c01";
 		reg = <0x50>;
 		pagesize = <8>;
+		bootph-all;
 	};
 };
 
@@ -641,15 +653,25 @@
 };
 
 &pcie_bus_clk {
-	clock-frequency = <100000000>;
+	status = "disabled";
 };
 
 &pciec0 {
+	clocks = <&cpg CPG_MOD 319>, <&pcie_usb_clk 1>;
 	status = "okay";
 };
 
+&pciec0_rp {
+	clocks = <&pcie_usb_clk 3>;
+};
+
 &pciec1 {
+	clocks = <&cpg CPG_MOD 318>, <&pcie_usb_clk 2>;
 	status = "okay";
+};
+
+&pciec1_rp {
+	clocks = <&pcie_usb_clk 4>;
 };
 
 &pfc {
@@ -891,7 +913,7 @@
 				reg = <0x00040000 0x140000>;
 				read-only;
 			};
-			cert_header_sa6@180000 {
+			cert-header-sa6@180000 {
 				reg = <0x00180000 0x040000>;
 				read-only;
 			};
@@ -943,6 +965,7 @@
 &scif2 {
 	pinctrl-0 = <&scif2_pins>;
 	pinctrl-names = "default";
+	bootph-all;
 
 	status = "okay";
 };
@@ -1004,6 +1027,11 @@
 	shared-pin;
 };
 
+/* Firmware should reserve it but sadly doesn't */
+&swdt {
+	status = "reserved";
+};
+
 &usb_extal_clk {
 	clock-frequency = <50000000>;
 };
@@ -1033,11 +1061,12 @@
 };
 
 &usb3_phy0 {
+	clocks = <&cpg CPG_MOD 328>, <&pcie_usb_clk 6>, <&usb_extal_clk>;
 	status = "okay";
 };
 
 &usb3s0_clk {
-	clock-frequency = <100000000>;
+	status = "disabled";
 };
 
 &vin0 {

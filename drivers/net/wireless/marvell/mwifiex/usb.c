@@ -10,7 +10,7 @@
 
 #define USB_VERSION	"1.0"
 
-static struct mwifiex_if_ops usb_ops;
+static const struct mwifiex_if_ops usb_ops;
 
 static const struct usb_device_id mwifiex_usb_table[] = {
 	/* 8766 */
@@ -520,8 +520,6 @@ static int mwifiex_usb_probe(struct usb_interface *intf,
 		return ret;
 	}
 
-	usb_get_dev(udev);
-
 	return 0;
 }
 
@@ -666,8 +664,6 @@ static void mwifiex_usb_disconnect(struct usb_interface *intf)
 	mwifiex_dbg(adapter, FATAL,
 		    "%s: removing card\n", __func__);
 	mwifiex_remove_card(adapter);
-
-	usb_put_dev(interface_to_usbdev(intf));
 }
 
 static void mwifiex_usb_coredump(struct device *dev)
@@ -745,8 +741,6 @@ static void mwifiex_usb_port_resync(struct mwifiex_adapter *adapter)
 	if (adapter->usb_mc_status) {
 		for (i = 0; i < adapter->priv_num; i++) {
 			priv = adapter->priv[i];
-			if (!priv)
-				continue;
 			if ((priv->bss_role == MWIFIEX_BSS_ROLE_UAP &&
 			     !priv->bss_started) ||
 			    (priv->bss_role == MWIFIEX_BSS_ROLE_STA &&
@@ -758,8 +752,6 @@ static void mwifiex_usb_port_resync(struct mwifiex_adapter *adapter)
 	} else {
 		for (i = 0; i < adapter->priv_num; i++) {
 			priv = adapter->priv[i];
-			if (!priv)
-				continue;
 			if ((priv->bss_role == MWIFIEX_BSS_ROLE_UAP &&
 			     priv->bss_started) ||
 			    (priv->bss_role == MWIFIEX_BSS_ROLE_STA &&
@@ -770,8 +762,7 @@ static void mwifiex_usb_port_resync(struct mwifiex_adapter *adapter)
 		}
 		for (i = 0; i < adapter->priv_num; i++) {
 			priv = adapter->priv[i];
-			if (priv)
-				priv->usb_port = active_port;
+			priv->usb_port = active_port;
 		}
 		for (i = 0; i < MWIFIEX_TX_DATA_PORT; i++) {
 			if (active_port == card->port[i].tx_data_ep)
@@ -882,7 +873,7 @@ static int mwifiex_usb_prepare_tx_aggr_skb(struct mwifiex_adapter *adapter,
 	 * write complete, delete the tx_aggr timer
 	 */
 	if (port->tx_aggr.timer_cnxt.is_hold_timer_set) {
-		del_timer(&port->tx_aggr.timer_cnxt.hold_timer);
+		timer_delete(&port->tx_aggr.timer_cnxt.hold_timer);
 		port->tx_aggr.timer_cnxt.is_hold_timer_set = false;
 		port->tx_aggr.timer_cnxt.hold_tmo_msecs = 0;
 	}
@@ -1130,7 +1121,7 @@ static void mwifiex_usb_tx_aggr_tmo(struct timer_list *t)
 	struct urb_context *urb_cnxt = NULL;
 	struct sk_buff *skb_send = NULL;
 	struct tx_aggr_tmr_cnxt *timer_context =
-		from_timer(timer_context, t, hold_timer);
+		timer_container_of(timer_context, t, hold_timer);
 	struct mwifiex_adapter *adapter = timer_context->adapter;
 	struct usb_tx_data_port *port = timer_context->port;
 	int err = 0;
@@ -1359,7 +1350,7 @@ static void mwifiex_usb_cleanup_tx_aggr(struct mwifiex_adapter *adapter)
 				mwifiex_write_data_complete(adapter, skb_tmp,
 							    0, -1);
 		if (port->tx_aggr.timer_cnxt.hold_timer.function)
-			del_timer_sync(&port->tx_aggr.timer_cnxt.hold_timer);
+			timer_delete_sync(&port->tx_aggr.timer_cnxt.hold_timer);
 		port->tx_aggr.timer_cnxt.is_hold_timer_set = false;
 		port->tx_aggr.timer_cnxt.hold_tmo_msecs = 0;
 	}
@@ -1562,7 +1553,7 @@ static int mwifiex_pm_wakeup_card(struct mwifiex_adapter *adapter)
 {
 	/* Simulation of HS_AWAKE event */
 	adapter->pm_wakeup_fw_try = false;
-	del_timer(&adapter->wakeup_timer);
+	timer_delete(&adapter->wakeup_timer);
 	adapter->pm_wakeup_card_req = false;
 	adapter->ps_state = PS_STATE_AWAKE;
 
@@ -1590,7 +1581,7 @@ mwifiex_pm_wakeup_card_complete(struct mwifiex_adapter *adapter)
 	return 0;
 }
 
-static struct mwifiex_if_ops usb_ops = {
+static const struct mwifiex_if_ops usb_ops = {
 	.register_dev =		mwifiex_register_dev,
 	.unregister_dev =	mwifiex_unregister_dev,
 	.wakeup =		mwifiex_pm_wakeup_card,

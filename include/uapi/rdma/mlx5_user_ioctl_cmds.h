@@ -139,6 +139,7 @@ enum mlx5_ib_var_alloc_attrs {
 	MLX5_IB_ATTR_VAR_OBJ_ALLOC_MMAP_OFFSET,
 	MLX5_IB_ATTR_VAR_OBJ_ALLOC_MMAP_LENGTH,
 	MLX5_IB_ATTR_VAR_OBJ_ALLOC_PAGE_ID,
+	MLX5_IB_ATTR_VAR_OBJ_ALLOC_FLAGS,
 };
 
 enum mlx5_ib_var_obj_destroy_attrs {
@@ -239,6 +240,7 @@ enum mlx5_ib_flow_matcher_create_attrs {
 	MLX5_IB_ATTR_FLOW_MATCHER_MATCH_CRITERIA,
 	MLX5_IB_ATTR_FLOW_MATCHER_FLOW_FLAGS,
 	MLX5_IB_ATTR_FLOW_MATCHER_FT_TYPE,
+	MLX5_IB_ATTR_FLOW_MATCHER_IB_PORT,
 };
 
 enum mlx5_ib_flow_matcher_destroy_attrs {
@@ -272,6 +274,10 @@ enum mlx5_ib_device_query_context_attrs {
 
 enum mlx5_ib_create_cq_attrs {
 	MLX5_IB_ATTR_CREATE_CQ_UAR_INDEX = UVERBS_ID_DRIVER_NS_WITH_UHW,
+};
+
+enum mlx5_ib_reg_dmabuf_mr_attrs {
+	MLX5_IB_ATTR_REG_DMABUF_MR_ACCESS_FLAGS = (1U << UVERBS_ID_NS_SHIFT),
 };
 
 #define MLX5_IB_DW_MATCH_PARAM 0xA0
@@ -344,11 +350,16 @@ enum mlx5_ib_pd_methods {
 
 enum mlx5_ib_device_methods {
 	MLX5_IB_METHOD_QUERY_PORT = (1U << UVERBS_ID_NS_SHIFT),
+	MLX5_IB_METHOD_GET_DATA_DIRECT_SYSFS_PATH,
 };
 
 enum mlx5_ib_query_port_attrs {
 	MLX5_IB_ATTR_QUERY_PORT_PORT_NUM = (1U << UVERBS_ID_NS_SHIFT),
 	MLX5_IB_ATTR_QUERY_PORT,
+};
+
+enum mlx5_ib_get_data_direct_sysfs_path_attrs {
+	MLX5_IB_ATTR_GET_DATA_DIRECT_SYSFS_PATH = (1U << UVERBS_ID_NS_SHIFT),
 };
 
 #endif

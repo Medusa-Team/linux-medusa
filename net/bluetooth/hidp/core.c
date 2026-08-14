@@ -179,12 +179,21 @@ static void hidp_input_report(struct hidp_session *session, struct sk_buff *skb)
 {
 	struct input_dev *dev = session->input;
 	unsigned char *keys = session->keys;
-	unsigned char *udata = skb->data + 1;
-	signed char *sdata = skb->data + 1;
-	int i, size = skb->len - 1;
+	unsigned char *udata;
+	signed char *sdata;
+	u8 *hdr;
+	int i;
 
-	switch (skb->data[0]) {
+	hdr = skb_pull_data(skb, 1);
+	if (!hdr)
+		return;
+
+	switch (*hdr) {
 	case 0x01:	/* Keyboard report */
+		udata = skb_pull_data(skb, 8);
+		if (!udata)
+			break;
+
 		for (i = 0; i < 8; i++)
 			input_report_key(dev, hidp_keycode[i + 224], (udata[0] >> i) & 1);
 
@@ -213,6 +222,10 @@ static void hidp_input_report(struct hidp_session *session, struct sk_buff *skb)
 		break;
 
 	case 0x02:	/* Mouse report */
+		sdata = skb_pull_data(skb, 3);
+		if (!sdata)
+			break;
+
 		input_report_key(dev, BTN_LEFT,   sdata[0] & 0x01);
 		input_report_key(dev, BTN_RIGHT,  sdata[0] & 0x02);
 		input_report_key(dev, BTN_MIDDLE, sdata[0] & 0x04);
@@ -222,7 +235,7 @@ static void hidp_input_report(struct hidp_session *session, struct sk_buff *skb)
 		input_report_rel(dev, REL_X, sdata[1]);
 		input_report_rel(dev, REL_Y, sdata[2]);
 
-		if (size > 3)
+		if (skb->len > 0)
 			input_report_rel(dev, REL_WHEEL, sdata[3]);
 		break;
 	}
@@ -405,7 +418,7 @@ static int hidp_raw_request(struct hid_device *hid, unsigned char reportnum,
 
 static void hidp_idle_timeout(struct timer_list *t)
 {
-	struct hidp_session *session = from_timer(session, t, timer);
+	struct hidp_session *session = timer_container_of(session, t, timer);
 
 	/* The HIDP user-space API only contains calls to add and remove
 	 * devices. There is no way to forward events of any kind. Therefore,
@@ -433,7 +446,7 @@ static void hidp_set_timer(struct hidp_session *session)
 static void hidp_del_timer(struct hidp_session *session)
 {
 	if (session->idle_to > 0)
-		del_timer_sync(&session->timer);
+		timer_delete_sync(&session->timer);
 }
 
 static void hidp_process_report(struct hidp_session *session, int type,
@@ -920,7 +933,7 @@ static int hidp_session_new(struct hidp_session **out, const bdaddr_t *bdaddr,
 	ctrl = bt_sk(ctrl_sock->sk);
 	intr = bt_sk(intr_sock->sk);
 
-	session = kzalloc(sizeof(*session), GFP_KERNEL);
+	session = kzalloc_obj(*session);
 	if (!session)
 		return -ENOMEM;
 
@@ -986,7 +999,8 @@ static void session_free(struct kref *ref)
 	skb_queue_purge(&session->intr_transmit);
 	fput(session->intr_sock->file);
 	fput(session->ctrl_sock->file);
-	l2cap_conn_put(session->conn);
+	if (session->conn)
+		l2cap_conn_put(session->conn);
 	kfree(session);
 }
 
@@ -1032,6 +1046,28 @@ static struct hidp_session *hidp_session_find(const bdaddr_t *bdaddr)
 	up_read(&hidp_session_sem);
 
 	return session;
+}
+
+/*
+ * Consume session->conn: clear the member under hidp_session_sem, then
+ * l2cap_unregister_user() and l2cap_conn_put() the snapshot outside the
+ * sem.  At most one caller wins; later callers see NULL and skip.  The
+ * reference is the one hidp_session_new() took via l2cap_conn_get().
+ */
+static void hidp_session_unregister_conn(struct hidp_session *session)
+{
+	struct l2cap_conn *conn;
+
+	down_write(&hidp_session_sem);
+	conn = session->conn;
+	if (conn)
+		session->conn = NULL;
+	up_write(&hidp_session_sem);
+
+	if (conn) {
+		l2cap_unregister_user(conn, &session->user);
+		l2cap_conn_put(conn);
+	}
 }
 
 /*
@@ -1163,6 +1199,15 @@ static void hidp_session_remove(struct l2cap_conn *conn,
 						    user);
 
 	down_write(&hidp_session_sem);
+
+	/* Drop L2CAP reference immediately to indicate that
+	 * l2cap_unregister_user() shall not be called as it is already
+	 * considered removed.
+	 */
+	if (session->conn) {
+		l2cap_conn_put(session->conn);
+		session->conn = NULL;
+	}
 
 	hidp_session_terminate(session);
 
@@ -1301,7 +1346,8 @@ static int hidp_session_thread(void *arg)
 	 * Instead, this call has the same semantics as if user-space tried to
 	 * delete the session.
 	 */
-	l2cap_unregister_user(session->conn, &session->user);
+	hidp_session_unregister_conn(session);
+
 	hidp_session_put(session);
 
 	module_put_and_kthread_exit(0);
@@ -1406,7 +1452,7 @@ int hidp_connection_del(struct hidp_conndel_req *req)
 				         HIDP_CTRL_VIRTUAL_CABLE_UNPLUG,
 				       NULL, 0);
 	else
-		l2cap_unregister_user(session->conn, &session->user);
+		hidp_session_unregister_conn(session);
 
 	hidp_session_put(session);
 

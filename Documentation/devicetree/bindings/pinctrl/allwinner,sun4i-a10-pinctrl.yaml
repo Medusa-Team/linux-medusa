@@ -44,6 +44,7 @@ properties:
       - allwinner,sun8i-r40-pinctrl
       - allwinner,sun8i-v3-pinctrl
       - allwinner,sun8i-v3s-pinctrl
+      - allwinner,sun8i-v853-pinctrl
       - allwinner,sun9i-a80-pinctrl
       - allwinner,sun9i-a80-r-pinctrl
       - allwinner,sun20i-d1-pinctrl
@@ -105,7 +106,7 @@ patternProperties:
   #     the pin numbers then,
   #   - Finally, the name will end with either -pin or pins.
 
-  "^([rs]-)?(([a-z0-9]{3,}|[a-oq-z][a-z0-9]*?)?-)+?(p[a-ilm][0-9]*?-)??pins?$":
+  "^([rs]-)?(([a-z0-9]{3,}|[a-oq-z0-9][a-z0-9]*?)?-)+?(p[a-ilm][0-9]*?-)??pins?$":
     type: object
 
     properties:
@@ -178,6 +179,18 @@ allOf:
         interrupts:
           minItems: 7
           maxItems: 7
+
+  - if:
+      properties:
+        compatible:
+          enum:
+            - allwinner,sun8i-v853-pinctrl
+
+    then:
+      properties:
+        interrupts:
+          minItems: 8
+          maxItems: 8
 
   - if:
       properties:

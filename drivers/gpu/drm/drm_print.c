@@ -25,6 +25,7 @@
 
 #include <linux/debugfs.h>
 #include <linux/dynamic_debug.h>
+#include <linux/export.h>
 #include <linux/io.h>
 #include <linux/moduleparam.h>
 #include <linux/seq_file.h>
@@ -100,8 +101,9 @@ void __drm_puts_coredump(struct drm_printer *p, const char *str)
 			copy = iterator->remain;
 
 		/* Copy out the bit of the string that we need */
-		memcpy(iterator->data,
-			str + (iterator->start - iterator->offset), copy);
+		if (iterator->data)
+			memcpy(iterator->data,
+			       str + (iterator->start - iterator->offset), copy);
 
 		iterator->offset = iterator->start + copy;
 		iterator->remain -= copy;
@@ -110,7 +112,8 @@ void __drm_puts_coredump(struct drm_printer *p, const char *str)
 
 		len = min_t(ssize_t, strlen(str), iterator->remain);
 
-		memcpy(iterator->data + pos, str, len);
+		if (iterator->data)
+			memcpy(iterator->data + pos, str, len);
 
 		iterator->offset += len;
 		iterator->remain -= len;
@@ -140,8 +143,9 @@ void __drm_printfn_coredump(struct drm_printer *p, struct va_format *vaf)
 	if ((iterator->offset >= iterator->start) && (len < iterator->remain)) {
 		ssize_t pos = iterator->offset - iterator->start;
 
-		snprintf(((char *) iterator->data) + pos,
-			iterator->remain, "%pV", vaf);
+		if (iterator->data)
+			snprintf(((char *) iterator->data) + pos,
+				 iterator->remain, "%pV", vaf);
 
 		iterator->offset += len;
 		iterator->remain -= len;
@@ -231,6 +235,20 @@ void __drm_printfn_err(struct drm_printer *p, struct va_format *vaf)
 		drm_err(drm, "%pV", vaf);
 }
 EXPORT_SYMBOL(__drm_printfn_err);
+
+void __drm_printfn_line(struct drm_printer *p, struct va_format *vaf)
+{
+	unsigned int counter = ++p->line.counter;
+	const char *prefix = p->prefix ?: "";
+	const char *pad = p->prefix ? " " : "";
+
+	if (p->line.series)
+		drm_printf(p->arg, "%s%s%u.%u: %pV",
+			   prefix, pad, p->line.series, counter, vaf);
+	else
+		drm_printf(p->arg, "%s%s%u: %pV", prefix, pad, counter, vaf);
+}
+EXPORT_SYMBOL(__drm_printfn_line);
 
 /**
  * drm_puts - print a const string to a &drm_printer stream
@@ -373,3 +391,26 @@ void drm_print_regset32(struct drm_printer *p, struct debugfs_regset32 *regset)
 	}
 }
 EXPORT_SYMBOL(drm_print_regset32);
+
+/**
+ * drm_print_hex_dump - print a hex dump to a &drm_printer stream
+ * @p: The &drm_printer
+ * @prefix: Prefix for each line, may be NULL for no prefix
+ * @buf: Buffer to dump
+ * @len: Length of buffer
+ *
+ * Print hex dump to &drm_printer, with 16 space-separated hex bytes per line,
+ * optionally with a prefix on each line. No separator is added after prefix.
+ */
+void drm_print_hex_dump(struct drm_printer *p, const char *prefix,
+			const u8 *buf, size_t len)
+{
+	int i;
+
+	for (i = 0; i < len; i += 16) {
+		int bytes_per_line = min(16, len - i);
+
+		drm_printf(p, "%s%*ph\n", prefix ?: "", bytes_per_line, buf + i);
+	}
+}
+EXPORT_SYMBOL(drm_print_hex_dump);

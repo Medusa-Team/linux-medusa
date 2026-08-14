@@ -725,7 +725,6 @@ void efx_siena_reset_down(struct efx_nic *efx, enum reset_type method)
 
 	mutex_lock(&efx->mac_lock);
 	down_write(&efx->filter_sem);
-	mutex_lock(&efx->rss_lock);
 	efx->type->fini(efx);
 }
 
@@ -786,9 +785,6 @@ int efx_siena_reset_up(struct efx_nic *efx, enum reset_type method, bool ok)
 			   " VFs may not function\n", rc);
 #endif
 
-	if (efx->type->rx_restore_rss_contexts)
-		efx->type->rx_restore_rss_contexts(efx);
-	mutex_unlock(&efx->rss_lock);
 	efx->type->filter_table_restore(efx);
 	up_write(&efx->filter_sem);
 	if (efx->type->sriov_reset)
@@ -806,7 +802,6 @@ int efx_siena_reset_up(struct efx_nic *efx, enum reset_type method, bool ok)
 fail:
 	efx->port_initialized = false;
 
-	mutex_unlock(&efx->rss_lock);
 	up_write(&efx->filter_sem);
 	mutex_unlock(&efx->mac_lock);
 
@@ -1016,9 +1011,7 @@ int efx_siena_init_struct(struct efx_nic *efx,
 		efx->type->rx_hash_offset - efx->type->rx_prefix_size;
 	efx->rx_packet_ts_offset =
 		efx->type->rx_ts_offset - efx->type->rx_prefix_size;
-	INIT_LIST_HEAD(&efx->rss_context.list);
 	efx->rss_context.context_id = EFX_MCDI_RSS_CONTEXT_INVALID;
-	mutex_init(&efx->rss_lock);
 	efx->vport_id = EVB_PORT_ID_ASSIGNED;
 	spin_lock_init(&efx->stats_lock);
 	efx->vi_stride = EFX_DEFAULT_VI_STRIDE;
@@ -1030,8 +1023,8 @@ int efx_siena_init_struct(struct efx_nic *efx,
 	mutex_init(&efx->rps_mutex);
 	spin_lock_init(&efx->rps_hash_lock);
 	/* Failure to allocate is not fatal, but may degrade ARFS performance */
-	efx->rps_hash_table = kcalloc(EFX_ARFS_HASH_TABLE_SIZE,
-				      sizeof(*efx->rps_hash_table), GFP_KERNEL);
+	efx->rps_hash_table = kzalloc_objs(*efx->rps_hash_table,
+					   EFX_ARFS_HASH_TABLE_SIZE);
 #endif
 	efx->mdio.dev = net_dev;
 	INIT_WORK(&efx->mac_work, efx_mac_work);
@@ -1292,9 +1285,6 @@ out:
 
 /* For simplicity and reliability, we always require a slot reset and try to
  * reset the hardware when a pci error affecting the device is detected.
- * We leave both the link_reset and mmio_enabled callback unimplemented:
- * with our request for slot reset the mmio_enabled callback will never be
- * called, and the link_reset callback is not used by AER or EEH mechanisms.
  */
 const struct pci_error_handlers efx_siena_err_handlers = {
 	.error_detected = efx_io_error_detected,

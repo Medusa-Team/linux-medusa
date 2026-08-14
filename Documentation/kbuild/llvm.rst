@@ -71,10 +71,6 @@ recommend::
 
 	PATH=/path/to/llvm/:$PATH make LLVM=-14
 
-``LLVM=0`` is not the same as omitting ``LLVM`` altogether, it will behave like
-``LLVM=1``. If you only wish to use certain LLVM utilities, use their
-respective make variables.
-
 The same value used for ``LLVM=`` should be set for each invocation of ``make``
 if configuring and building via distinct commands. ``LLVM=`` should also be set
 as an environment variable when running scripts that will eventually run
@@ -179,6 +175,9 @@ yet. Bug reports are always welcome at the issue tracker below!
    * - s390
      - Maintained
      - ``LLVM=1`` (LLVM >= 18.1.0), ``CC=clang`` (LLVM < 18.1.0)
+   * - sparc (sparc64 only)
+     - Maintained
+     - ``CC=clang LLVM_IAS=0`` (LLVM >= 20)
    * - um (User Mode)
      - Maintained
      - ``LLVM=1``

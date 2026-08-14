@@ -61,6 +61,7 @@
 #include <asm/ftrace.h>
 #include <asm/kup.h>
 #include <asm/fadump.h>
+#include <asm/systemcfg.h>
 
 #include <trace/events/ipi.h>
 
@@ -821,6 +822,8 @@ static int parse_thread_groups(struct device_node *dn,
 
 	count = of_property_count_u32_elems(dn, "ibm,thread-groups");
 	thread_group_array = kcalloc(count, sizeof(u32), GFP_KERNEL);
+	if (!thread_group_array)
+		return -ENOMEM;
 	ret = of_property_read_u32_array(dn, "ibm,thread-groups",
 					 thread_group_array, count);
 	if (ret)
@@ -1027,19 +1030,19 @@ static int powerpc_shared_proc_flags(void)
  * We can't just pass cpu_l2_cache_mask() directly because
  * returns a non-const pointer and the compiler barfs on that.
  */
-static const struct cpumask *shared_cache_mask(int cpu)
+static const struct cpumask *tl_cache_mask(struct sched_domain_topology_level *tl, int cpu)
 {
 	return per_cpu(cpu_l2_cache_map, cpu);
 }
 
 #ifdef CONFIG_SCHED_SMT
-static const struct cpumask *smallcore_smt_mask(int cpu)
+static const struct cpumask *tl_smallcore_smt_mask(struct sched_domain_topology_level *tl, int cpu)
 {
 	return cpu_smallcore_mask(cpu);
 }
 #endif
 
-static struct cpumask *cpu_coregroup_mask(int cpu)
+struct cpumask *cpu_coregroup_mask(int cpu)
 {
 	return per_cpu(cpu_coregroup_map, cpu);
 }
@@ -1051,11 +1054,6 @@ static bool has_coregroup_support(void)
 		return 0;
 
 	return coregroup_enabled;
-}
-
-static const struct cpumask *cpu_mc_mask(int cpu)
-{
-	return cpu_coregroup_mask(cpu);
 }
 
 static int __init init_big_cores(void)
@@ -1088,6 +1086,29 @@ static int __init init_big_cores(void)
 
 	return 0;
 }
+
+/*
+ * die_mask and die_id are only available on systems which support
+ * multiple coregroups within a same package. On all other systems, die_mask
+ * would be same as package mask and die_id would be set to -1.
+ */
+const struct cpumask *cpu_die_mask(int cpu)
+{
+	if (has_coregroup_support())
+		return per_cpu(cpu_coregroup_map, cpu);
+	else
+		return cpu_node_mask(cpu);
+}
+EXPORT_SYMBOL_GPL(cpu_die_mask);
+
+int cpu_die_id(int cpu)
+{
+	if (has_coregroup_support())
+		return cpu_to_coregroup_id(cpu);
+	else
+		return -1;
+}
+EXPORT_SYMBOL_GPL(cpu_die_id);
 
 void __init smp_prepare_cpus(unsigned int max_cpus)
 {
@@ -1151,7 +1172,7 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 		 * Assumption: if boot_cpuid doesn't have a chip-id, then no
 		 * other CPUs, will also not have chip-id.
 		 */
-		chip_id_lookup_table = kcalloc(idx, sizeof(int), GFP_KERNEL);
+		chip_id_lookup_table = kzalloc_objs(int, idx);
 		if (chip_id_lookup_table)
 			memset(chip_id_lookup_table, -1, sizeof(int) * idx);
 	}
@@ -1166,7 +1187,7 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	cpu_smt_set_num_threads(num_threads, threads_per_core);
 }
 
-void smp_prepare_boot_cpu(void)
+void __init smp_prepare_boot_cpu(void)
 {
 	BUG_ON(smp_processor_id() != boot_cpuid);
 #ifdef CONFIG_PPC64
@@ -1186,8 +1207,8 @@ int generic_cpu_disable(void)
 		return -EBUSY;
 
 	set_cpu_online(cpu, false);
-#ifdef CONFIG_PPC64
-	vdso_data->processorCount--;
+#ifdef CONFIG_PPC64_PROC_SYSTEMCFG
+	systemcfg->processorCount--;
 #endif
 	/* Update affinity of all IRQs previously aimed at this CPU */
 	irq_migrate_all_off_this_cpu();
@@ -1447,7 +1468,7 @@ static bool update_mask_by_l2(int cpu, cpumask_var_t *mask)
 		return false;
 	}
 
-	cpumask_and(*mask, cpu_online_mask, cpu_cpu_mask(cpu));
+	cpumask_and(*mask, cpu_online_mask, cpu_node_mask(cpu));
 
 	/* Update l2-cache mask with all the CPUs that are part of submask */
 	or_cpumasks_related(cpu, cpu, submask_fn, cpu_l2_cache_mask);
@@ -1537,7 +1558,7 @@ static void update_coregroup_mask(int cpu, cpumask_var_t *mask)
 		return;
 	}
 
-	cpumask_and(*mask, cpu_online_mask, cpu_cpu_mask(cpu));
+	cpumask_and(*mask, cpu_online_mask, cpu_node_mask(cpu));
 
 	/* Update coregroup mask with all the CPUs that are part of submask */
 	or_cpumasks_related(cpu, cpu, submask_fn, cpu_coregroup_mask);
@@ -1600,7 +1621,7 @@ static void add_cpu_to_masks(int cpu)
 
 	/* If chip_id is -1; limit the cpu_core_mask to within PKG */
 	if (chip_id == -1)
-		cpumask_and(mask, mask, cpu_cpu_mask(cpu));
+		cpumask_and(mask, mask, cpu_node_mask(cpu));
 
 	for_each_cpu(i, mask) {
 		if (chip_id == cpu_to_chip_id(i)) {
@@ -1642,10 +1663,12 @@ void start_secondary(void *unused)
 
 	secondary_cpu_time_init();
 
-#ifdef CONFIG_PPC64
+#ifdef CONFIG_PPC64_PROC_SYSTEMCFG
 	if (system_state == SYSTEM_RUNNING)
-		vdso_data->processorCount++;
+		systemcfg->processorCount++;
+#endif
 
+#ifdef CONFIG_PPC64
 	vdso_getcpu_init();
 #endif
 	set_numa_node(numa_cpu_lookup_table[cpu]);
@@ -1697,28 +1720,23 @@ static void __init build_sched_topology(void)
 #ifdef CONFIG_SCHED_SMT
 	if (has_big_cores) {
 		pr_info("Big cores detected but using small core scheduling\n");
-		powerpc_topology[i++] = (struct sched_domain_topology_level){
-			smallcore_smt_mask, powerpc_smt_flags, SD_INIT_NAME(SMT)
-		};
+		powerpc_topology[i++] =
+			SDTL_INIT(tl_smallcore_smt_mask, powerpc_smt_flags, SMT);
 	} else {
-		powerpc_topology[i++] = (struct sched_domain_topology_level){
-			cpu_smt_mask, powerpc_smt_flags, SD_INIT_NAME(SMT)
-		};
+		powerpc_topology[i++] = SDTL_INIT(tl_smt_mask, powerpc_smt_flags, SMT);
 	}
 #endif
 	if (shared_caches) {
-		powerpc_topology[i++] = (struct sched_domain_topology_level){
-			shared_cache_mask, powerpc_shared_cache_flags, SD_INIT_NAME(CACHE)
-		};
+		powerpc_topology[i++] =
+			SDTL_INIT(tl_cache_mask, powerpc_shared_cache_flags, CACHE);
 	}
+
 	if (has_coregroup_support()) {
-		powerpc_topology[i++] = (struct sched_domain_topology_level){
-			cpu_mc_mask, powerpc_shared_proc_flags, SD_INIT_NAME(MC)
-		};
+		powerpc_topology[i++] =
+			SDTL_INIT(tl_mc_mask, powerpc_shared_proc_flags, MC);
 	}
-	powerpc_topology[i++] = (struct sched_domain_topology_level){
-		cpu_cpu_mask, powerpc_shared_proc_flags, SD_INIT_NAME(PKG)
-	};
+
+	powerpc_topology[i++] = SDTL_INIT(tl_pkg_mask, powerpc_shared_proc_flags, PKG);
 
 	/* There must be one trailing NULL entry left.  */
 	BUG_ON(i >= ARRAY_SIZE(powerpc_topology) - 1);

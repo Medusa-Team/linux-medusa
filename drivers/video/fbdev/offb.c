@@ -640,8 +640,13 @@ static void offb_init_nodriver(struct platform_device *parent, struct device_nod
 			vid = be32_to_cpup(vidp);
 			did = be32_to_cpup(didp);
 			pdev = pci_get_device(vid, did, NULL);
-			if (!pdev || pci_enable_device(pdev))
+			if (!pdev)
 				return;
+
+			if (pci_enable_device(pdev)) {
+				pci_dev_put(pdev);
+				return;
+			}
 		}
 #endif
 		/* kludge for valkyrie */
@@ -673,7 +678,7 @@ static struct platform_driver offb_driver_bootx_noscreen = {
 		.name = "bootx-noscreen",
 	},
 	.probe = offb_probe_bootx_noscreen,
-	.remove_new = offb_remove,
+	.remove = offb_remove,
 };
 
 static int offb_probe_display(struct platform_device *pdev)
@@ -695,7 +700,7 @@ static struct platform_driver offb_driver_display = {
 		.of_match_table = offb_of_match_display,
 	},
 	.probe = offb_probe_display,
-	.remove_new = offb_remove,
+	.remove = offb_remove,
 };
 
 static int __init offb_init(void)

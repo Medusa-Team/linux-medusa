@@ -60,7 +60,7 @@ static const struct regmap_irq bd718xx_irqs[] = {
 	REGMAP_IRQ_REG(BD718XX_INT_STBY_REQ, 0, BD718XX_INT_STBY_REQ_MASK),
 };
 
-static struct regmap_irq_chip bd718xx_irq_chip = {
+static const struct regmap_irq_chip bd718xx_irq_chip = {
 	.name = "bd718xx-irq",
 	.irqs = bd718xx_irqs,
 	.num_irqs = ARRAY_SIZE(bd718xx_irqs),
@@ -72,14 +72,13 @@ static struct regmap_irq_chip bd718xx_irq_chip = {
 	.init_ack_masked = true,
 };
 
-static const struct regmap_range pmic_status_range = {
-	.range_min = BD718XX_REG_IRQ,
-	.range_max = BD718XX_REG_POW_STATE,
+static const struct regmap_range pmic_status_range[] = {
+	regmap_reg_range(BD718XX_REG_IRQ, BD718XX_REG_POW_STATE),
 };
 
 static const struct regmap_access_table volatile_regs = {
-	.yes_ranges = &pmic_status_range,
-	.n_yes_ranges = 1,
+	.yes_ranges = &pmic_status_range[0],
+	.n_yes_ranges = ARRAY_SIZE(pmic_status_range),
 };
 
 static const struct regmap_config bd718xx_regmap_config = {

@@ -1,39 +1,29 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2022 Meta Platforms, Inc. and affiliates. */
 #include <linux/capability.h>
+#include <linux/err.h>
 #include <stdlib.h>
-#include <regex.h>
 #include <test_progs.h>
 #include <bpf/btf.h>
 
 #include "autoconf_helper.h"
+#include "disasm_helpers.h"
 #include "unpriv_helpers.h"
 #include "cap_helpers.h"
+#include "jit_disasm_helpers.h"
 
-#define str_has_pfx(str, pfx) \
-	(strncmp(str, pfx, __builtin_constant_p(pfx) ? sizeof(pfx) - 1 : strlen(pfx)) == 0)
+static inline const char *str_has_pfx(const char *str, const char *pfx)
+{
+	size_t len = strlen(pfx);
+
+	return strncmp(str, pfx, len) == 0 ? str + len : NULL;
+}
 
 #define TEST_LOADER_LOG_BUF_SZ 2097152
 
-#define TEST_TAG_EXPECT_FAILURE "comment:test_expect_failure"
-#define TEST_TAG_EXPECT_SUCCESS "comment:test_expect_success"
-#define TEST_TAG_EXPECT_MSG_PFX "comment:test_expect_msg="
-#define TEST_TAG_EXPECT_REGEX_PFX "comment:test_expect_regex="
-#define TEST_TAG_EXPECT_FAILURE_UNPRIV "comment:test_expect_failure_unpriv"
-#define TEST_TAG_EXPECT_SUCCESS_UNPRIV "comment:test_expect_success_unpriv"
-#define TEST_TAG_EXPECT_MSG_PFX_UNPRIV "comment:test_expect_msg_unpriv="
-#define TEST_TAG_EXPECT_REGEX_PFX_UNPRIV "comment:test_expect_regex_unpriv="
-#define TEST_TAG_LOG_LEVEL_PFX "comment:test_log_level="
-#define TEST_TAG_PROG_FLAGS_PFX "comment:test_prog_flags="
-#define TEST_TAG_DESCRIPTION_PFX "comment:test_description="
-#define TEST_TAG_RETVAL_PFX "comment:test_retval="
-#define TEST_TAG_RETVAL_PFX_UNPRIV "comment:test_retval_unpriv="
-#define TEST_TAG_AUXILIARY "comment:test_auxiliary"
-#define TEST_TAG_AUXILIARY_UNPRIV "comment:test_auxiliary_unpriv"
-#define TEST_BTF_PATH "comment:test_btf_path="
 
 /* Warning: duplicated in bpf_misc.h */
-#define POINTER_VALUE	0xcafe4all
+#define POINTER_VALUE	0xbadcafe
 #define TEST_DATA_LEN	64
 
 #ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
@@ -49,19 +39,23 @@ enum mode {
 	UNPRIV = 2
 };
 
-struct expect_msg {
-	const char *substr; /* substring match */
-	const char *regex_str; /* regex-based match */
-	regex_t regex;
+enum load_mode {
+	JITED		= 1 << 0,
+	NO_JITED	= 1 << 1,
 };
 
 struct test_subspec {
 	char *name;
+	char *description;
 	bool expect_failure;
-	struct expect_msg *expect_msgs;
-	size_t expect_msg_cnt;
+	struct expected_msgs expect_msgs;
+	struct expected_msgs expect_xlated;
+	struct expected_msgs jited;
+	struct expected_msgs stderr;
+	struct expected_msgs stdout;
 	int retval;
 	bool execute;
+	__u64 caps;
 };
 
 struct test_spec {
@@ -72,6 +66,9 @@ struct test_spec {
 	int log_level;
 	int prog_flags;
 	int mode_mask;
+	int arch_mask;
+	int load_mask;
+	int linear_sz;
 	bool auxiliary;
 	bool valid;
 };
@@ -96,61 +93,162 @@ void test_loader_fini(struct test_loader *tester)
 	free(tester->log_buf);
 }
 
-static void free_test_spec(struct test_spec *spec)
+static void free_msgs(struct expected_msgs *msgs)
 {
 	int i;
 
-	/* Deallocate expect_msgs arrays. */
-	for (i = 0; i < spec->priv.expect_msg_cnt; i++)
-		if (spec->priv.expect_msgs[i].regex_str)
-			regfree(&spec->priv.expect_msgs[i].regex);
-	for (i = 0; i < spec->unpriv.expect_msg_cnt; i++)
-		if (spec->unpriv.expect_msgs[i].regex_str)
-			regfree(&spec->unpriv.expect_msgs[i].regex);
-
-	free(spec->priv.name);
-	free(spec->unpriv.name);
-	free(spec->priv.expect_msgs);
-	free(spec->unpriv.expect_msgs);
-
-	spec->priv.name = NULL;
-	spec->unpriv.name = NULL;
-	spec->priv.expect_msgs = NULL;
-	spec->unpriv.expect_msgs = NULL;
+	for (i = 0; i < msgs->cnt; i++)
+		if (msgs->patterns[i].is_regex)
+			regfree(&msgs->patterns[i].regex);
+	free(msgs->patterns);
+	msgs->patterns = NULL;
+	msgs->cnt = 0;
 }
 
-static int push_msg(const char *substr, const char *regex_str, struct test_subspec *subspec)
+static void free_test_spec(struct test_spec *spec)
 {
-	void *tmp;
-	int regcomp_res;
-	char error_msg[100];
-	struct expect_msg *msg;
+	/* Deallocate expect_msgs arrays. */
+	free_msgs(&spec->priv.expect_msgs);
+	free_msgs(&spec->unpriv.expect_msgs);
+	free_msgs(&spec->priv.expect_xlated);
+	free_msgs(&spec->unpriv.expect_xlated);
+	free_msgs(&spec->priv.jited);
+	free_msgs(&spec->unpriv.jited);
+	free_msgs(&spec->unpriv.stderr);
+	free_msgs(&spec->priv.stderr);
+	free_msgs(&spec->unpriv.stdout);
+	free_msgs(&spec->priv.stdout);
 
-	tmp = realloc(subspec->expect_msgs,
-		      (1 + subspec->expect_msg_cnt) * sizeof(struct expect_msg));
+	free(spec->priv.name);
+	free(spec->priv.description);
+	free(spec->unpriv.name);
+	free(spec->unpriv.description);
+	spec->priv.name = NULL;
+	spec->priv.description = NULL;
+	spec->unpriv.name = NULL;
+	spec->unpriv.description = NULL;
+}
+
+/* Compiles regular expression matching pattern.
+ * Pattern has a special syntax:
+ *
+ *   pattern := (<verbatim text> | regex)*
+ *   regex := "{{" <posix extended regular expression> "}}"
+ *
+ * In other words, pattern is a verbatim text with inclusion
+ * of regular expressions enclosed in "{{" "}}" pairs.
+ * For example, pattern "foo{{[0-9]+}}" matches strings like
+ * "foo0", "foo007", etc.
+ */
+static int compile_regex(const char *pattern, regex_t *regex)
+{
+	char err_buf[256], buf[256] = {}, *ptr, *buf_end;
+	const char *original_pattern = pattern, *next;
+	bool in_regex = false;
+	int err;
+
+	buf_end = buf + sizeof(buf);
+	ptr = buf;
+	while (*pattern && ptr < buf_end - 2) {
+		if (!in_regex && (next = str_has_pfx(pattern, "{{"))) {
+			in_regex = true;
+			pattern = next;
+			continue;
+		}
+		if (in_regex && (next = str_has_pfx(pattern, "}}"))) {
+			in_regex = false;
+			pattern = next;
+			continue;
+		}
+		if (in_regex) {
+			*ptr++ = *pattern++;
+			continue;
+		}
+		/* list of characters that need escaping for extended posix regex */
+		if (strchr(".[]\\()*+?{}|^$", *pattern)) {
+			*ptr++ = '\\';
+			*ptr++ = *pattern++;
+			continue;
+		}
+		*ptr++ = *pattern++;
+	}
+	if (*pattern) {
+		PRINT_FAIL("Regexp too long: '%s'\n", original_pattern);
+		return -EINVAL;
+	}
+	if (in_regex) {
+		PRINT_FAIL("Regexp has open '{{' but no closing '}}': '%s'\n", original_pattern);
+		return -EINVAL;
+	}
+	err = regcomp(regex, buf, REG_EXTENDED | REG_NEWLINE);
+	if (err != 0) {
+		regerror(err, regex, err_buf, sizeof(err_buf));
+		PRINT_FAIL("Regexp compilation error in '%s': '%s'\n", buf, err_buf);
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int __push_msg(const char *pattern, bool on_next_line, bool negative,
+		      struct expected_msgs *msgs)
+{
+	struct expect_msg *msg;
+	void *tmp;
+	int err;
+
+	tmp = realloc(msgs->patterns,
+		      (1 + msgs->cnt) * sizeof(struct expect_msg));
 	if (!tmp) {
 		ASSERT_FAIL("failed to realloc memory for messages\n");
 		return -ENOMEM;
 	}
-	subspec->expect_msgs = tmp;
-	msg = &subspec->expect_msgs[subspec->expect_msg_cnt];
-
-	if (substr) {
-		msg->substr = substr;
-		msg->regex_str = NULL;
-	} else {
-		msg->regex_str = regex_str;
-		msg->substr = NULL;
-		regcomp_res = regcomp(&msg->regex, regex_str, REG_EXTENDED|REG_NEWLINE);
-		if (regcomp_res != 0) {
-			regerror(regcomp_res, &msg->regex, error_msg, sizeof(error_msg));
-			PRINT_FAIL("Regexp compilation error in '%s': '%s'\n",
-				   regex_str, error_msg);
-			return -EINVAL;
-		}
+	msgs->patterns = tmp;
+	msg = &msgs->patterns[msgs->cnt];
+	msg->on_next_line = on_next_line;
+	msg->substr = pattern;
+	msg->negative = negative;
+	msg->is_regex = false;
+	if (strstr(pattern, "{{")) {
+		err = compile_regex(pattern, &msg->regex);
+		if (err)
+			return err;
+		msg->is_regex = true;
 	}
+	msgs->cnt += 1;
+	return 0;
+}
 
-	subspec->expect_msg_cnt += 1;
+static int clone_msgs(struct expected_msgs *from, struct expected_msgs *to)
+{
+	struct expect_msg *msg;
+	int i, err;
+
+	for (i = 0; i < from->cnt; i++) {
+		msg = &from->patterns[i];
+		err = __push_msg(msg->substr, msg->on_next_line, msg->negative, to);
+		if (err)
+			return err;
+	}
+	return 0;
+}
+
+static int push_msg(const char *substr, bool negative, struct expected_msgs *msgs)
+{
+	return __push_msg(substr, false, negative, msgs);
+}
+
+static int push_disasm_msg(const char *regex_str, bool *on_next_line, struct expected_msgs *msgs)
+{
+	int err;
+
+	if (strcmp(regex_str, "...") == 0) {
+		*on_next_line = false;
+		return 0;
+	}
+	err = __push_msg(regex_str, *on_next_line, false, msgs);
+	if (err)
+		return err;
+	*on_next_line = true;
 	return 0;
 }
 
@@ -172,22 +270,47 @@ static int parse_int(const char *str, int *val, const char *name)
 	return 0;
 }
 
+static int parse_caps(const char *str, __u64 *val, const char *name)
+{
+	int cap_flag = 0;
+	char *token = NULL, *saveptr = NULL;
+
+	char *str_cpy = strdup(str);
+	if (str_cpy == NULL) {
+		PRINT_FAIL("Memory allocation failed\n");
+		return -EINVAL;
+	}
+
+	token = strtok_r(str_cpy, "|", &saveptr);
+	while (token != NULL) {
+		errno = 0;
+		if (!strncmp("CAP_", token, sizeof("CAP_") - 1)) {
+			PRINT_FAIL("define %s constant in bpf_misc.h, failed to parse caps\n", token);
+			return -EINVAL;
+		}
+		cap_flag = strtol(token, NULL, 10);
+		if (!cap_flag || errno) {
+			PRINT_FAIL("failed to parse caps %s\n", name);
+			return -EINVAL;
+		}
+		*val |= (1ULL << cap_flag);
+		token = strtok_r(NULL, "|", &saveptr);
+	}
+
+	free(str_cpy);
+	return 0;
+}
+
 static int parse_retval(const char *str, int *val, const char *name)
 {
-	struct {
-		char *name;
-		int val;
-	} named_values[] = {
-		{ "INT_MIN"      , INT_MIN },
-		{ "POINTER_VALUE", POINTER_VALUE },
-		{ "TEST_DATA_LEN", TEST_DATA_LEN },
-	};
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(named_values); ++i) {
-		if (strcmp(str, named_values[i].name) != 0)
-			continue;
-		*val = named_values[i].val;
+	/*
+	 * INT_MIN is defined as (-INT_MAX -1), i.e. it doesn't expand to a
+	 * single int and cannot be parsed with strtol, so we handle it
+	 * separately here. In addition, it expands to different expressions in
+	 * different compilers so we use a prefixed _INT_MIN instead.
+	 */
+	if (strcmp(str, "_INT_MIN") == 0) {
+		*val = INT_MIN;
 		return 0;
 	}
 
@@ -202,6 +325,73 @@ static void update_flags(int *flags, int flag, bool clear)
 		*flags |= flag;
 }
 
+static const char *skip_decl_tag_pfx(const char *s)
+{
+	int n = 0;
+
+	if (sscanf(s, "comment:%*d:%n", &n) < 0 || !n)
+		return NULL;
+	return s + n;
+}
+
+static int compare_decl_tags(const void *a, const void *b)
+{
+	return strverscmp(*(const char **)a, *(const char **)b);
+}
+
+/*
+ * Compilers don't guarantee order in which BTF attributes would be generated,
+ * while order is important for test tags like __msg.
+ * Each test tag has the following prefix: "comment:" __COUNTER__,
+ * when sorted using strverscmp this gives same order as in the original C code.
+ */
+static const char **collect_decl_tags(struct btf *btf, int id, int *cnt)
+{
+	const char **tmp, **tags = NULL;
+	const struct btf_type *t;
+	int i;
+
+	*cnt = 0;
+	for (i = 1; i < btf__type_cnt(btf); i++) {
+		t = btf__type_by_id(btf, i);
+		if (!btf_is_decl_tag(t) || t->type != id || btf_decl_tag(t)->component_idx != -1)
+			continue;
+		tmp = realloc(tags, (*cnt + 1) * sizeof(*tags));
+		if (!tmp) {
+			free(tags);
+			return ERR_PTR(-ENOMEM);
+		}
+		tags = tmp;
+		tags[(*cnt)++] = btf__str_by_offset(btf, t->name_off);
+	}
+
+	if (*cnt)
+		qsort(tags, *cnt, sizeof(*tags), compare_decl_tags);
+	return tags;
+}
+
+enum arch {
+	ARCH_UNKNOWN	= 0x1,
+	ARCH_X86_64	= 0x2,
+	ARCH_ARM64	= 0x4,
+	ARCH_RISCV64	= 0x8,
+	ARCH_S390X	= 0x10,
+};
+
+static int get_current_arch(void)
+{
+#if defined(__x86_64__)
+	return ARCH_X86_64;
+#elif defined(__aarch64__)
+	return ARCH_ARM64;
+#elif defined(__riscv) && __riscv_xlen == 64
+	return ARCH_RISCV64;
+#elif defined(__s390x__)
+	return ARCH_S390X;
+#endif
+	return ARCH_UNKNOWN;
+}
+
 /* Uses btf_decl_tag attributes to describe the expected test
  * behavior, see bpf_misc.h for detailed description of each attribute
  * and attribute combinations.
@@ -214,8 +404,22 @@ static int parse_test_spec(struct test_loader *tester,
 	const char *description = NULL;
 	bool has_unpriv_result = false;
 	bool has_unpriv_retval = false;
-	int func_id, i, err = 0;
+	bool unpriv_xlated_on_next_line = true;
+	bool xlated_on_next_line = true;
+	bool unpriv_jit_on_next_line;
+	bool jit_on_next_line;
+	bool stderr_on_next_line = true;
+	bool unpriv_stderr_on_next_line = true;
+	bool stdout_on_next_line = true;
+	bool unpriv_stdout_on_next_line = true;
+	bool collect_jit = false;
+	const char **tags = NULL;
+	int func_id, i, nr_tags;
+	int err = 0;
+	u32 arch_mask = 0;
+	u32 load_mask = 0;
 	struct btf *btf;
+	enum arch arch;
 
 	memset(spec, 0, sizeof(*spec));
 
@@ -234,89 +438,114 @@ static int parse_test_spec(struct test_loader *tester,
 		return -EINVAL;
 	}
 
-	for (i = 1; i < btf__type_cnt(btf); i++) {
+	tags = collect_decl_tags(btf, func_id, &nr_tags);
+	if (IS_ERR(tags))
+		return PTR_ERR(tags);
+
+	for (i = 0; i < nr_tags; i++) {
 		const char *s, *val, *msg;
-		const struct btf_type *t;
 		bool clear;
 		int flags;
 
-		t = btf__type_by_id(btf, i);
-		if (!btf_is_decl_tag(t))
+		s = skip_decl_tag_pfx(tags[i]);
+		if (!s)
 			continue;
-
-		if (t->type != func_id || btf_decl_tag(t)->component_idx != -1)
-			continue;
-
-		s = btf__str_by_offset(btf, t->name_off);
-		if (str_has_pfx(s, TEST_TAG_DESCRIPTION_PFX)) {
-			description = s + sizeof(TEST_TAG_DESCRIPTION_PFX) - 1;
-		} else if (strcmp(s, TEST_TAG_EXPECT_FAILURE) == 0) {
+		if ((val = str_has_pfx(s, "test_description="))) {
+			description = val;
+		} else if (strcmp(s, "test_expect_failure") == 0) {
 			spec->priv.expect_failure = true;
 			spec->mode_mask |= PRIV;
-		} else if (strcmp(s, TEST_TAG_EXPECT_SUCCESS) == 0) {
+		} else if (strcmp(s, "test_expect_success") == 0) {
 			spec->priv.expect_failure = false;
 			spec->mode_mask |= PRIV;
-		} else if (strcmp(s, TEST_TAG_EXPECT_FAILURE_UNPRIV) == 0) {
+		} else if (strcmp(s, "test_expect_failure_unpriv") == 0) {
 			spec->unpriv.expect_failure = true;
 			spec->mode_mask |= UNPRIV;
 			has_unpriv_result = true;
-		} else if (strcmp(s, TEST_TAG_EXPECT_SUCCESS_UNPRIV) == 0) {
+		} else if (strcmp(s, "test_expect_success_unpriv") == 0) {
 			spec->unpriv.expect_failure = false;
 			spec->mode_mask |= UNPRIV;
 			has_unpriv_result = true;
-		} else if (strcmp(s, TEST_TAG_AUXILIARY) == 0) {
+		} else if (strcmp(s, "test_auxiliary") == 0) {
 			spec->auxiliary = true;
 			spec->mode_mask |= PRIV;
-		} else if (strcmp(s, TEST_TAG_AUXILIARY_UNPRIV) == 0) {
+		} else if (strcmp(s, "test_auxiliary_unpriv") == 0) {
 			spec->auxiliary = true;
 			spec->mode_mask |= UNPRIV;
-		} else if (str_has_pfx(s, TEST_TAG_EXPECT_MSG_PFX)) {
-			msg = s + sizeof(TEST_TAG_EXPECT_MSG_PFX) - 1;
-			err = push_msg(msg, NULL, &spec->priv);
+		} else if ((msg = str_has_pfx(s, "test_expect_msg="))) {
+			err = push_msg(msg, false, &spec->priv.expect_msgs);
 			if (err)
 				goto cleanup;
 			spec->mode_mask |= PRIV;
-		} else if (str_has_pfx(s, TEST_TAG_EXPECT_MSG_PFX_UNPRIV)) {
-			msg = s + sizeof(TEST_TAG_EXPECT_MSG_PFX_UNPRIV) - 1;
-			err = push_msg(msg, NULL, &spec->unpriv);
-			if (err)
-				goto cleanup;
-			spec->mode_mask |= UNPRIV;
-		} else if (str_has_pfx(s, TEST_TAG_EXPECT_REGEX_PFX)) {
-			msg = s + sizeof(TEST_TAG_EXPECT_REGEX_PFX) - 1;
-			err = push_msg(NULL, msg, &spec->priv);
+		} else if ((msg = str_has_pfx(s, "test_expect_not_msg="))) {
+			err = push_msg(msg, true, &spec->priv.expect_msgs);
 			if (err)
 				goto cleanup;
 			spec->mode_mask |= PRIV;
-		} else if (str_has_pfx(s, TEST_TAG_EXPECT_REGEX_PFX_UNPRIV)) {
-			msg = s + sizeof(TEST_TAG_EXPECT_REGEX_PFX_UNPRIV) - 1;
-			err = push_msg(NULL, msg, &spec->unpriv);
+		} else if ((msg = str_has_pfx(s, "test_expect_msg_unpriv="))) {
+			err = push_msg(msg, false, &spec->unpriv.expect_msgs);
 			if (err)
 				goto cleanup;
 			spec->mode_mask |= UNPRIV;
-		} else if (str_has_pfx(s, TEST_TAG_RETVAL_PFX)) {
-			val = s + sizeof(TEST_TAG_RETVAL_PFX) - 1;
+		} else if ((msg = str_has_pfx(s, "test_expect_not_msg_unpriv="))) {
+			err = push_msg(msg, true, &spec->unpriv.expect_msgs);
+			if (err)
+				goto cleanup;
+			spec->mode_mask |= UNPRIV;
+		} else if ((msg = str_has_pfx(s, "test_jited="))) {
+			if (arch_mask == 0) {
+				PRINT_FAIL("__jited used before __arch_*");
+				goto cleanup;
+			}
+			if (collect_jit) {
+				err = push_disasm_msg(msg, &jit_on_next_line,
+						      &spec->priv.jited);
+				if (err)
+					goto cleanup;
+				spec->mode_mask |= PRIV;
+			}
+		} else if ((msg = str_has_pfx(s, "test_jited_unpriv="))) {
+			if (arch_mask == 0) {
+				PRINT_FAIL("__unpriv_jited used before __arch_*");
+				goto cleanup;
+			}
+			if (collect_jit) {
+				err = push_disasm_msg(msg, &unpriv_jit_on_next_line,
+						      &spec->unpriv.jited);
+				if (err)
+					goto cleanup;
+				spec->mode_mask |= UNPRIV;
+			}
+		} else if ((msg = str_has_pfx(s, "test_expect_xlated="))) {
+			err = push_disasm_msg(msg, &xlated_on_next_line,
+					      &spec->priv.expect_xlated);
+			if (err)
+				goto cleanup;
+			spec->mode_mask |= PRIV;
+		} else if ((msg = str_has_pfx(s, "test_expect_xlated_unpriv="))) {
+			err = push_disasm_msg(msg, &unpriv_xlated_on_next_line,
+					      &spec->unpriv.expect_xlated);
+			if (err)
+				goto cleanup;
+			spec->mode_mask |= UNPRIV;
+		} else if ((val = str_has_pfx(s, "test_retval="))) {
 			err = parse_retval(val, &spec->priv.retval, "__retval");
 			if (err)
 				goto cleanup;
 			spec->priv.execute = true;
 			spec->mode_mask |= PRIV;
-		} else if (str_has_pfx(s, TEST_TAG_RETVAL_PFX_UNPRIV)) {
-			val = s + sizeof(TEST_TAG_RETVAL_PFX_UNPRIV) - 1;
+		} else if ((val = str_has_pfx(s, "test_retval_unpriv="))) {
 			err = parse_retval(val, &spec->unpriv.retval, "__retval_unpriv");
 			if (err)
 				goto cleanup;
 			spec->mode_mask |= UNPRIV;
 			spec->unpriv.execute = true;
 			has_unpriv_retval = true;
-		} else if (str_has_pfx(s, TEST_TAG_LOG_LEVEL_PFX)) {
-			val = s + sizeof(TEST_TAG_LOG_LEVEL_PFX) - 1;
+		} else if ((val = str_has_pfx(s, "test_log_level="))) {
 			err = parse_int(val, &spec->log_level, "test log level");
 			if (err)
 				goto cleanup;
-		} else if (str_has_pfx(s, TEST_TAG_PROG_FLAGS_PFX)) {
-			val = s + sizeof(TEST_TAG_PROG_FLAGS_PFX) - 1;
-
+		} else if ((val = str_has_pfx(s, "test_prog_flags="))) {
 			clear = val[0] == '!';
 			if (clear)
 				val++;
@@ -341,41 +570,134 @@ static int parse_test_spec(struct test_loader *tester,
 					goto cleanup;
 				update_flags(&spec->prog_flags, flags, clear);
 			}
-		} else if (str_has_pfx(s, TEST_BTF_PATH)) {
-			spec->btf_custom_path = s + sizeof(TEST_BTF_PATH) - 1;
+		} else if ((val = str_has_pfx(s, "test_arch="))) {
+			if (strcmp(val, "X86_64") == 0) {
+				arch = ARCH_X86_64;
+			} else if (strcmp(val, "ARM64") == 0) {
+				arch = ARCH_ARM64;
+			} else if (strcmp(val, "RISCV64") == 0) {
+				arch = ARCH_RISCV64;
+			} else if (strcmp(val, "s390x") == 0) {
+				arch = ARCH_S390X;
+			} else {
+				PRINT_FAIL("bad arch spec: '%s'\n", val);
+				err = -EINVAL;
+				goto cleanup;
+			}
+			arch_mask |= arch;
+			collect_jit = get_current_arch() == arch;
+			unpriv_jit_on_next_line = true;
+			jit_on_next_line = true;
+		} else if ((val = str_has_pfx(s, "test_btf_path="))) {
+			spec->btf_custom_path = val;
+		} else if ((val = str_has_pfx(s, "test_caps_unpriv="))) {
+			err = parse_caps(val, &spec->unpriv.caps, "test caps");
+			if (err)
+				goto cleanup;
+			spec->mode_mask |= UNPRIV;
+		} else if ((val = str_has_pfx(s, "load_mode="))) {
+			if (strcmp(val, "jited") == 0) {
+				load_mask = JITED;
+			} else if (strcmp(val, "no_jited") == 0) {
+				load_mask = NO_JITED;
+			} else {
+				PRINT_FAIL("bad load spec: '%s'", val);
+				err = -EINVAL;
+				goto cleanup;
+			}
+		} else if ((msg = str_has_pfx(s, "test_expect_stderr="))) {
+			err = push_disasm_msg(msg, &stderr_on_next_line,
+					      &spec->priv.stderr);
+			if (err)
+				goto cleanup;
+		} else if ((msg = str_has_pfx(s, "test_expect_stderr_unpriv="))) {
+			err = push_disasm_msg(msg, &unpriv_stderr_on_next_line,
+					      &spec->unpriv.stderr);
+			if (err)
+				goto cleanup;
+		} else if ((msg = str_has_pfx(s, "test_expect_stdout="))) {
+			err = push_disasm_msg(msg, &stdout_on_next_line,
+					      &spec->priv.stdout);
+			if (err)
+				goto cleanup;
+		} else if ((msg = str_has_pfx(s, "test_expect_stdout_unpriv="))) {
+			err = push_disasm_msg(msg, &unpriv_stdout_on_next_line,
+					      &spec->unpriv.stdout);
+			if (err)
+				goto cleanup;
+		} else if ((val = str_has_pfx(s, "test_linear_size="))) {
+			switch (bpf_program__type(prog)) {
+			case BPF_PROG_TYPE_SCHED_ACT:
+			case BPF_PROG_TYPE_SCHED_CLS:
+			case BPF_PROG_TYPE_CGROUP_SKB:
+				err = parse_int(val, &spec->linear_sz, "test linear size");
+				if (err)
+					goto cleanup;
+				break;
+			default:
+				PRINT_FAIL("__linear_size for unsupported program type");
+				err = -EINVAL;
+				goto cleanup;
+			}
 		}
 	}
+
+	spec->arch_mask = arch_mask ?: -1;
+	spec->load_mask = load_mask ?: (JITED | NO_JITED);
 
 	if (spec->mode_mask == 0)
 		spec->mode_mask = PRIV;
 
-	if (!description)
-		description = spec->prog_name;
-
 	if (spec->mode_mask & PRIV) {
-		spec->priv.name = strdup(description);
+		spec->priv.name = strdup(spec->prog_name);
 		if (!spec->priv.name) {
 			PRINT_FAIL("failed to allocate memory for priv.name\n");
 			err = -ENOMEM;
 			goto cleanup;
 		}
+
+		if (description) {
+			spec->priv.description = strdup(description);
+			if (!spec->priv.description) {
+				PRINT_FAIL("failed to allocate memory for priv.description\n");
+				err = -ENOMEM;
+				goto cleanup;
+			}
+		}
 	}
 
 	if (spec->mode_mask & UNPRIV) {
-		int descr_len = strlen(description);
+		int name_len = strlen(spec->prog_name);
 		const char *suffix = " @unpriv";
+		int suffix_len = strlen(suffix);
 		char *name;
 
-		name = malloc(descr_len + strlen(suffix) + 1);
+		name = malloc(name_len + suffix_len + 1);
 		if (!name) {
 			PRINT_FAIL("failed to allocate memory for unpriv.name\n");
 			err = -ENOMEM;
 			goto cleanup;
 		}
 
-		strcpy(name, description);
-		strcpy(&name[descr_len], suffix);
+		strcpy(name, spec->prog_name);
+		strcpy(&name[name_len], suffix);
 		spec->unpriv.name = name;
+
+		if (description) {
+			int descr_len = strlen(description);
+			char *descr;
+
+			descr = malloc(descr_len + suffix_len + 1);
+			if (!descr) {
+				PRINT_FAIL("failed to allocate memory for unpriv.description\n");
+				err = -ENOMEM;
+				goto cleanup;
+			}
+
+			strcpy(descr, description);
+			strcpy(&descr[descr_len], suffix);
+			spec->unpriv.description = descr;
+		}
 	}
 
 	if (spec->mode_mask & (PRIV | UNPRIV)) {
@@ -387,22 +709,25 @@ static int parse_test_spec(struct test_loader *tester,
 			spec->unpriv.execute = spec->priv.execute;
 		}
 
-		if (!spec->unpriv.expect_msgs) {
-			for (i = 0; i < spec->priv.expect_msg_cnt; i++) {
-				struct expect_msg *msg = &spec->priv.expect_msgs[i];
-
-				err = push_msg(msg->substr, msg->regex_str, &spec->unpriv);
-				if (err)
-					goto cleanup;
-			}
-		}
+		if (spec->unpriv.expect_msgs.cnt == 0)
+			clone_msgs(&spec->priv.expect_msgs, &spec->unpriv.expect_msgs);
+		if (spec->unpriv.expect_xlated.cnt == 0)
+			clone_msgs(&spec->priv.expect_xlated, &spec->unpriv.expect_xlated);
+		if (spec->unpriv.jited.cnt == 0)
+			clone_msgs(&spec->priv.jited, &spec->unpriv.jited);
+		if (spec->unpriv.stderr.cnt == 0)
+			clone_msgs(&spec->priv.stderr, &spec->unpriv.stderr);
+		if (spec->unpriv.stdout.cnt == 0)
+			clone_msgs(&spec->priv.stdout, &spec->unpriv.stdout);
 	}
 
 	spec->valid = true;
 
+	free(tags);
 	return 0;
 
 cleanup:
+	free(tags);
 	free_test_spec(spec);
 	return err;
 }
@@ -434,7 +759,6 @@ static void prepare_case(struct test_loader *tester,
 	bpf_program__set_flags(prog, prog_flags | spec->prog_flags);
 
 	tester->log_buf[0] = '\0';
-	tester->next_match_pos = 0;
 }
 
 static void emit_verifier_log(const char *log_buf, bool force)
@@ -444,46 +768,198 @@ static void emit_verifier_log(const char *log_buf, bool force)
 	fprintf(stdout, "VERIFIER LOG:\n=============\n%s=============\n", log_buf);
 }
 
-static void validate_case(struct test_loader *tester,
-			  struct test_subspec *subspec,
-			  struct bpf_object *obj,
-			  struct bpf_program *prog,
-			  int load_err)
+static void emit_xlated(const char *xlated, bool force)
 {
-	int i, j, err;
-	char *match;
+	if (!force && env.verbosity == VERBOSE_NONE)
+		return;
+	fprintf(stdout, "XLATED:\n=============\n%s=============\n", xlated);
+}
+
+static void emit_jited(const char *jited, bool force)
+{
+	if (!force && env.verbosity == VERBOSE_NONE)
+		return;
+	fprintf(stdout, "JITED:\n=============\n%s=============\n", jited);
+}
+
+static void emit_stderr(const char *stderr, bool force)
+{
+	if (!force && env.verbosity == VERBOSE_NONE)
+		return;
+	fprintf(stdout, "STDERR:\n=============\n%s=============\n", stderr);
+}
+
+static void emit_stdout(const char *bpf_stdout, bool force)
+{
+	if (!force && env.verbosity == VERBOSE_NONE)
+		return;
+	fprintf(stdout, "STDOUT:\n=============\n%s=============\n", bpf_stdout);
+}
+
+static const char *match_msg(struct expect_msg *msg, const char **log)
+{
+	const char *match = NULL;
 	regmatch_t reg_match[1];
+	int err;
 
-	for (i = 0; i < subspec->expect_msg_cnt; i++) {
-		struct expect_msg *msg = &subspec->expect_msgs[i];
+	if (!msg->is_regex) {
+		match = strstr(*log, msg->substr);
+		if (match)
+			*log = match + strlen(msg->substr);
+	} else {
+		err = regexec(&msg->regex, *log, 1, reg_match, 0);
+		if (err == 0) {
+			match = *log + reg_match[0].rm_so;
+			*log += reg_match[0].rm_eo;
+		}
+	}
+	return match;
+}
 
-		if (msg->substr) {
-			match = strstr(tester->log_buf + tester->next_match_pos, msg->substr);
-			if (match)
-				tester->next_match_pos = match - tester->log_buf + strlen(msg->substr);
-		} else {
-			err = regexec(&msg->regex,
-				      tester->log_buf + tester->next_match_pos, 1, reg_match, 0);
-			if (err == 0) {
-				match = tester->log_buf + tester->next_match_pos + reg_match[0].rm_so;
-				tester->next_match_pos += reg_match[0].rm_eo;
-			} else {
-				match = NULL;
+static int count_lines(const char *start, const char *end)
+{
+	const char *tmp;
+	int n = 0;
+
+	for (tmp = start; tmp < end; ++tmp)
+		if (*tmp == '\n')
+			n++;
+	return n;
+}
+
+struct match {
+	const char *start;
+	const char *end;
+	int line;
+};
+
+/*
+ * Positive messages are matched sequentially, each next message
+ * is looked for starting from the end of a previous matched one.
+ */
+static void match_positive_msgs(const char *log, struct expected_msgs *msgs, struct match *matches)
+{
+	const char *prev_match;
+	int i, line;
+
+	prev_match = log;
+	line = 0;
+	for (i = 0; i < msgs->cnt; i++) {
+		struct expect_msg *msg = &msgs->patterns[i];
+		const char *match = NULL;
+
+		if (msg->negative)
+			continue;
+
+		match = match_msg(msg, &log);
+		if (match) {
+			line += count_lines(prev_match, match);
+			matches[i].start = match;
+			matches[i].end   = log;
+			matches[i].line  = line;
+			prev_match = match;
+		}
+	}
+}
+
+/*
+ * Each negative messages N located between positive messages P1 and P2
+ * is matched in the span P1.end .. P2.start. Consequently, negative messages
+ * are unordered within the span.
+ */
+static void match_negative_msgs(const char *log, struct expected_msgs *msgs, struct match *matches)
+{
+	const char *start = log, *end, *next, *match;
+	const char *log_end = log + strlen(log);
+	int i, j, next_positive;
+
+	for (i = 0; i < msgs->cnt; i++) {
+		struct expect_msg *msg = &msgs->patterns[i];
+
+		/* positive message bumps span start */
+		if (!msg->negative) {
+			start = matches[i].end ?: start;
+			continue;
+		}
+
+		/* count stride of negative patterns and adjust span end */
+		end = log_end;
+		for (next_positive = i + 1; next_positive < msgs->cnt; next_positive++) {
+			if (!msgs->patterns[next_positive].negative) {
+				end = matches[next_positive].start;
+				break;
 			}
 		}
 
-		if (!ASSERT_OK_PTR(match, "expect_msg")) {
+		/* try matching negative messages within identified span */
+		for (j = i; j < next_positive; j++) {
+			next = start;
+			match = match_msg(msg, &next);
+			if (match && next <= end) {
+				matches[j].start = match;
+				matches[j].end = next;
+			}
+		}
+
+		/* -1 to account for i++ */
+		i = next_positive - 1;
+	}
+}
+
+void validate_msgs(const char *log_buf, struct expected_msgs *msgs,
+		   void (*emit_fn)(const char *buf, bool force))
+{
+	struct match matches[msgs->cnt];
+	struct match *prev_match = NULL;
+	int i, j;
+
+	memset(matches, 0, sizeof(*matches) * msgs->cnt);
+	match_positive_msgs(log_buf, msgs, matches);
+	match_negative_msgs(log_buf, msgs, matches);
+
+	for (i = 0; i < msgs->cnt; i++) {
+		struct expect_msg *msg = &msgs->patterns[i];
+		struct match *match = &matches[i];
+		const char *pat_status;
+		bool unexpected;
+		bool wrong_line;
+		bool no_match;
+
+		no_match   = !msg->negative && !match->start;
+		wrong_line = !msg->negative &&
+			     msg->on_next_line &&
+			     prev_match && prev_match->line + 1 != match->line;
+		unexpected = msg->negative && match->start;
+		if (no_match || wrong_line || unexpected) {
+			PRINT_FAIL("expect_msg\n");
 			if (env.verbosity == VERBOSE_NONE)
-				emit_verifier_log(tester->log_buf, true /*force*/);
+				emit_fn(log_buf, true /*force*/);
 			for (j = 0; j <= i; j++) {
-				msg = &subspec->expect_msgs[j];
+				msg = &msgs->patterns[j];
+				if (j < i)
+					pat_status = "MATCHED   ";
+				else if (wrong_line)
+					pat_status = "WRONG LINE";
+				else if (no_match)
+					pat_status = "EXPECTED  ";
+				else
+					pat_status = "UNEXPECTED";
+				msg = &msgs->patterns[j];
 				fprintf(stderr, "%s %s: '%s'\n",
-					j < i ? "MATCHED " : "EXPECTED",
-					msg->substr ? "SUBSTR" : " REGEX",
-					msg->substr ?: msg->regex_str);
+					pat_status,
+					msg->is_regex ? " REGEX" : "SUBSTR",
+					msg->substr);
 			}
-			return;
+			if (wrong_line) {
+				fprintf(stderr,
+					"expecting match at line %d, actual match is at line %d\n",
+					prev_match->line + 1, match->line);
+			}
+			break;
 		}
+
+		if (!msg->negative)
+			prev_match = match;
 	}
 }
 
@@ -500,7 +976,7 @@ static int drop_capabilities(struct cap_state *caps)
 
 	err = cap_disable_effective(caps_to_drop, &caps->old_caps);
 	if (err) {
-		PRINT_FAIL("failed to drop capabilities: %i, %s\n", err, strerror(err));
+		PRINT_FAIL("failed to drop capabilities: %i, %s\n", err, strerror(-err));
 		return err;
 	}
 
@@ -517,7 +993,7 @@ static int restore_capabilities(struct cap_state *caps)
 
 	err = cap_enable_effective(caps->old_caps, NULL);
 	if (err)
-		PRINT_FAIL("failed to restore capabilities: %i, %s\n", err, strerror(err));
+		PRINT_FAIL("failed to restore capabilities: %i, %s\n", err, strerror(-err));
 	caps->initialized = false;
 	return err;
 }
@@ -562,10 +1038,11 @@ static bool is_unpriv_capable_map(struct bpf_map *map)
 	}
 }
 
-static int do_prog_test_run(int fd_prog, int *retval, bool empty_opts)
+static int do_prog_test_run(int fd_prog, int *retval, bool empty_opts, int linear_sz)
 {
 	__u8 tmp_out[TEST_DATA_LEN << 2] = {};
 	__u8 tmp_in[TEST_DATA_LEN] = {};
+	struct __sk_buff ctx = {};
 	int err, saved_errno;
 	LIBBPF_OPTS(bpf_test_run_opts, topts,
 		.data_in = tmp_in,
@@ -574,6 +1051,12 @@ static int do_prog_test_run(int fd_prog, int *retval, bool empty_opts)
 		.data_size_out = sizeof(tmp_out),
 		.repeat = 1,
 	);
+
+	if (linear_sz) {
+		ctx.data_end = linear_sz;
+		topts.ctx_in = &ctx;
+		topts.ctx_size_in = sizeof(ctx);
+	}
 
 	if (empty_opts) {
 		memset(&topts, 0, sizeof(struct bpf_test_run_opts));
@@ -611,6 +1094,50 @@ static bool should_do_test_run(struct test_spec *spec, struct test_subspec *subs
 	return true;
 }
 
+/* Get a disassembly of BPF program after verifier applies all rewrites */
+static int get_xlated_program_text(int prog_fd, char *text, size_t text_sz)
+{
+	struct bpf_insn *insn_start = NULL, *insn, *insn_end;
+	__u32 insns_cnt = 0, i;
+	char buf[64];
+	FILE *out = NULL;
+	int err;
+
+	err = get_xlated_program(prog_fd, &insn_start, &insns_cnt);
+	if (!ASSERT_OK(err, "get_xlated_program"))
+		goto out;
+	out = fmemopen(text, text_sz, "w");
+	if (!ASSERT_OK_PTR(out, "open_memstream"))
+		goto out;
+	insn_end = insn_start + insns_cnt;
+	insn = insn_start;
+	while (insn < insn_end) {
+		i = insn - insn_start;
+		insn = disasm_insn(insn, buf, sizeof(buf));
+		fprintf(out, "%d: %s\n", i, buf);
+	}
+	fflush(out);
+
+out:
+	free(insn_start);
+	if (out)
+		fclose(out);
+	return err;
+}
+
+/* Read the bpf stream corresponding to the stream_id */
+static int get_stream(int stream_id, int prog_fd, char *text, size_t text_sz)
+{
+	LIBBPF_OPTS(bpf_prog_stream_read_opts, ropts);
+	int ret;
+
+	ret = bpf_prog_stream_read(prog_fd, stream_id, text, text_sz, &ropts);
+	ASSERT_GT(ret, 0, "stream read");
+	text[ret] = '\0';
+
+	return ret;
+}
+
 /* this function is forced noinline and has short generic name to look better
  * in test_progs output (in case of a failure)
  */
@@ -624,16 +1151,29 @@ void run_subtest(struct test_loader *tester,
 		 bool unpriv)
 {
 	struct test_subspec *subspec = unpriv ? &spec->unpriv : &spec->priv;
+	int current_runtime = is_jit_enabled() ? JITED : NO_JITED;
 	struct bpf_program *tprog = NULL, *tprog_iter;
+	struct bpf_link *link, *links[32] = {};
 	struct test_spec *spec_iter;
 	struct cap_state caps = {};
 	struct bpf_object *tobj;
 	struct bpf_map *map;
 	int retval, err, i;
+	int links_cnt = 0;
 	bool should_load;
 
-	if (!test__start_subtest(subspec->name))
+	if (!test__start_subtest_with_desc(subspec->name, subspec->description))
 		return;
+
+	if ((get_current_arch() & spec->arch_mask) == 0) {
+		test__skip();
+		return;
+	}
+
+	if ((current_runtime & spec->load_mask) == 0) {
+		test__skip();
+		return;
+	}
 
 	if (unpriv) {
 		if (!can_execute_unpriv(tester, spec)) {
@@ -644,6 +1184,13 @@ void run_subtest(struct test_loader *tester,
 		if (drop_capabilities(&caps)) {
 			test__end_subtest();
 			return;
+		}
+		if (subspec->caps) {
+			err = cap_enable_effective(subspec->caps, NULL);
+			if (err) {
+				PRINT_FAIL("failed to set capabilities: %i, %s\n", err, strerror(-err));
+				goto subtest_cleanup;
+			}
 		}
 	}
 
@@ -695,16 +1242,61 @@ void run_subtest(struct test_loader *tester,
 			goto tobj_cleanup;
 		}
 	}
-
 	emit_verifier_log(tester->log_buf, false /*force*/);
-	validate_case(tester, subspec, tobj, tprog, err);
+	validate_msgs(tester->log_buf, &subspec->expect_msgs, emit_verifier_log);
+
+	/* Restore capabilities because the kernel will silently ignore requests
+	 * for program info (such as xlated program text) if we are not
+	 * bpf-capable. Also, for some reason test_verifier executes programs
+	 * with all capabilities restored. Do the same here.
+	 */
+	if (restore_capabilities(&caps))
+		goto tobj_cleanup;
+
+	if (subspec->expect_xlated.cnt) {
+		err = get_xlated_program_text(bpf_program__fd(tprog),
+					      tester->log_buf, tester->log_buf_sz);
+		if (err)
+			goto tobj_cleanup;
+		emit_xlated(tester->log_buf, false /*force*/);
+		validate_msgs(tester->log_buf, &subspec->expect_xlated, emit_xlated);
+	}
+
+	if (subspec->jited.cnt) {
+		err = get_jited_program_text(bpf_program__fd(tprog),
+					     tester->log_buf, tester->log_buf_sz);
+		if (err == -EOPNOTSUPP) {
+			printf("%s:SKIP: jited programs disassembly is not supported,\n", __func__);
+			printf("%s:SKIP: tests are built w/o LLVM development libs\n", __func__);
+			test__skip();
+			goto tobj_cleanup;
+		}
+		if (!ASSERT_EQ(err, 0, "get_jited_program_text"))
+			goto tobj_cleanup;
+		emit_jited(tester->log_buf, false /*force*/);
+		validate_msgs(tester->log_buf, &subspec->jited, emit_jited);
+	}
 
 	if (should_do_test_run(spec, subspec)) {
-		/* For some reason test_verifier executes programs
-		 * with all capabilities restored. Do the same here.
+		/* Do bpf_map__attach_struct_ops() for each struct_ops map.
+		 * This should trigger bpf_struct_ops->reg callback on kernel side.
 		 */
-		if (restore_capabilities(&caps))
-			goto tobj_cleanup;
+		bpf_object__for_each_map(map, tobj) {
+			if (!bpf_map__autocreate(map) ||
+			    bpf_map__type(map) != BPF_MAP_TYPE_STRUCT_OPS)
+				continue;
+			if (links_cnt >= ARRAY_SIZE(links)) {
+				PRINT_FAIL("too many struct_ops maps");
+				goto tobj_cleanup;
+			}
+			link = bpf_map__attach_struct_ops(map);
+			if (!link) {
+				PRINT_FAIL("bpf_map__attach_struct_ops failed for map %s: err=%d\n",
+					   bpf_map__name(map), -errno);
+				goto tobj_cleanup;
+			}
+			links[links_cnt++] = link;
+		}
 
 		if (tester->pre_execution_cb) {
 			err = tester->pre_execution_cb(tobj);
@@ -714,15 +1306,46 @@ void run_subtest(struct test_loader *tester,
 			}
 		}
 
-		do_prog_test_run(bpf_program__fd(tprog), &retval,
-				 bpf_program__type(tprog) == BPF_PROG_TYPE_SYSCALL ? true : false);
-		if (retval != subspec->retval && subspec->retval != POINTER_VALUE) {
+		err = do_prog_test_run(bpf_program__fd(tprog), &retval,
+				       bpf_program__type(tprog) == BPF_PROG_TYPE_SYSCALL ? true : false,
+				       spec->linear_sz);
+		if (!err && retval != subspec->retval && subspec->retval != POINTER_VALUE) {
 			PRINT_FAIL("Unexpected retval: %d != %d\n", retval, subspec->retval);
 			goto tobj_cleanup;
 		}
+
+		if (subspec->stderr.cnt) {
+			err = get_stream(2, bpf_program__fd(tprog),
+					 tester->log_buf, tester->log_buf_sz);
+			if (err <= 0) {
+				PRINT_FAIL("Unexpected retval from get_stream(): %d, errno = %d\n",
+					   err, errno);
+				goto tobj_cleanup;
+			}
+			emit_stderr(tester->log_buf, false /*force*/);
+			validate_msgs(tester->log_buf, &subspec->stderr, emit_stderr);
+		}
+
+		if (subspec->stdout.cnt) {
+			err = get_stream(1, bpf_program__fd(tprog),
+					 tester->log_buf, tester->log_buf_sz);
+			if (err <= 0) {
+				PRINT_FAIL("Unexpected retval from get_stream(): %d, errno = %d\n",
+					   err, errno);
+				goto tobj_cleanup;
+			}
+			emit_stdout(tester->log_buf, false /*force*/);
+			validate_msgs(tester->log_buf, &subspec->stdout, emit_stdout);
+		}
+
+		/* redo bpf_map__attach_struct_ops for each test */
+		while (links_cnt > 0)
+			bpf_link__destroy(links[--links_cnt]);
 	}
 
 tobj_cleanup:
+	while (links_cnt > 0)
+		bpf_link__destroy(links[--links_cnt]);
 	bpf_object__close(tobj);
 subtest_cleanup:
 	test__end_subtest();

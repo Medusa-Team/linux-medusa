@@ -20,6 +20,7 @@
 #include <drm/drm_blend.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
+#include <drm/drm_print.h>
 #include <drm/drm_vblank.h>
 
 #include "exynos_drm_crtc.h"
@@ -871,7 +872,7 @@ static void exynos5433_decon_remove(struct platform_device *pdev)
 
 struct platform_driver exynos5433_decon_driver = {
 	.probe		= exynos5433_decon_probe,
-	.remove_new	= exynos5433_decon_remove,
+	.remove		= exynos5433_decon_remove,
 	.driver		= {
 		.name	= "exynos5433-decon",
 		.pm	= pm_ptr(&exynos5433_decon_pm_ops),

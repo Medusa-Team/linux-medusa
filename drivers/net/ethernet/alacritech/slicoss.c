@@ -192,7 +192,7 @@ static int slic_new_upr(struct slic_device *sdev, unsigned int type,
 {
 	struct slic_upr *upr;
 
-	upr = kmalloc(sizeof(*upr), GFP_ATOMIC);
+	upr = kmalloc_obj(*upr, GFP_ATOMIC);
 	if (!upr)
 		return -ENOMEM;
 	upr->type = type;
@@ -378,8 +378,8 @@ static void slic_xmit_complete(struct slic_device *sdev)
 	smp_wmb();
 
 	u64_stats_update_begin(&sdev->stats.syncp);
-	sdev->stats.tx_bytes += bytes;
-	sdev->stats.tx_packets += frames;
+	u64_stats_add(&sdev->stats.tx_bytes, bytes);
+	u64_stats_add(&sdev->stats.tx_packets, frames);
 	u64_stats_update_end(&sdev->stats.syncp);
 
 	netif_tx_lock(dev);
@@ -615,8 +615,8 @@ static void slic_handle_receive(struct slic_device *sdev, unsigned int todo,
 	}
 
 	u64_stats_update_begin(&sdev->stats.syncp);
-	sdev->stats.rx_bytes += bytes;
-	sdev->stats.rx_packets += frames;
+	u64_stats_add(&sdev->stats.rx_bytes, bytes);
+	u64_stats_add(&sdev->stats.rx_packets, frames);
 	u64_stats_update_end(&sdev->stats.syncp);
 
 	slic_refill_rx_queue(sdev, GFP_ATOMIC);
@@ -845,7 +845,7 @@ static int slic_init_tx_queue(struct slic_device *sdev)
 	txq->put_idx = 0;
 	txq->done_idx = 0;
 
-	txq->txbuffs = kcalloc(txq->len, sizeof(*buff), GFP_KERNEL);
+	txq->txbuffs = kzalloc_objs(*buff, txq->len);
 	if (!txq->txbuffs)
 		return -ENOMEM;
 
@@ -922,7 +922,7 @@ static int slic_init_rx_queue(struct slic_device *sdev)
 	rxq->done_idx = 0;
 	rxq->put_idx = 0;
 
-	buff = kcalloc(rxq->len, sizeof(*buff), GFP_KERNEL);
+	buff = kzalloc_objs(*buff, rxq->len);
 	if (!buff)
 		return -ENOMEM;
 
@@ -1678,17 +1678,15 @@ static int slic_init(struct slic_device *sdev)
 	slic_card_reset(sdev);
 
 	err = slic_load_firmware(sdev);
-	if (err) {
-		dev_err(&sdev->pdev->dev, "failed to load firmware\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(&sdev->pdev->dev, err,
+			"failed to load firmware\n");
 
 	/* we need the shared memory to read EEPROM so set it up temporarily */
 	err = slic_init_shmem(sdev);
-	if (err) {
-		dev_err(&sdev->pdev->dev, "failed to init shared memory\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(&sdev->pdev->dev, err,
+			"failed to init shared memory\n");
 
 	err = slic_read_eeprom(sdev);
 	if (err) {
@@ -1741,10 +1739,9 @@ static int slic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	int err;
 
 	err = pci_enable_device(pdev);
-	if (err) {
-		dev_err(&pdev->dev, "failed to enable PCI device\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(&pdev->dev, err,
+			"failed to enable PCI device\n");
 
 	pci_set_master(pdev);
 	pci_try_set_mwi(pdev);

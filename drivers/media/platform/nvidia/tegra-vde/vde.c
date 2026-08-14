@@ -61,7 +61,7 @@ int tegra_vde_alloc_bo(struct tegra_vde *vde,
 	struct tegra_vde_bo *bo;
 	int err;
 
-	bo = kzalloc(sizeof(*bo), GFP_KERNEL);
+	bo = kzalloc_obj(*bo);
 	if (!bo)
 		return -ENOMEM;
 
@@ -535,7 +535,7 @@ MODULE_DEVICE_TABLE(of, tegra_vde_of_match);
 
 static struct platform_driver tegra_vde_driver = {
 	.probe		= tegra_vde_probe,
-	.remove_new	= tegra_vde_remove,
+	.remove		= tegra_vde_remove,
 	.shutdown	= tegra_vde_shutdown,
 	.driver		= {
 		.name		= "tegra-vde",

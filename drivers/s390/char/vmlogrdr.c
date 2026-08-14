@@ -11,8 +11,7 @@
  *
  */
 
-#define KMSG_COMPONENT "vmlogrdr"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "vmlogrdr: " fmt
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -23,6 +22,7 @@
 #include <linux/spinlock.h>
 #include <linux/atomic.h>
 #include <linux/uaccess.h>
+#include <asm/machine.h>
 #include <asm/cpcmd.h>
 #include <asm/debug.h>
 #include <asm/ebcdic.h>
@@ -96,7 +96,6 @@ static const struct file_operations vmlogrdr_fops = {
 	.open    = vmlogrdr_open,
 	.release = vmlogrdr_release,
 	.read    = vmlogrdr_read,
-	.llseek  = no_llseek,
 };
 
 
@@ -124,7 +123,7 @@ static DECLARE_WAIT_QUEUE_HEAD(read_wait_queue);
  */
 
 static struct vmlogrdr_priv_t sys_ser[] = {
-	{ .system_service = "*LOGREC ",
+	{ .system_service = { '*', 'L', 'O', 'G', 'R', 'E', 'C', ' ' },
 	  .internal_name  = "logrec",
 	  .recording_name = "EREP",
 	  .minor_num      = 0,
@@ -133,7 +132,7 @@ static struct vmlogrdr_priv_t sys_ser[] = {
 	  .autorecording  = 1,
 	  .autopurge      = 1,
 	},
-	{ .system_service = "*ACCOUNT",
+	{ .system_service = { '*', 'A', 'C', 'C', 'O', 'U', 'N', 'T' },
 	  .internal_name  = "account",
 	  .recording_name = "ACCOUNT",
 	  .minor_num      = 1,
@@ -142,7 +141,7 @@ static struct vmlogrdr_priv_t sys_ser[] = {
 	  .autorecording  = 1,
 	  .autopurge      = 1,
 	},
-	{ .system_service = "*SYMPTOM",
+	{ .system_service = { '*', 'S', 'Y', 'M', 'P', 'T', 'O', 'M' },
 	  .internal_name  = "symptom",
 	  .recording_name = "SYMPTOM",
 	  .minor_num      = 2,
@@ -255,7 +254,7 @@ static int vmlogrdr_recording(struct vmlogrdr_priv_t * logptr,
 
 	/*
 	 * The recording commands needs to be called with option QID
-	 * for guests that have previlege classes A or B.
+	 * for guests that have privilege classes A or B.
 	 * Purging has to be done as separate step, because recording
 	 * can't be switched on as long as records are on the queue.
 	 * Doing both at the same time doesn't work.
@@ -357,7 +356,7 @@ static int vmlogrdr_open (struct inode *inode, struct file *filp)
 	if (connect_rc) {
 		pr_err("vmlogrdr: iucv connection to %s "
 		       "failed with rc %i \n",
-		       logptr->system_service, connect_rc);
+		       logptr->internal_name, connect_rc);
 		goto out_path;
 	}
 
@@ -532,7 +531,7 @@ static ssize_t vmlogrdr_autopurge_show(struct device *dev,
 				       char *buf)
 {
 	struct vmlogrdr_priv_t *priv = dev_get_drvdata(dev);
-	return sprintf(buf, "%u\n", priv->autopurge);
+	return sysfs_emit(buf, "%u\n", priv->autopurge);
 }
 
 
@@ -557,7 +556,7 @@ static ssize_t vmlogrdr_purge_store(struct device * dev,
 
         /*
 	 * The recording command needs to be called with option QID
-	 * for guests that have previlege classes A or B.
+	 * for guests that have privilege classes A or B.
 	 * Other guests will not recognize the command and we have to
 	 * issue the same command without the QID parameter.
 	 */
@@ -606,7 +605,7 @@ static ssize_t vmlogrdr_autorecording_show(struct device *dev,
 					   char *buf)
 {
 	struct vmlogrdr_priv_t *priv = dev_get_drvdata(dev);
-	return sprintf(buf, "%u\n", priv->autorecording);
+	return sysfs_emit(buf, "%u\n", priv->autorecording);
 }
 
 
@@ -810,7 +809,7 @@ static int __init vmlogrdr_init(void)
 	int i;
 	dev_t dev;
 
-	if (! MACHINE_IS_VM) {
+	if (!machine_is_vm()) {
 		pr_err("not running under VM, driver not loaded.\n");
 		return -ENODEV;
 	}

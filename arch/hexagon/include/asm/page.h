@@ -45,9 +45,7 @@
 #define HVM_HUGEPAGE_SIZE 0x5
 #endif
 
-#define PAGE_SHIFT CONFIG_PAGE_SHIFT
-#define PAGE_SIZE  (1UL << PAGE_SHIFT)
-#define PAGE_MASK  (~((1 << PAGE_SHIFT) - 1))
+#include <vdso/page.h>
 
 #ifdef __KERNEL__
 #ifndef __ASSEMBLY__
@@ -92,7 +90,7 @@ struct page;
 #define virt_to_page(kaddr) pfn_to_page(PFN_DOWN(__pa(kaddr)))
 
 /* Default vm area behavior is non-executable.  */
-#define VM_DATA_DEFAULT_FLAGS	VM_DATA_FLAGS_NON_EXEC
+#define VMA_DATA_DEFAULT_FLAGS	VMA_DATA_FLAGS_NON_EXEC
 
 #define virt_addr_valid(kaddr) pfn_valid(__pa(kaddr) >> PAGE_SHIFT)
 
@@ -115,14 +113,7 @@ static inline void clear_page(void *page)
 /*
  * Under assumption that kernel always "sees" user map...
  */
-#define clear_user_page(page, vaddr, pg)	clear_page(page)
 #define copy_user_page(to, from, vaddr, pg)	copy_page(to, from)
-
-/*
- * page_to_phys - convert page to physical address
- * @page - pointer to page entry in mem_map
- */
-#define page_to_phys(page)      (page_to_pfn(page) << PAGE_SHIFT)
 
 static inline unsigned long virt_to_pfn(const void *kaddr)
 {

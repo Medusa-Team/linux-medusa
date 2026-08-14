@@ -703,7 +703,7 @@ static int isp116x_urb_enqueue(struct usb_hcd *hcd,
 	}
 	/* avoid all allocations within spinlocks: request or endpoint */
 	if (!hep->hcpriv) {
-		ep = kzalloc(sizeof *ep, mem_flags);
+		ep = kzalloc_obj(*ep, mem_flags);
 		if (!ep)
 			return -ENOMEM;
 	}
@@ -1684,7 +1684,7 @@ MODULE_ALIAS("platform:isp116x-hcd");
 
 static struct platform_driver isp116x_driver = {
 	.probe = isp116x_probe,
-	.remove_new = isp116x_remove,
+	.remove = isp116x_remove,
 	.suspend = isp116x_suspend,
 	.resume = isp116x_resume,
 	.driver = {

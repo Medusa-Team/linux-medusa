@@ -178,6 +178,7 @@ static int cs42l43_sdw_probe(struct sdw_slave *sdw, const struct sdw_device_id *
 
 	cs42l43->dev = dev;
 	cs42l43->sdw = sdw;
+	cs42l43->variant_id = (long)id->driver_data;
 
 	cs42l43->regmap = devm_regmap_init_sdw(sdw, &cs42l43_sdw_regmap);
 	if (IS_ERR(cs42l43->regmap))
@@ -187,17 +188,9 @@ static int cs42l43_sdw_probe(struct sdw_slave *sdw, const struct sdw_device_id *
 	return cs42l43_dev_probe(cs42l43);
 }
 
-static int cs42l43_sdw_remove(struct sdw_slave *sdw)
-{
-	struct cs42l43 *cs42l43 = dev_get_drvdata(&sdw->dev);
-
-	cs42l43_dev_remove(cs42l43);
-
-	return 0;
-}
-
 static const struct sdw_device_id cs42l43_sdw_id[] = {
-	SDW_SLAVE_ENTRY(0x01FA, 0x4243, 0),
+	SDW_SLAVE_ENTRY(0x01FA, 0x4243, (void *) CS42L43_DEVID_VAL),
+	SDW_SLAVE_ENTRY(0x01FA, 0x2A3B, (void *) CS42L43B_DEVID_VAL),
 	{}
 };
 MODULE_DEVICE_TABLE(sdw, cs42l43_sdw_id);
@@ -209,13 +202,12 @@ static struct sdw_driver cs42l43_sdw_driver = {
 	},
 
 	.probe		= cs42l43_sdw_probe,
-	.remove		= cs42l43_sdw_remove,
 	.id_table	= cs42l43_sdw_id,
 	.ops		= &cs42l43_sdw_ops,
 };
 module_sdw_driver(cs42l43_sdw_driver);
 
-MODULE_IMPORT_NS(MFD_CS42L43);
+MODULE_IMPORT_NS("MFD_CS42L43");
 
 MODULE_DESCRIPTION("CS42L43 SoundWire Driver");
 MODULE_AUTHOR("Lucas Tanure <tanureal@opensource.cirrus.com>");

@@ -37,7 +37,6 @@
  */
 
 #include <linux/array_size.h>
-#include <linux/dma-mapping.h>
 #include <linux/spinlock.h>
 #include <linux/stddef.h>
 #include <linux/types.h>
@@ -366,6 +365,30 @@ __kfifo_int_must_check_helper( \
 	struct __kfifo *__kfifo = &__tmp->kfifo; \
 	__is_kfifo_ptr(__tmp) ? \
 	__kfifo_alloc(__kfifo, size, sizeof(*__tmp->type), gfp_mask) : \
+	-EINVAL; \
+}) \
+)
+
+/**
+ * kfifo_alloc_node - dynamically allocates a new fifo buffer on a NUMA node
+ * @fifo: pointer to the fifo
+ * @size: the number of elements in the fifo, this must be a power of 2
+ * @gfp_mask: get_free_pages mask, passed to kmalloc()
+ * @node: NUMA node to allocate memory on
+ *
+ * This macro dynamically allocates a new fifo buffer with NUMA node awareness.
+ *
+ * The number of elements will be rounded-up to a power of 2.
+ * The fifo will be release with kfifo_free().
+ * Return 0 if no error, otherwise an error code.
+ */
+#define kfifo_alloc_node(fifo, size, gfp_mask, node) \
+__kfifo_int_must_check_helper( \
+({ \
+	typeof((fifo) + 1) __tmp = (fifo); \
+	struct __kfifo *__kfifo = &__tmp->kfifo; \
+	__is_kfifo_ptr(__tmp) ? \
+	__kfifo_alloc_node(__kfifo, size, sizeof(*__tmp->type), gfp_mask, node) : \
 	-EINVAL; \
 }) \
 )
@@ -900,8 +923,14 @@ __kfifo_uint_must_check_helper( \
 )
 
 
-extern int __kfifo_alloc(struct __kfifo *fifo, unsigned int size,
-	size_t esize, gfp_t gfp_mask);
+extern int __kfifo_alloc_node(struct __kfifo *fifo, unsigned int size,
+	size_t esize, gfp_t gfp_mask, int node);
+
+static inline int __kfifo_alloc(struct __kfifo *fifo, unsigned int size,
+				size_t esize, gfp_t gfp_mask)
+{
+	return __kfifo_alloc_node(fifo, size, esize, gfp_mask, NUMA_NO_NODE);
+}
 
 extern void __kfifo_free(struct __kfifo *fifo);
 

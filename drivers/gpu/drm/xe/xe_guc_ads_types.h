@@ -14,7 +14,7 @@ struct xe_bo;
  * struct xe_guc_ads - GuC additional data structures (ADS)
  */
 struct xe_guc_ads {
-	/** @bo: XE BO for GuC ads blob */
+	/** @bo: Xe BO for GuC ads blob */
 	struct xe_bo *bo;
 	/** @golden_lrc_size: golden LRC size */
 	size_t golden_lrc_size;
@@ -22,6 +22,8 @@ struct xe_guc_ads {
 	u32 regset_size;
 	/** @ads_waklv_size: total waklv size supported by platform */
 	u32 ads_waklv_size;
+	/** @capture_size: size of register set passed to GuC for capture */
+	u32 capture_size;
 };
 
 #endif

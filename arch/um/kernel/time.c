@@ -25,6 +25,8 @@
 #include <shared/init.h>
 
 #ifdef CONFIG_UML_TIME_TRAVEL_SUPPORT
+#include <linux/sched/clock.h>
+
 enum time_travel_mode time_travel_mode;
 EXPORT_SYMBOL_GPL(time_travel_mode);
 
@@ -46,6 +48,15 @@ static unsigned long long _time_travel_ext_free_until;
 static u16 time_travel_shm_id;
 static struct um_timetravel_schedshm *time_travel_shm;
 static union um_timetravel_schedshm_client *time_travel_shm_client;
+
+unsigned long tt_extra_sched_jiffies;
+
+notrace unsigned long long sched_clock(void)
+{
+	return (unsigned long long)(jiffies - INITIAL_JIFFIES +
+				    tt_extra_sched_jiffies)
+					* (NSEC_PER_SEC / HZ);
+}
 
 static void time_travel_set_time(unsigned long long ns)
 {
@@ -443,6 +454,11 @@ static void time_travel_periodic_timer(struct time_travel_event *e)
 {
 	time_travel_add_event(&time_travel_timer_event,
 			      time_travel_time + time_travel_timer_interval);
+
+	/* clock tick; decrease extra jiffies by keeping sched_clock constant */
+	if (tt_extra_sched_jiffies > 0)
+		tt_extra_sched_jiffies -= 1;
+
 	deliver_alarm();
 }
 
@@ -594,6 +610,10 @@ EXPORT_SYMBOL_GPL(time_travel_add_irq_event);
 
 static void time_travel_oneshot_timer(struct time_travel_event *e)
 {
+	/* clock tick; decrease extra jiffies by keeping sched_clock constant */
+	if (tt_extra_sched_jiffies > 0)
+		tt_extra_sched_jiffies -= 1;
+
 	deliver_alarm();
 }
 
@@ -605,9 +625,10 @@ void time_travel_sleep(void)
 	 * controller application.
 	 */
 	unsigned long long next = S64_MAX;
+	int cpu = raw_smp_processor_id();
 
 	if (time_travel_mode == TT_MODE_BASIC)
-		os_timer_disable();
+		os_timer_disable(cpu);
 
 	time_travel_update_time(next, true);
 
@@ -618,9 +639,9 @@ void time_travel_sleep(void)
 			 * This is somewhat wrong - we should get the first
 			 * one sooner like the os_timer_one_shot() below...
 			 */
-			os_timer_set_interval(time_travel_timer_interval);
+			os_timer_set_interval(cpu, time_travel_timer_interval);
 		} else {
-			os_timer_one_shot(time_travel_timer_event.time - next);
+			os_timer_one_shot(cpu, time_travel_timer_event.time - next);
 		}
 	}
 }
@@ -738,6 +759,8 @@ extern u64 time_travel_ext_req(u32 op, u64 time);
 #define time_travel_del_event(e) do { } while (0)
 #endif
 
+static struct clock_event_device timer_clockevent[NR_CPUS];
+
 void timer_handler(int sig, struct siginfo *unused_si, struct uml_pt_regs *regs)
 {
 	unsigned long flags;
@@ -760,12 +783,14 @@ void timer_handler(int sig, struct siginfo *unused_si, struct uml_pt_regs *regs)
 
 static int itimer_shutdown(struct clock_event_device *evt)
 {
+	int cpu = evt - &timer_clockevent[0];
+
 	if (time_travel_mode != TT_MODE_OFF)
 		time_travel_del_event(&time_travel_timer_event);
 
 	if (time_travel_mode != TT_MODE_INFCPU &&
 	    time_travel_mode != TT_MODE_EXTERNAL)
-		os_timer_disable();
+		os_timer_disable(cpu);
 
 	return 0;
 }
@@ -773,6 +798,7 @@ static int itimer_shutdown(struct clock_event_device *evt)
 static int itimer_set_periodic(struct clock_event_device *evt)
 {
 	unsigned long long interval = NSEC_PER_SEC / HZ;
+	int cpu = evt - &timer_clockevent[0];
 
 	if (time_travel_mode != TT_MODE_OFF) {
 		time_travel_del_event(&time_travel_timer_event);
@@ -785,7 +811,7 @@ static int itimer_set_periodic(struct clock_event_device *evt)
 
 	if (time_travel_mode != TT_MODE_INFCPU &&
 	    time_travel_mode != TT_MODE_EXTERNAL)
-		os_timer_set_interval(interval);
+		os_timer_set_interval(cpu, interval);
 
 	return 0;
 }
@@ -805,7 +831,7 @@ static int itimer_next_event(unsigned long delta,
 
 	if (time_travel_mode != TT_MODE_INFCPU &&
 	    time_travel_mode != TT_MODE_EXTERNAL)
-		return os_timer_one_shot(delta);
+		return os_timer_one_shot(raw_smp_processor_id(), delta);
 
 	return 0;
 }
@@ -815,10 +841,9 @@ static int itimer_one_shot(struct clock_event_device *evt)
 	return itimer_next_event(0, evt);
 }
 
-static struct clock_event_device timer_clockevent = {
+static struct clock_event_device _timer_clockevent = {
 	.name			= "posix-timer",
 	.rating			= 250,
-	.cpumask		= cpu_possible_mask,
 	.features		= CLOCK_EVT_FEAT_PERIODIC |
 				  CLOCK_EVT_FEAT_ONESHOT,
 	.set_state_shutdown	= itimer_shutdown,
@@ -836,13 +861,21 @@ static struct clock_event_device timer_clockevent = {
 
 static irqreturn_t um_timer(int irq, void *dev)
 {
-	if (get_current()->mm != NULL)
-	{
-        /* userspace - relay signal, results in correct userspace timers */
-		os_alarm_process(get_current()->mm->context.id.u.pid);
-	}
+	int cpu = raw_smp_processor_id();
+	struct clock_event_device *evt = &timer_clockevent[cpu];
 
-	(*timer_clockevent.event_handler)(&timer_clockevent);
+	/*
+	 * Interrupt the (possibly) running userspace process, technically this
+	 * should only happen if userspace is currently executing.
+	 * With infinite CPU time-travel, we can only get here when userspace
+	 * is not executing. Do not notify there and avoid spurious scheduling.
+	 */
+	if (time_travel_mode != TT_MODE_INFCPU &&
+	    time_travel_mode != TT_MODE_EXTERNAL &&
+	    get_current()->mm)
+		os_alarm_process(get_current()->mm->context.id.pid);
+
+	evt->event_handler(evt);
 
 	return IRQ_HANDLED;
 }
@@ -879,7 +912,24 @@ static struct clocksource timer_clocksource = {
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 };
 
-static void __init um_timer_setup(void)
+int um_setup_timer(void)
+{
+	int cpu = raw_smp_processor_id();
+	struct clock_event_device *evt = &timer_clockevent[cpu];
+	int err;
+
+	err = os_timer_create();
+	if (err)
+		return err;
+
+	memcpy(evt, &_timer_clockevent, sizeof(*evt));
+	evt->cpumask = cpumask_of(cpu);
+	clockevents_register_device(evt);
+
+	return 0;
+}
+
+static void __init um_timer_init(void)
 {
 	int err;
 
@@ -888,8 +938,8 @@ static void __init um_timer_setup(void)
 		printk(KERN_ERR "register_timer : request_irq failed - "
 		       "errno = %d\n", -err);
 
-	err = os_timer_create();
-	if (err != 0) {
+	err = um_setup_timer();
+	if (err) {
 		printk(KERN_ERR "creation of timer failed - errno = %d\n", -err);
 		return;
 	}
@@ -899,7 +949,6 @@ static void __init um_timer_setup(void)
 		printk(KERN_ERR "clocksource_register_hz returned %d\n", err);
 		return;
 	}
-	clockevents_register_device(&timer_clockevent);
 }
 
 void read_persistent_clock64(struct timespec64 *ts)
@@ -920,7 +969,7 @@ void read_persistent_clock64(struct timespec64 *ts)
 void __init time_init(void)
 {
 	timer_set_signal_handler();
-	late_time_init = um_timer_setup;
+	late_time_init = um_timer_init;
 }
 
 #ifdef CONFIG_UML_TIME_TRAVEL_SUPPORT
@@ -936,21 +985,21 @@ static int setup_time_travel(char *str)
 {
 	if (strcmp(str, "=inf-cpu") == 0) {
 		time_travel_mode = TT_MODE_INFCPU;
-		timer_clockevent.name = "time-travel-timer-infcpu";
+		_timer_clockevent.name = "time-travel-timer-infcpu";
 		timer_clocksource.name = "time-travel-clock";
 		return 1;
 	}
 
 	if (strncmp(str, "=ext:", 5) == 0) {
 		time_travel_mode = TT_MODE_EXTERNAL;
-		timer_clockevent.name = "time-travel-timer-external";
+		_timer_clockevent.name = "time-travel-timer-external";
 		timer_clocksource.name = "time-travel-clock-external";
 		return time_travel_connect_external(str + 5);
 	}
 
 	if (!*str) {
 		time_travel_mode = TT_MODE_BASIC;
-		timer_clockevent.name = "time-travel-timer";
+		_timer_clockevent.name = "time-travel-timer";
 		timer_clocksource.name = "time-travel-clock";
 		return 1;
 	}
@@ -961,26 +1010,26 @@ static int setup_time_travel(char *str)
 __setup("time-travel", setup_time_travel);
 __uml_help(setup_time_travel,
 "time-travel\n"
-"This option just enables basic time travel mode, in which the clock/timers\n"
-"inside the UML instance skip forward when there's nothing to do, rather than\n"
-"waiting for real time to elapse. However, instance CPU speed is limited by\n"
-"the real CPU speed, so e.g. a 10ms timer will always fire after ~10ms wall\n"
-"clock (but quicker when there's nothing to do).\n"
+"    This option just enables basic time travel mode, in which the clock/timers\n"
+"    inside the UML instance skip forward when there's nothing to do, rather than\n"
+"    waiting for real time to elapse. However, instance CPU speed is limited by\n"
+"    the real CPU speed, so e.g. a 10ms timer will always fire after ~10ms wall\n"
+"    clock (but quicker when there's nothing to do).\n"
 "\n"
 "time-travel=inf-cpu\n"
-"This enables time travel mode with infinite processing power, in which there\n"
-"are no wall clock timers, and any CPU processing happens - as seen from the\n"
-"guest - instantly. This can be useful for accurate simulation regardless of\n"
-"debug overhead, physical CPU speed, etc. but is somewhat dangerous as it can\n"
-"easily lead to getting stuck (e.g. if anything in the system busy loops).\n"
+"    This enables time travel mode with infinite processing power, in which there\n"
+"    are no wall clock timers, and any CPU processing happens - as seen from the\n"
+"    guest - instantly. This can be useful for accurate simulation regardless of\n"
+"    debug overhead, physical CPU speed, etc. but is somewhat dangerous as it can\n"
+"    easily lead to getting stuck (e.g. if anything in the system busy loops).\n"
 "\n"
 "time-travel=ext:[ID:]/path/to/socket\n"
-"This enables time travel mode similar to =inf-cpu, except the system will\n"
-"use the given socket to coordinate with a central scheduler, in order to\n"
-"have more than one system simultaneously be on simulated time. The virtio\n"
-"driver code in UML knows about this so you can also simulate networks and\n"
-"devices using it, assuming the device has the right capabilities.\n"
-"The optional ID is a 64-bit integer that's sent to the central scheduler.\n");
+"    This enables time travel mode similar to =inf-cpu, except the system will\n"
+"    use the given socket to coordinate with a central scheduler, in order to\n"
+"    have more than one system simultaneously be on simulated time. The virtio\n"
+"    driver code in UML knows about this so you can also simulate networks and\n"
+"    devices using it, assuming the device has the right capabilities.\n"
+"    The optional ID is a 64-bit integer that's sent to the central scheduler.\n\n");
 
 static int setup_time_travel_start(char *str)
 {
@@ -997,8 +1046,9 @@ static int setup_time_travel_start(char *str)
 __setup("time-travel-start=", setup_time_travel_start);
 __uml_help(setup_time_travel_start,
 "time-travel-start=<nanoseconds>\n"
-"Configure the UML instance's wall clock to start at this value rather than\n"
-"the host's wall clock at the time of UML boot.\n");
+"    Configure the UML instance's wall clock to start at this value rather than\n"
+"    the host's wall clock at the time of UML boot.\n\n");
+
 static struct kobject *bc_time_kobject;
 
 static ssize_t bc_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)

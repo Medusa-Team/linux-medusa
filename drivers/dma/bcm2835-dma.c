@@ -260,23 +260,6 @@ static void bcm2835_dma_create_cb_set_length(
 	control_block->info |= finalextrainfo;
 }
 
-static inline size_t bcm2835_dma_count_frames_for_sg(
-	struct bcm2835_chan *c,
-	struct scatterlist *sgl,
-	unsigned int sg_len)
-{
-	size_t frames = 0;
-	struct scatterlist *sgent;
-	unsigned int i;
-	size_t plength = bcm2835_dma_max_frame_length(c);
-
-	for_each_sg(sgl, sgent, sg_len, i)
-		frames += bcm2835_dma_frames_for_length(
-			sg_dma_len(sgent), plength);
-
-	return frames;
-}
-
 /**
  * bcm2835_dma_create_cb_chain - create a control block and fills data in
  *
@@ -314,7 +297,7 @@ static struct bcm2835_desc *bcm2835_dma_create_cb_chain(
 		return NULL;
 
 	/* allocate and setup the descriptor. */
-	d = kzalloc(struct_size(d, cb_list, frames), gfp);
+	d = kzalloc_flex(*d, cb_list, frames, gfp);
 	if (!d)
 		return NULL;
 
@@ -369,7 +352,7 @@ static struct bcm2835_desc *bcm2835_dma_create_cb_chain(
 	/* the last frame requires extra flags */
 	d->cb_list[d->frames - 1].cb->info |= finalextrainfo;
 
-	/* detect a size missmatch */
+	/* detect a size mismatch */
 	if (buf_len && (d->size != buf_len))
 		goto error_cb;
 
@@ -672,7 +655,7 @@ static struct dma_async_tx_descriptor *bcm2835_dma_prep_slave_sg(
 	}
 
 	/* count frames in sg list */
-	frames = bcm2835_dma_count_frames_for_sg(c, sgl, sg_len);
+	frames = sg_nents_for_dma(sgl, sg_len, bcm2835_dma_max_frame_length(c));
 
 	/* allocate the CB chain */
 	d = bcm2835_dma_create_cb_chain(chan, direction, false,
@@ -875,6 +858,27 @@ static struct dma_chan *bcm2835_dma_xlate(struct of_phandle_args *spec,
 	return chan;
 }
 
+static int bcm2835_dma_suspend_late(struct device *dev)
+{
+	struct bcm2835_dmadev *od = dev_get_drvdata(dev);
+	struct bcm2835_chan *c, *next;
+
+	list_for_each_entry_safe(c, next, &od->ddev.channels,
+				 vc.chan.device_node) {
+		void __iomem *chan_base = c->chan_base;
+
+		/* Check if DMA channel is busy */
+		if (readl(chan_base + BCM2835_DMA_ADDR))
+			return -EBUSY;
+	}
+
+	return 0;
+}
+
+static const struct dev_pm_ops bcm2835_dma_pm_ops = {
+	LATE_SYSTEM_SLEEP_PM_OPS(bcm2835_dma_suspend_late, NULL)
+};
+
 static int bcm2835_dma_probe(struct platform_device *pdev)
 {
 	struct bcm2835_dmadev *od;
@@ -1029,16 +1033,16 @@ static void bcm2835_dma_remove(struct platform_device *pdev)
 
 static struct platform_driver bcm2835_dma_driver = {
 	.probe	= bcm2835_dma_probe,
-	.remove_new = bcm2835_dma_remove,
+	.remove = bcm2835_dma_remove,
 	.driver = {
 		.name = "bcm2835-dma",
 		.of_match_table = of_match_ptr(bcm2835_dma_of_match),
+		.pm = pm_ptr(&bcm2835_dma_pm_ops),
 	},
 };
 
 module_platform_driver(bcm2835_dma_driver);
 
-MODULE_ALIAS("platform:bcm2835-dma");
 MODULE_DESCRIPTION("BCM2835 DMA engine driver");
 MODULE_AUTHOR("Florian Meier <florian.meier@koalo.de>");
 MODULE_LICENSE("GPL");

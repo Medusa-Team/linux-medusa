@@ -39,7 +39,9 @@
 
 #include "head.h"
 
+#ifndef CONFIG_HOTPLUG_PARALLEL
 static DECLARE_COMPLETION(cpu_running);
+#endif
 
 void __init smp_prepare_cpus(unsigned int max_cpus)
 {
@@ -179,6 +181,12 @@ static int start_secondary_cpu(int cpu, struct task_struct *tidle)
 	return -EOPNOTSUPP;
 }
 
+#ifdef CONFIG_HOTPLUG_PARALLEL
+int arch_cpuhp_kick_ap_alive(unsigned int cpu, struct task_struct *tidle)
+{
+	return start_secondary_cpu(cpu, tidle);
+}
+#else
 int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 {
 	int ret = 0;
@@ -199,6 +207,7 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 
 	return ret;
 }
+#endif
 
 void __init smp_cpus_done(unsigned int max_cpus)
 {
@@ -225,27 +234,31 @@ asmlinkage __visible void smp_callin(void)
 	mmgrab(mm);
 	current->active_mm = mm;
 
+#ifdef CONFIG_HOTPLUG_PARALLEL
+	cpuhp_ap_sync_alive();
+#endif
+
 	store_cpu_topology(curr_cpuid);
 	notify_cpu_starting(curr_cpuid);
 
 	riscv_ipi_enable();
 
 	numa_add_cpu(curr_cpuid);
+
+	pr_debug("CPU%u: Booted secondary hartid %lu\n", curr_cpuid,
+		cpuid_to_hartid_map(curr_cpuid));
+
 	set_cpu_online(curr_cpuid, true);
 
-	riscv_user_isa_enable();
-
 	/*
-	 * Remote cache and TLB flushes are ignored while the CPU is offline,
-	 * so flush them both right now just in case.
+	 * Remote instruction cache and TLB flushes are ignored while the CPU
+	 * is offline, so flush them both right now just in case.
 	 */
 	local_flush_icache_all();
 	local_flush_tlb_all();
+#ifndef CONFIG_HOTPLUG_PARALLEL
 	complete(&cpu_running);
-	/*
-	 * Disable preemption before enabling interrupts, so we don't try to
-	 * schedule a CPU that hasn't actually started yet.
-	 */
+#endif
 	local_irq_enable();
 	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
 }

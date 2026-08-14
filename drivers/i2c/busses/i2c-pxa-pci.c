@@ -112,7 +112,7 @@ static int ce4100_i2c_probe(struct pci_dev *dev,
 		dev_err(&dev->dev, "Missing device tree node.\n");
 		return -EINVAL;
 	}
-	sds = kzalloc(sizeof(*sds), GFP_KERNEL);
+	sds = kzalloc_obj(*sds);
 	if (!sds)
 		return -ENOMEM;
 
@@ -135,7 +135,7 @@ err_dev_add:
 
 static const struct pci_device_id ce4100_i2c_devices[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_INTEL, 0x2e68)},
-	{ },
+	{ }
 };
 
 static struct pci_driver ce4100_i2c_driver = {

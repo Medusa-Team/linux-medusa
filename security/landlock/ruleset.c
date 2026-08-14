@@ -8,11 +8,13 @@
 
 #include <linux/bits.h>
 #include <linux/bug.h>
+#include <linux/cleanup.h>
 #include <linux/compiler_types.h>
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/lockdep.h>
+#include <linux/mutex.h>
 #include <linux/overflow.h>
 #include <linux/rbtree.h>
 #include <linux/refcount.h>
@@ -20,6 +22,8 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 
+#include "access.h"
+#include "domain.h"
 #include "limits.h"
 #include "object.h"
 #include "ruleset.h"
@@ -28,9 +32,8 @@ static struct landlock_ruleset *create_ruleset(const u32 num_layers)
 {
 	struct landlock_ruleset *new_ruleset;
 
-	new_ruleset =
-		kzalloc(struct_size(new_ruleset, access_masks, num_layers),
-			GFP_KERNEL_ACCOUNT);
+	new_ruleset = kzalloc_flex(*new_ruleset, access_masks, num_layers,
+				   GFP_KERNEL_ACCOUNT);
 	if (!new_ruleset)
 		return ERR_PTR(-ENOMEM);
 	refcount_set(&new_ruleset->usage, 1);
@@ -52,12 +55,13 @@ static struct landlock_ruleset *create_ruleset(const u32 num_layers)
 
 struct landlock_ruleset *
 landlock_create_ruleset(const access_mask_t fs_access_mask,
-			const access_mask_t net_access_mask)
+			const access_mask_t net_access_mask,
+			const access_mask_t scope_mask)
 {
 	struct landlock_ruleset *new_ruleset;
 
 	/* Informs about useless ruleset. */
-	if (!fs_access_mask && !net_access_mask)
+	if (!fs_access_mask && !net_access_mask && !scope_mask)
 		return ERR_PTR(-ENOMSG);
 	new_ruleset = create_ruleset(1);
 	if (IS_ERR(new_ruleset))
@@ -66,6 +70,8 @@ landlock_create_ruleset(const access_mask_t fs_access_mask,
 		landlock_add_fs_access_mask(new_ruleset, fs_access_mask, 0);
 	if (net_access_mask)
 		landlock_add_net_access_mask(new_ruleset, net_access_mask, 0);
+	if (scope_mask)
+		landlock_add_scope_mask(new_ruleset, scope_mask, 0);
 	return new_ruleset;
 }
 
@@ -75,6 +81,10 @@ static void build_check_rule(void)
 		.num_layers = ~0,
 	};
 
+	/*
+	 * Checks that .num_layers is large enough for at least
+	 * LANDLOCK_MAX_NUM_LAYERS layers.
+	 */
 	BUILD_BUG_ON(rule.num_layers < LANDLOCK_MAX_NUM_LAYERS);
 }
 
@@ -97,7 +107,7 @@ static bool is_object_pointer(const enum landlock_key_type key_type)
 
 static struct landlock_rule *
 create_rule(const struct landlock_id id,
-	    const struct landlock_layer (*const layers)[], const u32 num_layers,
+	    const struct landlock_layer (*layers)[], const u32 num_layers,
 	    const struct landlock_layer *const new_layer)
 {
 	struct landlock_rule *new_rule;
@@ -112,13 +122,13 @@ create_rule(const struct landlock_id id,
 	} else {
 		new_num_layers = num_layers;
 	}
-	new_rule = kzalloc(struct_size(new_rule, layers, new_num_layers),
-			   GFP_KERNEL_ACCOUNT);
+	new_rule = kzalloc_flex(*new_rule, layers, new_num_layers,
+				GFP_KERNEL_ACCOUNT);
 	if (!new_rule)
 		return ERR_PTR(-ENOMEM);
 	RB_CLEAR_NODE(&new_rule->node);
 	if (is_object_pointer(id.type)) {
-		/* This should be catched by insert_rule(). */
+		/* This should have been caught by insert_rule(). */
 		WARN_ON_ONCE(!id.key.object);
 		landlock_get_object(id.key.object);
 	}
@@ -191,10 +201,12 @@ static void build_check_ruleset(void)
  * When merging a ruleset in a domain, or copying a domain, @layers will be
  * added to @ruleset as new constraints, similarly to a boolean AND between
  * access rights.
+ *
+ * Return: 0 on success, -errno on failure.
  */
 static int insert_rule(struct landlock_ruleset *const ruleset,
 		       const struct landlock_id id,
-		       const struct landlock_layer (*const layers)[],
+		       const struct landlock_layer (*layers)[],
 		       const size_t num_layers)
 {
 	struct rb_node **walker_node;
@@ -282,6 +294,10 @@ static void build_check_layer(void)
 		.access = ~0,
 	};
 
+	/*
+	 * Checks that .level and .access are large enough to contain their expected
+	 * maximum values.
+	 */
 	BUILD_BUG_ON(layer.level < LANDLOCK_MAX_NUM_LAYERS);
 	BUILD_BUG_ON(layer.access < LANDLOCK_MASK_ACCESS_FS);
 }
@@ -299,22 +315,6 @@ int landlock_insert_rule(struct landlock_ruleset *const ruleset,
 
 	build_check_layer();
 	return insert_rule(ruleset, id, &layers, ARRAY_SIZE(layers));
-}
-
-static void get_hierarchy(struct landlock_hierarchy *const hierarchy)
-{
-	if (hierarchy)
-		refcount_inc(&hierarchy->usage);
-}
-
-static void put_hierarchy(struct landlock_hierarchy *hierarchy)
-{
-	while (hierarchy && refcount_dec_and_test(&hierarchy->usage)) {
-		const struct landlock_hierarchy *const freeme = hierarchy;
-
-		hierarchy = hierarchy->parent;
-		kfree(freeme);
-	}
 }
 
 static int merge_tree(struct landlock_ruleset *const dst,
@@ -381,7 +381,8 @@ static int merge_ruleset(struct landlock_ruleset *const dst,
 		err = -EINVAL;
 		goto out_unlock;
 	}
-	dst->access_masks[dst->num_layers - 1] = src->access_masks[0];
+	dst->access_masks[dst->num_layers - 1] =
+		landlock_upgrade_handled_access_masks(src->access_masks[0]);
 
 	/* Merges the @src inode tree. */
 	err = merge_tree(dst, src, LANDLOCK_KEY_INODE);
@@ -470,7 +471,7 @@ static int inherit_ruleset(struct landlock_ruleset *const parent,
 		err = -EINVAL;
 		goto out_unlock;
 	}
-	get_hierarchy(parent->hierarchy);
+	landlock_get_hierarchy(parent->hierarchy);
 	child->hierarchy->parent = parent->hierarchy;
 
 out_unlock:
@@ -494,7 +495,7 @@ static void free_ruleset(struct landlock_ruleset *const ruleset)
 		free_rule(freeme, LANDLOCK_KEY_NET_PORT);
 #endif /* IS_ENABLED(CONFIG_INET) */
 
-	put_hierarchy(ruleset->hierarchy);
+	landlock_put_hierarchy(ruleset->hierarchy);
 	kfree(ruleset);
 }
 
@@ -513,6 +514,7 @@ static void free_ruleset_work(struct work_struct *const work)
 	free_ruleset(ruleset);
 }
 
+/* Only called by hook_cred_free(). */
 void landlock_put_ruleset_deferred(struct landlock_ruleset *const ruleset)
 {
 	if (ruleset && refcount_dec_and_test(&ruleset->usage)) {
@@ -527,14 +529,17 @@ void landlock_put_ruleset_deferred(struct landlock_ruleset *const ruleset)
  * @parent: Parent domain.
  * @ruleset: New ruleset to be merged.
  *
- * Returns the intersection of @parent and @ruleset, or returns @parent if
- * @ruleset is empty, or returns a duplicate of @ruleset if @parent is empty.
+ * The current task is requesting to be restricted.  The subjective credentials
+ * must not be in an overridden state. cf. landlock_init_hierarchy_log().
+ *
+ * Return: A new domain merging @parent and @ruleset on success, or ERR_PTR()
+ * on failure.  If @parent is NULL, the new domain duplicates @ruleset.
  */
 struct landlock_ruleset *
 landlock_merge_ruleset(struct landlock_ruleset *const parent,
 		       struct landlock_ruleset *const ruleset)
 {
-	struct landlock_ruleset *new_dom;
+	struct landlock_ruleset *new_dom __free(landlock_put_ruleset) = NULL;
 	u32 num_layers;
 	int err;
 
@@ -554,29 +559,29 @@ landlock_merge_ruleset(struct landlock_ruleset *const parent,
 	new_dom = create_ruleset(num_layers);
 	if (IS_ERR(new_dom))
 		return new_dom;
+
 	new_dom->hierarchy =
-		kzalloc(sizeof(*new_dom->hierarchy), GFP_KERNEL_ACCOUNT);
-	if (!new_dom->hierarchy) {
-		err = -ENOMEM;
-		goto out_put_dom;
-	}
+		kzalloc_obj(*new_dom->hierarchy, GFP_KERNEL_ACCOUNT);
+	if (!new_dom->hierarchy)
+		return ERR_PTR(-ENOMEM);
+
 	refcount_set(&new_dom->hierarchy->usage, 1);
 
 	/* ...as a child of @parent... */
 	err = inherit_ruleset(parent, new_dom);
 	if (err)
-		goto out_put_dom;
+		return ERR_PTR(err);
 
 	/* ...and including @ruleset. */
 	err = merge_ruleset(new_dom, ruleset);
 	if (err)
-		goto out_put_dom;
+		return ERR_PTR(err);
 
-	return new_dom;
+	err = landlock_init_hierarchy_log(new_dom->hierarchy);
+	if (err)
+		return ERR_PTR(err);
 
-out_put_dom:
-	landlock_put_ruleset(new_dom);
-	return ERR_PTR(err);
+	return no_free_ptr(new_dom);
 }
 
 /*
@@ -608,22 +613,24 @@ landlock_find_rule(const struct landlock_ruleset *const ruleset,
 	return NULL;
 }
 
-/*
- * @layer_masks is read and may be updated according to the access request and
- * the matching rule.
- * @masks_array_size must be equal to ARRAY_SIZE(*layer_masks).
+/**
+ * landlock_unmask_layers - Remove the access rights in @masks
+ *                          which are granted in @rule
  *
- * Returns true if the request is allowed (i.e. relevant layer masks for the
- * request are empty).
+ * Updates the set of (per-layer) unfulfilled access rights @masks
+ * so that all the access rights granted in @rule are removed from it
+ * (because they are now fulfilled).
+ *
+ * @rule: A rule that grants a set of access rights for each layer
+ * @masks: A matrix of unfulfilled access rights for each layer
+ *
+ * Return: True if the request is allowed (i.e. the access rights granted all
+ * remaining unfulfilled access rights and masks has no leftover set bits).
  */
 bool landlock_unmask_layers(const struct landlock_rule *const rule,
-			    const access_mask_t access_request,
-			    layer_mask_t (*const layer_masks)[],
-			    const size_t masks_array_size)
+			    struct layer_access_masks *masks)
 {
-	size_t layer_level;
-
-	if (!access_request || !layer_masks)
+	if (!masks)
 		return true;
 	if (!rule)
 		return false;
@@ -638,28 +645,18 @@ bool landlock_unmask_layers(const struct landlock_rule *const rule,
 	 * by only one rule, but by the union (binary OR) of multiple rules.
 	 * E.g. /a/b <execute> + /a <read> => /a/b <execute + read>
 	 */
-	for (layer_level = 0; layer_level < rule->num_layers; layer_level++) {
-		const struct landlock_layer *const layer =
-			&rule->layers[layer_level];
-		const layer_mask_t layer_bit = BIT_ULL(layer->level - 1);
-		const unsigned long access_req = access_request;
-		unsigned long access_bit;
-		bool is_empty;
+	for (size_t i = 0; i < rule->num_layers; i++) {
+		const struct landlock_layer *const layer = &rule->layers[i];
 
-		/*
-		 * Records in @layer_masks which layer grants access to each
-		 * requested access.
-		 */
-		is_empty = true;
-		for_each_set_bit(access_bit, &access_req, masks_array_size) {
-			if (layer->access & BIT_ULL(access_bit))
-				(*layer_masks)[access_bit] &= ~layer_bit;
-			is_empty = is_empty && !(*layer_masks)[access_bit];
-		}
-		if (is_empty)
-			return true;
+		/* Clear the bits where the layer in the rule grants access. */
+		masks->access[layer->level - 1] &= ~layer->access;
 	}
-	return false;
+
+	for (size_t i = 0; i < ARRAY_SIZE(masks->access); i++) {
+		if (masks->access[i])
+			return false;
+	}
+	return true;
 }
 
 typedef access_mask_t
@@ -669,38 +666,34 @@ get_access_mask_t(const struct landlock_ruleset *const ruleset,
 /**
  * landlock_init_layer_masks - Initialize layer masks from an access request
  *
- * Populates @layer_masks such that for each access right in @access_request,
+ * Populates @masks such that for each access right in @access_request,
  * the bits for all the layers are set where this access right is handled.
  *
  * @domain: The domain that defines the current restrictions.
  * @access_request: The requested access rights to check.
- * @layer_masks: It must contain %LANDLOCK_NUM_ACCESS_FS or
- * %LANDLOCK_NUM_ACCESS_NET elements according to @key_type.
+ * @masks: Layer access masks to populate.
  * @key_type: The key type to switch between access masks of different types.
  *
- * Returns: An access mask where each access right bit is set which is handled
+ * Return: An access mask where each access right bit is set which is handled
  * in any of the active layers in @domain.
  */
 access_mask_t
 landlock_init_layer_masks(const struct landlock_ruleset *const domain,
 			  const access_mask_t access_request,
-			  layer_mask_t (*const layer_masks)[],
+			  struct layer_access_masks *const masks,
 			  const enum landlock_key_type key_type)
 {
 	access_mask_t handled_accesses = 0;
-	size_t layer_level, num_access;
 	get_access_mask_t *get_access_mask;
 
 	switch (key_type) {
 	case LANDLOCK_KEY_INODE:
 		get_access_mask = landlock_get_fs_access_mask;
-		num_access = LANDLOCK_NUM_ACCESS_FS;
 		break;
 
 #if IS_ENABLED(CONFIG_INET)
 	case LANDLOCK_KEY_NET_PORT:
 		get_access_mask = landlock_get_net_access_mask;
-		num_access = LANDLOCK_NUM_ACCESS_NET;
 		break;
 #endif /* IS_ENABLED(CONFIG_INET) */
 
@@ -709,27 +702,18 @@ landlock_init_layer_masks(const struct landlock_ruleset *const domain,
 		return 0;
 	}
 
-	memset(layer_masks, 0,
-	       array_size(sizeof((*layer_masks)[0]), num_access));
-
 	/* An empty access request can happen because of O_WRONLY | O_RDWR. */
 	if (!access_request)
 		return 0;
 
-	/* Saves all handled accesses per layer. */
-	for (layer_level = 0; layer_level < domain->num_layers; layer_level++) {
-		const unsigned long access_req = access_request;
-		const access_mask_t access_mask =
-			get_access_mask(domain, layer_level);
-		unsigned long access_bit;
+	for (size_t i = 0; i < domain->num_layers; i++) {
+		const access_mask_t handled = get_access_mask(domain, i);
 
-		for_each_set_bit(access_bit, &access_req, num_access) {
-			if (BIT_ULL(access_bit) & access_mask) {
-				(*layer_masks)[access_bit] |=
-					BIT_ULL(layer_level);
-				handled_accesses |= BIT_ULL(access_bit);
-			}
-		}
+		masks->access[i] = access_request & handled;
+		handled_accesses |= masks->access[i];
 	}
+	for (size_t i = domain->num_layers; i < ARRAY_SIZE(masks->access); i++)
+		masks->access[i] = 0;
+
 	return handled_accesses;
 }

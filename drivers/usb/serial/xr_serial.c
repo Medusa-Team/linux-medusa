@@ -756,7 +756,7 @@ static void xr_cdc_set_line_coding(struct tty_struct *tty,
 	struct usb_cdc_line_coding *lc;
 	int ret;
 
-	lc = kzalloc(sizeof(*lc), GFP_KERNEL);
+	lc = kzalloc_obj(*lc);
 	if (!lc)
 		return;
 
@@ -1020,7 +1020,7 @@ static int xr_port_probe(struct usb_serial_port *port)
 	type_id = (int)(unsigned long)usb_get_serial_data(port->serial);
 	type = &xr_types[type_id];
 
-	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	data = kzalloc_obj(*data);
 	if (!data)
 		return -ENOMEM;
 
@@ -1082,7 +1082,6 @@ MODULE_DEVICE_TABLE(usb, id_table);
 
 static struct usb_serial_driver xr_device = {
 	.driver = {
-		.owner = THIS_MODULE,
 		.name =	"xr_serial",
 	},
 	.id_table		= id_table,

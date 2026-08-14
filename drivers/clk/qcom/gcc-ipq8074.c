@@ -1895,10 +1895,10 @@ static const struct freq_conf ftbl_nss_port6_tx_clk_src_125[] = {
 static const struct freq_multi_tbl ftbl_nss_port6_tx_clk_src[] = {
 	FMS(19200000, P_XO, 1, 0, 0),
 	FM(25000000, ftbl_nss_port6_tx_clk_src_25),
-	FMS(78125000, P_UNIPHY1_RX, 4, 0, 0),
+	FMS(78125000, P_UNIPHY2_TX, 4, 0, 0),
 	FM(125000000, ftbl_nss_port6_tx_clk_src_125),
-	FMS(156250000, P_UNIPHY1_RX, 2, 0, 0),
-	FMS(312500000, P_UNIPHY1_RX, 1, 0, 0),
+	FMS(156250000, P_UNIPHY2_TX, 2, 0, 0),
+	FMS(312500000, P_UNIPHY2_TX, 1, 0, 0),
 	{ }
 };
 
@@ -1947,7 +1947,7 @@ static struct clk_regmap_div nss_port6_tx_div_clk_src = {
 	},
 };
 
-static struct freq_tbl ftbl_crypto_clk_src[] = {
+static const struct freq_tbl ftbl_crypto_clk_src[] = {
 	F(40000000, P_GPLL0_DIV2, 10, 0, 0),
 	F(80000000, P_GPLL0, 10, 0, 0),
 	F(100000000, P_GPLL0, 8, 0, 0),
@@ -1968,7 +1968,7 @@ static struct clk_rcg2 crypto_clk_src = {
 	},
 };
 
-static struct freq_tbl ftbl_gp_clk_src[] = {
+static const struct freq_tbl ftbl_gp_clk_src[] = {
 	F(19200000, P_XO, 1, 0, 0),
 	{ }
 };

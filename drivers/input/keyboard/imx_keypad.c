@@ -183,7 +183,8 @@ static void imx_keypad_fire_events(struct imx_keypad *keypad,
  */
 static void imx_keypad_check_for_events(struct timer_list *t)
 {
-	struct imx_keypad *keypad = from_timer(keypad, t, check_matrix_timer);
+	struct imx_keypad *keypad = timer_container_of(keypad, t,
+						       check_matrix_timer);
 	unsigned short matrix_volatile_state[MAX_MATRIX_KEY_COLS];
 	unsigned short reg_val;
 	bool state_changed, is_zero_matrix;
@@ -323,7 +324,7 @@ static void imx_keypad_config(struct imx_keypad *keypad)
 	reg_val |= (keypad->cols_en_mask & 0xff) << 8;	/* cols */
 	writew(reg_val, keypad->mmio_base + KPCR);
 
-	/* Write 0's to KPDR[15:8] (Colums) */
+	/* Write 0's to KPDR[15:8] (Columns) */
 	reg_val = readw(keypad->mmio_base + KPDR);
 	reg_val &= 0x00ff;
 	writew(reg_val, keypad->mmio_base + KPDR);
@@ -356,7 +357,7 @@ static void imx_keypad_inhibit(struct imx_keypad *keypad)
 	reg_val |= KBD_STAT_KPKR | KBD_STAT_KPKD;
 	writew(reg_val, keypad->mmio_base + KPSR);
 
-	/* Colums as open drain and disable all rows */
+	/* Columns as open drain and disable all rows */
 	reg_val = (keypad->cols_en_mask & 0xff) << 8;
 	writew(reg_val, keypad->mmio_base + KPCR);
 }
@@ -370,7 +371,7 @@ static void imx_keypad_close(struct input_dev *dev)
 	/* Mark keypad as being inactive */
 	keypad->enabled = false;
 	synchronize_irq(keypad->irq);
-	del_timer_sync(&keypad->check_matrix_timer);
+	timer_delete_sync(&keypad->check_matrix_timer);
 
 	imx_keypad_inhibit(keypad);
 
@@ -521,13 +522,11 @@ static int __maybe_unused imx_kbd_noirq_suspend(struct device *dev)
 	struct input_dev *input_dev = kbd->input_dev;
 	unsigned short reg_val = readw(kbd->mmio_base + KPSR);
 
-	/* imx kbd can wake up system even clock is disabled */
-	mutex_lock(&input_dev->mutex);
-
-	if (input_device_enabled(input_dev))
-		clk_disable_unprepare(kbd->clk);
-
-	mutex_unlock(&input_dev->mutex);
+	scoped_guard(mutex, &input_dev->mutex) {
+		/* imx kbd can wake up system even clock is disabled */
+		if (input_device_enabled(input_dev))
+			clk_disable_unprepare(kbd->clk);
+	}
 
 	if (device_may_wakeup(&pdev->dev)) {
 		if (reg_val & KBD_STAT_KPKD)
@@ -547,23 +546,20 @@ static int __maybe_unused imx_kbd_noirq_resume(struct device *dev)
 	struct platform_device *pdev = to_platform_device(dev);
 	struct imx_keypad *kbd = platform_get_drvdata(pdev);
 	struct input_dev *input_dev = kbd->input_dev;
-	int ret = 0;
+	int error;
 
 	if (device_may_wakeup(&pdev->dev))
 		disable_irq_wake(kbd->irq);
 
-	mutex_lock(&input_dev->mutex);
+	guard(mutex)(&input_dev->mutex);
 
 	if (input_device_enabled(input_dev)) {
-		ret = clk_prepare_enable(kbd->clk);
-		if (ret)
-			goto err_clk;
+		error = clk_prepare_enable(kbd->clk);
+		if (error)
+			return error;
 	}
 
-err_clk:
-	mutex_unlock(&input_dev->mutex);
-
-	return ret;
+	return 0;
 }
 
 static const struct dev_pm_ops imx_kbd_pm_ops = {

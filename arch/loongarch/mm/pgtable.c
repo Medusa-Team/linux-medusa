@@ -5,6 +5,7 @@
 #include <linux/init.h>
 #include <linux/export.h>
 #include <linux/mm.h>
+#include <asm/fixmap.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
@@ -23,11 +24,10 @@ EXPORT_SYMBOL(tlb_virt_to_page);
 
 pgd_t *pgd_alloc(struct mm_struct *mm)
 {
-	pgd_t *init, *ret = NULL;
-	struct ptdesc *ptdesc = pagetable_alloc(GFP_KERNEL & ~__GFP_HIGHMEM, 0);
+	pgd_t *init, *ret;
 
-	if (ptdesc) {
-		ret = (pgd_t *)ptdesc_address(ptdesc);
+	ret = __pgd_alloc(mm, 0);
+	if (ret) {
 		init = pgd_offset(&init_mm, 0UL);
 		pgd_init(ret);
 		memcpy(ret + USER_PTRS_PER_PGD, init + USER_PTRS_PER_PGD,
@@ -116,13 +116,24 @@ void pud_init(void *addr)
 EXPORT_SYMBOL_GPL(pud_init);
 #endif
 
-pmd_t mk_pmd(struct page *page, pgprot_t prot)
+void kernel_pte_init(void *addr)
 {
-	pmd_t pmd;
+	unsigned long *p, *end;
 
-	pmd_val(pmd) = (page_to_pfn(page) << PFN_PTE_SHIFT) | pgprot_val(prot);
+	p = (unsigned long *)addr;
+	end = p + PTRS_PER_PTE;
 
-	return pmd;
+	do {
+		p[0] = _PAGE_GLOBAL;
+		p[1] = _PAGE_GLOBAL;
+		p[2] = _PAGE_GLOBAL;
+		p[3] = _PAGE_GLOBAL;
+		p[4] = _PAGE_GLOBAL;
+		p += 8;
+		p[-3] = _PAGE_GLOBAL;
+		p[-2] = _PAGE_GLOBAL;
+		p[-1] = _PAGE_GLOBAL;
+	} while (p != end);
 }
 
 void set_pmd_at(struct mm_struct *mm, unsigned long addr,
@@ -134,6 +145,15 @@ void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 
 void __init pagetable_init(void)
 {
+#ifdef CONFIG_HIGHMEM
+	unsigned long vaddr;
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+#endif
+
 	/* Initialize the entire pgd.  */
 	pgd_init(swapper_pg_dir);
 	pgd_init(invalid_pg_dir);
@@ -142,5 +162,22 @@ void __init pagetable_init(void)
 #endif
 #ifndef __PAGETABLE_PMD_FOLDED
 	pmd_init(invalid_pmd_table);
+#endif
+
+#ifdef CONFIG_HIGHMEM
+	/* Permanent kmaps */
+	vaddr = PKMAP_BASE;
+	fixrange_init(vaddr & PMD_MASK, vaddr + PAGE_SIZE * LAST_PKMAP, swapper_pg_dir);
+
+	pgd = swapper_pg_dir + pgd_index(vaddr);
+	p4d = p4d_offset(pgd, vaddr);
+	pud = pud_offset(p4d, vaddr);
+	pmd = pmd_offset(pud, vaddr);
+	pte = pte_offset_kernel(pmd, vaddr);
+	pkmap_page_table = pte;
+
+	/* Fixed mappings */
+	vaddr = __fix_to_virt(__end_of_fixed_addresses - 1);
+	fixrange_init(vaddr & PMD_MASK, vaddr + FIXADDR_SIZE, swapper_pg_dir);
 #endif
 }

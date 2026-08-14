@@ -370,27 +370,22 @@ static uint16_t combios_get_table_offset(struct drm_device *dev,
 bool radeon_combios_check_hardcoded_edid(struct radeon_device *rdev)
 {
 	int edid_info, size;
-	struct edid *edid;
+	const struct drm_edid *edid;
 	unsigned char *raw;
-	edid_info = combios_get_table_offset(rdev->ddev, COMBIOS_HARDCODED_EDID_TABLE);
+	edid_info = combios_get_table_offset(rdev_to_drm(rdev), COMBIOS_HARDCODED_EDID_TABLE);
 	if (!edid_info)
 		return false;
 
 	raw = rdev->bios + edid_info;
 	size = EDID_LENGTH * (raw[0x7e] + 1);
-	edid = kmalloc(size, GFP_KERNEL);
-	if (edid == NULL)
-		return false;
+	edid = drm_edid_alloc(raw, size);
 
-	memcpy((unsigned char *)edid, raw, size);
-
-	if (!drm_edid_is_valid(edid)) {
-		kfree(edid);
+	if (!drm_edid_valid(edid)) {
+		drm_edid_free(edid);
 		return false;
 	}
 
 	rdev->mode_info.bios_hardcoded_edid = edid;
-	rdev->mode_info.bios_hardcoded_edid_size = size;
 	return true;
 }
 
@@ -398,18 +393,7 @@ bool radeon_combios_check_hardcoded_edid(struct radeon_device *rdev)
 struct edid *
 radeon_bios_get_hardcoded_edid(struct radeon_device *rdev)
 {
-	struct edid *edid;
-
-	if (rdev->mode_info.bios_hardcoded_edid) {
-		edid = kmalloc(rdev->mode_info.bios_hardcoded_edid_size, GFP_KERNEL);
-		if (edid) {
-			memcpy((unsigned char *)edid,
-			       (unsigned char *)rdev->mode_info.bios_hardcoded_edid,
-			       rdev->mode_info.bios_hardcoded_edid_size);
-			return edid;
-		}
-	}
-	return NULL;
+	return drm_edid_duplicate(drm_edid_raw(rdev->mode_info.bios_hardcoded_edid));
 }
 
 static struct radeon_i2c_bus_rec combios_setup_i2c_bus(struct radeon_device *rdev,
@@ -642,7 +626,7 @@ static struct radeon_i2c_bus_rec combios_setup_i2c_bus(struct radeon_device *rde
 
 static struct radeon_i2c_bus_rec radeon_combios_get_i2c_info_from_table(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	struct radeon_i2c_bus_rec i2c;
 	u16 offset;
 	u8 id, blocks, clk, data;
@@ -670,7 +654,7 @@ static struct radeon_i2c_bus_rec radeon_combios_get_i2c_info_from_table(struct r
 
 void radeon_combios_i2c_init(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	struct radeon_i2c_bus_rec i2c;
 
 	/* actual hw pads
@@ -812,7 +796,7 @@ bool radeon_combios_get_clock_info(struct drm_device *dev)
 
 bool radeon_combios_sideport_present(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	u16 igp_info;
 
 	/* sideport is AMD only */
@@ -867,8 +851,7 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 	struct radeon_encoder_primary_dac *p_dac;
 	int found = 0;
 
-	p_dac = kzalloc(sizeof(struct radeon_encoder_primary_dac),
-			GFP_KERNEL);
+	p_dac = kzalloc_obj(struct radeon_encoder_primary_dac);
 
 	if (!p_dac)
 		return NULL;
@@ -915,7 +898,7 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 enum radeon_tv_std
 radeon_combios_get_tv_info(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	uint16_t tv_info;
 	enum radeon_tv_std tv_std = TV_STD_NTSC;
 
@@ -1018,7 +1001,7 @@ struct radeon_encoder_tv_dac *radeon_combios_get_tv_dac_info(struct
 	struct radeon_encoder_tv_dac *tv_dac;
 	int found = 0;
 
-	tv_dac = kzalloc(sizeof(struct radeon_encoder_tv_dac), GFP_KERNEL);
+	tv_dac = kzalloc_obj(struct radeon_encoder_tv_dac);
 	if (!tv_dac)
 		return NULL;
 
@@ -1106,7 +1089,7 @@ static struct radeon_encoder_lvds *radeon_legacy_get_lvds_info_from_regs(struct
 	uint32_t ppll_div_sel, ppll_val;
 	uint32_t lvds_ss_gen_cntl = RREG32(RADEON_LVDS_SS_GEN_CNTL);
 
-	lvds = kzalloc(sizeof(struct radeon_encoder_lvds), GFP_KERNEL);
+	lvds = kzalloc_obj(struct radeon_encoder_lvds);
 
 	if (!lvds)
 		return NULL;
@@ -1181,7 +1164,7 @@ struct radeon_encoder_lvds *radeon_combios_get_lvds_info(struct radeon_encoder
 	lcd_info = combios_get_table_offset(dev, COMBIOS_LCD_INFO_TABLE);
 
 	if (lcd_info) {
-		lvds = kzalloc(sizeof(struct radeon_encoder_lvds), GFP_KERNEL);
+		lvds = kzalloc_obj(struct radeon_encoder_lvds);
 
 		if (!lvds)
 			return NULL;
@@ -2637,7 +2620,7 @@ static const char *thermal_controller_names[] = {
 
 void radeon_combios_get_power_modes(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	u16 offset, misc, misc2 = 0;
 	u8 rev, tmp;
 	int state_index = 0;
@@ -2646,16 +2629,13 @@ void radeon_combios_get_power_modes(struct radeon_device *rdev)
 	rdev->pm.default_power_state_index = -1;
 
 	/* allocate 2 power states */
-	rdev->pm.power_state = kcalloc(2, sizeof(struct radeon_power_state),
-				       GFP_KERNEL);
+	rdev->pm.power_state = kzalloc_objs(struct radeon_power_state, 2);
 	if (rdev->pm.power_state) {
 		/* allocate 1 clock mode per state */
 		rdev->pm.power_state[0].clock_info =
-			kcalloc(1, sizeof(struct radeon_pm_clock_info),
-				GFP_KERNEL);
+			kzalloc_objs(struct radeon_pm_clock_info, 1);
 		rdev->pm.power_state[1].clock_info =
-			kcalloc(1, sizeof(struct radeon_pm_clock_info),
-				GFP_KERNEL);
+			kzalloc_objs(struct radeon_pm_clock_info, 1);
 		if (!rdev->pm.power_state[0].clock_info ||
 		    !rdev->pm.power_state[1].clock_info)
 			goto pm_failed;

@@ -763,7 +763,7 @@ static int compute_bitstructs(struct gfs2_rgrpd *rgd)
 	if (!length)
 		return -EINVAL;
 
-	rgd->rd_bits = kcalloc(length, sizeof(struct gfs2_bitmap), GFP_NOFS);
+	rgd->rd_bits = kzalloc_objs(struct gfs2_bitmap, length, GFP_NOFS);
 	if (!rgd->rd_bits)
 		return -ENOMEM;
 
@@ -1879,7 +1879,7 @@ static void try_rgrp_unlink(struct gfs2_rgrpd *rgd, u64 *last_unlinked, u64 skip
 		 */
 		ip = gl->gl_object;
 
-		if (ip || !gfs2_queue_try_to_evict(gl))
+		if (ip || !gfs2_queue_verify_delete(gl, false))
 			gfs2_glock_put(gl);
 		else
 			found++;
@@ -1923,7 +1923,7 @@ static void try_rgrp_unlink(struct gfs2_rgrpd *rgd, u64 *last_unlinked, u64 skip
 static bool gfs2_rgrp_congested(const struct gfs2_rgrpd *rgd, int loops)
 {
 	const struct gfs2_glock *gl = rgd->rd_gl;
-	const struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
+	const struct gfs2_sbd *sdp = glock_sbd(gl);
 	struct gfs2_lkstats *st;
 	u64 r_dcount, l_dcount;
 	u64 l_srttb, a_srttb = 0;
@@ -1987,10 +1987,8 @@ static bool gfs2_rgrp_used_recently(const struct gfs2_blkreserv *rs,
 static u32 gfs2_orlov_skip(const struct gfs2_inode *ip)
 {
 	const struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
-	u32 skip;
 
-	get_random_bytes(&skip, sizeof(skip));
-	return skip % sdp->sd_rgrps;
+	return get_random_u32() % sdp->sd_rgrps;
 }
 
 static bool gfs2_select_rgrp(struct gfs2_rgrpd **pos, const struct gfs2_rgrpd *begin)
@@ -2531,7 +2529,7 @@ void __gfs2_free_blocks(struct gfs2_inode *ip, struct gfs2_rgrpd *rgd,
 	rgrp_unlock_local(rgd);
 
 	/* Directories keep their data in the metadata address space */
-	if (meta || ip->i_depth || gfs2_is_jdata(ip))
+	if (meta || (ip->i_diskflags & GFS2_DIF_EXHASH) || gfs2_is_jdata(ip))
 		gfs2_journal_wipe(ip, bstart, blen);
 }
 
@@ -2701,8 +2699,8 @@ void gfs2_rlist_add(struct gfs2_inode *ip, struct gfs2_rgrp_list *rlist,
 	if (rlist->rl_rgrps == rlist->rl_space) {
 		new_space = rlist->rl_space + 10;
 
-		tmp = kcalloc(new_space, sizeof(struct gfs2_rgrpd *),
-			      GFP_NOFS | __GFP_NOFAIL);
+		tmp = kzalloc_objs(struct gfs2_rgrpd *, new_space,
+				   GFP_NOFS | __GFP_NOFAIL);
 
 		if (rlist->rl_rgd) {
 			memcpy(tmp, rlist->rl_rgd,
@@ -2733,9 +2731,8 @@ void gfs2_rlist_alloc(struct gfs2_rgrp_list *rlist,
 {
 	unsigned int x;
 
-	rlist->rl_ghs = kmalloc_array(rlist->rl_rgrps,
-				      sizeof(struct gfs2_holder),
-				      GFP_NOFS | __GFP_NOFAIL);
+	rlist->rl_ghs = kmalloc_objs(struct gfs2_holder, rlist->rl_rgrps,
+				     GFP_NOFS | __GFP_NOFAIL);
 	for (x = 0; x < rlist->rl_rgrps; x++)
 		gfs2_holder_init(rlist->rl_rgd[x]->rd_gl, state, flags,
 				 &rlist->rl_ghs[x]);

@@ -133,33 +133,16 @@ struct ib_uverbs_completion_event_file {
 	struct ib_uverbs_event_queue		ev_queue;
 };
 
-struct ib_uverbs_file {
-	struct kref				ref;
-	struct ib_uverbs_device		       *device;
-	struct mutex				ucontext_lock;
-	/*
-	 * ucontext must be accessed via ib_uverbs_get_ucontext() or with
-	 * ucontext_lock held
-	 */
-	struct ib_ucontext		       *ucontext;
-	struct ib_uverbs_async_event_file      *default_async_file;
-	struct list_head			list;
-
-	/*
-	 * To access the uobjects list hw_destroy_rwsem must be held for write
-	 * OR hw_destroy_rwsem held for read AND uobjects_lock held.
-	 * hw_destroy_rwsem should be called across any destruction of the HW
-	 * object of an associated uobject.
-	 */
-	struct rw_semaphore	hw_destroy_rwsem;
-	spinlock_t		uobjects_lock;
-	struct list_head	uobjects;
-
-	struct mutex umap_lock;
-	struct list_head umaps;
-	struct page *disassociate_page;
-
-	struct xarray		idr;
+struct ib_uverbs_dmabuf_file {
+	struct ib_uobject uobj;
+	struct dma_buf *dmabuf;
+	struct list_head dmabufs_elm;
+	struct rdma_user_mmap_entry *mmap_entry;
+	struct phys_vec phys_vec;
+	struct p2pdma_provider *provider;
+	struct kref kref;
+	struct completion comp;
+	u8 revoked :1;
 };
 
 struct ib_uverbs_event {
@@ -246,6 +229,40 @@ int uverbs_dealloc_mw(struct ib_mw *mw);
 void ib_uverbs_detach_umcast(struct ib_qp *qp,
 			     struct ib_uqp_object *uobj);
 
+struct bundle_alloc_head {
+	struct_group_tagged(bundle_alloc_head_hdr, hdr,
+		struct bundle_alloc_head *next;
+	);
+	u8 data[];
+};
+
+struct bundle_priv {
+	/* Must be first */
+	struct bundle_alloc_head_hdr alloc_head;
+	struct bundle_alloc_head *allocated_mem;
+	size_t internal_avail;
+	size_t internal_used;
+
+	struct radix_tree_root *radix;
+	void __rcu **radix_slots;
+	unsigned long radix_slots_len;
+	u32 method_key;
+
+	struct ib_uverbs_attr __user *user_attrs;
+	struct ib_uverbs_attr *uattrs;
+
+	DECLARE_BITMAP(uobj_finalize, UVERBS_API_ATTR_BKEY_LEN);
+	DECLARE_BITMAP(spec_finalize, UVERBS_API_ATTR_BKEY_LEN);
+	DECLARE_BITMAP(uobj_hw_obj_valid, UVERBS_API_ATTR_BKEY_LEN);
+
+	/*
+	 * Must be last. bundle ends in a flex array which overlaps
+	 * internal_buffer.
+	 */
+	struct uverbs_attr_bundle_hdr bundle;
+	u64 internal_buffer[32];
+};
+
 long ib_uverbs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 struct ib_uverbs_flow_spec {
@@ -319,4 +336,13 @@ ib_uverbs_get_async_event(struct uverbs_attr_bundle *attrs,
 void copy_port_attr_to_resp(struct ib_port_attr *attr,
 			    struct ib_uverbs_query_port_resp *resp,
 			    struct ib_device *ib_dev, u8 port_num);
+
+static inline void ib_uverbs_dmabuf_done(struct kref *kref)
+{
+	struct ib_uverbs_dmabuf_file *priv =
+		container_of(kref, struct ib_uverbs_dmabuf_file, kref);
+
+	complete(&priv->comp);
+}
+
 #endif /* UVERBS_H */

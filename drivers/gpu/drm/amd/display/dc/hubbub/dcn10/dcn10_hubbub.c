@@ -679,24 +679,6 @@ void hubbub1_update_dchub(
 	dh_data->dchub_info_valid = false;
 }
 
-void hubbub1_toggle_watermark_change_req(struct hubbub *hubbub)
-{
-	struct dcn10_hubbub *hubbub1 = TO_DCN10_HUBBUB(hubbub);
-
-	uint32_t watermark_change_req;
-
-	REG_GET(DCHUBBUB_ARB_WATERMARK_CHANGE_CNTL,
-			DCHUBBUB_ARB_WATERMARK_CHANGE_REQUEST, &watermark_change_req);
-
-	if (watermark_change_req)
-		watermark_change_req = 0;
-	else
-		watermark_change_req = 1;
-
-	REG_UPDATE(DCHUBBUB_ARB_WATERMARK_CHANGE_CNTL,
-			DCHUBBUB_ARB_WATERMARK_CHANGE_REQUEST, watermark_change_req);
-}
-
 void hubbub1_soft_reset(struct hubbub *hubbub, bool reset)
 {
 	struct dcn10_hubbub *hubbub1 = TO_DCN10_HUBBUB(hubbub);
@@ -960,5 +942,23 @@ void hubbub1_construct(struct hubbub *hubbub,
 	hubbub1->debug_test_index_pstate = 0x7;
 	if (ctx->dce_version == DCN_VERSION_1_01)
 		hubbub1->debug_test_index_pstate = 0xB;
+}
+
+void dcn10_hubbub_global_timer_enable(struct hubbub *hubbub, bool enable, uint32_t refdiv)
+{
+	struct dcn10_hubbub *hubbub1 = TO_DCN10_HUBBUB(hubbub);
+
+	if (refdiv > 0)
+		REG_UPDATE(DCHUBBUB_GLOBAL_TIMER_CNTL, DCHUBBUB_GLOBAL_TIMER_REFDIV, refdiv);
+
+	REG_UPDATE(DCHUBBUB_GLOBAL_TIMER_CNTL, DCHUBBUB_GLOBAL_TIMER_ENABLE, enable ? 1 : 0);
+}
+
+void dcn10_hubbub_read_fb_aperture(struct hubbub *hubbub, uint32_t *fb_base_value, uint32_t *fb_offset_value)
+{
+	struct dcn10_hubbub *hubbub1 = TO_DCN10_HUBBUB(hubbub);
+
+	REG_GET(DCHUBBUB_SDPIF_FB_BASE, SDPIF_FB_BASE, fb_base_value);
+	REG_GET(DCHUBBUB_SDPIF_FB_OFFSET, SDPIF_FB_OFFSET, fb_offset_value);
 }
 

@@ -109,7 +109,7 @@ static int platram_probe(struct platform_device *pdev)
 
 	pdata = dev_get_platdata(&pdev->dev);
 
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc_obj(*info);
 	if (info == NULL) {
 		err = -ENOMEM;
 		goto exit_error;
@@ -205,7 +205,7 @@ MODULE_ALIAS("platform:mtd-ram");
 
 static struct platform_driver platram_driver = {
 	.probe		= platram_probe,
-	.remove_new	= platram_remove,
+	.remove		= platram_remove,
 	.driver		= {
 		.name	= "mtd-ram",
 	},

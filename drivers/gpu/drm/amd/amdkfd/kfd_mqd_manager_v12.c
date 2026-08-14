@@ -77,19 +77,16 @@ static void update_cu_mask(struct mqd_manager *mm, void *mqd,
 static void set_priority(struct v12_compute_mqd *m, struct queue_properties *q)
 {
 	m->cp_hqd_pipe_priority = pipe_priority_map[q->priority];
-	m->cp_hqd_queue_priority = q->priority;
 }
 
-static struct kfd_mem_obj *allocate_mqd(struct kfd_node *node,
+static struct kfd_mem_obj *allocate_mqd(struct mqd_manager *mm,
 		struct queue_properties *q)
 {
+	u32 mqd_size = AMDGPU_MQD_SIZE_ALIGN(mm->mqd_size);
+	struct kfd_node *node = mm->dev;
 	struct kfd_mem_obj *mqd_mem_obj;
 
-	/*
-	 * Allocate one PAGE_SIZE memory for MQD as MES writes to areas beyond
-	 * struct MQD size.
-	 */
-	if (kfd_gtt_sa_allocate(node, PAGE_SIZE, &mqd_mem_obj))
+	if (kfd_gtt_sa_allocate(node, mqd_size, &mqd_mem_obj))
 		return NULL;
 
 	return mqd_mem_obj;
@@ -101,11 +98,12 @@ static void init_mqd(struct mqd_manager *mm, void **mqd,
 {
 	uint64_t addr;
 	struct v12_compute_mqd *m;
+	u32 mqd_size = AMDGPU_MQD_SIZE_ALIGN(mm->mqd_size);
 
 	m = (struct v12_compute_mqd *) mqd_mem_obj->cpu_ptr;
 	addr = mqd_mem_obj->gpu_addr;
 
-	memset(m, 0, PAGE_SIZE);
+	memset(m, 0, mqd_size);
 
 	m->header = 0xC0310800;
 	m->compute_pipelinestat_enable = 1;
@@ -121,6 +119,8 @@ static void init_mqd(struct mqd_manager *mm, void **mqd,
 	m->cp_hqd_persistent_state = CP_HQD_PERSISTENT_STATE__PRELOAD_REQ_MASK |
 			0x55 << CP_HQD_PERSISTENT_STATE__PRELOAD_SIZE__SHIFT;
 
+	m->cp_hqd_pq_control = 5 << CP_HQD_PQ_CONTROL__RPTR_BLOCK_SIZE__SHIFT;
+	m->cp_hqd_pq_control |= CP_HQD_PQ_CONTROL__UNORD_DISPATCH_MASK;
 	m->cp_mqd_control = 1 << CP_MQD_CONTROL__PRIV_STATE__SHIFT;
 
 	m->cp_mqd_base_addr_lo        = lower_32_bits(addr);
@@ -184,10 +184,9 @@ static void update_mqd(struct mqd_manager *mm, void *mqd,
 
 	m = get_mqd(mqd);
 
-	m->cp_hqd_pq_control = 5 << CP_HQD_PQ_CONTROL__RPTR_BLOCK_SIZE__SHIFT;
+	m->cp_hqd_pq_control &= ~CP_HQD_PQ_CONTROL__QUEUE_SIZE_MASK;
 	m->cp_hqd_pq_control |=
 			ffs(q->queue_size / sizeof(unsigned int)) - 1 - 1;
-	m->cp_hqd_pq_control |= CP_HQD_PQ_CONTROL__UNORD_DISPATCH_MASK;
 	pr_debug("cp_hqd_pq_control 0x%x\n", m->cp_hqd_pq_control);
 
 	m->cp_hqd_pq_base_lo = lower_32_bits((uint64_t)q->queue_address >> 8);
@@ -341,10 +340,20 @@ static void update_mqd_sdma(struct mqd_manager *mm, void *mqd,
 	m->sdmax_rlcx_doorbell_offset =
 		q->doorbell_off << SDMA0_QUEUE0_DOORBELL_OFFSET__OFFSET__SHIFT;
 
+	m->sdmax_rlcx_sched_cntl = (amdgpu_sdma_phase_quantum
+		<< SDMA0_QUEUE0_SCHEDULE_CNTL__CONTEXT_QUANTUM__SHIFT)
+		 & SDMA0_QUEUE0_SCHEDULE_CNTL__CONTEXT_QUANTUM_MASK;
+
 	m->sdma_engine_id = q->sdma_engine_id;
 	m->sdma_queue_id = q->sdma_queue_id;
 
 	m->sdmax_rlcx_dummy_reg = SDMA_RLC_DUMMY_DEFAULT;
+
+	/* Allow context switch so we don't cross-process starve with a massive
+	* command buffer of long-running SDMA commands
+	* sdmax_rlcx_ib_cntl represent SDMA_QUEUE0_IB_CNTL register
+	*/
+	m->sdmax_rlcx_ib_cntl |= SDMA0_QUEUE0_IB_CNTL__SWITCH_INSIDE_IB_MASK;
 
 	q->is_active = QUEUE_IS_ACTIVE(*q);
 }
@@ -375,7 +384,7 @@ struct mqd_manager *mqd_manager_init_v12(enum KFD_MQD_TYPE type,
 	if (WARN_ON(type >= KFD_MQD_TYPE_MAX))
 		return NULL;
 
-	mqd = kzalloc(sizeof(*mqd), GFP_KERNEL);
+	mqd = kzalloc_obj(*mqd);
 	if (!mqd)
 		return NULL;
 

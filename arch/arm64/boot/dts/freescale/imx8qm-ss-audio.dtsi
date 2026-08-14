@@ -134,7 +134,7 @@
 	};
 
 	esai1: esai@59810000 {
-		compatible = "fsl,imx8qm-esai";
+		compatible = "fsl,imx8qm-esai", "fsl,imx6ull-esai";
 		reg = <0x59810000 0x10000>;
 		interrupts = <GIC_SPI 411 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&esai1_lpcg IMX_LPCG_CLK_0>,
@@ -304,7 +304,7 @@
 };
 
 /* edma2 called in imx8qm RM with the same address in edma0 of imx8qxp */
-&edma0{
+&edma0 {
 	reg = <0x591f0000 0x150000>;
 	dma-channels = <20>;
 	dma-channel-mask = <0>;
@@ -327,7 +327,8 @@
 		     <GIC_SPI 319 IRQ_TYPE_LEVEL_HIGH>, /* sai2 */
 		     <GIC_SPI 324 IRQ_TYPE_LEVEL_HIGH>, /* sai3 */
 		     <GIC_SPI 326 IRQ_TYPE_LEVEL_HIGH>, /* sai4 */
-		     <GIC_SPI 328 IRQ_TYPE_LEVEL_HIGH>; /* sai5 */
+		     <GIC_SPI 328 IRQ_TYPE_LEVEL_HIGH>, /* sai5 */
+		     <GIC_SPI 369 IRQ_TYPE_LEVEL_HIGH>;
 	power-domains = <&pd IMX_SC_R_DMA_2_CH0>,
 			<&pd IMX_SC_R_DMA_2_CH1>,
 			<&pd IMX_SC_R_DMA_2_CH2>,
@@ -351,7 +352,7 @@
 };
 
 /* edma3 called in imx8qm RM with the same address in edma1 of imx8qxp */
-&edma1{
+&edma1 {
 	reg = <0x599f0000 0xc0000>;
 	dma-channels = <11>;
 	dma-channel-mask = <0xc0>;
@@ -365,7 +366,8 @@
 		     <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>, /* no used */
 		     <GIC_SPI 330 IRQ_TYPE_LEVEL_HIGH>, /* sai6 */
 		     <GIC_SPI 330 IRQ_TYPE_LEVEL_HIGH>,
-		     <GIC_SPI 332 IRQ_TYPE_LEVEL_HIGH>; /* sai7 */
+		     <GIC_SPI 332 IRQ_TYPE_LEVEL_HIGH>, /* sai7 */
+		     <GIC_SPI 371 IRQ_TYPE_LEVEL_HIGH>;
 	power-domains = <&pd IMX_SC_R_DMA_3_CH0>,
 			<&pd IMX_SC_R_DMA_3_CH1>,
 			<&pd IMX_SC_R_DMA_3_CH2>,

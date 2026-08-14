@@ -272,9 +272,6 @@ static long pfrt_log_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 
 	case PFRT_LOG_IOC_GET_INFO:
 		info.log_level = get_pfrt_log_level(pfrt_log_dev);
-		if (ret < 0)
-			return ret;
-
 		info.log_type = pfrt_log_dev->info.log_type;
 		info.log_revid = pfrt_log_dev->info.log_revid;
 		if (copy_to_user(p, &info, sizeof(info)))
@@ -363,9 +360,13 @@ static void pfrt_log_put_idx(void *data)
 
 static int acpi_pfrt_log_probe(struct platform_device *pdev)
 {
-	acpi_handle handle = ACPI_HANDLE(&pdev->dev);
 	struct pfrt_log_device *pfrt_log_dev;
+	acpi_handle handle;
 	int ret;
+
+	handle = ACPI_HANDLE(&pdev->dev);
+	if (!handle)
+		return -ENODEV;
 
 	if (!acpi_has_method(handle, "_DSM")) {
 		dev_dbg(&pdev->dev, "Missing _DSM\n");
@@ -425,7 +426,7 @@ static struct platform_driver acpi_pfrt_log_driver = {
 		.acpi_match_table = acpi_pfrt_log_ids,
 	},
 	.probe = acpi_pfrt_log_probe,
-	.remove_new = acpi_pfrt_log_remove,
+	.remove = acpi_pfrt_log_remove,
 };
 module_platform_driver(acpi_pfrt_log_driver);
 

@@ -238,6 +238,8 @@ static int cs40l50_upload_owt(struct cs40l50_work *work_data)
 	header.data_words = len / sizeof(u32);
 
 	new_owt_effect_data = kmalloc(sizeof(header) + len, GFP_KERNEL);
+	if (!new_owt_effect_data)
+		return -ENOMEM;
 
 	memcpy(new_owt_effect_data, &header, sizeof(header));
 	memcpy(new_owt_effect_data + sizeof(header), work_data->custom_data, len);
@@ -274,7 +276,7 @@ static void cs40l50_add_worker(struct work_struct *work)
 	/* Update effect if already uploaded, otherwise create new effect */
 	effect = cs40l50_find_effect(work_data->effect->id, &vib->effect_head);
 	if (!effect) {
-		effect = kzalloc(sizeof(*effect), GFP_KERNEL);
+		effect = kzalloc_obj(*effect);
 		if (!effect) {
 			error = -ENOMEM;
 			goto err_pm;
@@ -306,7 +308,6 @@ err_free:
 			list_add(&effect->list, &vib->effect_head);
 	}
 err_pm:
-	pm_runtime_mark_last_busy(vib->dev);
 	pm_runtime_put_autosuspend(vib->dev);
 err_exit:
 	work_data->error = error;
@@ -334,11 +335,12 @@ static int cs40l50_add(struct input_dev *dev, struct ff_effect *effect,
 	work_data.custom_len = effect->u.periodic.custom_len;
 	work_data.vib = vib;
 	work_data.effect = effect;
-	INIT_WORK(&work_data.work, cs40l50_add_worker);
+	INIT_WORK_ONSTACK(&work_data.work, cs40l50_add_worker);
 
 	/* Push to the workqueue to serialize with playbacks */
 	queue_work(vib->vib_wq, &work_data.work);
 	flush_work(&work_data.work);
+	destroy_work_on_stack(&work_data.work);
 
 	kfree(work_data.custom_data);
 
@@ -365,7 +367,6 @@ static void cs40l50_start_worker(struct work_struct *work)
 		dev_err(vib->dev, "Effect to play not found\n");
 	}
 
-	pm_runtime_mark_last_busy(vib->dev);
 	pm_runtime_put_autosuspend(vib->dev);
 err_free:
 	kfree(work_data);
@@ -381,7 +382,6 @@ static void cs40l50_stop_worker(struct work_struct *work)
 
 	vib->dsp.write(vib->dev, vib->regmap, vib->dsp.stop_cmd);
 
-	pm_runtime_mark_last_busy(vib->dev);
 	pm_runtime_put_autosuspend(vib->dev);
 
 	kfree(work_data);
@@ -392,7 +392,7 @@ static int cs40l50_playback(struct input_dev *dev, int effect_id, int val)
 	struct cs40l50_vibra *vib = input_get_drvdata(dev);
 	struct cs40l50_work *work_data;
 
-	work_data = kzalloc(sizeof(*work_data), GFP_ATOMIC);
+	work_data = kzalloc_obj(*work_data, GFP_ATOMIC);
 	if (!work_data)
 		return -ENOMEM;
 
@@ -453,7 +453,6 @@ static void cs40l50_erase_worker(struct work_struct *work)
 	list_del(&erase_effect->list);
 	kfree(erase_effect);
 err_pm:
-	pm_runtime_mark_last_busy(vib->dev);
 	pm_runtime_put_autosuspend(vib->dev);
 err_exit:
 	work_data->error = error;
@@ -467,18 +466,18 @@ static int cs40l50_erase(struct input_dev *dev, int effect_id)
 	work_data.vib = vib;
 	work_data.effect = &dev->ff->effects[effect_id];
 
-	INIT_WORK(&work_data.work, cs40l50_erase_worker);
+	INIT_WORK_ONSTACK(&work_data.work, cs40l50_erase_worker);
 
 	/* Push to workqueue to serialize with playbacks */
 	queue_work(vib->vib_wq, &work_data.work);
 	flush_work(&work_data.work);
+	destroy_work_on_stack(&work_data.work);
 
 	return work_data.error;
 }
 
 static void cs40l50_remove_wq(void *data)
 {
-	flush_workqueue(data);
 	destroy_workqueue(data);
 }
 

@@ -23,6 +23,7 @@
 
 #include <linux/mctp.h>
 #include <net/mctp.h>
+#include <net/mctpdevice.h>
 #include <net/pkt_sched.h>
 
 #define MCTP_SERIAL_MTU		68 /* base mtu (64) + mctp header */
@@ -64,18 +65,18 @@ struct mctp_serial {
 	u16			txfcs, rxfcs, rxfcs_rcvd;
 	unsigned int		txlen, rxlen;
 	unsigned int		txpos, rxpos;
-	unsigned char		txbuf[BUFSIZE],
+	u8			txbuf[BUFSIZE],
 				rxbuf[BUFSIZE];
 };
 
-static bool needs_escape(unsigned char c)
+static bool needs_escape(u8 c)
 {
 	return c == BYTE_ESC || c == BYTE_FRAME;
 }
 
-static int next_chunk_len(struct mctp_serial *dev)
+static unsigned int next_chunk_len(struct mctp_serial *dev)
 {
-	int i;
+	unsigned int i;
 
 	/* either we have no bytes to send ... */
 	if (dev->txpos == dev->txlen)
@@ -99,7 +100,7 @@ static int next_chunk_len(struct mctp_serial *dev)
 	return i;
 }
 
-static int write_chunk(struct mctp_serial *dev, unsigned char *buf, int len)
+static ssize_t write_chunk(struct mctp_serial *dev, u8 *buf, size_t len)
 {
 	return dev->tty->ops->write(dev->tty, buf, len);
 }
@@ -108,9 +109,10 @@ static void mctp_serial_tx_work(struct work_struct *work)
 {
 	struct mctp_serial *dev = container_of(work, struct mctp_serial,
 					       tx_work);
-	unsigned char c, buf[3];
 	unsigned long flags;
-	int len, txlen;
+	ssize_t txlen;
+	unsigned int len;
+	u8 c, buf[3];
 
 	spin_lock_irqsave(&dev->lock, flags);
 
@@ -293,7 +295,7 @@ static void mctp_serial_rx(struct mctp_serial *dev)
 	dev->netdev->stats.rx_bytes += dev->rxlen;
 }
 
-static void mctp_serial_push_header(struct mctp_serial *dev, unsigned char c)
+static void mctp_serial_push_header(struct mctp_serial *dev, u8 c)
 {
 	switch (dev->rxpos) {
 	case 0:
@@ -323,7 +325,7 @@ static void mctp_serial_push_header(struct mctp_serial *dev, unsigned char c)
 	}
 }
 
-static void mctp_serial_push_trailer(struct mctp_serial *dev, unsigned char c)
+static void mctp_serial_push_trailer(struct mctp_serial *dev, u8 c)
 {
 	switch (dev->rxpos) {
 	case 0:
@@ -347,7 +349,7 @@ static void mctp_serial_push_trailer(struct mctp_serial *dev, unsigned char c)
 	}
 }
 
-static void mctp_serial_push(struct mctp_serial *dev, unsigned char c)
+static void mctp_serial_push(struct mctp_serial *dev, u8 c)
 {
 	switch (dev->rxstate) {
 	case STATE_IDLE:
@@ -394,7 +396,7 @@ static void mctp_serial_tty_receive_buf(struct tty_struct *tty, const u8 *c,
 					const u8 *f, size_t len)
 {
 	struct mctp_serial *dev = tty->disc_data;
-	int i;
+	size_t i;
 
 	if (!netif_running(dev->netdev))
 		return;
@@ -469,7 +471,7 @@ static int mctp_serial_open(struct tty_struct *tty)
 	spin_lock_init(&dev->lock);
 	INIT_WORK(&dev->tx_work, mctp_serial_tx_work);
 
-	rc = register_netdev(ndev);
+	rc = mctp_register_netdev(ndev, NULL, MCTP_PHYS_BINDING_SERIAL);
 	if (rc)
 		goto free_netdev;
 
@@ -491,7 +493,7 @@ static void mctp_serial_close(struct tty_struct *tty)
 	struct mctp_serial *dev = tty->disc_data;
 	int idx = dev->idx;
 
-	unregister_netdev(dev->netdev);
+	mctp_unregister_netdev(dev->netdev);
 	ida_free(&mctp_serial_ida, idx);
 }
 

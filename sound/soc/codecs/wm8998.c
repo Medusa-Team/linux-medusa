@@ -101,8 +101,8 @@ static int wm8998_asrc_ev(struct snd_soc_dapm_widget *w,
 static int wm8998_inmux_put(struct snd_kcontrol *kcontrol,
 			    struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct wm8998_priv *wm8998 = snd_soc_component_get_drvdata(component);
 	struct arizona *arizona = wm8998->core.arizona;
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
@@ -1279,7 +1279,7 @@ static int wm8998_set_fll(struct snd_soc_component *component, int fll_id,
 static int wm8998_component_probe(struct snd_soc_component *component)
 {
 	struct wm8998_priv *priv = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct arizona *arizona = priv->core.arizona;
 	int ret;
 
@@ -1292,7 +1292,7 @@ static int wm8998_component_probe(struct snd_soc_component *component)
 
 	arizona_init_gpio(component);
 
-	snd_soc_component_disable_pin(component, "HAPTICS");
+	snd_soc_dapm_disable_pin(dapm, "HAPTICS");
 
 	return 0;
 }
@@ -1426,7 +1426,7 @@ static struct platform_driver wm8998_codec_driver = {
 		.name = "wm8998-codec",
 	},
 	.probe = wm8998_probe,
-	.remove_new = wm8998_remove,
+	.remove = wm8998_remove,
 };
 
 module_platform_driver(wm8998_codec_driver);

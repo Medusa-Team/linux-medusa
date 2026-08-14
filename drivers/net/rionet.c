@@ -515,7 +515,7 @@ static int rionet_setup_netdev(struct rio_mport *mport, struct net_device *ndev)
 	/* MTU range: 68 - 4082 */
 	ndev->min_mtu = ETH_MIN_MTU;
 	ndev->max_mtu = RIONET_MAX_MTU;
-	ndev->features = NETIF_F_LLTX;
+	ndev->lltx = true;
 	SET_NETDEV_DEV(ndev, &mport->dev);
 	ndev->ethtool_ops = &rionet_ethtool_ops;
 
@@ -603,7 +603,7 @@ static int rionet_add_dev(struct device *dev, struct subsys_interface *sif)
 
 		rnet = netdev_priv(nets[netid].ndev);
 
-		peer = kzalloc(sizeof(*peer), GFP_KERNEL);
+		peer = kzalloc_obj(*peer);
 		if (!peer) {
 			rc = -ENOMEM;
 			goto out;

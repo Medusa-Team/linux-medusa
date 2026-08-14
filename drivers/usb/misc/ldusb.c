@@ -627,7 +627,6 @@ static const struct file_operations ld_usb_fops = {
 	.open =		ld_usb_open,
 	.release =	ld_usb_release,
 	.poll =		ld_usb_poll,
-	.llseek =	no_llseek,
 };
 
 /*
@@ -657,7 +656,7 @@ static int ld_usb_probe(struct usb_interface *intf, const struct usb_device_id *
 
 	/* allocate memory for our device state and initialize it */
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (!dev)
 		goto exit;
 	mutex_init(&dev->mutex);

@@ -7,7 +7,7 @@
  *         Jason McMullan <jason.mcmullan@netronome.com>
  */
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/bitfield.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
@@ -278,9 +278,9 @@ struct nfp_nsp *nfp_nsp_open(struct nfp_cpp *cpp)
 
 	res = nfp_resource_acquire(cpp, NFP_RESOURCE_NSP);
 	if (IS_ERR(res))
-		return (void *)res;
+		return ERR_CAST(res);
 
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	state = kzalloc_obj(*state);
 	if (!state) {
 		nfp_resource_release(res);
 		return ERR_PTR(-ENOMEM);
@@ -514,7 +514,7 @@ nfp_nsp_command_buf_dma_sg(struct nfp_nsp *nsp,
 	dma_size = BIT_ULL(dma_order);
 	nseg = DIV_ROUND_UP(max_size, chunk_size);
 
-	chunks = kcalloc(nseg, sizeof(*chunks), GFP_KERNEL);
+	chunks = kzalloc_objs(*chunks, nseg);
 	if (!chunks)
 		return -ENOMEM;
 

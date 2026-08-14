@@ -16,6 +16,7 @@
 #include <linux/i2c-smbus.h>
 #include <linux/property.h>
 #include <linux/slab.h>
+#include <linux/string_choices.h>
 
 #include "i2c-core.h"
 
@@ -122,7 +123,7 @@ EXPORT_SYMBOL(i2c_smbus_read_byte);
 s32 i2c_smbus_write_byte(const struct i2c_client *client, u8 value)
 {
 	return i2c_smbus_xfer(client->adapter, client->addr, client->flags,
-	                      I2C_SMBUS_WRITE, value, I2C_SMBUS_BYTE, NULL);
+			      I2C_SMBUS_WRITE, value, I2C_SMBUS_BYTE, NULL);
 }
 EXPORT_SYMBOL(i2c_smbus_write_byte);
 
@@ -352,6 +353,7 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter *adapter, u16 addr,
 			  && size != I2C_SMBUS_I2C_BLOCK_DATA);
 
 	msgbuf0[0] = command;
+	msgbuf1[0] = 0;
 	switch (size) {
 	case I2C_SMBUS_QUICK:
 		msg[0].len = 0;
@@ -433,7 +435,7 @@ static s32 i2c_smbus_xfer_emulated(struct i2c_adapter *adapter, u16 addr,
 	case I2C_SMBUS_I2C_BLOCK_DATA:
 		if (data->block[0] > I2C_SMBUS_BLOCK_MAX) {
 			dev_err(&adapter->dev, "Invalid block %s size %d\n",
-				read_write == I2C_SMBUS_READ ? "read" : "write",
+				str_read_write(read_write == I2C_SMBUS_READ),
 				data->block[0]);
 			return -EINVAL;
 		}
@@ -564,6 +566,18 @@ s32 __i2c_smbus_xfer(struct i2c_adapter *adapter, u16 addr,
 	res = __i2c_check_suspended(adapter);
 	if (res)
 		return res;
+
+	/* Reject invalid caller-supplied block lengths before any
+	 * tracepoint or native smbus_xfer callback runs.
+	 */
+	if (data &&
+	    (protocol == I2C_SMBUS_I2C_BLOCK_DATA ||
+	     protocol == I2C_SMBUS_BLOCK_PROC_CALL ||
+	     (protocol == I2C_SMBUS_BLOCK_DATA &&
+	      read_write == I2C_SMBUS_WRITE)) &&
+	    (data->block[0] == 0 ||
+	     data->block[0] > I2C_SMBUS_BLOCK_MAX))
+		return -EINVAL;
 
 	/* If enabled, the following two tracepoints are conditional on
 	 * read_write and protocol.
@@ -712,11 +726,14 @@ int i2c_setup_smbus_alert(struct i2c_adapter *adapter)
 	if (!parent)
 		return 0;
 
+	/* Report serious errors */
 	irq = device_property_match_string(parent, "interrupt-names", "smbus_alert");
-	if (irq == -EINVAL || irq == -ENODATA)
-		return 0;
-	else if (irq < 0)
+	if (irq < 0 && irq != -EINVAL && irq != -ENODATA)
 		return irq;
+
+	/* Skip setup when no irq was found */
+	if (irq < 0 && !device_property_present(parent, "smbalert-gpios"))
+		return 0;
 
 	return PTR_ERR_OR_ZERO(i2c_new_smbus_alert_device(adapter, NULL));
 }

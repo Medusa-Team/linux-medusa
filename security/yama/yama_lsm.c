@@ -76,7 +76,6 @@ static void report_access(const char *access, struct task_struct *target,
 				struct task_struct *agent)
 {
 	struct access_report_info *info;
-	char agent_comm[sizeof(agent->comm)];
 
 	assert_spin_locked(&target->alloc_lock); /* for target->comm */
 
@@ -86,12 +85,11 @@ static void report_access(const char *access, struct task_struct *target,
 		 */
 		pr_notice_ratelimited(
 		    "ptrace %s of \"%s\"[%d] was attempted by \"%s\"[%d]\n",
-		    access, target->comm, target->pid,
-		    get_task_comm(agent_comm, agent), agent->pid);
+		    access, target->comm, target->pid, agent->comm, agent->pid);
 		return;
 	}
 
-	info = kmalloc(sizeof(*info), GFP_ATOMIC);
+	info = kmalloc_obj(*info, GFP_ATOMIC);
 	if (!info)
 		return;
 	init_task_work(&info->work, __report_access);
@@ -145,7 +143,7 @@ static int yama_ptracer_add(struct task_struct *tracer,
 {
 	struct ptrace_relation *relation, *added;
 
-	added = kmalloc(sizeof(*added), GFP_KERNEL);
+	added = kmalloc_obj(*added);
 	if (!added)
 		return -ENOMEM;
 
@@ -224,7 +222,7 @@ static int yama_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 			   unsigned long arg4, unsigned long arg5)
 {
 	int rc = -ENOSYS;
-	struct task_struct *myself = current;
+	struct task_struct *myself;
 
 	switch (option) {
 	case PR_SET_PTRACER:
@@ -234,11 +232,7 @@ static int yama_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 		 * leader checking is handled later when walking the ancestry
 		 * at the time of PTRACE_ATTACH check.
 		 */
-		rcu_read_lock();
-		if (!thread_group_leader(myself))
-			myself = rcu_dereference(myself->group_leader);
-		get_task_struct(myself);
-		rcu_read_unlock();
+		myself = current->group_leader;
 
 		if (arg2 == 0) {
 			yama_ptracer_del(NULL, myself);
@@ -257,7 +251,6 @@ static int yama_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 			}
 		}
 
-		put_task_struct(myself);
 		break;
 	}
 
@@ -454,7 +447,7 @@ static int yama_dointvec_minmax(const struct ctl_table *table, int write,
 
 static int max_scope = YAMA_SCOPE_NO_ATTACH;
 
-static struct ctl_table yama_sysctl_table[] = {
+static const struct ctl_table yama_sysctl_table[] = {
 	{
 		.procname       = "ptrace_scope",
 		.data           = &ptrace_scope,
@@ -483,6 +476,6 @@ static int __init yama_init(void)
 }
 
 DEFINE_LSM(yama) = {
-	.name = "yama",
+	.id = &yama_lsmid,
 	.init = yama_init,
 };

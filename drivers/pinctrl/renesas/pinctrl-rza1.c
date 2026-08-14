@@ -19,6 +19,7 @@
 #include <linux/ioport.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
@@ -525,7 +526,6 @@ static inline int rza1_pinmux_get_swio(unsigned int port,
 	const struct rza1_swio_pin *swio_pin;
 	unsigned int i;
 
-
 	for (i = 0; i < table->npins; ++i) {
 		swio_pin = &table->pins[i];
 		if (swio_pin->port == port && swio_pin->pin == pin &&
@@ -589,7 +589,7 @@ static inline unsigned int rza1_get_bit(struct rza1_port *port,
 {
 	void __iomem *mem = RZA1_ADDR(port->base, reg, port->id);
 
-	return ioread16(mem) & BIT(bit);
+	return !!(ioread16(mem) & BIT(bit));
 }
 
 /**
@@ -668,7 +668,7 @@ static inline int rza1_pin_get(struct rza1_port *port, unsigned int pin)
  * @mux_conf: pin multiplexing descriptor
  */
 static int rza1_pin_mux_single(struct rza1_pinctrl *rza1_pctl,
-			       struct rza1_mux_conf *mux_conf)
+			       const struct rza1_mux_conf *mux_conf)
 {
 	struct rza1_port *port = &rza1_pctl->ports[mux_conf->port];
 	unsigned int pin = mux_conf->pin;
@@ -750,6 +750,11 @@ static int rza1_pin_mux_single(struct rza1_pinctrl *rza1_pctl,
 static int rza1_gpio_request(struct gpio_chip *chip, unsigned int gpio)
 {
 	struct rza1_port *port = gpiochip_get_data(chip);
+	int ret;
+
+	ret = pinctrl_gpio_request(chip, gpio);
+	if (ret)
+		return ret;
 
 	rza1_pin_reset(port, gpio);
 
@@ -771,6 +776,7 @@ static void rza1_gpio_free(struct gpio_chip *chip, unsigned int gpio)
 	struct rza1_port *port = gpiochip_get_data(chip);
 
 	rza1_pin_reset(port, gpio);
+	pinctrl_gpio_free(chip, gpio);
 }
 
 static int rza1_gpio_get_direction(struct gpio_chip *chip, unsigned int gpio)
@@ -823,12 +829,13 @@ static int rza1_gpio_get(struct gpio_chip *chip, unsigned int gpio)
 	return rza1_pin_get(port, gpio);
 }
 
-static void rza1_gpio_set(struct gpio_chip *chip, unsigned int gpio,
-			  int value)
+static int rza1_gpio_set(struct gpio_chip *chip, unsigned int gpio, int value)
 {
 	struct rza1_port *port = gpiochip_get_data(chip);
 
 	rza1_pin_set(port, gpio, value);
+
+	return 0;
 }
 
 static const struct gpio_chip rza1_gpiochip_template = {
@@ -925,7 +932,7 @@ static int rza1_parse_pinmux_node(struct rza1_pinctrl *rza1_pctl,
 		case PIN_CONFIG_INPUT_ENABLE:
 			pinmux_flags |= MUX_FLAGS_SWIO_INPUT;
 			break;
-		case PIN_CONFIG_OUTPUT:	/* for DT backwards compatibility */
+		case PIN_CONFIG_LEVEL:	/* for DT backwards compatibility */
 		case PIN_CONFIG_OUTPUT_ENABLE:
 			pinmux_flags |= MUX_FLAGS_SWIO_OUTPUT;
 			break;
@@ -1055,7 +1062,7 @@ static int rza1_dt_node_to_map(struct pinctrl_dev *pctldev,
 
 	/* Create map where to retrieve function and mux settings from */
 	*num_maps = 0;
-	*map = kzalloc(sizeof(**map), GFP_KERNEL);
+	*map = kzalloc_obj(**map);
 	if (!*map) {
 		ret = -ENOMEM;
 		goto remove_function;
@@ -1111,8 +1118,8 @@ static int rza1_set_mux(struct pinctrl_dev *pctldev, unsigned int selector,
 			   unsigned int group)
 {
 	struct rza1_pinctrl *rza1_pctl = pinctrl_dev_get_drvdata(pctldev);
-	struct rza1_mux_conf *mux_confs;
-	struct function_desc *func;
+	const struct rza1_mux_conf *mux_confs;
+	const struct function_desc *func;
 	struct group_desc *grp;
 	int i;
 
@@ -1124,7 +1131,7 @@ static int rza1_set_mux(struct pinctrl_dev *pctldev, unsigned int selector,
 	if (!func)
 		return -EINVAL;
 
-	mux_confs = (struct rza1_mux_conf *)func->data;
+	mux_confs = (const struct rza1_mux_conf *)func->data;
 	for (i = 0; i < grp->grp.npins; ++i) {
 		int ret;
 

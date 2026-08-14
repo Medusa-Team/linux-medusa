@@ -170,10 +170,7 @@
 
 #define mmu_linear_psize	MMU_PAGE_8M
 
-#define MODULES_VADDR	(PAGE_OFFSET - SZ_256M)
-#define MODULES_END	PAGE_OFFSET
-
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/mmdebug.h>
 #include <linux/sizes.h>
@@ -264,6 +261,6 @@ static inline int arch_vmap_pte_supported_shift(unsigned long size)
 extern s32 patch__itlbmiss_exit_1, patch__dtlbmiss_exit_1;
 extern s32 patch__itlbmiss_perf, patch__dtlbmiss_perf;
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 #endif /* _ASM_POWERPC_MMU_8XX_H_ */

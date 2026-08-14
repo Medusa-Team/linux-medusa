@@ -68,12 +68,12 @@ static int dw_mci_bluefield_probe(struct platform_device *pdev)
 
 static struct platform_driver dw_mci_bluefield_pltfm_driver = {
 	.probe		= dw_mci_bluefield_probe,
-	.remove_new	= dw_mci_pltfm_remove,
+	.remove		= dw_mci_pltfm_remove,
 	.driver		= {
 		.name		= "dwmmc_bluefield",
 		.probe_type	= PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table	= dw_mci_bluefield_match,
-		.pm		= &dw_mci_pltfm_pmops,
+		.pm		= pm_ptr(&dw_mci_pmops),
 	},
 };
 

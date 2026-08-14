@@ -58,6 +58,12 @@ do {							\
 #define sysfs_attr_init(attr) do {} while (0)
 #endif
 
+#ifdef CONFIG_CFI
+#define __SYSFS_FUNCTION_ALTERNATIVE(MEMBERS...) struct { MEMBERS }
+#else
+#define __SYSFS_FUNCTION_ALTERNATIVE(MEMBERS...) union { MEMBERS }
+#endif
+
 /**
  * struct attribute_group - data structure used to declare an attribute group.
  * @name:	Optional: Attribute group name
@@ -87,18 +93,33 @@ do {							\
  *		SYSFS_GROUP_VISIBLE() when assigning this callback to
  *		specify separate _group_visible() and _attr_visible()
  *		handlers.
+ * @bin_size:
+ *		Optional: Function to return the size of a binary attribute
+ *		of the group. Will be called repeatedly for each binary
+ *		attribute in the group. Overwrites the size field embedded
+ *		inside the attribute itself.
  * @attrs:	Pointer to NULL terminated list of attributes.
  * @bin_attrs:	Pointer to NULL terminated list of binary attributes.
  *		Either attrs or bin_attrs or both must be provided.
  */
 struct attribute_group {
 	const char		*name;
-	umode_t			(*is_visible)(struct kobject *,
-					      struct attribute *, int);
+	__SYSFS_FUNCTION_ALTERNATIVE(
+		umode_t			(*is_visible)(struct kobject *,
+						      struct attribute *, int);
+		umode_t			(*is_visible_const)(struct kobject *,
+							    const struct attribute *, int);
+	);
 	umode_t			(*is_bin_visible)(struct kobject *,
-						  struct bin_attribute *, int);
-	struct attribute	**attrs;
-	struct bin_attribute	**bin_attrs;
+						  const struct bin_attribute *, int);
+	size_t			(*bin_size)(struct kobject *,
+					    const struct bin_attribute *,
+					    int);
+	union {
+		struct attribute	**attrs;
+		const struct attribute	*const *attrs_const;
+	};
+	const struct bin_attribute	*const *bin_attrs;
 };
 
 #define SYSFS_PREALLOC		010000
@@ -191,22 +212,22 @@ struct attribute_group {
  * attributes, the group visibility is determined by the function
  * specified to is_visible() not is_bin_visible()
  */
-#define DEFINE_SYSFS_BIN_GROUP_VISIBLE(name)                             \
-	static inline umode_t sysfs_group_visible_##name(                \
-		struct kobject *kobj, struct bin_attribute *attr, int n) \
-	{                                                                \
-		if (n == 0 && !name##_group_visible(kobj))               \
-			return SYSFS_GROUP_INVISIBLE;                    \
-		return name##_attr_visible(kobj, attr, n);               \
+#define DEFINE_SYSFS_BIN_GROUP_VISIBLE(name)                                   \
+	static inline umode_t sysfs_group_visible_##name(                      \
+		struct kobject *kobj, const struct bin_attribute *attr, int n) \
+	{                                                                      \
+		if (n == 0 && !name##_group_visible(kobj))                     \
+			return SYSFS_GROUP_INVISIBLE;                          \
+		return name##_attr_visible(kobj, attr, n);                     \
 	}
 
-#define DEFINE_SIMPLE_SYSFS_BIN_GROUP_VISIBLE(name)                   \
-	static inline umode_t sysfs_group_visible_##name(             \
-		struct kobject *kobj, struct bin_attribute *a, int n) \
-	{                                                             \
-		if (n == 0 && !name##_group_visible(kobj))            \
-			return SYSFS_GROUP_INVISIBLE;                 \
-		return a->mode;                                       \
+#define DEFINE_SIMPLE_SYSFS_BIN_GROUP_VISIBLE(name)                         \
+	static inline umode_t sysfs_group_visible_##name(                   \
+		struct kobject *kobj, const struct bin_attribute *a, int n) \
+	{                                                                   \
+		if (n == 0 && !name##_group_visible(kobj))                  \
+			return SYSFS_GROUP_INVISIBLE;                       \
+		return a->mode;                                             \
 	}
 
 #define SYSFS_GROUP_VISIBLE(fn) sysfs_group_visible_##fn
@@ -230,28 +251,20 @@ struct attribute_group {
 	.store	= _store,						\
 }
 
-#define __ATTR_RO(_name) {						\
-	.attr	= { .name = __stringify(_name), .mode = 0444 },		\
-	.show	= _name##_show,						\
-}
-
 #define __ATTR_RO_MODE(_name, _mode) {					\
 	.attr	= { .name = __stringify(_name),				\
 		    .mode = VERIFY_OCTAL_PERMISSIONS(_mode) },		\
 	.show	= _name##_show,						\
 }
 
-#define __ATTR_RW_MODE(_name, _mode) {					\
-	.attr	= { .name = __stringify(_name),				\
-		    .mode = VERIFY_OCTAL_PERMISSIONS(_mode) },		\
-	.show	= _name##_show,						\
-	.store	= _name##_store,					\
-}
+#define __ATTR_RO(_name)						\
+	__ATTR_RO_MODE(_name, 0444)
 
-#define __ATTR_WO(_name) {						\
-	.attr	= { .name = __stringify(_name), .mode = 0200 },		\
-	.store	= _name##_store,					\
-}
+#define __ATTR_RW_MODE(_name, _mode)					\
+	__ATTR(_name, _mode, _name##_show, _name##_store)
+
+#define __ATTR_WO(_name)						\
+	__ATTR(_name, 0200, NULL, _name##_store)
 
 #define __ATTR_RW(_name) __ATTR(_name, 0644, _name##_show, _name##_store)
 
@@ -276,7 +289,12 @@ static const struct attribute_group *_name##_groups[] = {	\
 
 #define ATTRIBUTE_GROUPS(_name)					\
 static const struct attribute_group _name##_group = {		\
-	.attrs = _name##_attrs,					\
+	.attrs = _Generic(_name##_attrs,			\
+			  struct attribute **:			\
+				_name##_attrs,			\
+			  const struct attribute *const *:	\
+				(void *)_name##_attrs		\
+	),							\
 };								\
 __ATTRIBUTE_GROUPS(_name)
 
@@ -295,13 +313,13 @@ struct bin_attribute {
 	size_t			size;
 	void			*private;
 	struct address_space *(*f_mapping)(void);
-	ssize_t (*read)(struct file *, struct kobject *, struct bin_attribute *,
+	ssize_t (*read)(struct file *, struct kobject *, const struct bin_attribute *,
 			char *, loff_t, size_t);
-	ssize_t (*write)(struct file *, struct kobject *, struct bin_attribute *,
+	ssize_t (*write)(struct file *, struct kobject *, const struct bin_attribute *,
 			 char *, loff_t, size_t);
-	loff_t (*llseek)(struct file *, struct kobject *, struct bin_attribute *,
+	loff_t (*llseek)(struct file *, struct kobject *, const struct bin_attribute *,
 			 loff_t, int);
-	int (*mmap)(struct file *, struct kobject *, struct bin_attribute *attr,
+	int (*mmap)(struct file *, struct kobject *, const struct bin_attribute *attr,
 		    struct vm_area_struct *vma);
 };
 
@@ -320,22 +338,16 @@ struct bin_attribute {
 /* macros to create static binary attributes easier */
 #define __BIN_ATTR(_name, _mode, _read, _write, _size) {		\
 	.attr = { .name = __stringify(_name), .mode = _mode },		\
-	.read	= _read,						\
-	.write	= _write,						\
+	.read = _read,							\
+	.write = _write,						\
 	.size	= _size,						\
 }
 
-#define __BIN_ATTR_RO(_name, _size) {					\
-	.attr	= { .name = __stringify(_name), .mode = 0444 },		\
-	.read	= _name##_read,						\
-	.size	= _size,						\
-}
+#define __BIN_ATTR_RO(_name, _size)					\
+	__BIN_ATTR(_name, 0444, _name##_read, NULL, _size)
 
-#define __BIN_ATTR_WO(_name, _size) {					\
-	.attr	= { .name = __stringify(_name), .mode = 0200 },		\
-	.write	= _name##_write,					\
-	.size	= _size,						\
-}
+#define __BIN_ATTR_WO(_name, _size)					\
+	__BIN_ATTR(_name, 0200, NULL, _name##_write, _size)
 
 #define __BIN_ATTR_RW(_name, _size)					\
 	__BIN_ATTR(_name, 0644, _name##_read, _name##_write, _size)
@@ -356,11 +368,8 @@ struct bin_attribute bin_attr_##_name = __BIN_ATTR_WO(_name, _size)
 struct bin_attribute bin_attr_##_name = __BIN_ATTR_RW(_name, _size)
 
 
-#define __BIN_ATTR_ADMIN_RO(_name, _size) {					\
-	.attr	= { .name = __stringify(_name), .mode = 0400 },		\
-	.read	= _name##_read,						\
-	.size	= _size,						\
-}
+#define __BIN_ATTR_ADMIN_RO(_name, _size)				\
+	__BIN_ATTR(_name, 0400, _name##_read, NULL, _size)
 
 #define __BIN_ATTR_ADMIN_RW(_name, _size)					\
 	__BIN_ATTR(_name, 0600, _name##_read, _name##_write, _size)
@@ -371,10 +380,8 @@ struct bin_attribute bin_attr_##_name = __BIN_ATTR_ADMIN_RO(_name, _size)
 #define BIN_ATTR_ADMIN_RW(_name, _size)					\
 struct bin_attribute bin_attr_##_name = __BIN_ATTR_ADMIN_RW(_name, _size)
 
-#define __BIN_ATTR_SIMPLE_RO(_name, _mode) {				\
-	.attr	= { .name = __stringify(_name), .mode = _mode },	\
-	.read	= sysfs_bin_attr_simple_read,				\
-}
+#define __BIN_ATTR_SIMPLE_RO(_name, _mode)				\
+	__BIN_ATTR(_name, _mode, sysfs_bin_attr_simple_read, NULL, 0)
 
 #define BIN_ATTR_SIMPLE_RO(_name)					\
 struct bin_attribute bin_attr_##_name = __BIN_ATTR_SIMPLE_RO(_name, 0444)
@@ -389,13 +396,13 @@ struct sysfs_ops {
 
 #ifdef CONFIG_SYSFS
 
-int __must_check sysfs_create_dir_ns(struct kobject *kobj, const void *ns);
+int __must_check sysfs_create_dir_ns(struct kobject *kobj, const struct ns_common *ns);
 void sysfs_remove_dir(struct kobject *kobj);
 int __must_check sysfs_rename_dir_ns(struct kobject *kobj, const char *new_name,
-				     const void *new_ns);
+				     const struct ns_common *new_ns);
 int __must_check sysfs_move_dir_ns(struct kobject *kobj,
 				   struct kobject *new_parent_kobj,
-				   const void *new_ns);
+				   const struct ns_common *new_ns);
 int __must_check sysfs_create_mount_point(struct kobject *parent_kobj,
 					  const char *name);
 void sysfs_remove_mount_point(struct kobject *parent_kobj,
@@ -403,7 +410,7 @@ void sysfs_remove_mount_point(struct kobject *parent_kobj,
 
 int __must_check sysfs_create_file_ns(struct kobject *kobj,
 				      const struct attribute *attr,
-				      const void *ns);
+				      const struct ns_common *ns);
 int __must_check sysfs_create_files(struct kobject *kobj,
 				   const struct attribute * const *attr);
 int __must_check sysfs_chmod_file(struct kobject *kobj,
@@ -412,7 +419,7 @@ struct kernfs_node *sysfs_break_active_protection(struct kobject *kobj,
 						  const struct attribute *attr);
 void sysfs_unbreak_active_protection(struct kernfs_node *kn);
 void sysfs_remove_file_ns(struct kobject *kobj, const struct attribute *attr,
-			  const void *ns);
+			  const struct ns_common *ns);
 bool sysfs_remove_file_self(struct kobject *kobj, const struct attribute *attr);
 void sysfs_remove_files(struct kobject *kobj, const struct attribute * const *attr);
 
@@ -430,7 +437,7 @@ void sysfs_remove_link(struct kobject *kobj, const char *name);
 
 int sysfs_rename_link_ns(struct kobject *kobj, struct kobject *target,
 			 const char *old_name, const char *new_name,
-			 const void *new_ns);
+			 const struct ns_common *new_ns);
 
 void sysfs_delete_link(struct kobject *dir, struct kobject *targ,
 			const char *name);
@@ -438,15 +445,15 @@ void sysfs_delete_link(struct kobject *dir, struct kobject *targ,
 int __must_check sysfs_create_group(struct kobject *kobj,
 				    const struct attribute_group *grp);
 int __must_check sysfs_create_groups(struct kobject *kobj,
-				     const struct attribute_group **groups);
+				     const struct attribute_group *const *groups);
 int __must_check sysfs_update_groups(struct kobject *kobj,
-				     const struct attribute_group **groups);
+				     const struct attribute_group *const *groups);
 int sysfs_update_group(struct kobject *kobj,
 		       const struct attribute_group *grp);
 void sysfs_remove_group(struct kobject *kobj,
 			const struct attribute_group *grp);
 void sysfs_remove_groups(struct kobject *kobj,
-			 const struct attribute_group **groups);
+			 const struct attribute_group *const *groups);
 int sysfs_add_file_to_group(struct kobject *kobj,
 			const struct attribute *attr, const char *group);
 void sysfs_remove_file_from_group(struct kobject *kobj,
@@ -479,7 +486,7 @@ int sysfs_change_owner(struct kobject *kobj, kuid_t kuid, kgid_t kgid);
 int sysfs_link_change_owner(struct kobject *kobj, struct kobject *targ,
 			    const char *name, kuid_t kuid, kgid_t kgid);
 int sysfs_groups_change_owner(struct kobject *kobj,
-			      const struct attribute_group **groups,
+			      const struct attribute_group *const *groups,
 			      kuid_t kuid, kgid_t kgid);
 int sysfs_group_change_owner(struct kobject *kobj,
 			     const struct attribute_group *groups, kuid_t kuid,
@@ -490,12 +497,12 @@ __printf(3, 4)
 int sysfs_emit_at(char *buf, int at, const char *fmt, ...);
 
 ssize_t sysfs_bin_attr_simple_read(struct file *file, struct kobject *kobj,
-				   struct bin_attribute *attr, char *buf,
+				   const struct bin_attribute *attr, char *buf,
 				   loff_t off, size_t count);
 
 #else /* CONFIG_SYSFS */
 
-static inline int sysfs_create_dir_ns(struct kobject *kobj, const void *ns)
+static inline int sysfs_create_dir_ns(struct kobject *kobj, const struct ns_common *ns)
 {
 	return 0;
 }
@@ -505,14 +512,14 @@ static inline void sysfs_remove_dir(struct kobject *kobj)
 }
 
 static inline int sysfs_rename_dir_ns(struct kobject *kobj,
-				      const char *new_name, const void *new_ns)
+				      const char *new_name, const struct ns_common *new_ns)
 {
 	return 0;
 }
 
 static inline int sysfs_move_dir_ns(struct kobject *kobj,
 				    struct kobject *new_parent_kobj,
-				    const void *new_ns)
+				    const struct ns_common *new_ns)
 {
 	return 0;
 }
@@ -530,7 +537,7 @@ static inline void sysfs_remove_mount_point(struct kobject *parent_kobj,
 
 static inline int sysfs_create_file_ns(struct kobject *kobj,
 				       const struct attribute *attr,
-				       const void *ns)
+				       const struct ns_common *ns)
 {
 	return 0;
 }
@@ -560,7 +567,7 @@ static inline void sysfs_unbreak_active_protection(struct kernfs_node *kn)
 
 static inline void sysfs_remove_file_ns(struct kobject *kobj,
 					const struct attribute *attr,
-					const void *ns)
+					const struct ns_common *ns)
 {
 }
 
@@ -605,7 +612,7 @@ static inline void sysfs_remove_link(struct kobject *kobj, const char *name)
 
 static inline int sysfs_rename_link_ns(struct kobject *k, struct kobject *t,
 				       const char *old_name,
-				       const char *new_name, const void *ns)
+				       const char *new_name, const struct ns_common *ns)
 {
 	return 0;
 }
@@ -622,13 +629,13 @@ static inline int sysfs_create_group(struct kobject *kobj,
 }
 
 static inline int sysfs_create_groups(struct kobject *kobj,
-				      const struct attribute_group **groups)
+				      const struct attribute_group *const *groups)
 {
 	return 0;
 }
 
 static inline int sysfs_update_groups(struct kobject *kobj,
-				      const struct attribute_group **groups)
+				      const struct attribute_group *const *groups)
 {
 	return 0;
 }
@@ -645,7 +652,7 @@ static inline void sysfs_remove_group(struct kobject *kobj,
 }
 
 static inline void sysfs_remove_groups(struct kobject *kobj,
-				       const struct attribute_group **groups)
+				       const struct attribute_group *const *groups)
 {
 }
 
@@ -726,7 +733,7 @@ static inline int sysfs_change_owner(struct kobject *kobj, kuid_t kuid, kgid_t k
 }
 
 static inline int sysfs_groups_change_owner(struct kobject *kobj,
-			  const struct attribute_group **groups,
+			  const struct attribute_group *const *groups,
 			  kuid_t kuid, kgid_t kgid)
 {
 	return 0;
@@ -753,7 +760,7 @@ static inline int sysfs_emit_at(char *buf, int at, const char *fmt, ...)
 
 static inline ssize_t sysfs_bin_attr_simple_read(struct file *file,
 						 struct kobject *kobj,
-						 struct bin_attribute *attr,
+						 const struct bin_attribute *attr,
 						 char *buf, loff_t off,
 						 size_t count)
 {
@@ -800,5 +807,18 @@ static inline void sysfs_put(struct kernfs_node *kn)
 {
 	kernfs_put(kn);
 }
+
+/* Permissions on a sysfs file: you didn't miss the 0 prefix did you? */
+#define VERIFY_OCTAL_PERMISSIONS(perms)						\
+	(BUILD_BUG_ON_ZERO((perms) < 0) +					\
+	 BUILD_BUG_ON_ZERO((perms) > 0777) +					\
+	 /* USER_READABLE >= GROUP_READABLE >= OTHER_READABLE */		\
+	 BUILD_BUG_ON_ZERO((((perms) >> 6) & 4) < (((perms) >> 3) & 4)) +	\
+	 BUILD_BUG_ON_ZERO((((perms) >> 3) & 4) < ((perms) & 4)) +		\
+	 /* USER_WRITABLE >= GROUP_WRITABLE */					\
+	 BUILD_BUG_ON_ZERO((((perms) >> 6) & 2) < (((perms) >> 3) & 2)) +	\
+	 /* OTHER_WRITABLE?  Generally considered a bad idea. */		\
+	 BUILD_BUG_ON_ZERO((perms) & 2) +					\
+	 (perms))
 
 #endif /* _SYSFS_H_ */

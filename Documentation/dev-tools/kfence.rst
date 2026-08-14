@@ -53,6 +53,13 @@ configurable via the Kconfig option ``CONFIG_KFENCE_DEFERRABLE``.
    The KUnit test suite is very likely to fail when using a deferrable timer
    since it currently causes very unpredictable sample intervals.
 
+By default KFENCE will only sample 1 heap allocation within each sample
+interval. *Burst mode* allows to sample successive heap allocations, where the
+kernel boot parameter ``kfence.burst`` can be set to a non-zero value which
+denotes the *additional* successive allocations within a sample interval;
+setting ``kfence.burst=N`` means that ``1 + N`` successive allocations are
+attempted through KFENCE for each sample interval.
+
 The KFENCE memory pool is of fixed size, and if the pool is exhausted, no
 further KFENCE allocations occur. With ``CONFIG_KFENCE_NUM_OBJECTS`` (default
 255), the number of available guarded objects can be controlled. Each object
@@ -73,6 +80,13 @@ tables being allocated.
 
 Error reports
 ~~~~~~~~~~~~~
+
+The boot parameter ``kfence.fault`` can be used to control the behavior when a
+KFENCE error is detected:
+
+- ``kfence.fault=report``: Print the error report and continue (default).
+- ``kfence.fault=oops``: Print the error report and oops.
+- ``kfence.fault=panic``: Print the error report and panic.
 
 A typical out-of-bounds access looks like this::
 

@@ -41,7 +41,7 @@ static inline int thermal_get_temp(struct thermal_zone_device *thermal,
 	return 0;
 }
 
-static struct thermal_zone_device_ops ops = {
+static const struct thermal_zone_device_ops ops = {
 	.get_temp = thermal_get_temp,
 };
 
@@ -93,7 +93,7 @@ static int spear_thermal_probe(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
 	int ret = 0, val;
 
-	if (!np || !of_property_read_u32(np, "st,thermal-flags", &val)) {
+	if (!np || of_property_read_u32(np, "st,thermal-flags", &val)) {
 		dev_err(&pdev->dev, "Failed: DT Pdata not passed\n");
 		return -EINVAL;
 	}
@@ -173,7 +173,7 @@ MODULE_DEVICE_TABLE(of, spear_thermal_id_table);
 
 static struct platform_driver spear_thermal_driver = {
 	.probe = spear_thermal_probe,
-	.remove_new = spear_thermal_exit,
+	.remove = spear_thermal_exit,
 	.driver = {
 		.name = "spear_thermal",
 		.pm = &spear_thermal_pm_ops,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-#include "netlink.h"
 #include "common.h"
+#include "netlink.h"
 
 struct linkinfo_req_info {
 	struct ethnl_req_info		base;
@@ -35,7 +35,7 @@ static int linkinfo_prepare_data(const struct ethnl_req_info *req_base,
 	if (ret < 0)
 		return ret;
 	ret = __ethtool_get_link_ksettings(dev, &data->ksettings);
-	if (ret < 0 && info)
+	if (ret < 0)
 		GENL_SET_ERR_MSG(info, "failed to retrieve link settings");
 	ethnl_ops_complete(dev);
 

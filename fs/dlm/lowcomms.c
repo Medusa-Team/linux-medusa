@@ -160,9 +160,8 @@ struct dlm_proto_ops {
 	bool try_new_addr;
 	const char *name;
 	int proto;
+	int how;
 
-	int (*connect)(struct connection *con, struct socket *sock,
-		       struct sockaddr *addr, int addr_len);
 	void (*sockopts)(struct socket *sock);
 	int (*bind)(struct socket *sock);
 	int (*listen_validate)(void);
@@ -306,7 +305,7 @@ static struct connection *nodeid2con(int nodeid, gfp_t alloc)
 	if (con || !alloc)
 		return con;
 
-	con = kzalloc(sizeof(*con), alloc);
+	con = kzalloc_obj(*con, alloc);
 	if (!con)
 		return NULL;
 
@@ -464,7 +463,8 @@ static bool dlm_lowcomms_con_has_addr(const struct connection *con,
 int dlm_lowcomms_addr(int nodeid, struct sockaddr_storage *addr)
 {
 	struct connection *con;
-	bool ret, idx;
+	bool ret;
+	int idx;
 
 	idx = srcu_read_lock(&connections_srcu);
 	con = nodeid2con(nodeid, GFP_NOFS);
@@ -534,7 +534,7 @@ static void lowcomms_state_change(struct sock *sk)
 	/* SCTP layer is not calling sk_data_ready when the connection
 	 * is done, so we catch the signal through here.
 	 */
-	if (sk->sk_shutdown == RCV_SHUTDOWN)
+	if (sk->sk_shutdown & RCV_SHUTDOWN)
 		lowcomms_data_ready(sk);
 }
 
@@ -662,18 +662,18 @@ static void add_sock(struct socket *sock, struct connection *con)
 
 /* Add the port number to an IPv6 or 4 sockaddr and return the address
    length */
-static void make_sockaddr(struct sockaddr_storage *saddr, uint16_t port,
+static void make_sockaddr(struct sockaddr_storage *saddr, __be16 port,
 			  int *addr_len)
 {
 	saddr->ss_family =  dlm_local_addr[0].ss_family;
 	if (saddr->ss_family == AF_INET) {
 		struct sockaddr_in *in4_addr = (struct sockaddr_in *)saddr;
-		in4_addr->sin_port = cpu_to_be16(port);
+		in4_addr->sin_port = port;
 		*addr_len = sizeof(struct sockaddr_in);
 		memset(&in4_addr->sin_zero, 0, sizeof(in4_addr->sin_zero));
 	} else {
 		struct sockaddr_in6 *in6_addr = (struct sockaddr_in6 *)saddr;
-		in6_addr->sin6_port = cpu_to_be16(port);
+		in6_addr->sin6_port = port;
 		*addr_len = sizeof(struct sockaddr_in6);
 	}
 	memset((char *)saddr + *addr_len, 0, sizeof(struct sockaddr_storage) - *addr_len);
@@ -811,7 +811,7 @@ static void shutdown_connection(struct connection *con, bool and_other)
 		return;
 	}
 
-	ret = kernel_sock_shutdown(con->sock, SHUT_WR);
+	ret = kernel_sock_shutdown(con->sock, dlm_proto_ops->how);
 	up_read(&con->sock_lock);
 	if (ret) {
 		log_print("Connection %p failed to shutdown: %d will force close",
@@ -838,7 +838,7 @@ static struct processqueue_entry *new_processqueue_entry(int nodeid,
 {
 	struct processqueue_entry *pentry;
 
-	pentry = kmalloc(sizeof(*pentry), GFP_NOFS);
+	pentry = kmalloc_obj(*pentry, GFP_NOFS);
 	if (!pentry)
 		return NULL;
 
@@ -1052,7 +1052,7 @@ static int accept_from_sock(void)
 		struct connection *othercon = newcon->othercon;
 
 		if (!othercon) {
-			othercon = kzalloc(sizeof(*othercon), GFP_NOFS);
+			othercon = kzalloc_obj(*othercon, GFP_NOFS);
 			if (!othercon) {
 				log_print("failed to allocate incoming socket");
 				up_write(&newcon->sock_lock);
@@ -1123,10 +1123,10 @@ static void writequeue_entry_complete(struct writequeue_entry *e, int completed)
 /*
  * sctp_bind_addrs - bind a SCTP socket to all our addresses
  */
-static int sctp_bind_addrs(struct socket *sock, uint16_t port)
+static int sctp_bind_addrs(struct socket *sock, __be16 port)
 {
 	struct sockaddr_storage localaddr;
-	struct sockaddr *addr = (struct sockaddr *)&localaddr;
+	struct sockaddr_unsized *addr = (struct sockaddr_unsized *)&localaddr;
 	int i, addr_len, result = 0;
 
 	for (i = 0; i < dlm_local_count; i++) {
@@ -1599,8 +1599,7 @@ static int dlm_connect(struct connection *con)
 
 	log_print_ratelimited("connecting to %d", con->nodeid);
 	make_sockaddr(&addr, dlm_config.ci_tcp_port, &addr_len);
-	result = dlm_proto_ops->connect(con, sock, (struct sockaddr *)&addr,
-					addr_len);
+	result = kernel_connect(sock, (struct sockaddr_unsized *)&addr, addr_len, 0);
 	switch (result) {
 	case -EINPROGRESS:
 		/* not an error */
@@ -1633,13 +1632,6 @@ static void process_send_sockets(struct work_struct *work)
 			ret = dlm_connect(con);
 			switch (ret) {
 			case 0:
-				break;
-			case -EINPROGRESS:
-				/* avoid spamming resched on connection
-				 * we might can switch to a state_change
-				 * event based mechanism if established
-				 */
-				msleep(100);
 				break;
 			default:
 				/* CF_SEND_PENDING not cleared */
@@ -1711,7 +1703,7 @@ static int work_start(void)
 		return -ENOMEM;
 	}
 
-	process_workqueue = alloc_workqueue("dlm_process", WQ_HIGHPRI | WQ_BH, 0);
+	process_workqueue = alloc_workqueue("dlm_process", WQ_HIGHPRI | WQ_BH | WQ_PERCPU, 0);
 	if (!process_workqueue) {
 		log_print("can't start dlm_process");
 		destroy_workqueue(io_workqueue);
@@ -1821,7 +1813,7 @@ static int dlm_tcp_bind(struct socket *sock)
 	memcpy(&src_addr, &dlm_local_addr[0], sizeof(src_addr));
 	make_sockaddr(&src_addr, 0, &addr_len);
 
-	result = kernel_bind(sock, (struct sockaddr *)&src_addr,
+	result = kernel_bind(sock, (struct sockaddr_unsized *)&src_addr,
 			     addr_len);
 	if (result < 0) {
 		/* This *may* not indicate a critical error */
@@ -1831,18 +1823,12 @@ static int dlm_tcp_bind(struct socket *sock)
 	return 0;
 }
 
-static int dlm_tcp_connect(struct connection *con, struct socket *sock,
-			   struct sockaddr *addr, int addr_len)
-{
-	return kernel_connect(sock, addr, addr_len, O_NONBLOCK);
-}
-
 static int dlm_tcp_listen_validate(void)
 {
 	/* We don't support multi-homed hosts */
 	if (dlm_local_count > 1) {
-		log_print("TCP protocol can't handle multi-homed hosts, try SCTP");
-		return -EINVAL;
+		log_print("Detect multi-homed hosts but use only the first IP address.");
+		log_print("Try SCTP, if you want to enable multi-link.");
 	}
 
 	return 0;
@@ -1866,14 +1852,14 @@ static int dlm_tcp_listen_bind(struct socket *sock)
 
 	/* Bind to our port */
 	make_sockaddr(&dlm_local_addr[0], dlm_config.ci_tcp_port, &addr_len);
-	return kernel_bind(sock, (struct sockaddr *)&dlm_local_addr[0],
+	return kernel_bind(sock, (struct sockaddr_unsized *)&dlm_local_addr[0],
 			   addr_len);
 }
 
 static const struct dlm_proto_ops dlm_tcp_ops = {
 	.name = "TCP",
 	.proto = IPPROTO_TCP,
-	.connect = dlm_tcp_connect,
+	.how = SHUT_WR,
 	.sockopts = dlm_tcp_sockopts,
 	.bind = dlm_tcp_bind,
 	.listen_validate = dlm_tcp_listen_validate,
@@ -1884,22 +1870,6 @@ static const struct dlm_proto_ops dlm_tcp_ops = {
 static int dlm_sctp_bind(struct socket *sock)
 {
 	return sctp_bind_addrs(sock, 0);
-}
-
-static int dlm_sctp_connect(struct connection *con, struct socket *sock,
-			    struct sockaddr *addr, int addr_len)
-{
-	int ret;
-
-	/*
-	 * Make kernel_connect() function return in specified time,
-	 * since O_NONBLOCK argument in connect() function does not work here,
-	 * then, we should restore the default value of this attribute.
-	 */
-	sock_set_sndtimeo(sock->sk, 5);
-	ret = kernel_connect(sock, addr, addr_len, 0);
-	sock_set_sndtimeo(sock->sk, 0);
-	return ret;
 }
 
 static int dlm_sctp_listen_validate(void)
@@ -1928,8 +1898,8 @@ static void dlm_sctp_sockopts(struct socket *sock)
 static const struct dlm_proto_ops dlm_sctp_ops = {
 	.name = "SCTP",
 	.proto = IPPROTO_SCTP,
+	.how = SHUT_RDWR,
 	.try_new_addr = true,
-	.connect = dlm_sctp_connect,
 	.sockopts = dlm_sctp_sockopts,
 	.bind = dlm_sctp_bind,
 	.listen_validate = dlm_sctp_listen_validate,

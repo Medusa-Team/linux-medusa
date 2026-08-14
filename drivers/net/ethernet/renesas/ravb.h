@@ -35,16 +35,6 @@
 /* Driver's parameters */
 #define RAVB_ALIGN	128
 
-/* Hardware time stamp */
-#define RAVB_TXTSTAMP_VALID	0x00000001	/* TX timestamp valid */
-#define RAVB_TXTSTAMP_ENABLED	0x00000010	/* Enable TX timestamping */
-
-#define RAVB_RXTSTAMP_VALID	0x00000001	/* RX timestamp valid */
-#define RAVB_RXTSTAMP_TYPE	0x00000006	/* RX type mask */
-#define RAVB_RXTSTAMP_TYPE_V2_L2_EVENT 0x00000002
-#define RAVB_RXTSTAMP_TYPE_ALL	0x00000006
-#define RAVB_RXTSTAMP_ENABLED	0x00000010	/* Enable RX timestamping */
-
 enum ravb_reg {
 	/* AVB-DMAC registers */
 	CCC	= 0x0000,
@@ -998,6 +988,8 @@ enum CSR1_BIT {
 	CSR1_TDHD	= 0x08000000,
 };
 
+#define CSR1_CSUM_ENABLE (CSR1_TTCP4 | CSR1_TUDP4 | CSR1_TTCP6 | CSR1_TUDP6)
+
 enum CSR2_BIT {
 	CSR2_RIP4	= 0x00000001,
 	CSR2_RTCP4	= 0x00000010,
@@ -1012,7 +1004,9 @@ enum CSR2_BIT {
 	CSR2_RDHD	= 0x08000000,
 };
 
-#define DBAT_ENTRY_NUM	22
+#define CSR2_CSUM_ENABLE (CSR2_RTCP4 | CSR2_RUDP4 | CSR2_RICMP4 | \
+			  CSR2_RTCP6 | CSR2_RUDP6 | CSR2_RICMP6)
+
 #define RX_QUEUE_OFFSET	4
 #define NUM_RX_QUEUE	2
 #define NUM_TX_QUEUE	2
@@ -1050,11 +1044,14 @@ struct ravb_hw_info {
 	size_t gstrings_size;
 	netdev_features_t net_hw_features;
 	netdev_features_t net_features;
+	netdev_features_t vlan_features;
 	int stats_len;
 	u32 tccr_mask;
+	u32 tx_max_frame_size;
 	u32 rx_max_frame_size;
 	u32 rx_buffer_size;
 	u32 rx_desc_size;
+	u32 dbat_entry_num;
 	unsigned aligned_tx: 1;
 	unsigned coalesce_irqs:1;	/* Needs software IRQ coalescing */
 
@@ -1107,8 +1104,8 @@ struct ravb_private {
 	u32 rx_over_errors;
 	u32 rx_fifo_errors;
 	struct net_device_stats stats[NUM_RX_QUEUE];
-	u32 tstamp_tx_ctrl;
-	u32 tstamp_rx_ctrl;
+	enum hwtstamp_tx_types tstamp_tx_ctrl;
+	enum hwtstamp_rx_filters tstamp_rx_ctrl;
 	struct list_head ts_skb_list;
 	u32 ts_skb_tag;
 	struct ravb_ptp ptp;

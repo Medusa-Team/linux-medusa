@@ -18,10 +18,12 @@
  * enum sfh_message_type - Query the SFH message type
  * @MT_HPD: Message ID to know the Human presence info from MP2 FW
  * @MT_ALS: Message ID to know the Ambient light info from MP2 FW
+ * @MT_SRA: Message ID to know the SRA data from MP2 FW
  */
 enum sfh_message_type {
 	MT_HPD,
 	MT_ALS,
+	MT_SRA,
 };
 
 /**
@@ -40,11 +42,45 @@ enum sfh_hpd_info {
  * struct amd_sfh_info - get HPD sensor info from MP2 FW
  * @ambient_light: Populates the ambient light information
  * @user_present: Populates the user presence information
+ * @platform_type: Operating modes (clamshell, flat, tent, etc.)
+ * @laptop_placement: Device states (ontable, onlap, outbag)
  */
 struct amd_sfh_info {
 	u32 ambient_light;
 	u8 user_present;
+	u32 platform_type;
+	u32 laptop_placement;
+};
+
+enum laptop_placement {
+	LP_UNKNOWN = 0,
+	ON_TABLE,
+	ON_LAP_MOTION,
+	IN_BAG,
+	OUT_OF_BAG,
+	LP_UNDEFINED,
+};
+
+/**
+ * struct amd_pmf_npu_metrics: Get NPU metrics data from PMF driver
+ * @npuclk_freq: NPU clock frequency [MHz]
+ * @npu_busy: NPU busy % [0-100]
+ * @npu_power: NPU power [mW]
+ * @mpnpuclk_freq: MPNPU [MHz]
+ * @npu_reads: NPU read bandwidth [MB/sec]
+ * @npu_writes: NPU write bandwidth [MB/sec]
+ */
+struct amd_pmf_npu_metrics {
+	u16 npuclk_freq;
+	u16 npu_busy[8];
+	u16 npu_power;
+	u16 mpnpuclk_freq;
+	u16 npu_reads;
+	u16 npu_writes;
 };
 
 int amd_get_sfh_info(struct amd_sfh_info *sfh_info, enum sfh_message_type op);
+
+/* AMD PMF and NPU interface */
+int amd_pmf_get_npu_data(struct amd_pmf_npu_metrics *info);
 #endif

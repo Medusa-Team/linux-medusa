@@ -16,7 +16,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/spi/spi.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #define AD7293_R1B				BIT(16)
 #define AD7293_R2B				BIT(17)
@@ -114,6 +114,7 @@
 #define AD7293_REG_DATA_RAW_MSK			GENMASK(15, 4)
 #define AD7293_REG_VINX_RANGE_GET_CH_MSK(x, ch)	(((x) >> (ch)) & 0x1)
 #define AD7293_REG_VINX_RANGE_SET_CH_MSK(x, ch)	(((x) & 0x1) << (ch))
+#define AD7293_GENERAL_ADC_REF_MSK			BIT(7)
 #define AD7293_CHIP_ID				0x18
 
 enum ad7293_ch_type {
@@ -141,8 +142,7 @@ struct ad7293_state {
 	/* Protect against concurrent accesses to the device, page selection and data content */
 	struct mutex lock;
 	struct gpio_desc *gpio_reset;
-	struct regulator *reg_avdd;
-	struct regulator *reg_vdrive;
+	bool vrefin_en;
 	u8 page_select;
 	u8 data[3] __aligned(IIO_DMA_MINALIGN);
 };
@@ -776,37 +776,37 @@ static int ad7293_reset(struct ad7293_state *st)
 
 static int ad7293_properties_parse(struct ad7293_state *st)
 {
-	struct spi_device *spi = st->spi;
+	struct device *dev = &st->spi->dev;
+	int ret;
 
-	st->gpio_reset = devm_gpiod_get_optional(&st->spi->dev, "reset",
+	ret = devm_regulator_get_enable(dev, "avdd");
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to enable AVDD\n");
+
+	ret = devm_regulator_get_enable(dev, "vdrive");
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to enable VDRIVE\n");
+
+	ret = devm_regulator_get_enable_optional(dev, "vrefin");
+	if (ret < 0 && ret != -ENODEV)
+		return dev_err_probe(dev, ret, "failed to enable VREFIN\n");
+
+	st->vrefin_en = ret != -ENODEV;
+
+	st->gpio_reset = devm_gpiod_get_optional(dev, "reset",
 						 GPIOD_OUT_HIGH);
 	if (IS_ERR(st->gpio_reset))
-		return dev_err_probe(&spi->dev, PTR_ERR(st->gpio_reset),
+		return dev_err_probe(dev, PTR_ERR(st->gpio_reset),
 				     "failed to get the reset GPIO\n");
 
-	st->reg_avdd = devm_regulator_get(&spi->dev, "avdd");
-	if (IS_ERR(st->reg_avdd))
-		return dev_err_probe(&spi->dev, PTR_ERR(st->reg_avdd),
-				     "failed to get the AVDD voltage\n");
-
-	st->reg_vdrive = devm_regulator_get(&spi->dev, "vdrive");
-	if (IS_ERR(st->reg_vdrive))
-		return dev_err_probe(&spi->dev, PTR_ERR(st->reg_vdrive),
-				     "failed to get the VDRIVE voltage\n");
-
 	return 0;
-}
-
-static void ad7293_reg_disable(void *data)
-{
-	regulator_disable(data);
 }
 
 static int ad7293_init(struct ad7293_state *st)
 {
 	int ret;
 	u16 chip_id;
-	struct spi_device *spi = st->spi;
+	struct device *dev = &st->spi->dev;
 
 	ret = ad7293_properties_parse(st);
 	if (ret)
@@ -816,57 +816,18 @@ static int ad7293_init(struct ad7293_state *st)
 	if (ret)
 		return ret;
 
-	ret = regulator_enable(st->reg_avdd);
-	if (ret) {
-		dev_err(&spi->dev,
-			"Failed to enable specified AVDD Voltage!\n");
-		return ret;
-	}
-
-	ret = devm_add_action_or_reset(&spi->dev, ad7293_reg_disable,
-				       st->reg_avdd);
-	if (ret)
-		return ret;
-
-	ret = regulator_enable(st->reg_vdrive);
-	if (ret) {
-		dev_err(&spi->dev,
-			"Failed to enable specified VDRIVE Voltage!\n");
-		return ret;
-	}
-
-	ret = devm_add_action_or_reset(&spi->dev, ad7293_reg_disable,
-				       st->reg_vdrive);
-	if (ret)
-		return ret;
-
-	ret = regulator_get_voltage(st->reg_avdd);
-	if (ret < 0) {
-		dev_err(&spi->dev, "Failed to read avdd regulator: %d\n", ret);
-		return ret;
-	}
-
-	if (ret > 5500000 || ret < 4500000)
-		return -EINVAL;
-
-	ret = regulator_get_voltage(st->reg_vdrive);
-	if (ret < 0) {
-		dev_err(&spi->dev,
-			"Failed to read vdrive regulator: %d\n", ret);
-		return ret;
-	}
-	if (ret > 5500000 || ret < 1700000)
-		return -EINVAL;
-
 	/* Check Chip ID */
 	ret = __ad7293_spi_read(st, AD7293_REG_DEVICE_ID, &chip_id);
 	if (ret)
 		return ret;
 
-	if (chip_id != AD7293_CHIP_ID) {
-		dev_err(&spi->dev, "Invalid Chip ID.\n");
-		return -EINVAL;
-	}
+	if (chip_id != AD7293_CHIP_ID)
+		return dev_err_probe(dev, -EINVAL, "Invalid Chip ID.\n");
+
+	if (!st->vrefin_en)
+		return __ad7293_spi_update_bits(st, AD7293_REG_GENERAL,
+						AD7293_GENERAL_ADC_REF_MSK,
+						AD7293_GENERAL_ADC_REF_MSK);
 
 	return 0;
 }
@@ -882,9 +843,10 @@ static int ad7293_probe(struct spi_device *spi)
 {
 	struct iio_dev *indio_dev;
 	struct ad7293_state *st;
+	struct device *dev = &spi->dev;
 	int ret;
 
-	indio_dev = devm_iio_device_alloc(&spi->dev, sizeof(*st));
+	indio_dev = devm_iio_device_alloc(dev, sizeof(*st));
 	if (!indio_dev)
 		return -ENOMEM;
 
@@ -904,18 +866,18 @@ static int ad7293_probe(struct spi_device *spi)
 	if (ret)
 		return ret;
 
-	return devm_iio_device_register(&spi->dev, indio_dev);
+	return devm_iio_device_register(dev, indio_dev);
 }
 
 static const struct spi_device_id ad7293_id[] = {
 	{ "ad7293", 0 },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, ad7293_id);
 
 static const struct of_device_id ad7293_of_match[] = {
 	{ .compatible = "adi,ad7293" },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, ad7293_of_match);
 

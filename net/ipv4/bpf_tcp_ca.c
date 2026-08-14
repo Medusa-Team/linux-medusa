@@ -14,10 +14,6 @@
 /* "extern" is to avoid sparse warning.  It is only used in bpf_struct_ops.c. */
 static struct bpf_struct_ops bpf_tcp_congestion_ops;
 
-static u32 unsupported_ops[] = {
-	offsetof(struct tcp_congestion_ops, get_info),
-};
-
 static const struct btf_type *tcp_sock_type;
 static u32 tcp_sock_id, sock_id;
 static const struct btf_type *tcp_congestion_ops_type;
@@ -43,18 +39,6 @@ static int bpf_tcp_ca_init(struct btf *btf)
 	tcp_congestion_ops_type = btf_type_by_id(btf, type_id);
 
 	return 0;
-}
-
-static bool is_unsupported(u32 member_offset)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(unsupported_ops); i++) {
-		if (member_offset == unsupported_ops[i])
-			return true;
-	}
-
-	return false;
 }
 
 static bool bpf_tcp_ca_is_valid_access(int off, int size,
@@ -137,7 +121,7 @@ static int bpf_tcp_ca_btf_struct_access(struct bpf_verifier_log *log,
 BPF_CALL_2(bpf_tcp_send_ack, struct tcp_sock *, tp, u32, rcv_nxt)
 {
 	/* bpf_tcp_ca prog cannot have NULL tp */
-	__tcp_send_ack((struct sock *)tp, rcv_nxt);
+	__tcp_send_ack((struct sock *)tp, rcv_nxt, 0);
 	return 0;
 }
 
@@ -184,7 +168,7 @@ bpf_tcp_ca_get_func_proto(enum bpf_func_id func_id,
 		 */
 		if (prog_ops_moff(prog) !=
 		    offsetof(struct tcp_congestion_ops, release))
-			return &bpf_sk_setsockopt_proto;
+			return &bpf_sk_setsockopt_nodelay_proto;
 		return NULL;
 	case BPF_FUNC_getsockopt:
 		/* Since get/setsockopt is usually expected to
@@ -251,15 +235,6 @@ static int bpf_tcp_ca_init_member(const struct btf_type *t,
 	return 0;
 }
 
-static int bpf_tcp_ca_check_member(const struct btf_type *t,
-				   const struct btf_member *member,
-				   const struct bpf_prog *prog)
-{
-	if (is_unsupported(__btf_member_bit_offset(t, member) / 8))
-		return -ENOTSUPP;
-	return 0;
-}
-
 static int bpf_tcp_ca_reg(void *kdata, struct bpf_link *link)
 {
 	return tcp_register_congestion_control(kdata);
@@ -294,6 +269,10 @@ static void bpf_tcp_ca_set_state(struct sock *sk, u8 new_state)
 }
 
 static void bpf_tcp_ca_cwnd_event(struct sock *sk, enum tcp_ca_event ev)
+{
+}
+
+static void bpf_tcp_ca_cwnd_event_tx_start(struct sock *sk)
 {
 }
 
@@ -338,6 +317,7 @@ static struct tcp_congestion_ops __bpf_ops_tcp_congestion_ops = {
 	.cong_avoid = bpf_tcp_ca_cong_avoid,
 	.set_state = bpf_tcp_ca_set_state,
 	.cwnd_event = bpf_tcp_ca_cwnd_event,
+	.cwnd_event_tx_start = bpf_tcp_ca_cwnd_event_tx_start,
 	.in_ack_event = bpf_tcp_ca_in_ack_event,
 	.pkts_acked = bpf_tcp_ca_pkts_acked,
 	.min_tso_segs = bpf_tcp_ca_min_tso_segs,
@@ -354,7 +334,6 @@ static struct bpf_struct_ops bpf_tcp_congestion_ops = {
 	.reg = bpf_tcp_ca_reg,
 	.unreg = bpf_tcp_ca_unreg,
 	.update = bpf_tcp_ca_update,
-	.check_member = bpf_tcp_ca_check_member,
 	.init_member = bpf_tcp_ca_init_member,
 	.init = bpf_tcp_ca_init,
 	.validate = bpf_tcp_ca_validate,

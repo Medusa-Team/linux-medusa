@@ -120,22 +120,31 @@
 bool afs_check_validity(const struct afs_vnode *vnode)
 {
 	const struct afs_volume *volume = vnode->volume;
+	enum afs_vnode_invalid_trace trace = afs_vnode_valid_trace;
+	time64_t cb_expires_at = atomic64_read(&vnode->cb_expires_at);
 	time64_t deadline = ktime_get_real_seconds() + 10;
 
 	if (test_bit(AFS_VNODE_DELETED, &vnode->flags))
 		return true;
 
-	if (atomic_read(&volume->cb_v_check) != atomic_read(&volume->cb_v_break) ||
-	    atomic64_read(&vnode->cb_expires_at)  <= deadline ||
-	    volume->cb_expires_at <= deadline ||
-	    vnode->cb_ro_snapshot != atomic_read(&volume->cb_ro_snapshot) ||
-	    vnode->cb_scrub	  != atomic_read(&volume->cb_scrub) ||
-	    test_bit(AFS_VNODE_ZAP_DATA, &vnode->flags)) {
-		_debug("inval");
-		return false;
-	}
-
-	return true;
+	if (atomic_read(&volume->cb_v_check) != atomic_read(&volume->cb_v_break))
+		trace = afs_vnode_invalid_trace_cb_v_break;
+	else if (cb_expires_at == AFS_NO_CB_PROMISE)
+		trace = afs_vnode_invalid_trace_no_cb_promise;
+	else if (cb_expires_at <= deadline)
+		trace = afs_vnode_invalid_trace_expired;
+	else if (volume->cb_expires_at <= deadline)
+		trace = afs_vnode_invalid_trace_vol_expired;
+	else if (vnode->cb_ro_snapshot != atomic_read(&volume->cb_ro_snapshot))
+		trace = afs_vnode_invalid_trace_cb_ro_snapshot;
+	else if (vnode->cb_scrub != atomic_read(&volume->cb_scrub))
+		trace = afs_vnode_invalid_trace_cb_scrub;
+	else if (test_bit(AFS_VNODE_ZAP_DATA, &vnode->flags))
+		trace = afs_vnode_invalid_trace_zap_data;
+	else
+		return true;
+	trace_afs_vnode_invalid(vnode, trace);
+	return false;
 }
 
 /*
@@ -456,11 +465,17 @@ int afs_validate(struct afs_vnode *vnode, struct key *key)
 	vnode->cb_ro_snapshot = cb_ro_snapshot;
 	vnode->cb_scrub = cb_scrub;
 
-	/* if the vnode's data version number changed then its contents are
-	 * different */
+	/* If the vnode's data version number changed then its contents are
+	 * different.  Note that afs_apply_status() doesn't set ZAP_DATA on
+	 * directories.
+	 */
 	zap |= test_and_clear_bit(AFS_VNODE_ZAP_DATA, &vnode->flags);
-	if (zap)
-		afs_zap_data(vnode);
+	if (zap) {
+		if (S_ISREG(vnode->netfs.inode.i_mode))
+			afs_zap_data(vnode);
+		else if (S_ISLNK(vnode->netfs.inode.i_mode))
+			afs_invalidate_symlink(vnode);
+	}
 	up_write(&vnode->validate_lock);
 	_leave(" = 0");
 	return 0;

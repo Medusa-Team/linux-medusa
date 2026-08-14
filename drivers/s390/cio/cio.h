@@ -19,7 +19,7 @@ struct pmcw {
 	u32 intparm;		/* interruption parameter */
 	u32 qf	 : 1;		/* qdio facility */
 	u32 w	 : 1;
-	u32 isc  : 3;		/* interruption sublass */
+	u32 isc  : 3;		/* interruption subclass */
 	u32 res5 : 3;		/* reserved zeros */
 	u32 ena  : 1;		/* enabled */
 	u32 lm	 : 2;		/* limit mode */
@@ -103,11 +103,6 @@ struct subchannel {
 	struct work_struct todo_work;
 	struct schib_config config;
 	u64 dma_mask;
-	/*
-	 * Driver name to force a match.  Do not set directly, because core
-	 * frees it.  Use driver_set_override() to set or clear it.
-	 */
-	const char *driver_override;
 } __attribute__ ((aligned(8)));
 
 DECLARE_PER_CPU_ALIGNED(struct irb, cio_irb);

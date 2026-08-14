@@ -5,7 +5,7 @@
 #include "bpf_experimental.h"
 #include <bpf/bpf_helpers.h>
 #include "bpf_misc.h"
-#include "../bpf_testmod/bpf_testmod_kfunc.h"
+#include "../test_kmods/bpf_testmod_kfunc.h"
 
 char _license[] SEC("license") = "GPL";
 
@@ -186,4 +186,21 @@ long test_call_lru_sleepable(void *ctx)
 	int key = 4;
 
 	return test_elem_callback(&lru, &key, wq_callback);
+}
+
+SEC("tc")
+long test_map_no_btf(void *ctx)
+{
+	struct elem *val;
+	struct bpf_wq *wq;
+	int key = 42;
+
+	val = bpf_map_lookup_elem(&array, &key);
+	if (!val)
+		return -2;
+
+	wq = &val->w;
+	if (bpf_wq_init(wq, &array, 0) != 0)
+		return -3;
+	return 0;
 }

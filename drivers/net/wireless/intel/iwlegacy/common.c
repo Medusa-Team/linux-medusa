@@ -907,8 +907,7 @@ il_init_channel_map(struct il_priv *il)
 	D_EEPROM("Parsing data for %d channels.\n", il->channel_count);
 
 	il->channel_info =
-	    kcalloc(il->channel_count, sizeof(struct il_channel_info),
-		    GFP_KERNEL);
+	    kzalloc_objs(struct il_channel_info, il->channel_count);
 	if (!il->channel_info) {
 		IL_ERR("Could not allocate channel_info\n");
 		il->channel_count = 0;
@@ -2969,9 +2968,7 @@ il_tx_queue_alloc(struct il_priv *il, struct il_tx_queue *txq, u32 id)
 	/* Driver ilate data, only for Tx (not command) queues,
 	 * not shared with device. */
 	if (id != il->cmd_queue) {
-		txq->skbs = kcalloc(TFD_QUEUE_SIZE_MAX,
-				    sizeof(struct sk_buff *),
-				    GFP_KERNEL);
+		txq->skbs = kzalloc_objs(struct sk_buff *, TFD_QUEUE_SIZE_MAX);
 		if (!txq->skbs) {
 			IL_ERR("Fail to alloc skbs\n");
 			goto error;
@@ -3024,9 +3021,9 @@ il_tx_queue_init(struct il_priv *il, u32 txq_id)
 	}
 
 	txq->meta =
-	    kcalloc(actual_slots, sizeof(struct il_cmd_meta), GFP_KERNEL);
+	    kzalloc_objs(struct il_cmd_meta, actual_slots);
 	txq->cmd =
-	    kcalloc(actual_slots, sizeof(struct il_device_cmd *), GFP_KERNEL);
+	    kzalloc_objs(struct il_device_cmd *, actual_slots);
 
 	if (!txq->meta || !txq->cmd)
 		goto out_free_arrays;
@@ -3122,6 +3119,7 @@ il_enqueue_hcmd(struct il_priv *il, struct il_host_cmd *cmd)
 	struct il_cmd_meta *out_meta;
 	dma_addr_t phys_addr;
 	unsigned long flags;
+	u8 *out_payload;
 	u32 idx;
 	u16 fix_size;
 
@@ -3157,6 +3155,16 @@ il_enqueue_hcmd(struct il_priv *il, struct il_host_cmd *cmd)
 	out_cmd = txq->cmd[idx];
 	out_meta = &txq->meta[idx];
 
+	/* The payload is in the same place in regular and huge
+	 * command buffers, but we need to let the compiler know when
+	 * we're using a larger payload buffer to avoid "field-
+	 * spanning write" warnings at run-time for huge commands.
+	 */
+	if (cmd->flags & CMD_SIZE_HUGE)
+		out_payload = ((struct il_device_cmd_huge *)out_cmd)->cmd.payload;
+	else
+		out_payload = out_cmd->cmd.payload;
+
 	if (WARN_ON(out_meta->flags & CMD_MAPPED)) {
 		spin_unlock_irqrestore(&il->hcmd_lock, flags);
 		return -ENOSPC;
@@ -3170,7 +3178,7 @@ il_enqueue_hcmd(struct il_priv *il, struct il_host_cmd *cmd)
 		out_meta->callback = cmd->callback;
 
 	out_cmd->hdr.cmd = cmd->id;
-	memcpy(&out_cmd->cmd.payload, cmd->data, cmd->len);
+	memcpy(out_payload, cmd->data, cmd->len);
 
 	/* At this point, the out_cmd now has all of the incoming cmd
 	 * information */
@@ -3433,12 +3441,11 @@ il_init_geos(struct il_priv *il)
 	}
 
 	channels =
-	    kcalloc(il->channel_count, sizeof(struct ieee80211_channel),
-		    GFP_KERNEL);
+	    kzalloc_objs(struct ieee80211_channel, il->channel_count);
 	if (!channels)
 		return -ENOMEM;
 
-	rates = kcalloc(RATE_COUNT_LEGACY, sizeof(*rates), GFP_KERNEL);
+	rates = kzalloc_objs(*rates, RATE_COUNT_LEGACY);
 	if (!rates) {
 		kfree(channels);
 		return -ENOMEM;
@@ -3903,37 +3910,6 @@ il_set_rxon_ht(struct il_priv *il, struct il_ht_config *ht_conf)
 	_il_set_rxon_ht(il, ht_conf);
 }
 EXPORT_SYMBOL(il_set_rxon_ht);
-
-/* Return valid, unused, channel for a passive scan to reset the RF */
-u8
-il_get_single_channel_number(struct il_priv *il, enum nl80211_band band)
-{
-	const struct il_channel_info *ch_info;
-	int i;
-	u8 channel = 0;
-	u8 min, max;
-
-	if (band == NL80211_BAND_5GHZ) {
-		min = 14;
-		max = il->channel_count;
-	} else {
-		min = 0;
-		max = 14;
-	}
-
-	for (i = min; i < max; i++) {
-		channel = il->channel_info[i].channel;
-		if (channel == le16_to_cpu(il->staging.channel))
-			continue;
-
-		ch_info = il_get_channel_info(il, band, channel);
-		if (il_is_channel_valid(ch_info))
-			break;
-	}
-
-	return channel;
-}
-EXPORT_SYMBOL(il_get_single_channel_number);
 
 /*
  * il_set_rxon_channel - Set the band and channel values in staging RXON
@@ -4631,9 +4607,7 @@ il_alloc_txq_mem(struct il_priv *il)
 {
 	if (!il->txq)
 		il->txq =
-		    kcalloc(il->cfg->num_of_queues,
-			    sizeof(struct il_tx_queue),
-			    GFP_KERNEL);
+		    kzalloc_objs(struct il_tx_queue, il->cfg->num_of_queues);
 	if (!il->txq) {
 		IL_ERR("Not enough memory for txq\n");
 		return -ENOMEM;
@@ -4824,7 +4798,7 @@ il_check_stuck_queue(struct il_priv *il, int cnt)
 void
 il_bg_watchdog(struct timer_list *t)
 {
-	struct il_priv *il = from_timer(il, t, watchdog);
+	struct il_priv *il = timer_container_of(il, t, watchdog);
 	int cnt;
 	unsigned long timeout;
 
@@ -4862,7 +4836,7 @@ il_setup_watchdog(struct il_priv *il)
 		mod_timer(&il->watchdog,
 			  jiffies + msecs_to_jiffies(IL_WD_TICK(timeout)));
 	else
-		del_timer(&il->watchdog);
+		timer_delete(&il->watchdog);
 }
 EXPORT_SYMBOL(il_setup_watchdog);
 
@@ -4962,6 +4936,8 @@ il_pci_resume(struct device *device)
 	 */
 	pci_write_config_byte(pdev, PCI_CFG_RETRY_TIMEOUT, 0x00);
 
+	_il_wr(il, CSR_INT, 0xffffffff);
+	_il_wr(il, CSR_FH_INT_STATUS, 0xffffffff);
 	il_enable_interrupts(il);
 
 	if (!(_il_rd(il, CSR_GP_CNTRL) & CSR_GP_CNTRL_REG_FLAG_HW_RF_KILL_SW))
@@ -5008,7 +4984,7 @@ il_update_qos(struct il_priv *il)
  * il_mac_config - mac80211 config callback
  */
 int
-il_mac_config(struct ieee80211_hw *hw, u32 changed)
+il_mac_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 {
 	struct il_priv *il = hw->priv;
 	const struct il_channel_info *ch_info;

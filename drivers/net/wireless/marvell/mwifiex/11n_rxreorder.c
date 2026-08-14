@@ -206,7 +206,7 @@ mwifiex_del_rx_reorder_entry(struct mwifiex_private *priv,
 	start_win = (tbl->start_win + tbl->win_size) & (MAX_TID_VALUE - 1);
 	mwifiex_11n_dispatch_pkt_until_start_win(priv, tbl, start_win);
 
-	del_timer_sync(&tbl->timer_context.timer);
+	timer_delete_sync(&tbl->timer_context.timer);
 	tbl->timer_context.timer_is_set = false;
 
 	spin_lock_bh(&priv->rx_reorder_tbl_lock);
@@ -300,7 +300,7 @@ static void
 mwifiex_flush_data(struct timer_list *t)
 {
 	struct reorder_tmr_cnxt *ctx =
-		from_timer(ctx, t, timer);
+		timer_container_of(ctx, t, timer);
 	int start_win, seq_num;
 
 	ctx->timer_is_set = false;
@@ -344,7 +344,7 @@ mwifiex_11n_create_rx_reorder_tbl(struct mwifiex_private *priv, u8 *ta,
 		return;
 	}
 	/* if !tbl then create one */
-	new_node = kzalloc(sizeof(struct mwifiex_rx_reorder_tbl), GFP_KERNEL);
+	new_node = kzalloc_obj(struct mwifiex_rx_reorder_tbl);
 	if (!new_node)
 		return;
 
@@ -810,8 +810,6 @@ void mwifiex_update_rxreor_flags(struct mwifiex_adapter *adapter, u8 flags)
 
 	for (i = 0; i < adapter->priv_num; i++) {
 		priv = adapter->priv[i];
-		if (!priv)
-			continue;
 
 		spin_lock_bh(&priv->rx_reorder_tbl_lock);
 		list_for_each_entry(tbl, &priv->rx_reorder_tbl_ptr, list)
@@ -827,15 +825,13 @@ void mwifiex_update_rxreor_flags(struct mwifiex_adapter *adapter, u8 flags)
 static void mwifiex_update_ampdu_rxwinsize(struct mwifiex_adapter *adapter,
 					   bool coex_flag)
 {
-	u8 i;
+	u8 i, j;
 	u32 rx_win_size;
 	struct mwifiex_private *priv;
 
 	dev_dbg(adapter->dev, "Update rxwinsize %d\n", coex_flag);
 
 	for (i = 0; i < adapter->priv_num; i++) {
-		if (!adapter->priv[i])
-			continue;
 		priv = adapter->priv[i];
 		rx_win_size = priv->add_ba_param.rx_win_size;
 		if (coex_flag) {
@@ -867,8 +863,8 @@ static void mwifiex_update_ampdu_rxwinsize(struct mwifiex_adapter *adapter,
 		if (rx_win_size != priv->add_ba_param.rx_win_size) {
 			if (!priv->media_connected)
 				continue;
-			for (i = 0; i < MAX_NUM_TID; i++)
-				mwifiex_11n_delba(priv, i);
+			for (j = 0; j < MAX_NUM_TID; j++)
+				mwifiex_11n_delba(priv, j);
 		}
 	}
 }
@@ -882,17 +878,16 @@ void mwifiex_coex_ampdu_rxwinsize(struct mwifiex_adapter *adapter)
 	u8 count = 0;
 
 	for (i = 0; i < adapter->priv_num; i++) {
-		if (adapter->priv[i]) {
-			priv = adapter->priv[i];
-			if (GET_BSS_ROLE(priv) == MWIFIEX_BSS_ROLE_STA) {
-				if (priv->media_connected)
-					count++;
-			}
-			if (GET_BSS_ROLE(priv) == MWIFIEX_BSS_ROLE_UAP) {
-				if (priv->bss_started)
-					count++;
-			}
+		priv = adapter->priv[i];
+		if (GET_BSS_ROLE(priv) == MWIFIEX_BSS_ROLE_STA) {
+			if (priv->media_connected)
+				count++;
 		}
+		if (GET_BSS_ROLE(priv) == MWIFIEX_BSS_ROLE_UAP) {
+			if (priv->bss_started)
+				count++;
+		}
+
 		if (count >= MWIFIEX_BSS_COEX_COUNT)
 			break;
 	}

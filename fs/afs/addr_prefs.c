@@ -48,7 +48,7 @@ static int afs_split_string(char **pbuf, char *strv[], unsigned int maxstrv)
 		strv[count++] = p;
 
 		/* Skip over word */
-		while (!isspace(*p))
+		while (!isspace(*p) && *p)
 			p++;
 		if (!*p)
 			break;
@@ -401,7 +401,7 @@ int afs_proc_addr_prefs_write(struct file *file, char *buf, size_t size)
 	max_prefs = min_t(size_t, (psize - sizeof(*old)) / sizeof(old->prefs[0]), 255);
 
 	ret = -ENOMEM;
-	preflist = kmalloc(struct_size(preflist, prefs, max_prefs), GFP_KERNEL);
+	preflist = kmalloc_flex(*preflist, prefs, max_prefs);
 	if (!preflist)
 		goto done;
 
@@ -413,8 +413,10 @@ int afs_proc_addr_prefs_write(struct file *file, char *buf, size_t size)
 
 	do {
 		argc = afs_split_string(&buf, argv, ARRAY_SIZE(argv));
-		if (argc < 0)
-			return argc;
+		if (argc < 0) {
+			ret = argc;
+			goto done;
+		}
 		if (argc < 2)
 			goto inval;
 

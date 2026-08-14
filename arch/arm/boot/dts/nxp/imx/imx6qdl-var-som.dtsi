@@ -9,9 +9,6 @@
  * Copyright 2022 Bootlin
  */
 
-/dts-v1/;
-
-#include "imx6q.dtsi"
 #include <dt-bindings/clock/imx6qdl-clock.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/sound/fsl-imx-audmux.h>
@@ -436,7 +433,7 @@
 		>;
 	};
 
-	pinctrl_usdhc3_100mhz: usdhc3grp100mhzgrp {
+	pinctrl_usdhc3_100mhz: usdhc3-100mhz-grp {
 		fsl,pins = <
 			MX6QDL_PAD_SD3_CMD__SD3_CMD	0x170B9
 			MX6QDL_PAD_SD3_CLK__SD3_CLK	0x100B9
@@ -451,7 +448,7 @@
 		>;
 	};
 
-	pinctrl_usdhc3_200mhz: usdhc3grp200mhzgrp {
+	pinctrl_usdhc3_200mhz: usdhc3-200mhz-grp {
 		fsl,pins = <
 			MX6QDL_PAD_SD3_CMD__SD3_CMD	0x170F9
 			MX6QDL_PAD_SD3_CLK__SD3_CLK	0x100F9
@@ -529,11 +526,11 @@
 };
 
 &usbphy1 {
-	fsl,tx-d-cal = <0x5>;
+	fsl,tx-d-cal = <106>;
 };
 
 &usbphy2 {
-	fsl,tx-d-cal = <0x5>;
+	fsl,tx-d-cal = <106>;
 };
 
 &usdhc1 {

@@ -24,6 +24,7 @@
 
 #include "ext2.h"
 #include <linux/buffer_head.h>
+#include <linux/filelock.h>
 #include <linux/pagemap.h>
 #include <linux/swap.h>
 #include <linux/iversion.h>
@@ -87,7 +88,7 @@ static void ext2_commit_chunk(struct folio *folio, loff_t pos, unsigned len)
 	struct inode *dir = mapping->host;
 
 	inode_inc_iversion(dir);
-	block_write_end(NULL, mapping, pos, len, len, &folio->page, NULL);
+	block_write_end(pos, len, len, folio);
 
 	if (pos+len > dir->i_size) {
 		i_size_write(dir, pos+len);
@@ -140,7 +141,7 @@ out:
 Ebadsize:
 	if (!quiet)
 		ext2_error(sb, __func__,
-			"size of directory #%lu is not a multiple "
+			"size of directory #%llu is not a multiple "
 			"of chunk size", dir->i_ino);
 	goto fail;
 Eshort:
@@ -159,7 +160,7 @@ Einumber:
 	error = "inode out of bounds";
 bad_entry:
 	if (!quiet)
-		ext2_error(sb, __func__, "bad entry in directory #%lu: : %s - "
+		ext2_error(sb, __func__, "bad entry in directory #%llu: : %s - "
 			"offset=%llu, inode=%lu, rec_len=%d, name_len=%d",
 			dir->i_ino, error, folio_pos(folio) + offs,
 			(unsigned long) le32_to_cpu(p->inode),
@@ -169,7 +170,7 @@ Eend:
 	if (!quiet) {
 		p = (ext2_dirent *)(kaddr + offs);
 		ext2_error(sb, "ext2_check_folio",
-			"entry in directory #%lu spans the page boundary"
+			"entry in directory #%llu spans the page boundary"
 			"offset=%llu, inode=%lu",
 			dir->i_ino, folio_pos(folio) + offs,
 			(unsigned long) le32_to_cpu(p->inode));
@@ -263,7 +264,7 @@ ext2_readdir(struct file *file, struct dir_context *ctx)
 	unsigned long n = pos >> PAGE_SHIFT;
 	unsigned long npages = dir_pages(inode);
 	unsigned chunk_mask = ~(ext2_chunk_size(inode)-1);
-	bool need_revalidate = !inode_eq_iversion(inode, file->f_version);
+	bool need_revalidate = !inode_eq_iversion(inode, *(u64 *)file->private_data);
 	bool has_filetype;
 
 	if (pos > inode->i_size - EXT2_DIR_REC_LEN(1))
@@ -280,7 +281,7 @@ ext2_readdir(struct file *file, struct dir_context *ctx)
 
 		if (IS_ERR(kaddr)) {
 			ext2_error(sb, __func__,
-				   "bad page in #%lu",
+				   "bad page in #%llu",
 				   inode->i_ino);
 			ctx->pos += PAGE_SIZE - offset;
 			return PTR_ERR(kaddr);
@@ -290,7 +291,7 @@ ext2_readdir(struct file *file, struct dir_context *ctx)
 				offset = ext2_validate_entry(kaddr, offset, chunk_mask);
 				ctx->pos = (n<<PAGE_SHIFT) + offset;
 			}
-			file->f_version = inode_query_iversion(inode);
+			*(u64 *)file->private_data = inode_query_iversion(inode);
 			need_revalidate = false;
 		}
 		de = (ext2_dirent *)(kaddr+offset);
@@ -382,7 +383,7 @@ struct ext2_dir_entry_2 *ext2_find_entry (struct inode *dir,
 		/* next folio is past the blocks we've got */
 		if (unlikely(n > (dir->i_blocks >> (PAGE_SHIFT - 9)))) {
 			ext2_error(dir->i_sb, __func__,
-				"dir %lu size %lld exceeds block count %llu",
+				"dir %llu size %lld exceeds block count %llu",
 				dir->i_ino, dir->i_size,
 				(unsigned long long)dir->i_blocks);
 			goto out;
@@ -434,7 +435,7 @@ int ext2_inode_by_name(struct inode *dir, const struct qstr *child, ino_t *ino)
 
 static int ext2_prepare_chunk(struct folio *folio, loff_t pos, unsigned len)
 {
-	return __block_write_begin(&folio->page, pos, len, ext2_get_block);
+	return __block_write_begin(folio, pos, len, ext2_get_block);
 }
 
 static int ext2_handle_dirsync(struct inode *dir)
@@ -703,8 +704,30 @@ not_empty:
 	return 0;
 }
 
+static int ext2_dir_open(struct inode *inode, struct file *file)
+{
+	file->private_data = kzalloc(sizeof(u64), GFP_KERNEL);
+	if (!file->private_data)
+		return -ENOMEM;
+	return 0;
+}
+
+static int ext2_dir_release(struct inode *inode, struct file *file)
+{
+	kfree(file->private_data);
+	return 0;
+}
+
+static loff_t ext2_dir_llseek(struct file *file, loff_t offset, int whence)
+{
+	return generic_llseek_cookie(file, offset, whence,
+				     (u64 *)file->private_data);
+}
+
 const struct file_operations ext2_dir_operations = {
-	.llseek		= generic_file_llseek,
+	.open		= ext2_dir_open,
+	.release	= ext2_dir_release,
+	.llseek		= ext2_dir_llseek,
 	.read		= generic_read_dir,
 	.iterate_shared	= ext2_readdir,
 	.unlocked_ioctl = ext2_ioctl,
@@ -712,4 +735,5 @@ const struct file_operations ext2_dir_operations = {
 	.compat_ioctl	= ext2_compat_ioctl,
 #endif
 	.fsync		= ext2_fsync,
+	.setlease	= generic_setlease,
 };

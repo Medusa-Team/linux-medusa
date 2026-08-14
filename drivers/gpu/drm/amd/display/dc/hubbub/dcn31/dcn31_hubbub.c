@@ -750,7 +750,8 @@ static bool hubbub31_program_watermarks(
 	REG_UPDATE(DCHUBBUB_ARB_DF_REQ_OUTSTAND,
 			DCHUBBUB_ARB_MIN_REQ_OUTSTAND, 0x1FF);*/
 
-	hubbub1_allow_self_refresh_control(hubbub, !hubbub->ctx->dc->debug.disable_stutter);
+	if (safe_to_lower || hubbub->ctx->dc->debug.disable_stutter)
+		hubbub1_allow_self_refresh_control(hubbub, !hubbub->ctx->dc->debug.disable_stutter);
 	return wm_pending;
 }
 
@@ -932,8 +933,8 @@ int hubbub31_init_dchub_sys_ctx(struct hubbub *hubbub,
 
 		dcn20_vmid_setup(&hubbub2->vmid[15], &phys_config);
 	}
-
-	dcn21_dchvm_init(hubbub);
+	if (hubbub->funcs->dchvm_init)
+		hubbub->funcs->dchvm_init(hubbub);
 
 	return NUM_VMID;
 }
@@ -942,6 +943,7 @@ static void hubbub31_get_dchub_ref_freq(struct hubbub *hubbub,
 		unsigned int dccg_ref_freq_inKhz,
 		unsigned int *dchub_ref_freq_inKhz)
 {
+	(void)dccg_ref_freq_inKhz;
 	struct dcn20_hubbub *hubbub2 = TO_DCN20_HUBBUB(hubbub);
 	uint32_t ref_div = 0;
 	uint32_t ref_en = 0;
@@ -1070,6 +1072,8 @@ static const struct hubbub_funcs hubbub31_funcs = {
 	.program_compbuf_size = dcn31_program_compbuf_size,
 	.init_crb = dcn31_init_crb,
 	.hubbub_read_state = hubbub2_read_state,
+	.hubbub_read_reg_state = hubbub3_read_reg_state,
+	.dchvm_init  = dcn21_dchvm_init
 };
 
 void hubbub31_construct(struct dcn20_hubbub *hubbub31,

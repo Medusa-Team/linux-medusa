@@ -98,6 +98,11 @@ void brcmf_configure_arp_nd_offload(struct brcmf_if *ifp, bool enable)
 	s32 err;
 	u32 mode;
 
+	if (enable && brcmf_is_apmode_operating(ifp->drvr->wiphy)) {
+		brcmf_dbg(TRACE, "Skip ARP/ND offload enable when soft AP is running\n");
+		return;
+	}
+
 	if (enable)
 		mode = BRCMF_ARP_OL_AGENT | BRCMF_ARP_OL_PEER_AUTO_REPLY;
 	else
@@ -327,8 +332,8 @@ static netdev_tx_t brcmf_netdev_start_xmit(struct sk_buff *skb,
 	if (skb_headroom(skb) < drvr->hdrlen || skb_header_cloned(skb)) {
 		head_delta = max_t(int, drvr->hdrlen - skb_headroom(skb), 0);
 
-		brcmf_dbg(INFO, "%s: insufficient headroom (%d)\n",
-			  brcmf_ifname(ifp), head_delta);
+		brcmf_dbg(INFO, "%s: %s headroom\n", brcmf_ifname(ifp),
+			  head_delta ? "insufficient" : "unmodifiable");
 		atomic_inc(&drvr->bus_if->stats.pktcowed);
 		ret = pskb_expand_head(skb, ALIGN(head_delta, NET_SKB_PAD), 0,
 				       GFP_ATOMIC);
@@ -540,6 +545,11 @@ void brcmf_txfinalize(struct brcmf_if *ifp, struct sk_buff *txp, bool success)
 	struct ethhdr *eh;
 	u16 type;
 
+	if (!ifp) {
+		brcmu_pkt_buf_free_skb(txp);
+		return;
+	}
+
 	eh = (struct ethhdr *)(txp->data);
 	type = ntohs(eh->h_proto);
 
@@ -664,7 +674,7 @@ int brcmf_net_attach(struct brcmf_if *ifp, bool locked)
 
 	netif_carrier_off(ndev);
 
-	ndev->priv_destructor = brcmf_cfg80211_free_netdev;
+	ndev->priv_destructor = brcmf_cfg80211_free_vif;
 	brcmf_dbg(INFO, "%s: Broadcom Dongle Host Driver\n", ndev->name);
 	return 0;
 
@@ -682,7 +692,7 @@ void brcmf_net_detach(struct net_device *ndev, bool locked)
 		else
 			unregister_netdev(ndev);
 	} else {
-		brcmf_cfg80211_free_netdev(ndev);
+		brcmf_cfg80211_free_vif(ndev);
 		free_netdev(ndev);
 	}
 }
@@ -691,7 +701,7 @@ static int brcmf_net_mon_open(struct net_device *ndev)
 {
 	struct brcmf_if *ifp = netdev_priv(ndev);
 	struct brcmf_pub *drvr = ifp->drvr;
-	u32 monitor = 0;
+	u32 monitor;
 	int err;
 
 	brcmf_dbg(TRACE, "Enter\n");
@@ -869,7 +879,7 @@ struct brcmf_if *brcmf_add_if(struct brcmf_pub *drvr, s32 bsscfgidx, s32 ifidx,
 	if (!drvr->settings->p2p_enable && is_p2pdev) {
 		/* this is P2P_DEVICE interface */
 		brcmf_dbg(INFO, "allocate non-netdev interface\n");
-		ifp = kzalloc(sizeof(*ifp), GFP_KERNEL);
+		ifp = kzalloc_obj(*ifp);
 		if (!ifp)
 			return ERR_PTR(-ENOMEM);
 	} else {
@@ -1184,7 +1194,6 @@ static ssize_t bus_reset_write(struct file *file, const char __user *user_buf,
 
 static const struct file_operations bus_reset_fops = {
 	.open	= simple_open,
-	.llseek	= no_llseek,
 	.write	= bus_reset_write,
 };
 
@@ -1358,6 +1367,8 @@ int brcmf_attach(struct device *dev)
 	/* Attach to events important for core code */
 	brcmf_fweh_register(drvr, BRCMF_E_PSM_WATCHDOG,
 			    brcmf_psm_watchdog_notify);
+
+	brcmf_fwvid_get_cfg80211_ops(drvr);
 
 	ret = brcmf_bus_started(drvr, drvr->ops);
 	if (ret != 0) {

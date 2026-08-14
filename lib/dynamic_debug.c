@@ -95,6 +95,7 @@ static const struct { unsigned flag:8; char opt_char; } opt_array[] = {
 	{ _DPRINTK_FLAGS_INCL_SOURCENAME, 's' },
 	{ _DPRINTK_FLAGS_INCL_LINENO, 'l' },
 	{ _DPRINTK_FLAGS_INCL_TID, 't' },
+	{ _DPRINTK_FLAGS_INCL_STACK, 'd' },
 	{ _DPRINTK_FLAGS_NONE, '_' },
 };
 
@@ -1147,7 +1148,7 @@ static int ddebug_proc_show(struct seq_file *m, void *p)
 		   iter->table->mod_name, dp->function,
 		   ddebug_describe_flags(dp->flags, &flags));
 	seq_escape_str(m, dp->format, ESCAPE_SPACE, "\t\r\n\"");
-	seq_puts(m, "\"");
+	seq_putc(m, '"');
 
 	if (dp->class_id != _DPRINTK_CLASS_DFLT) {
 		class = ddebug_class_name(iter, dp);
@@ -1156,7 +1157,7 @@ static int ddebug_proc_show(struct seq_file *m, void *p)
 		else
 			seq_printf(m, " class unknown, _id:%d", dp->class_id);
 	}
-	seq_puts(m, "\n");
+	seq_putc(m, '\n');
 
 	return 0;
 }
@@ -1240,7 +1241,7 @@ static int ddebug_add_module(struct _ddebug_info *di, const char *modname)
 		return 0;
 	}
 
-	dt = kzalloc(sizeof(*dt), GFP_KERNEL);
+	dt = kzalloc_obj(*dt);
 	if (dt == NULL) {
 		pr_err("error adding module: %s\n", modname);
 		return -ENOMEM;

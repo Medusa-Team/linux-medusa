@@ -54,15 +54,11 @@
 #include <asm/uv/uv.h>
 
 static unsigned long efi_systab_phys __initdata;
-static unsigned long prop_phys = EFI_INVALID_TABLE_ADDR;
-static unsigned long uga_phys = EFI_INVALID_TABLE_ADDR;
 static unsigned long efi_runtime, efi_nr_tables;
 
 unsigned long efi_fw_vendor, efi_config_table;
 
 static const efi_config_table_type_t arch_tables[] __initconst = {
-	{EFI_PROPERTIES_TABLE_GUID,	&prop_phys,		"PROP"		},
-	{UGA_IO_PROTOCOL_GUID,		&uga_phys,		"UGA"		},
 #ifdef CONFIG_X86_UV
 	{UV_SYSTEM_TABLE_GUID,		&uv_systab_phys,	"UVsystab"	},
 #endif
@@ -74,7 +70,6 @@ static const unsigned long * const efi_tables[] = {
 	&efi.acpi20,
 	&efi.smbios,
 	&efi.smbios3,
-	&uga_phys,
 #ifdef CONFIG_X86_UV
 	&uv_systab_phys,
 #endif
@@ -82,7 +77,6 @@ static const unsigned long * const efi_tables[] = {
 	&efi_runtime,
 	&efi_config_table,
 	&efi.esrt,
-	&prop_phys,
 	&efi_mem_attr_table,
 #ifdef CONFIG_EFI_RCI2_TABLE
 	&rci2_table_phys,
@@ -339,8 +333,7 @@ static void __init efi_remove_e820_mmio(void)
 			if (size >= 256*1024) {
 				pr_info("Remove mem%02u: MMIO range=[0x%08llx-0x%08llx] (%lluMB) from e820 map\n",
 					i, start, end, size >> 20);
-				e820__range_remove(start, size,
-						   E820_TYPE_RESERVED, 1);
+				e820__range_remove(start, size, E820_TYPE_RESERVED);
 			} else {
 				pr_info("Not removing mem%02u: MMIO range=[0x%08llx-0x%08llx] (%lluKB) from e820 map\n",
 					i, start, end, size >> 10);
@@ -500,22 +493,6 @@ void __init efi_init(void)
 	if (!efi_runtime_supported() || efi_runtime_disabled()) {
 		efi_memmap_unmap();
 		return;
-	}
-
-	/* Parse the EFI Properties table if it exists */
-	if (prop_phys != EFI_INVALID_TABLE_ADDR) {
-		efi_properties_table_t *tbl;
-
-		tbl = early_memremap_ro(prop_phys, sizeof(*tbl));
-		if (tbl == NULL) {
-			pr_err("Could not map Properties table!\n");
-		} else {
-			if (tbl->memory_protection_attribute &
-			    EFI_PROPERTIES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA)
-				set_bit(EFI_NX_PE_DATA, &efi.flags);
-
-			early_memunmap(tbl, sizeof(*tbl));
-		}
 	}
 
 	set_bit(EFI_RUNTIME_SERVICES, &efi.flags);
@@ -784,6 +761,7 @@ static void __init kexec_enter_virtual_mode(void)
 
 	efi_sync_low_kernel_mappings();
 	efi_native_runtime_setup();
+	efi_runtime_update_mappings();
 #endif
 }
 
@@ -858,7 +836,7 @@ static void __init __efi_enter_virtual_mode(void)
 	}
 
 	efi_check_for_embedded_firmwares();
-	efi_free_boot_services();
+	efi_unmap_boot_services();
 
 	if (!efi_is_mixed())
 		efi_native_runtime_setup();
@@ -909,13 +887,6 @@ bool efi_is_table_address(unsigned long phys_addr)
 	return false;
 }
 
-char *efi_systab_show_arch(char *str)
-{
-	if (uga_phys != EFI_INVALID_TABLE_ADDR)
-		str += sprintf(str, "UGA=0x%lx\n", uga_phys);
-	return str;
-}
-
 #define EFI_FIELD(var) efi_ ## var
 
 #define EFI_ATTR_SHOW(name) \
@@ -949,7 +920,7 @@ umode_t efi_attr_is_visible(struct kobject *kobj, struct attribute *attr, int n)
 	return attr->mode;
 }
 
-enum efi_secureboot_mode __x86_ima_efi_boot_mode(void)
+enum efi_secureboot_mode __x86_efi_boot_mode(void)
 {
 	return boot_params.secure_boot;
 }

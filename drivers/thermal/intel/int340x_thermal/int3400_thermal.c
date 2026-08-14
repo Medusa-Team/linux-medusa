@@ -16,6 +16,8 @@
 #define INT3400_ODVP_CHANGED 0x88
 #define INT3400_KEEP_ALIVE 0xA0
 #define INT3400_FAKE_TEMP (20 * 1000) /* faked temp sensor with 20C */
+/* UUID prefix length for comparison - sufficient for all UUIDs */
+#define INT3400_UUID_PREFIX_LEN 7
 
 enum int3400_thermal_uuid {
 	INT3400_THERMAL_ACTIVE = 0,
@@ -75,11 +77,6 @@ struct odvp_attr {
 
 static BIN_ATTR_SIMPLE_RO(data_vault);
 
-static struct bin_attribute *data_attributes[] = {
-	&bin_attr_data_vault,
-	NULL,
-};
-
 static ssize_t imok_store(struct device *dev, struct device_attribute *attr,
 			  const char *buf, size_t count)
 {
@@ -108,10 +105,6 @@ static const struct attribute_group imok_attribute_group = {
 	.attrs = imok_attr,
 };
 
-static const struct attribute_group data_attribute_group = {
-	.bin_attrs = data_attributes,
-};
-
 static ssize_t available_uuids_show(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
@@ -121,7 +114,7 @@ static ssize_t available_uuids_show(struct device *dev,
 	int length = 0;
 
 	if (!priv->uuid_bitmap)
-		return sprintf(buf, "UNKNOWN\n");
+		return sysfs_emit(buf, "UNKNOWN\n");
 
 	for (i = 0; i < INT3400_THERMAL_MAXIMUM_UUID; i++) {
 		if (priv->uuid_bitmap & (1 << i))
@@ -137,8 +130,8 @@ static ssize_t current_uuid_show(struct device *dev,
 	struct int3400_thermal_priv *priv = dev_get_drvdata(dev);
 	int i, length = 0;
 
-	if (priv->current_uuid_index > 0)
-		return sprintf(buf, "%s\n",
+	if (priv->current_uuid_index >= 0)
+		return sysfs_emit(buf, "%s\n",
 			       int3400_thermal_uuids[priv->current_uuid_index]);
 
 	for (i = 0; i <= INT3400_THERMAL_CRITICAL; i++) {
@@ -149,7 +142,7 @@ static ssize_t current_uuid_show(struct device *dev,
 	if (length)
 		return length;
 
-	return sprintf(buf, "INVALID\n");
+	return sysfs_emit(buf, "INVALID\n");
 }
 
 static int int3400_thermal_run_osc(acpi_handle handle, char *uuid_str, int *enable)
@@ -208,7 +201,7 @@ static ssize_t current_uuid_store(struct device *dev,
 
 	for (i = 0; i < INT3400_THERMAL_MAXIMUM_UUID; ++i) {
 		if (!strncmp(buf, int3400_thermal_uuids[i],
-			     sizeof(int3400_thermal_uuids[i]) - 1)) {
+			     INT3400_UUID_PREFIX_LEN)) {
 			/*
 			 * If we have a list of supported UUIDs, make sure
 			 * this one is supported.
@@ -349,7 +342,7 @@ static ssize_t odvp_show(struct device *dev, struct device_attribute *attr,
 
 	odvp_attr = container_of(attr, struct odvp_attr, attr);
 
-	return sprintf(buf, "%d\n", odvp_attr->priv->odvp[odvp_attr->odvp]);
+	return sysfs_emit(buf, "%d\n", odvp_attr->priv->odvp[odvp_attr->odvp]);
 }
 
 static void cleanup_odvp(struct int3400_thermal_priv *priv)
@@ -389,8 +382,7 @@ static int evaluate_odvp(struct int3400_thermal_priv *priv)
 
 	if (priv->odvp == NULL) {
 		priv->odvp_count = obj->package.count;
-		priv->odvp = kmalloc_array(priv->odvp_count, sizeof(int),
-				     GFP_KERNEL);
+		priv->odvp = kmalloc_objs(int, priv->odvp_count);
 		if (!priv->odvp) {
 			ret = -ENOMEM;
 			goto out_err;
@@ -398,9 +390,8 @@ static int evaluate_odvp(struct int3400_thermal_priv *priv)
 	}
 
 	if (priv->odvp_attrs == NULL) {
-		priv->odvp_attrs = kcalloc(priv->odvp_count,
-					   sizeof(struct odvp_attr),
-					   GFP_KERNEL);
+		priv->odvp_attrs = kzalloc_objs(struct odvp_attr,
+						priv->odvp_count);
 		if (!priv->odvp_attrs) {
 			ret = -ENOMEM;
 			goto out_err;
@@ -524,13 +515,12 @@ eval_odvp:
 	return result;
 }
 
-static struct thermal_zone_device_ops int3400_thermal_ops = {
+static const struct thermal_zone_device_ops int3400_thermal_ops = {
 	.get_temp = int3400_thermal_get_temp,
 	.change_mode = int3400_thermal_change_mode,
 };
 
 static struct thermal_zone_params int3400_thermal_params = {
-	.governor_name = "user_space",
 	.no_hwmon = true,
 };
 
@@ -571,7 +561,7 @@ static int int3400_thermal_probe(struct platform_device *pdev)
 	if (!adev)
 		return -ENODEV;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
@@ -624,8 +614,7 @@ static int int3400_thermal_probe(struct platform_device *pdev)
 	}
 
 	if (!ZERO_OR_NULL_PTR(priv->data_vault)) {
-		result = sysfs_create_group(&pdev->dev.kobj,
-					    &data_attribute_group);
+		result = device_create_bin_file(&pdev->dev, &bin_attr_data_vault);
 		if (result)
 			goto free_uuid;
 	}
@@ -648,7 +637,7 @@ free_notify:
 free_sysfs:
 	cleanup_odvp(priv);
 	if (!ZERO_OR_NULL_PTR(priv->data_vault)) {
-		sysfs_remove_group(&pdev->dev.kobj, &data_attribute_group);
+		device_remove_bin_file(&pdev->dev, &bin_attr_data_vault);
 		kfree(priv->data_vault);
 	}
 free_uuid:
@@ -683,7 +672,7 @@ static void int3400_thermal_remove(struct platform_device *pdev)
 		acpi_thermal_rel_misc_device_remove(priv->adev->handle);
 
 	if (!ZERO_OR_NULL_PTR(priv->data_vault))
-		sysfs_remove_group(&pdev->dev.kobj, &data_attribute_group);
+		device_remove_bin_file(&pdev->dev, &bin_attr_data_vault);
 	sysfs_remove_group(&pdev->dev.kobj, &uuid_attribute_group);
 	sysfs_remove_group(&pdev->dev.kobj, &imok_attribute_group);
 	thermal_zone_device_unregister(priv->thermal);
@@ -700,6 +689,9 @@ static const struct acpi_device_id int3400_thermal_match[] = {
 	{"INTC1042", 0},
 	{"INTC1068", 0},
 	{"INTC10A0", 0},
+	{"INTC10D4", 0},
+	{"INTC10FC", 0},
+	{"INTC10F3", 0},
 	{}
 };
 
@@ -707,7 +699,7 @@ MODULE_DEVICE_TABLE(acpi, int3400_thermal_match);
 
 static struct platform_driver int3400_thermal_driver = {
 	.probe = int3400_thermal_probe,
-	.remove_new = int3400_thermal_remove,
+	.remove = int3400_thermal_remove,
 	.driver = {
 		   .name = "int3400 thermal",
 		   .acpi_match_table = ACPI_PTR(int3400_thermal_match),

@@ -551,8 +551,7 @@ int bnx2x_vf_mcast(struct bnx2x *bp, struct bnx2x_virtf *vf,
 	else
 		set_bit(RAMROD_COMP_WAIT, &mcast.ramrod_flags);
 	if (mc_num) {
-		mc = kcalloc(mc_num, sizeof(struct bnx2x_mcast_list_elem),
-			     GFP_KERNEL);
+		mc = kzalloc_objs(struct bnx2x_mcast_list_elem, mc_num);
 		if (!mc) {
 			BNX2X_ERR("Cannot Configure multicasts due to lack of memory\n");
 			return -ENOMEM;
@@ -1218,7 +1217,7 @@ int bnx2x_iov_init_one(struct bnx2x *bp, int int_mode_param,
 	}
 
 	/* allocate the vfs database */
-	bp->vfdb = kzalloc(sizeof(*(bp->vfdb)), GFP_KERNEL);
+	bp->vfdb = kzalloc_obj(*(bp->vfdb));
 	if (!bp->vfdb) {
 		BNX2X_ERR("failed to allocate vf database\n");
 		err = -ENOMEM;
@@ -1247,9 +1246,7 @@ int bnx2x_iov_init_one(struct bnx2x *bp, int int_mode_param,
 	   num_vfs_param, iov->nr_virtfn);
 
 	/* allocate the vf array */
-	bp->vfdb->vfs = kcalloc(BNX2X_NR_VIRTFN(bp),
-				sizeof(struct bnx2x_virtf),
-				GFP_KERNEL);
+	bp->vfdb->vfs = kzalloc_objs(struct bnx2x_virtf, BNX2X_NR_VIRTFN(bp));
 	if (!bp->vfdb->vfs) {
 		BNX2X_ERR("failed to allocate vf array\n");
 		err = -ENOMEM;
@@ -1275,9 +1272,8 @@ int bnx2x_iov_init_one(struct bnx2x *bp, int int_mode_param,
 	}
 
 	/* allocate the queue arrays for all VFs */
-	bp->vfdb->vfqs = kcalloc(BNX2X_MAX_NUM_VF_QUEUES,
-				 sizeof(struct bnx2x_vf_queue),
-				 GFP_KERNEL);
+	bp->vfdb->vfqs = kzalloc_objs(struct bnx2x_vf_queue,
+				      BNX2X_MAX_NUM_VF_QUEUES);
 
 	if (!bp->vfdb->vfqs) {
 		BNX2X_ERR("failed to allocate vf queue array\n");
@@ -2652,10 +2648,10 @@ int bnx2x_get_vf_config(struct net_device *dev, int vfidx,
 		/* vlan */
 		if (bulletin->valid_bitmap & (1 << VLAN_VALID))
 			/* vlan configured by ndo so its in bulletin board */
-			memcpy(&ivi->vlan, &bulletin->vlan, VLAN_HLEN);
+			ivi->vlan = bulletin->vlan;
 		else
 			/* function has not been loaded yet. Show vlans as 0s */
-			memset(&ivi->vlan, 0, VLAN_HLEN);
+			ivi->vlan = 0;
 
 		mutex_unlock(&bp->vfdb->bulletin_mutex);
 	}

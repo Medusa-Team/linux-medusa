@@ -10,6 +10,8 @@
 #include "fs.h"
 #include "transaction.h"
 #include "volumes.h"
+#include "bio.h"
+#include "ordered-data.h"
 
 struct btrfs_dio_data {
 	ssize_t submitted;
@@ -40,13 +42,23 @@ static int lock_extent_direct(struct inode *inode, u64 lockstart, u64 lockend,
 	struct btrfs_ordered_extent *ordered;
 	int ret = 0;
 
+	/* Direct lock must be taken before the extent lock. */
+	if (nowait) {
+		if (!btrfs_try_lock_dio_extent(io_tree, lockstart, lockend, cached_state))
+			return -EAGAIN;
+	} else {
+		btrfs_lock_dio_extent(io_tree, lockstart, lockend, cached_state);
+	}
+
 	while (1) {
 		if (nowait) {
-			if (!try_lock_extent(io_tree, lockstart, lockend,
-					     cached_state))
-				return -EAGAIN;
+			if (!btrfs_try_lock_extent(io_tree, lockstart, lockend,
+						   cached_state)) {
+				ret = -EAGAIN;
+				break;
+			}
 		} else {
-			lock_extent(io_tree, lockstart, lockend, cached_state);
+			btrfs_lock_extent(io_tree, lockstart, lockend, cached_state);
 		}
 		/*
 		 * We're concerned with the entire range that we're going to be
@@ -68,7 +80,7 @@ static int lock_extent_direct(struct inode *inode, u64 lockstart, u64 lockend,
 							 lockstart, lockend)))
 			break;
 
-		unlock_extent(io_tree, lockstart, lockend, cached_state);
+		btrfs_unlock_extent(io_tree, lockstart, lockend, cached_state);
 
 		if (ordered) {
 			if (nowait) {
@@ -95,7 +107,7 @@ static int lock_extent_direct(struct inode *inode, u64 lockstart, u64 lockend,
 			    test_bit(BTRFS_ORDERED_DIRECT, &ordered->flags))
 				btrfs_start_ordered_extent(ordered);
 			else
-				ret = nowait ? -EAGAIN : -ENOTBLK;
+				ret = -ENOTBLK;
 			btrfs_put_ordered_extent(ordered);
 		} else {
 			/*
@@ -120,6 +132,8 @@ static int lock_extent_direct(struct inode *inode, u64 lockstart, u64 lockend,
 		cond_resched();
 	}
 
+	if (ret)
+		btrfs_unlock_dio_extent(io_tree, lockstart, lockend, cached_state);
 	return ret;
 }
 
@@ -139,11 +153,11 @@ static struct extent_map *btrfs_create_dio_extent(struct btrfs_inode *inode,
 	}
 
 	ordered = btrfs_alloc_ordered_extent(inode, start, file_extent,
-					     (1 << type) |
-					     (1 << BTRFS_ORDERED_DIRECT));
+					     (1U << type) |
+					     (1U << BTRFS_ORDERED_DIRECT));
 	if (IS_ERR(ordered)) {
 		if (em) {
-			free_extent_map(em);
+			btrfs_free_extent_map(em);
 			btrfs_drop_extent_map_range(inode, start,
 					start + file_extent->num_bytes - 1, false);
 		}
@@ -172,7 +186,7 @@ static struct extent_map *btrfs_new_extent_direct(struct btrfs_inode *inode,
 	alloc_hint = btrfs_get_extent_allocation_hint(inode, start, len);
 again:
 	ret = btrfs_reserve_extent(root, len, len, fs_info->sectorsize,
-				   0, alloc_hint, &ins, 1, 1);
+				   0, alloc_hint, &ins, true, true);
 	if (ret == -EAGAIN) {
 		ASSERT(btrfs_is_zoned(fs_info));
 		wait_on_bit_io(&inode->root->fs_info->flags, BTRFS_FS_NEED_ZONE_FINISH,
@@ -192,8 +206,7 @@ again:
 				     BTRFS_ORDERED_REGULAR);
 	btrfs_dec_block_group_reservations(fs_info, ins.objectid);
 	if (IS_ERR(em))
-		btrfs_free_reserved_extent(fs_info, ins.objectid, ins.offset,
-					   1);
+		btrfs_free_reserved_extent(fs_info, ins.objectid, ins.offset, true);
 
 	return em;
 }
@@ -234,10 +247,10 @@ static int btrfs_get_blocks_direct_write(struct extent_map **map,
 		else
 			type = BTRFS_ORDERED_NOCOW;
 		len = min(len, em->len - (start - em->start));
-		block_start = extent_map_block_start(em) + (start - em->start);
+		block_start = btrfs_extent_map_block_start(em) + (start - em->start);
 
-		if (can_nocow_extent(inode, start, &len,
-				     &file_extent, false, false) == 1) {
+		if (can_nocow_extent(BTRFS_I(inode), start, &len, &file_extent,
+				     false) == 1) {
 			bg = btrfs_inc_nocow_writers(fs_info, block_start);
 			if (bg)
 				can_nocow = true;
@@ -253,7 +266,7 @@ static int btrfs_get_blocks_direct_write(struct extent_map **map,
 						      nowait);
 		if (ret < 0) {
 			/* Our caller expects us to free the input extent map. */
-			free_extent_map(em);
+			btrfs_free_extent_map(em);
 			*map = NULL;
 			btrfs_dec_nocow_writers(bg);
 			if (nowait && (ret == -ENOSPC || ret == -EDQUOT))
@@ -266,7 +279,7 @@ static int btrfs_get_blocks_direct_write(struct extent_map **map,
 					      &file_extent, type);
 		btrfs_dec_nocow_writers(bg);
 		if (type == BTRFS_ORDERED_PREALLOC) {
-			free_extent_map(em);
+			btrfs_free_extent_map(em);
 			*map = em2;
 			em = em2;
 		}
@@ -279,7 +292,7 @@ static int btrfs_get_blocks_direct_write(struct extent_map **map,
 		dio_data->nocow_done = true;
 	} else {
 		/* Our caller expects us to free the input extent map. */
-		free_extent_map(em);
+		btrfs_free_extent_map(em);
 		*map = NULL;
 
 		if (nowait) {
@@ -353,7 +366,7 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 	int ret = 0;
 	u64 len = length;
 	const u64 data_alloc_len = length;
-	bool unlock_extents = false;
+	u32 unlock_bits = EXTENT_LOCKED;
 
 	/*
 	 * We could potentially fault if we have a buffer > PAGE_SIZE, and if
@@ -374,7 +387,7 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 	 * to allocate a contiguous array for the checksums.
 	 */
 	if (!write)
-		len = min_t(u64, len, fs_info->sectorsize * BTRFS_MAX_BIO_SECTORS);
+		len = min_t(u64, len, fs_info->sectorsize * BIO_MAX_VECS);
 
 	lockstart = start;
 	lockend = start + len - 1;
@@ -428,8 +441,8 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 						  start, data_alloc_len, false);
 		if (!ret)
 			dio_data->data_space_reserved = true;
-		else if (ret && !(BTRFS_I(inode)->flags &
-				  (BTRFS_INODE_NODATACOW | BTRFS_INODE_PREALLOC)))
+		else if (!(BTRFS_I(inode)->flags &
+			   (BTRFS_INODE_NODATACOW | BTRFS_INODE_PREALLOC)))
 			goto err;
 	}
 
@@ -462,8 +475,8 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 	 * to buffered IO.  Don't blame me, this is the price we pay for using
 	 * the generic code.
 	 */
-	if (extent_map_is_compressed(em) || em->disk_bytenr == EXTENT_MAP_INLINE) {
-		free_extent_map(em);
+	if (btrfs_extent_map_is_compressed(em) || em->disk_bytenr == EXTENT_MAP_INLINE) {
+		btrfs_free_extent_map(em);
 		/*
 		 * If we are in a NOWAIT context, return -EAGAIN in order to
 		 * fallback to buffered IO. This is not only because we can
@@ -504,7 +517,7 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 	 * after we have submitted bios for all the extents in the range.
 	 */
 	if ((flags & IOMAP_NOWAIT) && len < length) {
-		free_extent_map(em);
+		btrfs_free_extent_map(em);
 		ret = -EAGAIN;
 		goto unlock_err;
 	}
@@ -514,7 +527,6 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 						    start, &len, flags);
 		if (ret < 0)
 			goto unlock_err;
-		unlock_extents = true;
 		/* Recalc len in case the new em is smaller than requested */
 		len = min(len, em->len - (start - em->start));
 		if (dio_data->data_space_reserved) {
@@ -535,21 +547,7 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 							       release_offset,
 							       release_len);
 		}
-	} else {
-		/*
-		 * We need to unlock only the end area that we aren't using.
-		 * The rest is going to be unlocked by the endio routine.
-		 */
-		lockstart = start + len;
-		if (lockstart < lockend)
-			unlock_extents = true;
 	}
-
-	if (unlock_extents)
-		unlock_extent(&BTRFS_I(inode)->io_tree, lockstart, lockend,
-			      &cached_state);
-	else
-		free_extent_state(cached_state);
 
 	/*
 	 * Translate extent map information to iomap.
@@ -561,19 +559,41 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
 		iomap->addr = IOMAP_NULL_ADDR;
 		iomap->type = IOMAP_HOLE;
 	} else {
-		iomap->addr = extent_map_block_start(em) + (start - em->start);
+		iomap->addr = btrfs_extent_map_block_start(em) + (start - em->start);
 		iomap->type = IOMAP_MAPPED;
 	}
 	iomap->offset = start;
 	iomap->bdev = fs_info->fs_devices->latest_dev->bdev;
 	iomap->length = len;
-	free_extent_map(em);
+	btrfs_free_extent_map(em);
+
+	/*
+	 * Reads will hold the EXTENT_DIO_LOCKED bit until the io is completed,
+	 * writes only hold it for this part.  We hold the extent lock until
+	 * we're completely done with the extent map to make sure it remains
+	 * valid.
+	 */
+	if (write)
+		unlock_bits |= EXTENT_DIO_LOCKED;
+
+	btrfs_clear_extent_bit(&BTRFS_I(inode)->io_tree, lockstart, lockend,
+			       unlock_bits, &cached_state);
+
+	/* We didn't use everything, unlock the dio extent for the remainder. */
+	if (!write && (start + len) < lockend)
+		btrfs_unlock_dio_extent(&BTRFS_I(inode)->io_tree, start + len,
+					lockend, NULL);
 
 	return 0;
 
 unlock_err:
-	unlock_extent(&BTRFS_I(inode)->io_tree, lockstart, lockend,
-		      &cached_state);
+	/*
+	 * Don't use EXTENT_LOCK_BITS here in case we extend it later and forget
+	 * to update this, be explicit that we expect EXTENT_LOCKED and
+	 * EXTENT_DIO_LOCKED to be set here, and so that's what we're clearing.
+	 */
+	btrfs_clear_extent_bit(&BTRFS_I(inode)->io_tree, lockstart, lockend,
+			       EXTENT_LOCKED | EXTENT_DIO_LOCKED, &cached_state);
 err:
 	if (dio_data->data_space_reserved) {
 		btrfs_free_reserved_data_space(BTRFS_I(inode),
@@ -596,8 +616,8 @@ static int btrfs_dio_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 
 	if (!write && (iomap->type == IOMAP_HOLE)) {
 		/* If reading from a hole, unlock and return */
-		unlock_extent(&BTRFS_I(inode)->io_tree, pos, pos + length - 1,
-			      NULL);
+		btrfs_unlock_dio_extent(&BTRFS_I(inode)->io_tree, pos,
+					pos + length - 1, NULL);
 		return 0;
 	}
 
@@ -605,11 +625,11 @@ static int btrfs_dio_iomap_end(struct inode *inode, loff_t pos, loff_t length,
 		pos += submitted;
 		length -= submitted;
 		if (write)
-			btrfs_finish_ordered_extent(dio_data->ordered, NULL,
+			btrfs_finish_ordered_extent(dio_data->ordered,
 						    pos, length, false);
 		else
-			unlock_extent(&BTRFS_I(inode)->io_tree, pos,
-				      pos + length - 1, NULL);
+			btrfs_unlock_dio_extent(&BTRFS_I(inode)->io_tree, pos,
+						pos + length - 1, NULL);
 		ret = -ENOTBLK;
 	}
 	if (write) {
@@ -637,12 +657,11 @@ static void btrfs_dio_end_io(struct btrfs_bio *bbio)
 	}
 
 	if (btrfs_op(bio) == BTRFS_MAP_WRITE) {
-		btrfs_finish_ordered_extent(bbio->ordered, NULL,
-					    dip->file_offset, dip->bytes,
-					    !bio->bi_status);
+		btrfs_finish_ordered_extent(bbio->ordered, dip->file_offset,
+					    dip->bytes, !bio->bi_status);
 	} else {
-		unlock_extent(&inode->io_tree, dip->file_offset,
-			      dip->file_offset + dip->bytes - 1, NULL);
+		btrfs_unlock_dio_extent(&inode->io_tree, dip->file_offset,
+					dip->file_offset + dip->bytes - 1, NULL);
 	}
 
 	bbio->bio.bi_private = bbio->private;
@@ -673,9 +692,9 @@ static int btrfs_extract_ordered_extent(struct btrfs_bio *bbio,
 	 * a pre-existing one.
 	 */
 	if (!test_bit(BTRFS_ORDERED_NOCOW, &ordered->flags)) {
-		ret = split_extent_map(bbio->inode, bbio->file_offset,
-				       ordered->num_bytes, len,
-				       ordered->disk_bytenr);
+		ret = btrfs_split_extent_map(bbio->inode, bbio->file_offset,
+					     ordered->num_bytes, len,
+					     ordered->disk_bytenr);
 		if (ret)
 			return ret;
 	}
@@ -695,10 +714,8 @@ static void btrfs_dio_submit_io(const struct iomap_iter *iter, struct bio *bio,
 		container_of(bbio, struct btrfs_dio_private, bbio);
 	struct btrfs_dio_data *dio_data = iter->private;
 
-	btrfs_bio_init(bbio, BTRFS_I(iter->inode)->root->fs_info,
+	btrfs_bio_init(bbio, BTRFS_I(iter->inode), file_offset,
 		       btrfs_dio_end_io, bio->bi_private);
-	bbio->inode = BTRFS_I(iter->inode);
-	bbio->file_offset = file_offset;
 
 	dip->file_offset = file_offset;
 	dip->bytes = bio->bi_iter.bi_size;
@@ -717,7 +734,7 @@ static void btrfs_dio_submit_io(const struct iomap_iter *iter, struct bio *bio,
 
 		ret = btrfs_extract_ordered_extent(bbio, dio_data->ordered);
 		if (ret) {
-			btrfs_finish_ordered_extent(dio_data->ordered, NULL,
+			btrfs_finish_ordered_extent(dio_data->ordered,
 						    file_offset, dip->bytes,
 						    !ret);
 			bio->bi_status = errno_to_blk_status(ret);
@@ -726,7 +743,7 @@ static void btrfs_dio_submit_io(const struct iomap_iter *iter, struct bio *bio,
 		}
 	}
 
-	btrfs_submit_bio(bbio, 0);
+	btrfs_submit_bbio(bbio, 0);
 }
 
 static const struct iomap_ops btrfs_dio_iomap_ops = {
@@ -745,7 +762,7 @@ static ssize_t btrfs_dio_read(struct kiocb *iocb, struct iov_iter *iter,
 	struct btrfs_dio_data data = { 0 };
 
 	return iomap_dio_rw(iocb, iter, &btrfs_dio_iomap_ops, &btrfs_dio_ops,
-			    IOMAP_DIO_PARTIAL, &data, done_before);
+			    IOMAP_DIO_PARTIAL | IOMAP_DIO_FSBLOCK_ALIGNED, &data, done_before);
 }
 
 static struct iomap_dio *btrfs_dio_write(struct kiocb *iocb, struct iov_iter *iter,
@@ -754,7 +771,7 @@ static struct iomap_dio *btrfs_dio_write(struct kiocb *iocb, struct iov_iter *it
 	struct btrfs_dio_data data = { 0 };
 
 	return __iomap_dio_rw(iocb, iter, &btrfs_dio_iomap_ops, &btrfs_dio_ops,
-			    IOMAP_DIO_PARTIAL, &data, done_before);
+			    IOMAP_DIO_PARTIAL | IOMAP_DIO_FSBLOCK_ALIGNED, &data, done_before);
 }
 
 static ssize_t check_direct_IO(struct btrfs_fs_info *fs_info,
@@ -767,7 +784,6 @@ static ssize_t check_direct_IO(struct btrfs_fs_info *fs_info,
 
 	if (iov_iter_alignment(iter) & blocksize_mask)
 		return -EINVAL;
-
 	return 0;
 }
 
@@ -784,6 +800,8 @@ ssize_t btrfs_direct_write(struct kiocb *iocb, struct iov_iter *from)
 	ssize_t ret;
 	unsigned int ilock_flags = 0;
 	struct iomap_dio *dio;
+	const u64 data_profile = btrfs_data_alloc_profile(fs_info) &
+				 BTRFS_BLOCK_GROUP_PROFILE_MASK;
 
 	if (iocb->ki_flags & IOCB_NOWAIT)
 		ilock_flags |= BTRFS_ILOCK_TRY;
@@ -796,6 +814,16 @@ ssize_t btrfs_direct_write(struct kiocb *iocb, struct iov_iter *from)
 	 */
 	if (iocb->ki_pos + iov_iter_count(from) <= i_size_read(inode) && IS_NOSEC(inode))
 		ilock_flags |= BTRFS_ILOCK_SHARED;
+
+	/*
+	 * If our data profile has duplication (either extra mirrors or RAID56),
+	 * we can not trust the direct IO buffer, the content may change during
+	 * writeback and cause different contents written to different mirrors.
+	 *
+	 * Thus only RAID0 and SINGLE can go true zero-copy direct IO.
+	 */
+	if (data_profile != BTRFS_BLOCK_GROUP_RAID0 && data_profile != 0)
+		goto buffered;
 
 relock:
 	ret = btrfs_inode_lock(BTRFS_I(inode), ilock_flags);
@@ -815,7 +843,7 @@ relock:
 		return ret;
 	}
 
-	ret = btrfs_write_check(iocb, from, ret);
+	ret = btrfs_write_check(iocb, ret);
 	if (ret < 0) {
 		btrfs_inode_unlock(BTRFS_I(inode), ilock_flags);
 		goto out;
@@ -834,6 +862,22 @@ relock:
 	}
 
 	if (check_direct_IO(fs_info, from, pos)) {
+		btrfs_inode_unlock(BTRFS_I(inode), ilock_flags);
+		goto buffered;
+	}
+	/*
+	 * We can't control the folios being passed in, applications can write
+	 * to them while a direct IO write is in progress.  This means the
+	 * content might change after we calculated the data checksum.
+	 * Therefore we can end up storing a checksum that doesn't match the
+	 * persisted data.
+	 *
+	 * To be extra safe and avoid false data checksum mismatch, if the
+	 * inode requires data checksum, just fallback to buffered IO.
+	 * For buffered IO we have full control of page cache and can ensure
+	 * no one is modifying the content during writeback.
+	 */
+	if (!(BTRFS_I(inode)->flags & BTRFS_INODE_NODATASUM)) {
 		btrfs_inode_unlock(BTRFS_I(inode), ilock_flags);
 		goto buffered;
 	}

@@ -303,10 +303,10 @@ static int rk817_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	unsigned int i2s_mst = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		i2s_mst |= RK817_I2S_MODE_SLV;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		i2s_mst |= RK817_I2S_MODE_MST;
 		break;
 	default:
@@ -529,7 +529,7 @@ static struct platform_driver rk817_codec_driver = {
 		   .name = "rk817-codec",
 		   },
 	.probe = rk817_platform_probe,
-	.remove_new = rk817_platform_remove,
+	.remove = rk817_platform_remove,
 };
 
 module_platform_driver(rk817_codec_driver);
