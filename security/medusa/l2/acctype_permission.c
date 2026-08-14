@@ -65,6 +65,7 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
 	struct dentry *dentry;
+	unsigned int requested = MEDUSA_VS_SEE;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0)
@@ -80,11 +81,14 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
 	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
 		goto out_dput;
-	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
-	    ((mask & (S_IRUGO | S_IXUGO)) &&
-	     !vs_intersects(VSR(task_security(current)), VS(inode_security(inode)))) ||
-	    ((mask & S_IWUGO) &&
-	     !vs_intersects(VSW(task_security(current)), VS(inode_security(inode))))) {
+	if (mask & (S_IRUGO | S_IXUGO))
+		requested |= MEDUSA_VS_READ;
+	if (mask & S_IWUGO)
+		requested |= MEDUSA_VS_WRITE;
+
+	if (!medusa_vs_access_allowed(&task_security(current)->med_subject,
+				      &inode_security(inode)->med_object,
+				      requested)) {
 		mad.vs.srw.vst = VS(inode_security(inode));
 		mad.vs.srw.vss = VSS(task_security(current));
 		mad.vs.srw.vsr = VSR(task_security(current));

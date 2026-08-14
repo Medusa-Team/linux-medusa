@@ -44,6 +44,7 @@
 #include "l3/med_cache.h"
 #include "l4/auth_server.h"
 #include "l4/comm.h"
+#include "l4/protocol.h"
 #include "l4/teleport.h"
 
 #define MEDUSA_MAJOR 111
@@ -735,6 +736,10 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		med_pr_err("write: can't read buffer\n");
 		return -EFAULT;
 	}
+	if (count < sizeof(MCPptr_t)) {
+		up_read(&lightswitch);
+		return -EMSGSIZE;
+	}
 
 	if (__copy_from_user(((char *)&recv_type), buf,
 				sizeof(MCPptr_t))) {
@@ -747,6 +752,10 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 
 	// Type of the message is received
 	if (recv_type == MEDUSA_COMM_AUTHANSWER) {
+		if (count != MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE) {
+			up_read(&lightswitch);
+			return -EMSGSIZE;
+		}
 		if (__copy_from_user(recv_buf, buf, sizeof(int16_t) + sizeof(MCPptr_t))) {
 			up_read(&lightswitch);
 			med_pr_err("write: can't copy buffer\n");
@@ -760,10 +769,15 @@ static ssize_t user_write(struct file *filp, const char __user *buf, size_t coun
 		rcu_read_lock();
 		answered_task = (struct task_struct *) idr_find(&answer_ids_idr, answered_task_id);
 		rcu_read_unlock();
-		if (answered_task == NULL) {
+		answ_result = medusa_comm_validate_authanswer(
+			MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE,
+			*(int16_t *)(recv_buf + sizeof(MCPptr_t)),
+			answered_task != NULL);
+		if (answ_result) {
 			up_read(&lightswitch);
-			med_pr_err("decision_answer: invalid decision_request_id: %llx\n", *(uint64_t *)(recv_buf));
-			return -100;
+			med_pr_err("decision_answer: invalid answer for request %llx: %d\n",
+				   *(uint64_t *)(recv_buf), answ_result);
+			return answ_result;
 		}
 		task_security(answered_task)->decision_answer = *(int16_t *)(recv_buf+sizeof(MCPptr_t));
 		med_pr_debug("answer received for %llx pid %d\n", *(uint64_t *)(recv_buf), answered_task->pid);

@@ -1,17 +1,39 @@
-Medusa Constable QEMU smoke test
-================================
+Medusa Constable QEMU integration scenarios
+============================================
 
-This test boots an x86-64 Medusa kernel with the Constable reference
-authorization server in a minimal initramfs.  It verifies all of the
-behavior-preserving migration boundary:
+The scenario runner boots an x86-64 Medusa kernel with the Constable
+reference authorization server in a minimal initramfs. Each scenario owns:
 
-  * Linux reaches /sbin/init with Medusa enabled.
-  * The kernel starts Constable before init.
-  * Constable connects to /dev/medusa using protocol version 3.
-  * The first mkdir decision is delegated to Constable.
-  * Constable updates the parent directory's med_oact cache bitmap.
-  * A second mkdir on the same parent does not produce another delegated
-    decision.
+  * `init` or `init.c`: guest operations and machine-readable result lines;
+  * optional `guest.c`: a separately runnable static test program;
+  * `medusa.conf`: the Constable policy under test;
+  * `expected`: exact result lines that must appear on the guest console.
+
+Blank lines and lines beginning with `#` in `expected` are ignored. A line
+beginning with `!` is a negative assertion: the remaining text must not occur
+on the console.
+
+The default `cache` scenario verifies that Linux reaches init with Medusa
+enabled, Constable connects using protocol version 3, the first `mkdir`
+decision is delegated, and clearing the parent directory's monitoring bitmap
+caches the second decision in the kernel.
+
+The `access` scenario covers filesystem operations, process creation,
+execution, credentials, signals, and all three supported SysV IPC classes.
+Its expected results deliberately record the current `EACCES` behavior when
+re-associating with an existing SysV IPC object. Filesystem and process
+operations are behavior checks; the console event assertions identify the
+SysV operations that demonstrably reached Constable.
+
+The `lifecycle` scenario verifies initial Constable registration, clean
+disconnect, the configured fail-open behavior without a server, and
+registration of a replacement server. It also characterizes a known defect:
+after restart, policy rules for the already-running init process and newly
+created IPC objects return `MED_ERR`, so a reloaded deny rule fails open.
+The scenario names this result `policy_reload_known_defect`; it must not be
+read as successful enforcement of the replacement policy. It also verifies
+normal connected audit output and records the known absence of an audit record
+when stale-context validation takes the disconnected fail-open path.
 
 The kernel must be configured with:
 
@@ -25,10 +47,14 @@ Build Constable and BusyBox as static x86-64 executables, then run:
   tools/testing/selftests/medusa/qemu/run.sh \
     path/to/arch/x86/boot/bzImage \
     path/to/constable \
-    path/to/busybox
+    path/to/busybox \
+    cache
 
-The test exits successfully only after observing:
+If the optional scenario argument is omitted, `cache` is used. The runner
+exits successfully only after every non-comment line in the scenario's
+`expected` file is observed on the console.
 
-  MEDUSA_QEMU_PASS: delegated=1 cached=1
-
-QEMU_ACCEL, QEMU_CPU, and QEMU_TIMEOUT may be overridden in the environment.
+`GUEST_CC` selects the static compiler for scenario C programs. Prebuilt
+programs may instead be supplied with `INIT_TEST_BINARY` and
+`GUEST_TEST_BINARY`. `QEMU_ACCEL`, `QEMU_CPU`, and `QEMU_TIMEOUT` may also be
+overridden in the environment.

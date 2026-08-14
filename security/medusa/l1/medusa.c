@@ -66,8 +66,7 @@ static int medusa_l1_inode_alloc_security(struct inode *inode)
 {
 	struct medusa_l1_inode_s *med = inode_security(inode);
 
-	hash_init(med->fuck);
-	init_med_object(&med->med_object);
+	medusa_inode_context_init(med);
 
 	return 0;
 }
@@ -286,6 +285,7 @@ static int medusa_l1_task_alloc(struct task_struct *task,
 				u64 clone_flags)
 {
 	struct medusa_l1_task_s *med = task_security(task);
+	enum medusa_task_context_mode mode = MEDUSA_TASK_CONTEXT_INHERIT;
 
 	/* swapper(s) or a new user thread */
 	if (task == current ||
@@ -304,9 +304,7 @@ static int medusa_l1_task_alloc(struct task_struct *task,
 		 */
 		if (!IS_ENABLED(CONFIG_SECURITY_MEDUSA_MONITOR_KTHREADS) &&
 		    (task->flags & PF_KTHREAD)) {
-			med_magic_not_monitored(&med->med_object);
-			unmonitor_med_object(&med->med_object);
-			unmonitor_med_subject(&med->med_subject);
+			mode = MEDUSA_TASK_CONTEXT_UNMONITORED;
 		}
 		/*
 		 * This branch applies on:
@@ -314,26 +312,10 @@ static int medusa_l1_task_alloc(struct task_struct *task,
 		 * b) a new user thread
 		 */
 		else {
-			med_magic_invalidate(&med->med_object);
-			init_med_object(&med->med_object);
-			init_med_subject(&med->med_subject);
+			mode = MEDUSA_TASK_CONTEXT_MONITORED;
 		}
 	}
-	/*
-	 * Inheritance of the security context state if the type of the newly
-	 * created thread is the same as the type of its parent.
-	 */
-	else {
-		*med = *task_security(current);
-	}
-
-	mutex_init(&med->validation_in_progress);
-	med->validation_depth_nesting = 1;
-
-#ifdef CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL
-	med->self = NULL;
-	refcount_set(&med->rcu_cb_set, 0);
-#endif /* CONFIG_SECURITY_MEDUSA_HOOKS_TASK_KILL */
+	medusa_task_context_init(med, task_security(current), mode);
 
 	return 0;
 }
@@ -390,8 +372,7 @@ static int medusa_l1_ipc_alloc_security(struct kern_ipc_perm *ipcp,
 {
 	struct medusa_l1_ipc_s *med = ipc_security(ipcp);
 
-	init_med_object(&med->med_object);
-	med->ipc_class = ipc_class;
+	medusa_ipc_context_init(med, ipc_class);
 	return 0;
 }
 

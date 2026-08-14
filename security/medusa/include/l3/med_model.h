@@ -33,6 +33,22 @@ struct medusa_subject_s {
 	struct s_cinfo_t cinfo;	/* l4 hint */
 };
 
+static inline bool medusa_vs_access_allowed(const struct medusa_subject_s *subject,
+					    const struct medusa_object_s *object,
+					    unsigned int requested)
+{
+	if ((requested & MEDUSA_VS_SEE) &&
+	    !vs_intersects(subject->vss, object->vs))
+		return false;
+	if ((requested & MEDUSA_VS_READ) &&
+	    !vs_intersects(subject->vsr, object->vs))
+		return false;
+	if ((requested & MEDUSA_VS_WRITE) &&
+	    !vs_intersects(subject->vsw, object->vs))
+		return false;
+	return true;
+}
+
 static inline void init_med_object(struct medusa_object_s *med_object)
 {
 	// Allow all VSs

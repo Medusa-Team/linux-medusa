@@ -3,18 +3,32 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 3 ]; then
-	echo "usage: $0 KERNEL_IMAGE CONSTABLE_STATIC BUSYBOX_STATIC" >&2
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
+	echo "usage: $0 KERNEL_IMAGE CONSTABLE_STATIC BUSYBOX_STATIC [SCENARIO]" >&2
 	exit 2
 fi
 
 kernel_image="$(realpath "$1")"
 constable="$(realpath "$2")"
 busybox="$(realpath "$3")"
+scenario="${4:-cache}"
 self_dir="$(cd "$(dirname "$0")" && pwd)"
 kernel_tree="$(cd "$self_dir/../../../../.." && pwd)"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/medusa-qemu.XXXXXX")"
 trap 'rm -rf "$work_dir"' EXIT
+
+case "$scenario" in
+	*[!a-zA-Z0-9_-]*|'')
+		echo "invalid scenario name: $scenario" >&2
+		exit 2
+		;;
+esac
+
+scenario_dir="$self_dir/scenarios/$scenario"
+if [ ! -d "$scenario_dir" ]; then
+	echo "unknown scenario: $scenario" >&2
+	exit 2
+fi
 
 for command in cc gzip qemu-system-x86_64 realpath timeout; do
 	if ! command -v "$command" >/dev/null; then
@@ -33,10 +47,42 @@ done
 mkdir -p "$work_dir/input"
 cp "$constable" "$work_dir/input/constable"
 cp "$busybox" "$work_dir/input/busybox"
-cp "$self_dir/init" "$work_dir/input/init"
 cp "$self_dir/init-constable.sh" "$work_dir/input/init-constable.sh"
-cp "$self_dir/medusa.conf" "$work_dir/input/medusa.conf"
+cp "$scenario_dir/medusa.conf" "$work_dir/input/medusa.conf"
 cp "$self_dir/constable.conf" "$work_dir/input/constable.conf"
+: >"$work_dir/input/constable.pid"
+if [ -f "$scenario_dir/medusa-reload.conf" ]; then
+	cp "$scenario_dir/medusa-reload.conf" \
+		"$work_dir/input/medusa-reload.conf"
+fi
+
+guest_cc="${GUEST_CC:-cc}"
+if [ -f "$scenario_dir/init.c" ] || [ -f "$scenario_dir/guest.c" ]; then
+	if ! command -v "$guest_cc" >/dev/null; then
+		echo "missing guest compiler: $guest_cc" >&2
+		exit 2
+	fi
+fi
+
+if [ -f "$scenario_dir/init.c" ]; then
+	if [ -n "${INIT_TEST_BINARY:-}" ]; then
+		cp "$(realpath "$INIT_TEST_BINARY")" "$work_dir/input/init"
+	else
+		"$guest_cc" -static -O2 -Wall -Wextra \
+			-o "$work_dir/input/init" "$scenario_dir/init.c"
+	fi
+else
+	cp "$scenario_dir/init" "$work_dir/input/init"
+fi
+
+if [ -f "$scenario_dir/guest.c" ]; then
+	if [ -n "${GUEST_TEST_BINARY:-}" ]; then
+		cp "$(realpath "$GUEST_TEST_BINARY")" "$work_dir/input/medusa-guest"
+	else
+		"$guest_cc" -static -O2 -Wall -Wextra \
+			-o "$work_dir/input/medusa-guest" "$scenario_dir/guest.c"
+	fi
+fi
 
 cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 
@@ -49,14 +95,24 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	echo "dir /sys 0555 0 0"
 	echo "dir /tmp 1777 0 0"
 	echo "file /bin/busybox $work_dir/input/busybox 0755 0 0"
-	for applet in sh mount mkdir sleep dmesg grep poweroff; do
+	for applet in awk cat chmod chown chroot cp dd dmesg echo fgrep grep \
+		kill killall link ln mkdir mkfifo mknod mv pidof poweroff ps \
+		mount readlink rm rmdir sed sh sleep stat touch true truncate \
+		unlink; do
 		echo "slink /bin/$applet busybox 0755 0 0"
 	done
 	echo "file /sbin/constable $work_dir/input/constable 0755 0 0"
 	echo "file /sbin/init $work_dir/input/init 0755 0 0"
 	echo "file /sbin/init-constable.sh $work_dir/input/init-constable.sh 0755 0 0"
+	echo "file /constable.pid $work_dir/input/constable.pid 0644 0 0"
 	echo "file /etc/medusa.conf $work_dir/input/medusa.conf 0644 0 0"
 	echo "file /etc/constable.conf $work_dir/input/constable.conf 0644 0 0"
+	if [ -f "$work_dir/input/medusa-reload.conf" ]; then
+		echo "file /etc/medusa-reload.conf $work_dir/input/medusa-reload.conf 0644 0 0"
+	fi
+	if [ -f "$work_dir/input/medusa-guest" ]; then
+		echo "file /bin/medusa-guest $work_dir/input/medusa-guest 0755 0 0"
+	fi
 	echo "nod /dev/console 0600 0 0 c 5 1"
 	echo "nod /dev/null 0666 0 0 c 1 3"
 	echo "nod /dev/medusa 0600 0 0 c 111 0"
@@ -71,12 +127,26 @@ timeout "${QEMU_TIMEOUT:-90}" qemu-system-x86_64 \
 	-m 1024 \
 	-kernel "$kernel_image" \
 	-initrd "$work_dir/initramfs.cpio.gz" \
-	-append "console=ttyS0 rdinit=/sbin/init panic=-1" \
+	-append "console=ttyS0 rdinit=/sbin/init panic=-1 audit=1" \
 	-nographic \
 	-no-reboot 2>&1 | tee "$work_dir/console.log"
 
-if ! grep -q "^MEDUSA_QEMU_PASS: delegated=1 cached=1" "$work_dir/console.log"; then
-	echo "Medusa QEMU integration test failed" >&2
-	exit 1
-fi
+while IFS= read -r expected || [ -n "$expected" ]; do
+	case "$expected" in
+		''|'#'*) continue ;;
+		'!'*)
+			unexpected="${expected#!}"
+			if grep -Fq "$unexpected" "$work_dir/console.log"; then
+				echo "scenario '$scenario' observed forbidden result: $unexpected" >&2
+				exit 1
+			fi
+			continue
+			;;
+	esac
+	if ! grep -Fq "$expected" "$work_dir/console.log"; then
+		echo "scenario '$scenario' missing expected result: $expected" >&2
+		exit 1
+	fi
+done <"$scenario_dir/expected"
 
+echo "Medusa QEMU scenario '$scenario' passed"

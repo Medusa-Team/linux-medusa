@@ -178,6 +178,80 @@ static void unmonitor_med_subject_success(struct kunit *test)
 	    bitmap_empty(med_subject->act.pack, CONFIG_MEDUSA_ACT));
 }
 
+static void action_bitmap_boundary_bits(struct kunit *test)
+{
+	struct act_t act;
+
+	act_clear(act);
+	act_setbit(act, 0);
+	act_setbit(act, CONFIG_MEDUSA_ACT - 1);
+
+	KUNIT_EXPECT_TRUE(test, act_testbit(act, 0));
+	KUNIT_EXPECT_TRUE(test, act_testbit(act, CONFIG_MEDUSA_ACT - 1));
+	KUNIT_EXPECT_EQ(test, 2,
+			bitmap_weight(act.pack, CONFIG_MEDUSA_ACT));
+
+	act_clearbit(act, 0);
+	act_clearbit(act, CONFIG_MEDUSA_ACT - 1);
+	KUNIT_EXPECT_FALSE(test, act_testbit(act, 0));
+	KUNIT_EXPECT_FALSE(test, act_testbit(act, CONFIG_MEDUSA_ACT - 1));
+	KUNIT_EXPECT_TRUE(test, bitmap_empty(act.pack, CONFIG_MEDUSA_ACT));
+}
+
+static void magic_generation_rollover_invalidates_context(struct kunit *test)
+{
+	struct medusa_object_s object;
+	int saved_magic = medusa_authserver_magic;
+
+	init_med_object(&object);
+	medusa_authserver_magic = 41;
+	med_magic_validate(&object);
+	KUNIT_ASSERT_TRUE(test, is_med_magic_valid(&object));
+
+	medusa_authserver_magic = 42;
+	KUNIT_EXPECT_FALSE(test, is_med_magic_valid(&object));
+	med_magic_validate(&object);
+	KUNIT_EXPECT_TRUE(test, is_med_magic_valid(&object));
+	KUNIT_EXPECT_EQ(test, 42, object.magic);
+
+	medusa_authserver_magic = saved_magic;
+}
+
+static void not_monitored_context_survives_normal_generation_changes(
+	struct kunit *test)
+{
+	struct medusa_object_s object;
+	int saved_magic = medusa_authserver_magic;
+
+	init_med_object(&object);
+	med_magic_not_monitored(&object);
+	KUNIT_ASSERT_EQ(test, MAGIC_NOT_MONITORED, object.magic);
+	KUNIT_ASSERT_TRUE(test, is_med_magic_valid(&object));
+	KUNIT_ASSERT_FALSE(test, is_med_magic_monitored(&object));
+
+	medusa_authserver_magic++;
+	med_magic_validate(&object);
+	med_magic_invalidate(&object);
+	KUNIT_EXPECT_EQ(test, MAGIC_NOT_MONITORED, object.magic);
+	KUNIT_EXPECT_TRUE(test, is_med_magic_valid(&object));
+
+	medusa_authserver_magic = saved_magic;
+}
+
+static void forced_invalidation_reenables_monitoring(struct kunit *test)
+{
+	struct medusa_object_s object;
+
+	init_med_object(&object);
+	med_magic_not_monitored(&object);
+	med_magic_invalidate_force(&object);
+
+	KUNIT_EXPECT_EQ(test, 0, object.magic);
+	KUNIT_EXPECT_TRUE(test, is_med_magic_monitored(&object));
+	KUNIT_EXPECT_EQ(test, medusa_authserver_magic == 0,
+			is_med_magic_valid(&object));
+}
+
 static struct kunit_case add_base_tc[] = {
 	KUNIT_CASE(is_med_magic_valid_not_changed),
 	KUNIT_CASE(is_med_magic_valid_changed_invalid),
@@ -187,6 +261,10 @@ static struct kunit_case add_base_tc[] = {
 	KUNIT_CASE(unmonitor_med_object_success),
 	KUNIT_CASE(init_med_subject_success),
 	KUNIT_CASE(unmonitor_med_subject_success),
+	KUNIT_CASE(action_bitmap_boundary_bits),
+	KUNIT_CASE(magic_generation_rollover_invalidates_context),
+	KUNIT_CASE(not_monitored_context_survives_normal_generation_changes),
+	KUNIT_CASE(forced_invalidation_reenables_monitoring),
 	{}
 };
 

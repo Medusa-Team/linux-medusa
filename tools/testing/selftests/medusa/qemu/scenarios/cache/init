@@ -15,7 +15,7 @@ while [ ! -c /dev/medusa ] && [ "$timeout" -gt 0 ]; do
 done
 
 if [ ! -c /dev/medusa ]; then
-	echo "MEDUSA_QEMU_FAIL: missing /dev/medusa"
+	echo "MEDUSA_QEMU_FAIL cache missing_device"
 	poweroff -f
 fi
 
@@ -26,9 +26,10 @@ sleep 1
 
 delegated="$(dmesg | grep -c MEDUSA_QEMU_DELEGATED_MKDIR)"
 if [ "$delegated" -eq 1 ]; then
-	echo "MEDUSA_QEMU_PASS: delegated=1 cached=1"
+	echo "MEDUSA_RESULT cache delegated_once PASS"
+	echo "MEDUSA_RESULT cache second_operation_cached PASS"
 else
-	echo "MEDUSA_QEMU_FAIL: delegated event count=$delegated"
+	echo "MEDUSA_QEMU_FAIL cache delegated_count=$delegated"
 fi
 
 poweroff -f
