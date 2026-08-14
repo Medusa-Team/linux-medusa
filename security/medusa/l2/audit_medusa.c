@@ -22,6 +22,28 @@ const char *medusa_audit_answer_name(enum medusa_answer_t answer)
 	return audit_answer[index];
 }
 
+const char *medusa_audit_decision_source_name(enum medusa_decision_source source)
+{
+	return medusa_decision_source_name(source);
+}
+
+const char *medusa_audit_unavailable_name(enum medusa_unavailable_reason reason)
+{
+	return medusa_unavailable_reason_name(reason);
+}
+
+void medusa_audit_apply_decision(struct medusa_audit_data *mad,
+				 struct medusa_decision_result result)
+{
+	mad->ans = result.answer;
+	mad->as = result.authserver_contacted ? AS_REQUEST : AS_NO_REQUEST;
+	mad->decision_metadata = 1;
+	mad->decision_source = result.source;
+	mad->unavailable = result.unavailable;
+	mad->request_id = result.request_id;
+	mad->policy_generation = result.policy_generation;
+}
+
 /*
  * medusa_pre - pre audit callback function to format audit record
  * @ab: audit buffer for formatting audit record
@@ -49,6 +71,18 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 		audit_log_format(ab, " as_request=1");
 	else
 		audit_log_format(ab, " as_request=0");
+	if (mad->decision_metadata) {
+		audit_log_format(ab, " decision_source=%s",
+				 medusa_audit_decision_source_name(
+					 mad->decision_source));
+		audit_log_format(ab, " unavailable=%s",
+				 medusa_audit_unavailable_name(
+					 mad->unavailable));
+		audit_log_format(ab, " policy_generation=%llu",
+				 (unsigned long long)mad->policy_generation);
+		audit_log_format(ab, " request_id=%llu",
+				 (unsigned long long)mad->request_id);
+	}
 }
 
 /*

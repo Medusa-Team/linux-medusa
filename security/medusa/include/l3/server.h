@@ -11,6 +11,7 @@
  */
 
 #include "l3/constants.h"
+#include "l3/health.h"
 #include "l3/kobject.h"
 
 struct medusa_authserver_s {
@@ -54,7 +55,10 @@ struct medusa_authserver_s {
 
 	enum medusa_answer_t (*decide)(struct medusa_event_s *req,
 		struct medusa_kobject_s *o1,
-		struct medusa_kobject_s *o2);
+		struct medusa_kobject_s *o2,
+		struct medusa_authserver_decision *decision);
+	bool (*is_healthy)(void);
+	enum medusa_health_reason (*health_reason)(void);
 };
 
 #endif

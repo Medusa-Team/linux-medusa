@@ -9,6 +9,7 @@ menuconfig SECURITY_MEDUSA_SUPPORT
 	bool "MEDUSA support"
 	depends on SECURITY && AUDIT
 	select NETWORK_SECMARK
+	select SECURITYFS
 	default n
 	help
 	  This selects MEDUSA LSM. Add "medusa" to the ordered CONFIG_LSM
@@ -129,6 +130,18 @@ config SECURITY_MEDUSA_ACT
 	  Medusa Communication Protocol transfers size of attributes in Bytes.
 	  To prevent a mistake and errornous interpretation of bits out of
 	  bitarray, the array size SEURITY_MEDUSA_ACT must be a multiple of 8.
+
+config SECURITY_MEDUSA_DECISION_LEASE_MS
+	int "Authorization decision liveness lease (milliseconds)"
+	default 5000
+	range 100 60000
+	help
+	  Initial and renewal interval for a delegated decision. Constable may
+	  renew a request's lease while it is making progress, including while
+	  waiting for interactive user approval. Silence until expiry marks the
+	  authorization server unhealthy and opens a circuit breaker; expiry
+	  does not directly select allow or deny. Each event instead uses its
+	  installed baseline or online-required fallback policy.
 
 config SECURITY_MEDUSA_MONITOR_KTHREADS
 	bool "Monitor kernel threads"

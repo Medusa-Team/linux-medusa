@@ -1,0 +1,152 @@
+What:		/sys/kernel/security/medusa/status
+Date:		July 2026
+Contact:	Jano Kacer <jano.kacer@gmail.com>
+Description:
+		Root-readable, read-only snapshot of Medusa decision-engine
+		liveness. One key=value record is emitted per line:
+
+		kernel_release
+			The running kernel release.
+		protocol_version
+			The active Medusa userspace protocol version.
+		authorization_server
+			"handshaking" while a userspace transport is processing
+			the announced schema, "connected" after the READY exchange
+			has completed, or "disconnected".
+		authorization_server_name
+			The active or handshaking kernel transport name, or "none".
+		protocol_state
+			"disconnected", "handshaking", or "ready".
+		policy_readiness
+			"unavailable", "initializing", or "ready". Protocol v3
+			READY is emitted by Constable only after its policy _init()
+			handler completes.
+		authorization_server_health
+			"healthy", "unhealthy", "unknown", or "unavailable".
+		circuit_breaker
+			"closed", "open", "unknown", "not_ready", or
+			"not_connected".
+		health_reason
+			"healthy", "disconnected", "decision_timeout",
+			"overloaded", "initializing", "unknown", or "invalid".
+		policy_generation
+			The current kernel context-invalidation generation. It
+			advances when a ready server registers or disconnects.
+		active_policy_generation
+			The generation eligible to answer decisions, or zero while
+			disconnected or handshaking.
+		last_ready_policy_generation
+			The most recent generation that completed READY. It remains
+			available across a disconnect and incomplete handshake.
+		pending_requests
+			Number of requests currently awaiting userspace.
+		pending_limit
+			Maximum number of simultaneous pending requests.
+		decision_lease_ms
+			Initial and renewal liveness lease for each request.
+		protocol_replies
+			Successfully matched decision replies.
+		protocol_lease_renewals
+			Successfully matched decision-progress messages.
+		protocol_malformed_messages
+			Frames rejected for an invalid length.
+		protocol_invalid_answers
+			Decision replies rejected for an unsupported verdict.
+		protocol_unknown_commands
+			Frames rejected for an unknown command.
+		protocol_unknown_requests
+			Replies or renewals naming no pending request.
+		protocol_stale_requests
+			Replies or renewals rejected for a stale generation.
+
+		Protocol counters are cumulative from boot and use wrapping
+		unsigned 64-bit arithmetic. Each rejected protocol frame also
+		emits a rate-limited ``Medusa: op=protocol_error`` audit record.
+		The record identifies the protocol and policy generation, stable
+		error-kind name, command and request ID when available, negative
+		errno, per-kind sequence, and number suppressed since the
+		previous emitted record. Error kinds are limited independently
+		to three records per five seconds, so one class of malformed input
+		cannot hide the first occurrence of another class.
+
+		The file mode is 0400. It does not expose policy mutation.
+		Medusa's own delegated file-open policy is bypassed so the file
+		remains available during an authorization-server outage; normal
+		VFS permissions and other active LSMs still apply.
+
+What:		/sys/kernel/security/medusa/events
+Date:		July 2026
+Contact:	Jano Kacer <jano.kacer@gmail.com>
+Description:
+		Root-readable, read-only snapshot of registered Medusa events.
+		Each line contains the event and subject/object class names,
+		whether the event is actively reachable from an installed LSM
+		hook, runtime trigger bit and bitmap owner, installed fallback
+		policy, and cumulative decision counters:
+
+		enforcement
+			"active" when an installed LSM hook or its required
+			context-validation path can reach the event; otherwise
+			"announced". This is code reachability, not a claim that
+			the event's monitoring bit is set by current policy.
+		evaluations
+			Policy evaluations that reached the event's kernel
+			monitoring-bit check.
+		cached
+			Evaluations allowed by an unset monitoring bit without
+			entering the central decision engine.
+
+		decisions
+			Calls entering the central decision engine.
+		delegated
+			Calls for which a userspace request was issued.
+		baseline
+			Final verdicts selected by the installed baseline.
+		online_required
+			Final denials selected because the event requires userspace.
+		allowed, denied
+			Final central-engine verdicts.
+		timed_out
+			Final fallbacks caused by an expired decision lease.
+		invalid_replies
+			Final denials caused by an unsupported server verdict.
+		degraded_decisions
+			Final fallbacks caused by any unavailability reason.
+
+		Event and class names are the protocol-v3 names announced to
+		Constable. "event_bit" is a runtime trigger position, not a stable
+		numeric event identifier. Counters use wrapping unsigned 64-bit
+		arithmetic. Kernel-cached fast-path accesses do not enter the central
+		decision engine and are therefore not included in its counters;
+		hook-level cached
+		accounting is reported separately as ``evaluations`` and
+		``cached``. Local virtual-space denials that occur before the
+		monitoring-bit check are not included in either value.
+
+		The file mode is 0400. It does not expose policy mutation.
+		Medusa's own delegated file-open policy is bypassed so the file
+		remains available during an authorization-server outage; normal
+		VFS permissions and other active LSMs still apply.
+
+What:		/sys/kernel/security/medusa/classes
+Date:		July 2026
+Contact:	Jano Kacer <jano.kacer@gmail.com>
+Description:
+		Root-readable, read-only snapshot of registered Medusa object
+		classes. Each line contains:
+
+		class
+			The protocol-v3 class name announced to Constable.
+		enforcement
+			"active" when at least one active event consumes the class
+			as subject or object; otherwise "announced".
+		announced_events
+			Registered events consuming the class.
+		enforced_events
+			Actively reachable events consuming the class.
+
+		An event using the same class for both arguments is counted once.
+		The file mode is 0400 and it has no write operation. Medusa's own
+		delegated file-open policy is bypassed so this diagnostic remains
+		available during an authorization-server outage; normal VFS
+		permissions and other active LSMs still apply.

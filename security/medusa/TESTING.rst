@@ -8,25 +8,190 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 42 tests in nine suites:
+The KUnit configuration runs 76 tests in eleven suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
 * policy-generation rollover and forced stale-context invalidation;
 * task initialization and inheritance plus inode and all SysV IPC contexts;
 * authorization-server registration, removal, and generation changes;
-* cached/delegated allow, deny, error/fail-open, and unsupported verdicts;
+* delegated allow and deny, installed baseline fallback, online-required
+  fallback, and unsupported verdicts;
+* authoritative object validation accepts only a supported Constable reply,
+  never an unavailable-policy fallback or incomplete server result;
 * protocol-v3 answer lengths, verdicts, unknown IDs, and stale IDs;
-* cache allocator growth across a size-class boundary.
+* cache allocator growth across a size-class boundary;
 * dynamic task, inode, and SysV IPC LSM blob offsets;
-* bounded audit-answer formatting and LSM return-value translation.
+* bounded audit-answer formatting and LSM return-value translation;
+* decision-source, authorization-server contact, and unavailability audit
+  metadata, including request ID and policy generation;
+* independent pending-request IDs, out-of-order replies, policy generations,
+  duplicate and unknown replies, bounded capacity, disconnect cleanup,
+  timeout races, and renewable liveness leases;
+* authorization-server health and circuit-breaker transitions;
+* teardown-safe authorization-server status snapshots, handshake, READY and
+  aborted-handshake transitions, optional health callbacks, and stable
+  observability names;
+* per-event final-verdict attribution, unsigned counter wrap, and cumulative
+  protocol-counter snapshots;
+* monitoring-bit evaluation, kernel-cache hit, and enforced-event accounting;
+* stable protocol-error audit kind names.
+
+Pending decision engine
+-----------------------
+
+Delegated decisions no longer store their answer in the calling task's
+security blob.  Each slow-path call owns a pending request with an independent
+completion, monotonically allocated 64-bit ID, and policy generation.  A
+bounded global table permits 1,024 concurrent requests.  Completion removes
+the request before waking its waiter, so unknown, duplicate, and stale-
+generation replies cannot complete a different request.  Disconnect removes
+and completes every remaining request with ``MED_ERR``.
+
+Renewable decision leases
+-------------------------
+
+The five-second decision interval is a liveness lease, not a maximum decision
+duration.  Protocol command ``MEDUSA_COMM_AUTHREQUEST_PROGRESS`` renews the
+lease of one pending request by its 64-bit request ID.  Constable exposes
+``mcp_renew_authrequest()`` so an interactive handler can renew before each
+lease expires while it waits for a human decision.  Renewal carries no
+verdict and cannot alter installed policy.
+
+If a request is silent for a complete lease, the pending request is removed
+and the authorization server's circuit breaker opens.  Existing waiters wake
+and apply their event-specific installed fallback; unrelated new operations
+immediately use their own installed fallback without filling the pending
+table.  A new Constable registration closes the breaker.  Lease duration is
+configured by ``CONFIG_SECURITY_MEDUSA_DECISION_LEASE_MS`` and defaults to
+5,000 milliseconds.
+
+Unavailable decision fallback
+-----------------------------
+
+Every event type has one atomically replaceable fallback policy.  Baseline
+allow preserves the legacy default while still consulting a healthy
+authorization server.  Baseline deny is authoritative and cannot be weakened
+by a userspace allow.  Online-required denies only its event when no answer is
+available.  Absence of Constable and transport failure no longer unmonitor
+kernel objects, so an outage does not discard the installed monitoring state.
+
+The decision result separately records its answer, source, unavailability
+reason, whether Constable was actually contacted, request ID, and policy
+generation.  Every unavailable-policy fallback increments an event-local
+counter and emits a structured audit record containing the event and object
+class names, active protocol, runtime trigger bit, verdict provenance, request
+metadata, and precise failure reason.  Repeated records are limited
+independently for each event to ten per five seconds; the next emitted record
+reports how many were suppressed while the counter continues accounting for
+every decision.  Stable numeric class and event IDs remain protocol-v4 work.
+
+Lease expiry, queue overload, a non-sleepable call site, an unhealthy server,
+transport failure, and absence of Constable have distinct audit reason names.
+The migrated ``mkdir`` and ``ipc_msgsnd`` operation-specific audit paths also
+carry request ID and policy generation while retaining the compatible
+``as_request`` field.
+
+Process, file, SysV IPC, and socket context validation requires a supported,
+authoritative Constable reply and verifies that userspace installed a valid
+context.  A lease timeout, open circuit, disconnected server, or installed
+fallback verdict therefore cannot be mistaken for a successful context
+refresh.
+
+Read-only securityfs observability
+----------------------------------
+
+When Medusa is enabled it creates three root-readable files:
+
+``/sys/kernel/security/medusa/status``
+  Reports the running kernel and protocol versions; disconnected, handshaking,
+  and READY state; policy readiness; server health and precise circuit-breaker
+  reason; active and last READY generations; live pending count and limit;
+  configured decision lease; and cumulative reply, renewal, malformed-frame,
+  invalid-answer, unknown-command, unknown-request, and stale-request counts.
+
+``/sys/kernel/security/medusa/events``
+  Reports every announced event, whether an installed hook or required
+  validation path actively reaches it, its subject and object classes, runtime
+  trigger bit and bitmap owner, installed fallback policy, monitoring-bit
+  evaluations and cache hits, and cumulative central-engine totals for
+  delegation, baseline and online-required verdicts, allow, deny, lease
+  timeout, invalid reply, and degraded fallback.
+
+``/sys/kernel/security/medusa/classes``
+  Reports every announced object class, whether an active event consumes it,
+  and its announced and actively reachable event counts.
+
+All three files have mode ``0400`` and no write operation.  The status snapshot
+takes an authorization-server reference while holding the registry lock, then
+queries optional health callbacks only after releasing that lock.  Event
+records are generated while the registry is locked so unregister cannot leave
+a dangling definition in a partial line.  Medusa's own delegated ``file_open``
+path exempts these three diagnostic files so an outage cannot hide its state;
+normal VFS permissions and other stacked LSMs still apply.  Protocol-v3 event
+names and runtime trigger bits are descriptive rather than stable numeric
+identities.  Event ``cached`` counts are the exact monitoring-bit cache hits
+that bypass the central engine.  Virtual-space denials and validation failures
+that return before that check are deliberately not mislabelled as cache hits.
+The QEMU lifecycle scenario proves that ``ipc_msgsnd`` and the process and IPC
+classes are active, socket policy remains announcement-only, and an unmonitored
+``pexec`` is counted as a cached evaluation.
+
+Protocol-error audit
+--------------------
+
+Rejected authorization answers and progress messages now use one structured
+audit schema:
+
+``Medusa: op=protocol_error protocol=... policy_generation=... error_kind=... command_present=... command=... request_present=... request_id=... error=... error_sequence=... suppressed=...``
+
+``error_kind`` is one of ``malformed_message``, ``invalid_answer``,
+``unknown_command``, ``unknown_request``, or ``stale_request``.  Presence bits
+distinguish an unavailable command or request ID from a real zero value.
+``error`` is the negative kernel errno, and ``error_sequence`` is the wrapping
+boot-lifetime count for that kind.
+
+Each kind has an independent three-record-per-five-second limiter.  The first
+occurrence of one kind is therefore visible even while another kind is being
+suppressed.  The next emitted record reports the accumulated ``suppressed``
+count; securityfs counters continue to include every rejected frame.
+
+Constable's protocol-v3 READY answer follows schema processing and completion
+of its optional policy ``_init()`` handler, so ``policy_readiness=ready`` has a
+defined meaning.  A device open that has not sent READY remains
+``protocol_state=handshaking`` with no active generation; disconnect retains
+the last generation that successfully became ready.  Kernel-cached fast-path
+accesses do not enter ``med_decide_result()`` and are deliberately not included
+in the central-engine event counters.  Cached accounting requires separate
+hook-level instrumentation rather than a misleading zero-valued counter.
+
+Protocol v3 carries the complete request ID on the supported x86-64 migration
+target.  Fixed-width, architecture-independent framing remains protocol-v4
+work.  The progress command is an optional extension to protocol v3;
+automatic feature negotiation remains protocol-v4 work, so old kernels must
+not be sent progress frames.
+
+Sleeping and SysV IPC
+---------------------
+
+The character-device slow path can block and therefore accepts decisions only
+from task context with interrupts enabled and no active atomic section.  It
+returns ``MED_ERR`` before allocating or queueing a request otherwise.
+
+Several SysV IPC hooks arrive with ``kern_ipc_perm.lock`` held.  On SMP with
+``CONFIG_DEBUG_SPINLOCK``, Medusa checks that the current task owns the lock,
+takes an object reference, releases the lock and RCU read section before
+delegating, then reacquires the lock and revalidates the object afterward.
+Without inspectable ownership, a lock-bound request must remain on the kernel
+path; the slow-path guard prevents sleeping while a UP spinlock preemption
+count or another atomic constraint is active.
 
 QEMU scenario coverage
 ----------------------
 
 ``cache``
-  Demonstrates one delegated ``mkdir`` followed by a kernel-cached decision
-  after Constable clears the directory monitoring bit.
+  Demonstrates one delegated ``ipc_msgsnd`` followed by a kernel-cached
+  decision after Constable clears the message queue's monitoring bit.
 
 ``access``
   Exercises create/open/write/fcntl/chmod/chown/truncate, symlink/link/rename/
@@ -38,10 +203,26 @@ QEMU scenario coverage
   characterizations, not proof of delegation.
 
 ``lifecycle``
-  Covers initial registration, disconnect, fail-open operation, replacement
+  Covers initial registration, disconnect, baseline-permitted operation,
+  replacement
   registration, enforcement of a reloaded deny policy, positive audit output
-  for a server-requested IPC operation, and the disconnected ``mkdir``
-  stale-context fail-open audit path.
+  for a server-requested IPC operation, and preserved kernel monitoring state
+  across the disconnect.
+
+``degraded``
+  Freezes Constable after proving a delegated denial, verifies that one
+  request waits for a full lease and uses baseline allow, verifies that the
+  open circuit immediately applies the same installed baseline to the next
+  request, and checks the decision-source, precise timeout reason, request,
+  policy-generation, event, and class audit metadata.
+  The scenario also mounts securityfs, checks healthy, degraded, and recovered
+  status snapshots, inserts an incomplete raw-device handshake between
+  disconnect and reconnect, verifies generation retention plus malformed,
+  unknown-command, and unknown-request protocol counts, checks per-event
+  delegation, baseline, timeout, and degraded attribution, and proves that the
+  status file cannot be opened after dropping to uid 65534.
+  It then terminates the frozen server, registers a replacement, and proves
+  that delegated denial is restored.
 
 ``stacking.config``
   Enables AppArmor before Medusa in ``CONFIG_LSM``.  The ``stacking`` scenario
@@ -110,9 +291,6 @@ not prove a delegated ``fork`` decision.
 Known defects kept separate from expected behaviour
 ---------------------------------------------------
 
-* If an object or process is validated while no authorization server exists,
-  the current fail-open path marks it permanently unmonitored.  A later server
-  generation does not automatically re-monitor it.
 * Re-associating with an existing message queue, semaphore set, or shared
   memory object returns ``EACCES`` even when ``ipc_perm`` is allowed.
   ``ipc_associate`` is not observed.

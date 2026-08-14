@@ -4,6 +4,7 @@
 #include <linux/lsm_audit.h>
 
 #include "l3/constants.h"
+#include "l3/decision.h"
 #include "l3/vs_model.h"
 
 /* Values for &medusa_audit_data->as */
@@ -29,6 +30,11 @@ struct medusa_audit_data {
 	enum medusa_answer_t ans;
 	/** @as: 1 if authorization server was contacted */
 	char as : 1;
+	char decision_metadata : 1;
+	enum medusa_decision_source decision_source;
+	enum medusa_unavailable_reason unavailable;
+	u64 request_id;
+	u64 policy_generation;
 
 	/**
 	 * union of virtual spaces used in access
@@ -117,6 +123,10 @@ struct medusa_audit_data {
 };
 
 const char *medusa_audit_answer_name(enum medusa_answer_t answer);
+const char *medusa_audit_decision_source_name(enum medusa_decision_source source);
+const char *medusa_audit_unavailable_name(enum medusa_unavailable_reason reason);
+void medusa_audit_apply_decision(struct medusa_audit_data *mad,
+				 struct medusa_decision_result result);
 void medusa_audit_log_callback(struct common_audit_data *cad,
 			       void (*medusa_post)(struct audit_buffer *, void *));
 void medusa_simple_file_cb(struct audit_buffer *ab, void *pcad);

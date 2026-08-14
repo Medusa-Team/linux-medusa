@@ -32,7 +32,7 @@ MED_EVTYPE(getprocess_event, "getprocess",
  */
 int process_kobj_validate_task(struct task_struct *ts)
 {
-	enum medusa_answer_t med_ret;
+	struct medusa_decision_result decision;
 	struct getprocess_event event;
 	struct process_kobject proc;
 	struct process_kobject parent;
@@ -119,8 +119,8 @@ init_always_do_direct_getprocess:
 
 	get_cmdline(ts, task_security(ts)->cmdline, sizeof(task_security(ts)->cmdline));
 	process_kern2kobj(&proc, ts);
-	med_ret = MED_DECIDE(getprocess_event, &event, &proc, &parent);
-	if (med_ret != MED_ERR)
+	decision = MED_DECIDE_RESULT(getprocess_event, &event, &proc, &parent);
+	if (medusa_decision_is_authoritative(&decision))
 		ret = is_med_magic_valid(&(task_security(ts)->med_object));
 
 out:

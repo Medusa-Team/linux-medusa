@@ -78,7 +78,9 @@ int medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
 	struct medusa_audit_data mad = {
 		.ipc.ipc_class = ipc_security(ipcp)->ipc_class,
 		.ans = MED_ALLOW,
-		.as = AS_NO_REQUEST
+		.as = AS_NO_REQUEST,
+		.decision_source = MEDUSA_DECISION_BASELINE,
+		.unavailable = MEDUSA_AVAILABLE,
 	};
 	struct ipc_msgsnd_access access;
 	struct process_kobject process;
@@ -107,11 +109,13 @@ int medusa_ipc_msgsnd(struct kern_ipc_perm *ipcp,
 		access.msgflg = msgflg;
 		access.ipc_class = object.ipc_class;
 
-		mad.ans = MED_DECIDE(ipc_msgsnd_access, &access, &process, &object);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(
+			&mad, MED_DECIDE_RESULT(ipc_msgsnd_access, &access,
+					       &process, &object));
 	}
 out:
-	if (task_security(current)->audit) {
+	if (task_security(current)->audit ||
+	    mad.unavailable != MEDUSA_AVAILABLE) {
 		cad.type = LSM_AUDIT_DATA_IPC;
 		cad.u.ipc_id = ipcp->key;
 		mad.function = "msgsnd";

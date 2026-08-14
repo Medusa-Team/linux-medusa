@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <linux/ratelimit.h>
+#include <linux/seq_file.h>
+#include <linux/string.h>
+
 #include "l3/arch.h"
 #include "l3/registry.h"
 #include "l3/med_cache.h"
@@ -12,6 +16,11 @@ static DEFINE_MUTEX(usecount_lock); /* the lock for modifying use-count */
 static struct medusa_kclass_s *kclasses;
 static struct medusa_evtype_s *evtypes;
 static struct medusa_authserver_s *authserver;
+static struct medusa_authserver_s *handshaking_authserver;
+static enum medusa_authserver_state authserver_state =
+	MEDUSA_AUTHSERVER_DISCONNECTED;
+static u64 active_policy_generation;
+static u64 last_ready_policy_generation;
 
 int medusa_authserver_magic = 1; /* the 'version' of authserver */
 /* WARNING! medusa_authserver_magic is not locked, nor atomic type,
@@ -214,6 +223,11 @@ int med_register_evtype(struct medusa_evtype_s *med_evtype, int flags)
 {
 	struct medusa_evtype_s *p;
 
+	atomic64_set(&med_evtype->degraded_decisions, 0);
+	medusa_decision_counters_init(med_evtype);
+	ratelimit_default_init(&med_evtype->degraded_audit_ratelimit);
+	ratelimit_set_flags(&med_evtype->degraded_audit_ratelimit,
+			    RATELIMIT_MSG_ON_RELEASE);
 	med_evtype->name[MEDUSA_EVNAME_MAX-1] = '\0';
 	med_evtype->arg_name[0][MEDUSA_ATTRNAME_MAX-1] = '\0';
 	med_evtype->arg_name[1][MEDUSA_ATTRNAME_MAX-1] = '\0';
@@ -322,6 +336,30 @@ int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver)
 }
 
 /**
+ * med_authserver_handshake_begin - publish an in-progress server handshake
+ * @med_authserver: transport preparing its userspace schema
+ *
+ * The authorization server is not eligible for decisions until
+ * med_register_authserver() completes the READY exchange.
+ */
+int med_authserver_handshake_begin(struct medusa_authserver_s *med_authserver)
+{
+	int error = 0;
+
+	mutex_lock(&registry_lock);
+	if (authserver || handshaking_authserver) {
+		error = -EBUSY;
+		goto out;
+	}
+
+	handshaking_authserver = med_authserver;
+	authserver_state = MEDUSA_AUTHSERVER_HANDSHAKING;
+out:
+	mutex_unlock(&registry_lock);
+	return error;
+}
+
+/**
  * med_register_authserver - register the authorization server
  * @med_authserver: pointer to the filled medusa_authserver_s structure
  *
@@ -333,8 +371,14 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 {
 	med_pr_info("Registering authorization server %s\n", med_authserver->name);
 	mutex_lock(&registry_lock);
-	if (authserver) {
-		med_pr_err("Failed registration of auth. server '%s', reason: '%s' already present!\n", med_authserver->name, authserver->name);
+	if (authserver ||
+	    (handshaking_authserver &&
+	     handshaking_authserver != med_authserver)) {
+		struct medusa_authserver_s *present =
+			authserver ? authserver : handshaking_authserver;
+
+		med_pr_err("Failed registration of auth. server '%s', reason: '%s' already present!\n",
+			   med_authserver->name, present->name);
 		mutex_unlock(&registry_lock);
 		return -1;
 	}
@@ -345,6 +389,10 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 	med_authserver->use_count = 1;
 	medusa_authserver_magic++;
 	authserver = med_authserver;
+	handshaking_authserver = NULL;
+	authserver_state = MEDUSA_AUTHSERVER_READY;
+	active_policy_generation = (u64)medusa_authserver_magic;
+	last_ready_policy_generation = active_policy_generation;
 
 	mutex_unlock(&registry_lock);
 	return 0;
@@ -367,13 +415,33 @@ void med_unregister_authserver(struct medusa_authserver_s *med_authserver)
 	 * to allow multiple different authentication servers some day
 	 */
 	if (med_authserver != authserver) {
+		if (med_authserver == handshaking_authserver) {
+			handshaking_authserver = NULL;
+			authserver_state = MEDUSA_AUTHSERVER_DISCONNECTED;
+		}
 		mutex_unlock(&registry_lock);
 		return;
 	}
 	medusa_authserver_magic++;
 	authserver = NULL;
+	authserver_state = MEDUSA_AUTHSERVER_DISCONNECTED;
+	active_policy_generation = 0;
 	mutex_unlock(&registry_lock);
 	med_put_authserver(med_authserver);
+}
+
+const char *medusa_authserver_state_name(enum medusa_authserver_state state)
+{
+	switch (state) {
+	case MEDUSA_AUTHSERVER_DISCONNECTED:
+		return "disconnected";
+	case MEDUSA_AUTHSERVER_HANDSHAKING:
+		return "handshaking";
+	case MEDUSA_AUTHSERVER_READY:
+		return "ready";
+	default:
+		return "invalid";
+	}
 }
 
 /**
@@ -426,4 +494,163 @@ void med_put_authserver(struct medusa_authserver_s *med_authserver)
 inline bool med_is_authserver_present(void)
 {
 	return !!authserver;
+}
+
+void medusa_event_set_enforced(struct medusa_evtype_s *evtype)
+{
+	if (evtype)
+		WRITE_ONCE(evtype->enforced, true);
+}
+
+/**
+ * medusa_registry_status_snapshot - copy authorization-server state safely
+ * @status: caller-provided snapshot
+ *
+ * The server reference is acquired while the registry pointer is protected.
+ * Health callbacks are deliberately invoked after dropping registry_lock:
+ * an authorization-server callback is external to the registry and may sleep.
+ */
+void medusa_registry_status_snapshot(struct medusa_registry_status *status)
+{
+	struct medusa_authserver_s *server = NULL;
+
+	memset(status, 0, sizeof(*status));
+	status->health_reason = MEDUSA_HEALTH_DISCONNECTED;
+
+	mutex_lock(&registry_lock);
+	status->policy_generation = (u64)medusa_authserver_magic;
+	status->server_state = authserver_state;
+	status->active_policy_generation = active_policy_generation;
+	status->last_ready_policy_generation = last_ready_policy_generation;
+	if (authserver) {
+		server = med_get_authserver();
+		status->connected = true;
+		strscpy(status->server_name, server->name,
+			sizeof(status->server_name));
+	} else if (handshaking_authserver) {
+		strscpy(status->server_name, handshaking_authserver->name,
+			sizeof(status->server_name));
+	}
+	mutex_unlock(&registry_lock);
+
+	if (!server)
+		return;
+
+	if (server->is_healthy) {
+		status->health_known = true;
+		status->healthy = server->is_healthy();
+		status->health_reason = status->healthy ?
+			MEDUSA_HEALTHY : MEDUSA_HEALTH_DISCONNECTED;
+	}
+	if (server->health_reason) {
+		status->health_known = true;
+		status->health_reason = server->health_reason();
+		status->healthy = status->health_reason == MEDUSA_HEALTHY;
+	}
+
+	med_put_authserver(server);
+}
+
+/**
+ * medusa_registry_events_seq_show - emit a consistent event registry snapshot
+ * @m: destination seq_file
+ *
+ * Event definitions are registry-owned while linked. Keep the registry locked
+ * so no event pointer can disappear midway through a line.
+ */
+int medusa_registry_events_seq_show(struct seq_file *m)
+{
+	struct medusa_decision_counter_snapshot counters;
+	struct medusa_evtype_s *event;
+	enum medusa_fallback_policy policy;
+	const char *fallback;
+	const char *trigger;
+	const char *trigger_bitmap;
+
+	mutex_lock(&registry_lock);
+	for (event = evtypes; event; event = event->next) {
+		if ((event->bitnr & MASK_BITNR) ==
+		    MEDUSA_EVTYPE_NOTTRIGGERED) {
+			trigger = "always";
+			trigger_bitmap = "none";
+		} else {
+			trigger = event->bitnr &
+				MEDUSA_EVTYPE_TRIGGEREDATOBJECT ?
+				"object" : "subject";
+			trigger_bitmap = event->bitnr &
+				MEDUSA_EVTYPE_TRIGGEREDBYOBJECTBIT ?
+				"object" : "subject";
+		}
+
+		policy = READ_ONCE(event->fallback_policy);
+		fallback = medusa_fallback_policy_name(policy);
+		medusa_decision_counters_snapshot(event, &counters);
+		seq_printf(m,
+			   "event=%s subject_class=%s object_class=%s event_bit=%u",
+			   event->name, event->arg_kclass[0]->name,
+			   event->arg_kclass[1]->name,
+			   event->bitnr & MASK_BITNR);
+		seq_printf(m, " enforcement=%s trigger=%s trigger_bitmap=%s",
+			   READ_ONCE(event->enforced) ? "active" : "announced",
+			   trigger, trigger_bitmap);
+		seq_printf(m, " fallback=%s evaluations=%llu cached=%llu",
+			   fallback,
+			   (unsigned long long)counters.evaluations,
+			   (unsigned long long)counters.cached);
+		seq_printf(m, " decisions=%llu delegated=%llu baseline=%llu",
+			   (unsigned long long)counters.total,
+			   (unsigned long long)counters.delegated,
+			   (unsigned long long)counters.baseline);
+		seq_printf(m, " online_required=%llu allowed=%llu denied=%llu",
+			   (unsigned long long)counters.online_required,
+			   (unsigned long long)counters.allowed,
+			   (unsigned long long)counters.denied);
+		seq_printf(m, " timed_out=%llu invalid_replies=%llu",
+			   (unsigned long long)counters.timed_out,
+			   (unsigned long long)counters.invalid_replies);
+		seq_printf(m, " degraded_decisions=%llu\n",
+			   (unsigned long long)
+				medusa_degraded_decision_count(event));
+	}
+	mutex_unlock(&registry_lock);
+
+	return 0;
+}
+
+/**
+ * medusa_registry_classes_seq_show - emit announced and enforced class state
+ * @m: destination seq_file
+ *
+ * A class is active when at least one active event consumes it as either its
+ * subject or object. Count each event once even when both arguments use the
+ * same class.
+ */
+int medusa_registry_classes_seq_show(struct seq_file *m)
+{
+	struct medusa_kclass_s *class;
+	struct medusa_evtype_s *event;
+
+	mutex_lock(&registry_lock);
+	for (class = kclasses; class; class = class->next) {
+		unsigned int announced_events = 0;
+		unsigned int enforced_events = 0;
+
+		for (event = evtypes; event; event = event->next) {
+			if (event->arg_kclass[0] != class &&
+			    event->arg_kclass[1] != class)
+				continue;
+			announced_events++;
+			if (READ_ONCE(event->enforced))
+				enforced_events++;
+		}
+
+		seq_printf(m,
+			   "class=%s enforcement=%s announced_events=%u enforced_events=%u\n",
+			   class->name,
+			   enforced_events ? "active" : "announced",
+			   announced_events, enforced_events);
+	}
+	mutex_unlock(&registry_lock);
+
+	return 0;
 }

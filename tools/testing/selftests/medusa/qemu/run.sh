@@ -74,7 +74,11 @@ done
 mkdir -p "$work_dir/input"
 cp "$constable" "$work_dir/input/constable"
 cp "$busybox" "$work_dir/input/busybox"
-cp "$self_dir/init-constable.sh" "$work_dir/input/init-constable.sh"
+if scenario_init_constable="$(scenario_file init-constable.sh)"; then
+	cp "$scenario_init_constable" "$work_dir/input/init-constable.sh"
+else
+	cp "$self_dir/init-constable.sh" "$work_dir/input/init-constable.sh"
+fi
 cp "$(scenario_file medusa.conf)" "$work_dir/input/medusa.conf"
 cp "$self_dir/constable.conf" "$work_dir/input/constable.conf"
 : >"$work_dir/input/constable.pid"
@@ -146,6 +150,8 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	echo "dir /dev 0755 0 0"
 	echo "dir /proc 0555 0 0"
 	echo "dir /sys 0555 0 0"
+	echo "dir /sys/fs 0755 0 0"
+	echo "dir /sys/fs/cgroup 0755 0 0"
 	echo "dir /tmp 1777 0 0"
 	echo "file /bin/busybox $work_dir/input/busybox 0755 0 0"
 	for applet in awk cat chmod chown chroot cp dd dmesg echo fgrep grep \
@@ -156,6 +162,9 @@ cc -O2 -o "$work_dir/gen_init_cpio" "$kernel_tree/usr/gen_init_cpio.c"
 	done
 	echo "file /sbin/constable $work_dir/input/constable 0755 0 0"
 	echo "file /sbin/init $work_dir/input/init 0755 0 0"
+	if [ -n "$init_c" ]; then
+		echo "file /sbin/medusa-test-helper $work_dir/input/init 0755 0 0"
+	fi
 	echo "file /sbin/init-constable.sh $work_dir/input/init-constable.sh 0755 0 0"
 	echo "file /constable.pid $work_dir/input/constable.pid 0644 0 0"
 	echo "file /etc/medusa.conf $work_dir/input/medusa.conf 0644 0 0"
@@ -189,7 +198,7 @@ timeout "${QEMU_TIMEOUT:-90}" qemu-system-x86_64 \
 	-m 1024 \
 	-kernel "$kernel_image" \
 	-initrd "$work_dir/initramfs.cpio.gz" \
-	-append "console=ttyS0 rdinit=/sbin/init panic=-1 audit=1" \
+	-append "console=ttyS0 rdinit=/sbin/init panic=-1 audit=1 audit_backlog_limit=8192" \
 	-nographic \
 	-no-reboot 2>&1 | tee "$work_dir/console.log"
 

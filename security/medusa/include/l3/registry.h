@@ -13,10 +13,29 @@
 #define _MEDUSA_REGISTRY_H
 
 #include "l3/arch.h"
+#include "l3/health.h"
 #include "l3/kobject.h"
 #include "l3/server.h"
 
-extern int authserver_magic; /* to be checked against magic in objects */
+struct seq_file;
+
+enum medusa_authserver_state {
+	MEDUSA_AUTHSERVER_DISCONNECTED,
+	MEDUSA_AUTHSERVER_HANDSHAKING,
+	MEDUSA_AUTHSERVER_READY,
+};
+
+struct medusa_registry_status {
+	u64 policy_generation;
+	u64 active_policy_generation;
+	u64 last_ready_policy_generation;
+	char server_name[MEDUSA_SERVERNAME_MAX];
+	enum medusa_health_reason health_reason;
+	enum medusa_authserver_state server_state;
+	bool connected;
+	bool health_known;
+	bool healthy;
+};
 
 /* interface to L2 */
 extern int med_register_kclass(struct medusa_kclass_s *med_kclass);
@@ -46,9 +65,10 @@ extern void med_unregister_evtype(struct medusa_evtype_s *med_evtype);
  *	MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT (the ... subject)
  */
 
-extern enum medusa_answer_t med_decide(struct medusa_evtype_s *, void *, void *, void *);
 #define MED_DECIDE(structname, arg1, arg2, arg3) \
 		med_decide(&MED_EVTYPEOF(structname), arg1, arg2, arg3)
+#define MED_DECIDE_RESULT(structname, arg1, arg2, arg3) \
+		med_decide_result(&MED_EVTYPEOF(structname), arg1, arg2, arg3)
 
 /* interface to L2 and L4 */
 extern void med_get_kclass(struct medusa_kclass_s *med_kclass);
@@ -57,10 +77,16 @@ extern struct medusa_kclass_s *med_get_kclass_by_pointer(struct medusa_kclass_s 
 extern struct medusa_authserver_s *med_get_authserver(void);
 extern void med_put_authserver(struct medusa_authserver_s *med_authserver);
 extern inline bool med_is_authserver_present(void);
+void medusa_registry_status_snapshot(struct medusa_registry_status *status);
+int medusa_registry_events_seq_show(struct seq_file *m);
+int medusa_registry_classes_seq_show(struct seq_file *m);
+void medusa_event_set_enforced(struct medusa_evtype_s *evtype);
 
 /* interface to L4 */
 extern int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver);
+int med_authserver_handshake_begin(struct medusa_authserver_s *med_authserver);
 extern int med_register_authserver(struct medusa_authserver_s *med_authserver);
 extern void med_unregister_authserver(struct medusa_authserver_s *med_authserver);
+const char *medusa_authserver_state_name(enum medusa_authserver_state state);
 
 #endif
