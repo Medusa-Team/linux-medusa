@@ -80,11 +80,18 @@ extern inline bool med_is_authserver_present(void);
 void medusa_registry_status_snapshot(struct medusa_registry_status *status);
 int medusa_registry_events_seq_show(struct seq_file *m);
 int medusa_registry_classes_seq_show(struct seq_file *m);
-void medusa_event_set_enforced(struct medusa_evtype_s *evtype);
+void medusa_event_set_enforced(
+	struct medusa_evtype_s *evtype,
+	enum medusa_delegation_context delegation_context);
+const char *medusa_delegation_context_name(
+	enum medusa_delegation_context delegation_context);
 
 /* interface to L4 */
 extern int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver);
 int med_authserver_handshake_begin(struct medusa_authserver_s *med_authserver);
+int med_authserver_stage_fallback_policy(
+	struct medusa_authserver_s *med_authserver, MCPptr_t event_id,
+	enum medusa_fallback_policy policy);
 extern int med_register_authserver(struct medusa_authserver_s *med_authserver);
 extern void med_unregister_authserver(struct medusa_authserver_s *med_authserver);
 const char *medusa_authserver_state_name(enum medusa_authserver_state state);

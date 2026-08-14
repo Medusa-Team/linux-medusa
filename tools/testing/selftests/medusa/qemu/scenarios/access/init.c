@@ -19,6 +19,22 @@ static void mount_one(const char *source, const char *target, const char *type)
 		perror(target);
 }
 
+static void dump_event_counters(void)
+{
+	char line[1024];
+	FILE *events;
+
+	events = fopen("/sys/kernel/security/medusa/events", "r");
+	if (!events) {
+		perror("medusa events");
+		return;
+	}
+
+	while (fgets(line, sizeof(line), events))
+		fputs(line, stdout);
+	fclose(events);
+}
+
 int main(void)
 {
 	int status;
@@ -27,10 +43,12 @@ int main(void)
 	mount_one("proc", "/proc", "proc");
 	mount_one("sysfs", "/sys", "sysfs");
 	mount_one("devtmpfs", "/dev", "devtmpfs");
+	mount_one("securityfs", "/sys/kernel/security", "securityfs");
 
 	sleep(2);
 	mount_one("tmpfs", "/tmp", "tmpfs");
 	status = medusa_access_main();
+	dump_event_counters();
 
 	sleep(1);
 	sync();

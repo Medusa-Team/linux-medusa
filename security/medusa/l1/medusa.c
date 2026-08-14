@@ -16,7 +16,7 @@
 #include "l1/task.h"
 #include "l1/ipc.h"
 #include "l1/socket.h"
-#include "l1/fuck.h"
+#include "l1/path_guard.h"
 #include "../../../../fs/mount.h" /* real_mount(), struct mount */
 
 /* Used by `medusa_l1_creds_for_exec` */
@@ -54,38 +54,39 @@ MEDUSA_DECLARE_EVENT(chown_access);
 MEDUSA_DECLARE_EVENT(chroot_access);
 #endif
 
-#define MEDUSA_MARK_EVENT_ENFORCED(name) \
-	medusa_event_set_enforced(&MED_EVTYPEOF(name))
+#define MEDUSA_MARK_EVENT_ENFORCED(name, context) \
+	medusa_event_set_enforced(&MED_EVTYPEOF(name), \
+				  MEDUSA_DELEGATION_##context)
 
 static void __init medusa_mark_enforced_events(void)
 {
-	MEDUSA_MARK_EVENT_ENFORCED(exec_faccess);
-	MEDUSA_MARK_EVENT_ENFORCED(exec_paccess);
-	MEDUSA_MARK_EVENT_ENFORCED(getprocess_event);
-	MEDUSA_MARK_EVENT_ENFORCED(getfile_event);
-	MEDUSA_MARK_EVENT_ENFORCED(ipc_event);
-	MEDUSA_MARK_EVENT_ENFORCED(truncate_access);
-	MEDUSA_MARK_EVENT_ENFORCED(fcntl_access);
-	MEDUSA_MARK_EVENT_ENFORCED(open_access);
-	MEDUSA_MARK_EVENT_ENFORCED(setresuid);
-	MEDUSA_MARK_EVENT_ENFORCED(ipc_perm_access);
-	MEDUSA_MARK_EVENT_ENFORCED(ipc_associate_access);
-	MEDUSA_MARK_EVENT_ENFORCED(ipc_ctl_access);
-	MEDUSA_MARK_EVENT_ENFORCED(ipc_msgsnd_access);
-	MEDUSA_MARK_EVENT_ENFORCED(ipc_msgrcv_access);
-	MEDUSA_MARK_EVENT_ENFORCED(ipc_shmat_access);
-	MEDUSA_MARK_EVENT_ENFORCED(ipc_semop_access);
+	MEDUSA_MARK_EVENT_ENFORCED(exec_faccess, SLEEPABLE);
+	MEDUSA_MARK_EVENT_ENFORCED(exec_paccess, SLEEPABLE);
+	MEDUSA_MARK_EVENT_ENFORCED(getprocess_event, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(getfile_event, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_event, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(truncate_access, SLEEPABLE);
+	MEDUSA_MARK_EVENT_ENFORCED(fcntl_access, SLEEPABLE);
+	MEDUSA_MARK_EVENT_ENFORCED(open_access, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(setresuid, SLEEPABLE);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_perm_access, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_associate_access, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_ctl_access, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_msgsnd_access, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_msgrcv_access, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_shmat_access, CONDITIONAL);
+	MEDUSA_MARK_EVENT_ENFORCED(ipc_semop_access, CONDITIONAL);
 #ifdef CONFIG_SECURITY_PATH
-	MEDUSA_MARK_EVENT_ENFORCED(mknod_access);
-	MEDUSA_MARK_EVENT_ENFORCED(mkdir_access);
-	MEDUSA_MARK_EVENT_ENFORCED(rmdir_access);
-	MEDUSA_MARK_EVENT_ENFORCED(unlink_access);
-	MEDUSA_MARK_EVENT_ENFORCED(symlink_access);
-	MEDUSA_MARK_EVENT_ENFORCED(link_access);
-	MEDUSA_MARK_EVENT_ENFORCED(rename_access);
-	MEDUSA_MARK_EVENT_ENFORCED(chmod_access);
-	MEDUSA_MARK_EVENT_ENFORCED(chown_access);
-	MEDUSA_MARK_EVENT_ENFORCED(chroot_access);
+	MEDUSA_MARK_EVENT_ENFORCED(mknod_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(mkdir_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(rmdir_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(unlink_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(symlink_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(link_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(rename_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(chmod_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(chown_access, LOCK_BOUND);
+	MEDUSA_MARK_EVENT_ENFORCED(chroot_access, SLEEPABLE);
 #endif
 }
 
@@ -151,8 +152,8 @@ static void medusa_l1_inode_free_security(struct inode *inode)
 {
 	struct medusa_l1_inode_s *med = inode_security(inode);
 
-	if (unlikely(med && !hash_empty(med->fuck)))
-		fuck_free(med);
+	if (unlikely(med && path_guard_has_entries(med)))
+		path_guard_free(med);
 }
 
 /*
@@ -258,7 +259,6 @@ static int medusa_l1_path_chmod(const struct path *path, umode_t mode)
 {
 	if (medusa_chmod(path, mode) == MED_DENY)
 		return -EACCES;
-	//return validate_fuck(path);
 	return 0;
 }
 
@@ -266,7 +266,6 @@ static int medusa_l1_path_chown(const struct path *path, kuid_t uid, kgid_t gid)
 {
 	if (medusa_chown(path, uid, gid) == MED_DENY)
 		return -EACCES;
-	//return validate_fuck(path);
 	return 0;
 }
 
@@ -297,7 +296,6 @@ static int medusa_l1_file_open(struct file *file)
 		return 0;
 	if (medusa_open(file) == MED_DENY)
 		return -EACCES;
-	//return validate_fuck(&file->f_path);
 	return 0;
 }
 

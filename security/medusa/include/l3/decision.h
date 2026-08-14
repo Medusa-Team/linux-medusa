@@ -25,6 +25,10 @@ enum medusa_decision_source {
 	MEDUSA_DECISION_BASELINE,
 	MEDUSA_DECISION_ONLINE_REQUIRED,
 	MEDUSA_DECISION_INVALID_REPLY,
+	MEDUSA_DECISION_CACHE,
+	MEDUSA_DECISION_VIRTUAL_SPACE,
+	MEDUSA_DECISION_PATH_GUARD,
+	MEDUSA_DECISION_VALIDATION,
 };
 
 enum medusa_unavailable_reason {
@@ -41,6 +45,7 @@ struct medusa_authserver_decision {
 	u64 request_id;
 	u64 policy_generation;
 	enum medusa_unavailable_reason unavailable;
+	bool request_present;
 	bool contacted;
 };
 
@@ -50,6 +55,7 @@ struct medusa_decision_result {
 	enum medusa_unavailable_reason unavailable;
 	u64 request_id;
 	u64 policy_generation;
+	bool request_present;
 	bool authserver_contacted;
 };
 
@@ -58,6 +64,7 @@ struct medusa_decision_counters {
 	atomic64_t cached;
 	atomic64_t total;
 	atomic64_t delegated;
+	atomic64_t auth_server;
 	atomic64_t baseline;
 	atomic64_t online_required;
 	atomic64_t allowed;
@@ -71,6 +78,7 @@ struct medusa_decision_counter_snapshot {
 	u64 cached;
 	u64 total;
 	u64 delegated;
+	u64 auth_server;
 	u64 baseline;
 	u64 online_required;
 	u64 allowed;
@@ -81,12 +89,17 @@ struct medusa_decision_counter_snapshot {
 
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 			       enum medusa_fallback_policy policy);
+enum medusa_fallback_policy
+medusa_get_fallback_policy(const struct medusa_evtype_s *evtype);
 u64 medusa_degraded_decision_count(const struct medusa_evtype_s *evtype);
 void medusa_decision_counters_init(struct medusa_evtype_s *evtype);
 void medusa_decision_counters_snapshot(const struct medusa_evtype_s *evtype,
 				       struct medusa_decision_counter_snapshot *snapshot);
 bool medusa_event_monitoring_check(struct medusa_evtype_s *evtype,
 				   bool monitored);
+bool medusa_event_fallback_requires_decision(
+	const struct medusa_evtype_s *evtype);
+u64 medusa_current_policy_generation(void);
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy);
 const char *medusa_decision_answer_name(enum medusa_answer_t answer);
 const char *medusa_decision_source_name(enum medusa_decision_source source);

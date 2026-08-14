@@ -40,8 +40,23 @@ void medusa_audit_apply_decision(struct medusa_audit_data *mad,
 	mad->decision_metadata = 1;
 	mad->decision_source = result.source;
 	mad->unavailable = result.unavailable;
+	mad->request_present = result.request_present;
 	mad->request_id = result.request_id;
 	mad->policy_generation = result.policy_generation;
+}
+
+void medusa_audit_apply_local(struct medusa_audit_data *mad,
+			      enum medusa_answer_t answer,
+			      enum medusa_decision_source source)
+{
+	mad->ans = answer;
+	mad->as = AS_NO_REQUEST;
+	mad->decision_metadata = 1;
+	mad->decision_source = source;
+	mad->unavailable = MEDUSA_AVAILABLE;
+	mad->request_present = 0;
+	mad->request_id = 0;
+	mad->policy_generation = medusa_current_policy_generation();
 }
 
 /*
@@ -80,7 +95,8 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 					 mad->unavailable));
 		audit_log_format(ab, " policy_generation=%llu",
 				 (unsigned long long)mad->policy_generation);
-		audit_log_format(ab, " request_id=%llu",
+		audit_log_format(ab, " request_present=%u request_id=%llu",
+				 mad->request_present,
 				 (unsigned long long)mad->request_id);
 	}
 }

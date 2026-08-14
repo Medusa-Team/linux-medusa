@@ -35,7 +35,8 @@ enum medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 	struct process_kobject process;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(socket_create_access))
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(socket_create_access, task_security(current))) {

@@ -57,7 +57,8 @@ asmlinkage enum medusa_answer_t medusa_syscall_i386(unsigned int eax,
 	struct process_kobject proc;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(syscall_access))
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(syscall_access, task_security(current))) {

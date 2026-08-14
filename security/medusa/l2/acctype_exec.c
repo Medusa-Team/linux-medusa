@@ -57,13 +57,13 @@ static void medusa_exec_pacb(struct audit_buffer *ab, void *pcad)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
-					    const char *filename)
+static struct medusa_decision_result
+medusa_do_fexec(struct inode *inode, const char *filename)
 {
 	struct exec_faccess access;
 	struct process_kobject process;
 	struct file_kobject file;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result;
 
 	strncpy(access.filename, filename, sizeof(access.filename));
 	access.filename[sizeof(access.filename) - 1] = '\0';
@@ -71,20 +71,18 @@ static enum medusa_answer_t medusa_do_fexec(struct inode *inode,
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, inode);
 	file_kobj_live_add(inode);
-	retval = MED_DECIDE(exec_faccess, &access, &process, &file);
+	result = MED_DECIDE_RESULT(exec_faccess, &access, &process, &file);
 	file_kobj_live_remove(inode);
-	if (retval != MED_ERR)
-		return retval;
-	return MED_ALLOW;
+	return result;
 }
 
-static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
-					    const char *filename)
+static struct medusa_decision_result
+medusa_do_pexec(struct inode *inode, const char *filename)
 {
 	struct exec_paccess access;
 	struct process_kobject process;
 	struct file_kobject file;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result;
 
 	strncpy(access.filename, filename, sizeof(access.filename));
 	access.filename[sizeof(access.filename) - 1] = '\0';
@@ -92,11 +90,9 @@ static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, inode);
 	file_kobj_live_add(inode);
-	retval = MED_DECIDE(exec_paccess, &access, &process, &file);
+	result = MED_DECIDE_RESULT(exec_paccess, &access, &process, &file);
 	file_kobj_live_remove(inode);
-	if (retval == MED_ERR)
-		retval = MED_ALLOW;
-	return retval;
+	return result;
 }
 
 enum medusa_answer_t medusa_exec(struct linux_binprm *bprm)
@@ -105,14 +101,18 @@ enum medusa_answer_t medusa_exec(struct linux_binprm *bprm)
 	// TODO: Can we use file_inode?
 	struct inode *inode = d_backing_inode(path->dentry);
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(exec_paccess) &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(exec_faccess))
 		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
-	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
+	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(exec_paccess) &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(exec_faccess))
 		return mad.ans;
 
 	if (!vs_intersects(VSS(task_security(current)), VS(inode_security(inode))) ||
@@ -120,19 +120,20 @@ enum medusa_answer_t medusa_exec(struct linux_binprm *bprm)
 		mad.vs.srw.vst = VS(inode_security(inode));
 		mad.vs.srw.vss = VSS(task_security(current));
 		mad.vs.srw.vsr = VSR(task_security(current));
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto audit;
 	}
 	/* TODO: Two types of monitoring need to be supported by audit */
 	if (MEDUSA_MONITORED_ACCESS_S(exec_paccess, task_security(current))) {
-		mad.ans = medusa_do_pexec(inode, bprm->filename);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    medusa_do_pexec(inode, bprm->filename));
 		if (mad.ans == MED_DENY)
 			goto audit;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(exec_faccess, inode_security(inode))) {
-		mad.ans = medusa_do_fexec(inode, bprm->filename);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    medusa_do_fexec(inode, bprm->filename));
 	}
 audit:
 	if (task_security(current)->audit) {

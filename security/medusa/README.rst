@@ -82,3 +82,10 @@ and LSM stacking belong to later phases.
 
 The Linux 7.1 test inventory, wired/unwired access list, and known defects are
 recorded in ``security/medusa/TESTING.rst``.
+
+The hard-link destination allowlist and its ``path_guard`` userspace object
+class are documented in ``security/medusa/PATH_GUARD.rst``.
+
+The securityfs boundary and the Phase 4 decision to defer arbitrary
+virtual-space/context queries until a safe protocol-v4 object-query ABI are
+documented in ``security/medusa/OBSERVABILITY.rst``.

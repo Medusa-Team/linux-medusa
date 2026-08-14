@@ -41,7 +41,8 @@ enum medusa_answer_t medusa_capable(int cap)
 	}
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(capable_access))
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(capable_access, task_security(current))) {

@@ -1,0 +1,10 @@
+!BUG: sleeping function called from invalid context
+!BUG: scheduling while atomic
+!scheduling while atomic
+!WARNING: possible circular locking dependency detected
+!WARNING: possible recursive locking detected
+!possible recursive locking detected
+!inconsistent lock state
+!bad unlock balance detected
+!BUG: spinlock
+!kernel BUG at kernel/locking

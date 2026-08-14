@@ -7,7 +7,8 @@ reference authorization server in a minimal initramfs. Each scenario owns:
   * `init` or `init.c`: guest operations and machine-readable result lines;
   * optional `guest.c`: a separately runnable static test program;
   * `medusa.conf`: the Constable policy under test;
-  * `expected`: exact result lines that must appear on the guest console.
+  * `expected`: exact result lines that must appear on the guest console;
+  * optional `expected-order`: result fragments that must occur in order.
 
 An optional `base` file names another scenario whose programs, policies, and
 expected results are inherited. Programs and policies can be overridden by
@@ -16,7 +17,10 @@ are checked in addition to the base expectations.
 
 Blank lines and lines beginning with `#` in `expected` are ignored. A line
 beginning with `!` is a negative assertion: the remaining text must not occur
-on the console.
+on the console. Blank and comment lines in `expected-order` are also ignored.
+Each remaining fragment must occur after the preceding fragment. This permits
+handler-order checks without depending on timestamps or complete printk
+prefixes.
 
 The default `cache` scenario verifies that Linux reaches init with Medusa
 enabled, Constable connects using protocol version 3, the first `mkdir`
@@ -25,10 +29,22 @@ caches the second decision in the kernel.
 
 The `access` scenario covers filesystem operations, process creation,
 execution, credentials, signals, and all three supported SysV IPC classes.
-Its expected results deliberately record the current `EACCES` behavior when
-re-associating with an existing SysV IPC object. Filesystem and process
-operations are behavior checks; the console event assertions identify the
-SysV operations that demonstrably reached Constable.
+It requires a Constable marker for every active access type exercised, so an
+operation-level success without a delegated decision is not sufficient.
+Three global callbacks handle one sentinel `mkdir` in source order, followed
+by its subject and object path-tree callbacks. The first updates `file.user`;
+the second fetches the object and verifies the value. Ordered markers plus an
+`EACCES` assertion prove global-to-path-tree order, update/fetch visibility,
+continued evaluation after denial, and deny precedence despite later `ALLOW`
+results and logging side effects.
+The scenario also prints the securityfs event inventory for direct comparison
+of evaluations, cached checks, delegated decisions, fallbacks, and delegation
+context.
+
+The `lockdep` scenario inherits `access` and adds negative assertions for
+atomic sleeping, scheduling while atomic, recursive/circular locking,
+inconsistent lock state, unlock imbalance, and spinlock failures. Build its
+kernel with `lockdep.config` merged into the Medusa test configuration.
 
 The `lifecycle` scenario verifies initial Constable registration, clean
 disconnect, the configured fail-open behavior without a server, and
@@ -36,6 +52,20 @@ registration of a replacement server. The replacement loads a different
 policy and proves that its `ipc_msgsnd` deny rule is enforced. The scenario
 also verifies that stale-context validation emits an audit record when it
 takes the disconnected fail-open path for `mkdir`.
+
+The `degraded` scenario verifies the renewable lease, circuit breaker,
+structured fallback audit records, protocol error accounting, securityfs
+privilege and snapshot consistency, and recovery through newer policy
+generations. A minimal protocol-v3 server renews one real request twice and
+answers after eight seconds; the operation must remain blocked beyond the
+initial five-second lease, and the status counters must report both renewals,
+one matched reply, and no leaked pending request. The separate silent-server
+case must still time out and open the circuit breaker. Its restart-stress phase
+then stops Constable with 32 independent message-queue operations in flight,
+proves that at least eight requests are pending concurrently, kills the server,
+and requires every waiter to apply its installed baseline within three
+seconds. The pending table must return to zero before another Constable
+reconnects and restores the delegated denial.
 
 The `stacking` scenario inherits the complete lifecycle test and additionally
 mounts securityfs and verifies that the kernel's runtime LSM list contains
@@ -69,7 +99,8 @@ Build Constable and BusyBox as static x86-64 executables, then run:
 
 If the optional scenario argument is omitted, `cache` is used. The runner
 exits successfully only after every non-comment line in the scenario's
-`expected` file is observed on the console.
+`expected` file is observed on the console and every `expected-order` fragment
+is observed in sequence.
 
 To exercise major-LSM stacking, merge `stacking.config` into the kernel
 configuration before building, verify the resulting configuration, then run
@@ -102,7 +133,11 @@ loads it before exercising the restricted guest.
 `GUEST_CC` selects the static compiler for scenario C programs. Prebuilt
 programs may instead be supplied with `INIT_TEST_BINARY` and
 `GUEST_TEST_BINARY`. `QEMU_ACCEL`, `QEMU_CPU`, and `QEMU_TIMEOUT` may also be
-overridden in the environment.
+overridden in the environment. The runner uses `qemu-system-x86_64` and
+rejects non-x86-64 Constable, BusyBox, init, or guest executables. This avoids
+silently building ARM64 guest programs when the runner itself is used from an
+ARM64 container; use an x86-64 cross compiler or prebuilt x86-64 binaries in
+that environment.
 
 A scenario containing `apparmor.profile` requires `apparmor_parser` on the
 host running the harness. `APPARMOR_PARSER` selects a non-default parser.

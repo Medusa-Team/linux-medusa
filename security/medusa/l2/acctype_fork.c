@@ -30,7 +30,8 @@ enum medusa_answer_t medusa_fork(unsigned long clone_flags)
 	struct process_kobject parent;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(fork_access))
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(fork_access, task_security(current))) {

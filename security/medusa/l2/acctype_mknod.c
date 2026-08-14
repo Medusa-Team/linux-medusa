@@ -46,15 +46,14 @@ static void medusa_mknod_pacb(struct audit_buffer *ab, void *pcad)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_mknod(const struct path *dir,
-					    struct dentry *dentry,
-					    int mode,
-					    dev_t dev)
+static struct medusa_decision_result
+medusa_do_mknod(const struct path *dir, struct dentry *dentry,
+		int mode, dev_t dev)
 {
 	struct mknod_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result;
 
 	file_kobj_dentry2string_mnt(dir, dentry, access.filename);
 	access.dev = dev;
@@ -62,9 +61,9 @@ static enum medusa_answer_t medusa_do_mknod(const struct path *dir,
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, dir->dentry->d_inode);
 	file_kobj_live_add(dir->dentry->d_inode);
-	retval = MED_DECIDE(mknod_access, &access, &process, &file);
+	result = MED_DECIDE_RESULT(mknod_access, &access, &process, &file);
 	file_kobj_live_remove(dir->dentry->d_inode);
-	return retval;
+	return result;
 }
 
 enum medusa_answer_t medusa_mknod(const struct path *dir,
@@ -74,17 +73,19 @@ enum medusa_answer_t medusa_mknod(const struct path *dir,
 {
 	struct path ndcurrent, ndupper;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(mknod_access))
 		return mad.ans;
 
 	ndcurrent = *dir;
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, NULL);
 
 	if (!is_med_magic_valid(&(inode_security(ndupper.dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry(ndupper.dentry, ndupper.mnt, NULL) <= 0) {
+	    file_kobj_validate_dentry(ndupper.dentry, ndupper.mnt, NULL) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(mknod_access)) {
 		medusa_put_upper_and_parent(&ndupper, NULL);
 		return mad.ans;
 	}
@@ -96,12 +97,14 @@ enum medusa_answer_t medusa_mknod(const struct path *dir,
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		medusa_put_upper_and_parent(&ndupper, NULL);
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto audit;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(mknod_access, inode_security(ndupper.dentry->d_inode))) {
-		mad.ans = medusa_do_mknod(&ndupper, dentry, mode, dev);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    medusa_do_mknod(&ndupper, dentry,
+							    mode, dev));
 	}
 	medusa_put_upper_and_parent(&ndupper, NULL);
 audit:

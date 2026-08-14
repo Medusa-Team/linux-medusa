@@ -37,21 +37,22 @@ static void medusa_permission_pacb(struct audit_buffer *ab, void *pcad)
 	audit_log_format(ab, " mask=%d", mad->mask);
 }
 
-static enum medusa_answer_t medusa_do_permission(struct dentry *dentry, struct inode *inode, int mask)
+static struct medusa_decision_result
+medusa_do_permission(struct dentry *dentry, struct inode *inode, int mask)
 {
 	struct permission_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result;
 
 	file_kobj_dentry2string(dentry, access.filename);
 	access.mask = mask;
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, inode);
 	file_kobj_live_add(inode);
-	retval = MED_DECIDE(permission_access, &access, &process, &file);
+	result = MED_DECIDE_RESULT(permission_access, &access, &process, &file);
 	file_kobj_live_remove(inode);
-	return retval;
+	return result;
 }
 
 /**
@@ -63,12 +64,13 @@ static enum medusa_answer_t medusa_do_permission(struct dentry *dentry, struct i
 enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 {
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 	struct dentry *dentry;
 	unsigned int requested = MEDUSA_VS_SEE;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(permission_access))
 		return mad.ans;
 
 	dentry = d_find_alias(inode);
@@ -76,10 +78,12 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 	if (!dentry || IS_ERR(dentry))
 		return mad.ans;
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(permission_access))
 		return mad.ans;
 	if (!is_med_magic_valid(&(inode_security(inode)->med_object)) &&
-	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0)
+	    file_kobj_validate_dentry(dentry, NULL, NULL) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(permission_access))
 		goto out_dput;
 	if (mask & (S_IRUGO | S_IXUGO))
 		requested |= MEDUSA_VS_READ;
@@ -93,12 +97,14 @@ enum medusa_answer_t medusa_permission(struct inode *inode, int mask)
 		mad.vs.srw.vss = VSS(task_security(current));
 		mad.vs.srw.vsr = VSR(task_security(current));
 		mad.vs.srw.vsw = VSW(task_security(current));
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto out_dput;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(permission_access, inode_security(inode))) {
-		mad.ans = medusa_do_permission(dentry, inode, mask);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    medusa_do_permission(dentry, inode,
+								 mask));
 	}
 out_dput:
 	cad.type = LSM_AUDIT_DATA_DENTRY;

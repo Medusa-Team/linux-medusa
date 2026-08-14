@@ -131,11 +131,22 @@ static void task_context_inherits_parent_state(struct kunit *test)
 #endif
 }
 
+static void monitored_task_does_not_inherit_unmonitored_parent(struct kunit *test)
+{
+	KUNIT_EXPECT_FALSE(test,
+		medusa_task_context_should_inherit(true, false));
+	KUNIT_EXPECT_FALSE(test,
+		medusa_task_context_should_inherit(false, true));
+	KUNIT_EXPECT_TRUE(test,
+		medusa_task_context_should_inherit(false, false));
+}
+
 static struct kunit_case task_context_test_cases[] = {
 	KUNIT_CASE(task_context_monitored_initialization),
 	KUNIT_CASE(task_context_unmonitored_initialization),
 	KUNIT_CASE(userspace_trigger_reenables_monitoring),
 	KUNIT_CASE(task_context_inherits_parent_state),
+	KUNIT_CASE(monitored_task_does_not_inherit_unmonitored_parent),
 	{}
 };
 

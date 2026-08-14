@@ -29,6 +29,7 @@ static enum medusa_answer_t fake_decide(struct medusa_event_s *event,
 	decision->policy_generation =
 		(u64)READ_ONCE(medusa_authserver_magic);
 	decision->unavailable = delegated_unavailable;
+	decision->request_present = true;
 	decision->contacted = true;
 	decide_calls++;
 	return delegated_answer;
@@ -86,6 +87,8 @@ static int comm_test_init(struct kunit *test)
 	atomic64_set(&test_event_type.degraded_decisions, 0);
 	medusa_decision_counters_init(&test_event_type);
 	WRITE_ONCE(test_event_type.enforced, false);
+	WRITE_ONCE(test_event_type.delegation_context,
+		   MEDUSA_DELEGATION_NONE);
 	ratelimit_state_init(&test_event_type.degraded_audit_ratelimit, HZ, 0);
 	KUNIT_ASSERT_EQ(test, 0,
 			medusa_set_fallback_policy(
@@ -110,6 +113,7 @@ decide_without_server_uses_baseline_and_preserves_monitoring(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, (u64)0, result.request_id);
 	KUNIT_EXPECT_EQ(test, (u64)READ_ONCE(medusa_authserver_magic),
 			result.policy_generation);
+	KUNIT_EXPECT_FALSE(test, result.request_present);
 	KUNIT_EXPECT_FALSE(test, result.authserver_contacted);
 	KUNIT_EXPECT_EQ(test, (u64)1,
 			medusa_degraded_decision_count(&test_event_type));
@@ -133,6 +137,7 @@ static void baseline_deny_is_enforced_without_server(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, MED_DENY, result.answer);
 	KUNIT_EXPECT_EQ(test, MEDUSA_DECISION_BASELINE, result.source);
 	KUNIT_EXPECT_EQ(test, MEDUSA_AVAILABLE, result.unavailable);
+	KUNIT_EXPECT_FALSE(test, result.request_present);
 	KUNIT_EXPECT_FALSE(test, result.authserver_contacted);
 	KUNIT_EXPECT_EQ(test, (u64)0,
 			medusa_degraded_decision_count(&test_event_type));
@@ -210,6 +215,7 @@ static void expect_delegated_answer(struct kunit *test,
 	KUNIT_EXPECT_EQ(test, expected_source, decision.source);
 	KUNIT_EXPECT_EQ(test, unavailable, decision.unavailable);
 	KUNIT_EXPECT_TRUE(test, decision.authserver_contacted);
+	KUNIT_EXPECT_TRUE(test, decision.request_present);
 	KUNIT_EXPECT_EQ(test, (u64)0x1234, decision.request_id);
 	KUNIT_EXPECT_EQ(test, expected_generation, decision.policy_generation);
 	KUNIT_EXPECT_EQ(test,
@@ -271,6 +277,7 @@ static void unhealthy_server_uses_baseline_without_contact(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, MEDUSA_DECISION_BASELINE, result.source);
 	KUNIT_EXPECT_EQ(test, MEDUSA_AUTH_SERVER_UNHEALTHY,
 			result.unavailable);
+	KUNIT_EXPECT_FALSE(test, result.request_present);
 	KUNIT_EXPECT_FALSE(test, result.authserver_contacted);
 	KUNIT_EXPECT_EQ(test, 0, decide_calls);
 }
@@ -288,6 +295,7 @@ static void authoritative_server_results_can_validate(struct kunit *test)
 		.answer = MED_ALLOW,
 		.source = MEDUSA_DECISION_AUTH_SERVER,
 		.unavailable = MEDUSA_AVAILABLE,
+		.request_present = true,
 		.authserver_contacted = true,
 	};
 
@@ -335,6 +343,9 @@ static void incomplete_server_results_cannot_validate(struct kunit *test)
 	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
 
 	result.authserver_contacted = true;
+	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
+
+	result.request_present = true;
 	result.unavailable = MEDUSA_AUTH_SERVER_UNREACHABLE;
 	KUNIT_EXPECT_FALSE(test, medusa_decision_is_authoritative(&result));
 
@@ -352,6 +363,8 @@ static void incomplete_server_results_cannot_validate(struct kunit *test)
 
 static void decision_metadata_names_are_stable(struct kunit *test)
 {
+	const char *source_name;
+
 	KUNIT_EXPECT_STREQ(test, "ALLOW",
 			  medusa_decision_answer_name(MED_ALLOW));
 	KUNIT_EXPECT_STREQ(test, "DENY",
@@ -365,6 +378,16 @@ static void decision_metadata_names_are_stable(struct kunit *test)
 	KUNIT_EXPECT_STREQ(test, "non_sleepable_context",
 			  medusa_unavailable_reason_name(
 				  MEDUSA_NON_SLEEPABLE_CONTEXT));
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_AUTH_SERVER);
+	KUNIT_EXPECT_STREQ(test, "auth_server", source_name);
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_CACHE);
+	KUNIT_EXPECT_STREQ(test, "cache", source_name);
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_VIRTUAL_SPACE);
+	KUNIT_EXPECT_STREQ(test, "virtual_space", source_name);
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_PATH_GUARD);
+	KUNIT_EXPECT_STREQ(test, "path_guard", source_name);
+	source_name = medusa_decision_source_name(MEDUSA_DECISION_VALIDATION);
+	KUNIT_EXPECT_STREQ(test, "validation", source_name);
 	KUNIT_EXPECT_EQ(test, (u64)0,
 			medusa_degraded_decision_count(NULL));
 }
@@ -406,6 +429,39 @@ static void protocol_accepts_supported_answers(struct kunit *test)
 		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_DENY, true));
 	KUNIT_EXPECT_EQ(test, 0, medusa_comm_validate_authanswer(
 		MEDUSA_COMM_AUTHANSWER_PAYLOAD_SIZE, MED_ERR, true));
+}
+
+static void protocol_accepts_supported_userspace_commands(struct kunit *test)
+{
+	bool supported;
+	u64 command;
+
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_AUTHANSWER);
+	KUNIT_EXPECT_TRUE(test, supported);
+	command = MEDUSA_COMM_AUTHREQUEST_PROGRESS;
+	supported = medusa_comm_command_is_supported(command);
+	KUNIT_EXPECT_TRUE(test, supported);
+	supported =
+		medusa_comm_command_is_supported(MEDUSA_COMM_FALLBACK_POLICY);
+	KUNIT_EXPECT_TRUE(test, supported);
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_FETCH_REQUEST);
+	KUNIT_EXPECT_TRUE(test, supported);
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_UPDATE_REQUEST);
+	KUNIT_EXPECT_TRUE(test, supported);
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_READY_ANSWER);
+	KUNIT_EXPECT_TRUE(test, supported);
+}
+
+static void protocol_rejects_unknown_userspace_commands(struct kunit *test)
+{
+	bool supported;
+
+	supported = medusa_comm_command_is_supported(0);
+	KUNIT_EXPECT_FALSE(test, supported);
+	supported = medusa_comm_command_is_supported(MEDUSA_COMM_AUTHREQUEST);
+	KUNIT_EXPECT_FALSE(test, supported);
+	supported = medusa_comm_command_is_supported(U64_MAX);
+	KUNIT_EXPECT_FALSE(test, supported);
 }
 
 static void protocol_rejects_malformed_answer_lengths(struct kunit *test)
@@ -454,6 +510,25 @@ static void protocol_validates_decision_progress(struct kunit *test)
 				false));
 }
 
+static void protocol_validates_fallback_policy(struct kunit *test)
+{
+	KUNIT_EXPECT_EQ(test, 0,
+			medusa_comm_validate_fallback_policy(
+				MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE,
+				MEDUSA_COMM_FALLBACK_BASELINE_ALLOW));
+	KUNIT_EXPECT_EQ(test, 0,
+			medusa_comm_validate_fallback_policy(
+				MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE,
+				MEDUSA_COMM_FALLBACK_ONLINE_REQUIRED));
+	KUNIT_EXPECT_EQ(test, -EMSGSIZE,
+			medusa_comm_validate_fallback_policy(
+				MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE - 1,
+				MEDUSA_COMM_FALLBACK_BASELINE_DENY));
+	KUNIT_EXPECT_EQ(test, -EINVAL,
+			medusa_comm_validate_fallback_policy(
+				MEDUSA_COMM_FALLBACK_POLICY_PAYLOAD_SIZE, 3));
+}
+
 static void decision_counters_attribute_final_verdicts(struct kunit *test)
 {
 	struct medusa_decision_counter_snapshot counters;
@@ -488,12 +563,17 @@ static void decision_counters_attribute_final_verdicts(struct kunit *test)
 	medusa_decision_counters_snapshot(&test_event_type, &counters);
 	KUNIT_EXPECT_EQ(test, (u64)6, counters.total);
 	KUNIT_EXPECT_EQ(test, (u64)4, counters.delegated);
+	KUNIT_EXPECT_EQ(test, (u64)2, counters.auth_server);
 	KUNIT_EXPECT_EQ(test, (u64)2, counters.baseline);
 	KUNIT_EXPECT_EQ(test, (u64)1, counters.online_required);
 	KUNIT_EXPECT_EQ(test, (u64)3, counters.allowed);
 	KUNIT_EXPECT_EQ(test, (u64)3, counters.denied);
 	KUNIT_EXPECT_EQ(test, (u64)1, counters.timed_out);
 	KUNIT_EXPECT_EQ(test, (u64)1, counters.invalid_replies);
+	KUNIT_EXPECT_EQ(test, counters.total,
+			counters.cached + counters.auth_server +
+			counters.baseline + counters.online_required +
+			counters.invalid_replies);
 }
 
 static void decision_counter_wrap_is_well_defined(struct kunit *test)
@@ -515,18 +595,66 @@ static void monitoring_cache_accounting_is_explicit(struct kunit *test)
 	struct medusa_decision_counter_snapshot counters;
 
 	KUNIT_EXPECT_FALSE(test,
+			   medusa_event_fallback_requires_decision(
+				   &test_event_type));
+	KUNIT_EXPECT_FALSE(test,
 			   medusa_event_monitoring_check(&test_event_type, false));
 	KUNIT_EXPECT_TRUE(test,
 			  medusa_event_monitoring_check(&test_event_type, true));
 	KUNIT_EXPECT_FALSE(test,
 			   medusa_event_monitoring_check(&test_event_type, false));
-	medusa_event_set_enforced(&test_event_type);
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_set_fallback_policy(
+				&test_event_type,
+				MEDUSA_FALLBACK_BASELINE_DENY));
+	KUNIT_EXPECT_TRUE(test,
+			  medusa_event_fallback_requires_decision(
+				  &test_event_type));
+	KUNIT_EXPECT_TRUE(test,
+			  medusa_event_monitoring_check(&test_event_type, false));
+	KUNIT_ASSERT_EQ(test, 0,
+			medusa_set_fallback_policy(
+				&test_event_type,
+				MEDUSA_FALLBACK_ONLINE_REQUIRED));
+	KUNIT_EXPECT_TRUE(test,
+			  medusa_event_fallback_requires_decision(
+				  &test_event_type));
+	medusa_event_set_enforced(&test_event_type,
+				  MEDUSA_DELEGATION_CONDITIONAL);
 	medusa_decision_counters_snapshot(&test_event_type, &counters);
 
 	KUNIT_EXPECT_TRUE(test, READ_ONCE(test_event_type.enforced));
-	KUNIT_EXPECT_EQ(test, (u64)3, counters.evaluations);
+	KUNIT_EXPECT_EQ(test, MEDUSA_DELEGATION_CONDITIONAL,
+			READ_ONCE(test_event_type.delegation_context));
+	KUNIT_EXPECT_EQ(test, (u64)4, counters.evaluations);
 	KUNIT_EXPECT_EQ(test, (u64)2, counters.cached);
-	KUNIT_EXPECT_EQ(test, (u64)0, counters.total);
+	KUNIT_EXPECT_EQ(test, (u64)2, counters.total);
+	KUNIT_EXPECT_EQ(test, (u64)0, counters.auth_server);
+	KUNIT_EXPECT_EQ(test, (u64)2, counters.allowed);
+	KUNIT_EXPECT_EQ(test, (u64)0, counters.denied);
+	KUNIT_EXPECT_EQ(test, counters.total,
+			counters.cached + counters.auth_server +
+			counters.baseline + counters.online_required +
+			counters.invalid_replies);
+}
+
+static void delegation_context_names_are_stable(struct kunit *test)
+{
+	KUNIT_EXPECT_STREQ(test, "none",
+			  medusa_delegation_context_name(
+				  MEDUSA_DELEGATION_NONE));
+	KUNIT_EXPECT_STREQ(test, "sleepable",
+			  medusa_delegation_context_name(
+				  MEDUSA_DELEGATION_SLEEPABLE));
+	KUNIT_EXPECT_STREQ(test, "lock_bound",
+			  medusa_delegation_context_name(
+				  MEDUSA_DELEGATION_LOCK_BOUND));
+	KUNIT_EXPECT_STREQ(test, "conditional",
+			  medusa_delegation_context_name(
+				  MEDUSA_DELEGATION_CONDITIONAL));
+	KUNIT_EXPECT_STREQ(test, "invalid",
+			  medusa_delegation_context_name(
+				  (enum medusa_delegation_context)-1));
 }
 
 static void protocol_counters_are_cumulative(struct kunit *test)
@@ -593,14 +721,18 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(fallback_policy_rejects_invalid_values),
 	KUNIT_CASE(fallback_policy_names_are_stable),
 	KUNIT_CASE(protocol_accepts_supported_answers),
+	KUNIT_CASE(protocol_accepts_supported_userspace_commands),
+	KUNIT_CASE(protocol_rejects_unknown_userspace_commands),
 	KUNIT_CASE(protocol_rejects_malformed_answer_lengths),
 	KUNIT_CASE(protocol_rejects_unknown_answer_code),
 	KUNIT_CASE(protocol_rejects_unknown_request_id),
 	KUNIT_CASE(protocol_rejects_stale_request_id),
 	KUNIT_CASE(protocol_validates_decision_progress),
+	KUNIT_CASE(protocol_validates_fallback_policy),
 	KUNIT_CASE(decision_counters_attribute_final_verdicts),
 	KUNIT_CASE(decision_counter_wrap_is_well_defined),
 	KUNIT_CASE(monitoring_cache_accounting_is_explicit),
+	KUNIT_CASE(delegation_context_names_are_stable),
 	KUNIT_CASE(protocol_counters_are_cumulative),
 	KUNIT_CASE(protocol_error_names_are_stable),
 	{}

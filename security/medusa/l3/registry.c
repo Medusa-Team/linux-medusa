@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include <linux/ratelimit.h>
+#include <linux/rcupdate.h>
 #include <linux/seq_file.h>
 #include <linux/string.h>
 
@@ -21,6 +22,8 @@ static enum medusa_authserver_state authserver_state =
 	MEDUSA_AUTHSERVER_DISCONNECTED;
 static u64 active_policy_generation;
 static u64 last_ready_policy_generation;
+static unsigned int fallback_policy_slot;
+static unsigned int handshaking_fallback_slot;
 
 int medusa_authserver_magic = 1; /* the 'version' of authserver */
 /* WARNING! medusa_authserver_magic is not locked, nor atomic type,
@@ -29,6 +32,25 @@ int medusa_authserver_magic = 1; /* the 'version' of authserver */
  * and place some memory barrier between, or get lock there - the lock
  * hopefully contains some kind of such barrier ;).
  */
+
+static unsigned int medusa_fallback_slot_read(void)
+{
+	/* Pairs with READY's release publication of the completed slot. */
+	return smp_load_acquire(&fallback_policy_slot);
+}
+
+enum medusa_fallback_policy
+medusa_get_fallback_policy(const struct medusa_evtype_s *evtype)
+{
+	enum medusa_fallback_policy policy;
+	unsigned int slot;
+
+	rcu_read_lock();
+	slot = medusa_fallback_slot_read();
+	policy = READ_ONCE(evtype->fallback_policy[slot]);
+	rcu_read_unlock();
+	return policy;
+}
 
 /**
  * med_get_kclass - lock the kclass by incrementing its use-count.
@@ -344,6 +366,7 @@ int med_register_authserver_prepare(struct medusa_authserver_s *med_authserver)
  */
 int med_authserver_handshake_begin(struct medusa_authserver_s *med_authserver)
 {
+	struct medusa_evtype_s *event;
 	int error = 0;
 
 	mutex_lock(&registry_lock);
@@ -354,6 +377,56 @@ int med_authserver_handshake_begin(struct medusa_authserver_s *med_authserver)
 
 	handshaking_authserver = med_authserver;
 	authserver_state = MEDUSA_AUTHSERVER_HANDSHAKING;
+	handshaking_fallback_slot = medusa_fallback_slot_read() ^ 1U;
+	/*
+	 * A reader can have sampled this inactive slot while it was active in
+	 * the preceding generation. Do not reuse it until every such lockless
+	 * reader has completed.
+	 */
+	synchronize_rcu();
+	for (event = evtypes; event; event = event->next)
+		WRITE_ONCE(
+			event->fallback_policy[handshaking_fallback_slot],
+			medusa_get_fallback_policy(event));
+out:
+	mutex_unlock(&registry_lock);
+	return error;
+}
+
+/**
+ * med_authserver_stage_fallback_policy - stage one event policy for READY
+ * @med_authserver: server owning the current handshake
+ * @event_id: event pointer announced by this kernel
+ * @policy: validated fallback policy
+ *
+ * Staging never changes the policy observed by decisions. The complete staged
+ * set is published by med_register_authserver() immediately before the server
+ * becomes eligible for decisions.
+ */
+int med_authserver_stage_fallback_policy(
+	struct medusa_authserver_s *med_authserver, MCPptr_t event_id,
+	enum medusa_fallback_policy policy)
+{
+	struct medusa_evtype_s *event;
+	int error = -ENOENT;
+
+	if (policy < MEDUSA_FALLBACK_BASELINE_ALLOW ||
+	    policy > MEDUSA_FALLBACK_ONLINE_REQUIRED)
+		return -EINVAL;
+
+	mutex_lock(&registry_lock);
+	if (handshaking_authserver != med_authserver) {
+		error = -EPERM;
+		goto out;
+	}
+	for (event = evtypes; event; event = event->next) {
+		if ((MCPptr_t)event != event_id)
+			continue;
+		WRITE_ONCE(event->fallback_policy[handshaking_fallback_slot],
+			   policy);
+		error = 0;
+		break;
+	}
 out:
 	mutex_unlock(&registry_lock);
 	return error;
@@ -387,6 +460,11 @@ int med_register_authserver(struct medusa_authserver_s *med_authserver)
 	 * we set use-count to 1, and somebody has to decrement it some day.
 	 */
 	med_authserver->use_count = 1;
+	if (handshaking_authserver == med_authserver) {
+		/* Publish every inactive-slot write as one policy generation. */
+		smp_store_release(&fallback_policy_slot,
+				  handshaking_fallback_slot);
+	}
 	medusa_authserver_magic++;
 	authserver = med_authserver;
 	handshaking_authserver = NULL;
@@ -496,10 +574,31 @@ inline bool med_is_authserver_present(void)
 	return !!authserver;
 }
 
-void medusa_event_set_enforced(struct medusa_evtype_s *evtype)
+const char *medusa_delegation_context_name(
+	enum medusa_delegation_context delegation_context)
 {
-	if (evtype)
+	switch (delegation_context) {
+	case MEDUSA_DELEGATION_NONE:
+		return "none";
+	case MEDUSA_DELEGATION_SLEEPABLE:
+		return "sleepable";
+	case MEDUSA_DELEGATION_LOCK_BOUND:
+		return "lock_bound";
+	case MEDUSA_DELEGATION_CONDITIONAL:
+		return "conditional";
+	default:
+		return "invalid";
+	}
+}
+
+void medusa_event_set_enforced(
+	struct medusa_evtype_s *evtype,
+	enum medusa_delegation_context delegation_context)
+{
+	if (evtype) {
+		WRITE_ONCE(evtype->delegation_context, delegation_context);
 		WRITE_ONCE(evtype->enforced, true);
+	}
 }
 
 /**
@@ -582,7 +681,7 @@ int medusa_registry_events_seq_show(struct seq_file *m)
 				"object" : "subject";
 		}
 
-		policy = READ_ONCE(event->fallback_policy);
+		policy = medusa_get_fallback_policy(event);
 		fallback = medusa_fallback_policy_name(policy);
 		medusa_decision_counters_snapshot(event, &counters);
 		seq_printf(m,
@@ -593,13 +692,19 @@ int medusa_registry_events_seq_show(struct seq_file *m)
 		seq_printf(m, " enforcement=%s trigger=%s trigger_bitmap=%s",
 			   READ_ONCE(event->enforced) ? "active" : "announced",
 			   trigger, trigger_bitmap);
+		seq_printf(m, " delegation=%s",
+			   medusa_delegation_context_name(
+				   READ_ONCE(event->delegation_context)));
 		seq_printf(m, " fallback=%s evaluations=%llu cached=%llu",
 			   fallback,
 			   (unsigned long long)counters.evaluations,
 			   (unsigned long long)counters.cached);
-		seq_printf(m, " decisions=%llu delegated=%llu baseline=%llu",
+		seq_printf(m,
+			   " decisions=%llu delegated=%llu auth_server=%llu",
 			   (unsigned long long)counters.total,
 			   (unsigned long long)counters.delegated,
+			   (unsigned long long)counters.auth_server);
+		seq_printf(m, " baseline=%llu",
 			   (unsigned long long)counters.baseline);
 		seq_printf(m, " online_required=%llu allowed=%llu denied=%llu",
 			   (unsigned long long)counters.online_required,

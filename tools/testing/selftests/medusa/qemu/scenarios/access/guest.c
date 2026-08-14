@@ -36,19 +36,6 @@ static void result(const char *name, bool passed)
 	}
 }
 
-static void expected_eacces(const char *name, long value)
-{
-	bool passed = value < 0 && errno == EACCES;
-
-	printf("MEDUSA_RESULT access %s %s\n", name,
-	       passed ? "PASS" : "FAIL");
-	if (!passed) {
-		printf("MEDUSA_DETAIL access %s expected=EACCES value=%ld errno=%d (%s)\n",
-		       name, value, errno, strerror(errno));
-		failures++;
-	}
-}
-
 static bool prime_path(const char *path, int flags)
 {
 	int fd = open(path, flags);
@@ -65,6 +52,10 @@ static void test_filesystem(void)
 	int status;
 
 	result("mkdir", mkdir("/tmp/access", 0755) == 0);
+	errno = 0;
+	result("multi_handler_deny",
+	       mkdir("/tmp/medusa-multi-deny", 0711) < 0 &&
+	       errno == EACCES);
 	result("validate_directory",
 	       prime_path("/tmp/access", O_RDONLY | O_DIRECTORY));
 	fd = open("/tmp/access/file", O_CREAT | O_RDWR, 0644);
@@ -154,12 +145,10 @@ static void test_message_queue(void)
 	struct msqid_ds info;
 	key_t key = 0x4d010001;
 	int id = msgget(key, IPC_CREAT | IPC_EXCL | 0600);
-	int associated;
 
 	result("msg_create", id >= 0);
-	errno = 0;
-	associated = id >= 0 ? msgget(key, 0600) : -1;
-	expected_eacces("msg_associate_expected_deny", associated);
+	result("msg_associate",
+	       id >= 0 && msgget(key, 0) == id);
 	result("msg_send",
 	       id >= 0 && msgsnd(id, &message, sizeof(message.text), 0) == 0);
 	memset(message.text, 0, sizeof(message.text));
@@ -176,12 +165,10 @@ static void test_semaphores(void)
 	union semun argument = { .val = 0 };
 	key_t key = 0x4d010002;
 	int id = semget(key, 1, IPC_CREAT | IPC_EXCL | 0600);
-	int associated;
 
 	result("sem_create", id >= 0);
-	errno = 0;
-	associated = id >= 0 ? semget(key, 1, 0600) : -1;
-	expected_eacces("sem_associate_expected_deny", associated);
+	result("sem_associate",
+	       id >= 0 && semget(key, 1, 0) == id);
 	result("sem_op", id >= 0 && semop(id, &operation, 1) == 0);
 	result("sem_remove",
 	       id >= 0 && semctl(id, 0, IPC_RMID, argument) == 0);
@@ -192,13 +179,11 @@ static void test_shared_memory(void)
 	struct shmid_ds info;
 	key_t key = 0x4d010003;
 	int id = shmget(key, 4096, IPC_CREAT | IPC_EXCL | 0600);
-	int associated;
 	void *memory;
 
 	result("shm_create", id >= 0);
-	errno = 0;
-	associated = id >= 0 ? shmget(key, 4096, 0600) : -1;
-	expected_eacces("shm_associate_expected_deny", associated);
+	result("shm_associate",
+	       id >= 0 && shmget(key, 4096, 0) == id);
 	memory = id >= 0 ? shmat(id, NULL, 0) : (void *)-1;
 	result("shm_attach", memory != (void *)-1);
 	if (memory != (void *)-1) {

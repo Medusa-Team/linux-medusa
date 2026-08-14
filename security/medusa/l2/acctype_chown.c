@@ -42,12 +42,13 @@ static void medusa_chown_pacb(struct audit_buffer *ab, void *pcad)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_chown(const struct path *path, kuid_t uid, kgid_t gid)
+static struct medusa_decision_result
+medusa_do_chown(const struct path *path, kuid_t uid, kgid_t gid)
 {
 	struct chown_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result;
 
 	access.uid = uid;
 	access.gid = gid;
@@ -55,22 +56,24 @@ static enum medusa_answer_t medusa_do_chown(const struct path *path, kuid_t uid,
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, path->dentry->d_inode);
 	file_kobj_live_add(path->dentry->d_inode);
-	retval = MED_DECIDE(chown_access, &access, &process, &file);
+	result = MED_DECIDE_RESULT(chown_access, &access, &process, &file);
 	file_kobj_live_remove(path->dentry->d_inode);
-	return retval;
+	return result;
 }
 
 enum medusa_answer_t medusa_chown(const struct path *path, kuid_t uid, kgid_t gid)
 {
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(chown_access))
 		return mad.ans;
 
 	if (!is_med_magic_valid(&(inode_security(path->dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0)
+	    file_kobj_validate_dentry_dir(path->mnt, path->dentry) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(chown_access))
 		return mad.ans;
 	if (!vs_intersects(VSS(task_security(current)),
 			   VS(inode_security(path->dentry->d_inode))) ||
@@ -79,12 +82,13 @@ enum medusa_answer_t medusa_chown(const struct path *path, kuid_t uid, kgid_t gi
 		mad.vs.sw.vst = VS(inode_security(path->dentry->d_inode));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto audit;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(chown_access, inode_security(path->dentry->d_inode))) {
-		mad.ans = medusa_do_chown(path, uid, gid);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    medusa_do_chown(path, uid, gid));
 	}
 audit:
 	if (task_security(current)->audit) {

@@ -88,9 +88,8 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 {
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
+		MEDUSA_AUDIT_DATA_INIT,
 		.ipc.ipc_class = ipc_security(ipcp)->ipc_class,
-		.ans = MED_ALLOW,
-		.as = AS_NO_REQUEST
 	};
 	struct ipc_msgrcv_access access;
 	struct process_kobject process;
@@ -110,11 +109,19 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 		return err;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ipc_msgrcv_access)) {
+		medusa_audit_apply_local(&mad, MED_ALLOW,
+					 MEDUSA_DECISION_VALIDATION);
 		goto out;
+	}
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
-	    ipc_kobj_validate_ipcp(ipcp) <= 0)
+	    ipc_kobj_validate_ipcp(ipcp) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ipc_msgrcv_access)) {
+		medusa_audit_apply_local(&mad, MED_ALLOW,
+					 MEDUSA_DECISION_VALIDATION);
 		goto out;
+	}
 
 	if (MEDUSA_MONITORED_ACCESS_O(ipc_msgrcv_access, ipc_security(ipcp))) {
 		process_kern2kobj(&process, current);
@@ -127,8 +134,10 @@ int medusa_ipc_msgrcv(struct kern_ipc_perm *ipcp,
 		access.ipc_class = object.ipc_class;
 		mad.ipc.ipc_class = object.ipc_class;
 
-		mad.ans = MED_DECIDE(ipc_msgrcv_access, &access, &process, &object);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    MED_DECIDE_RESULT(ipc_msgrcv_access,
+							      &access, &process,
+							      &object));
 	}
 out:
 	if (task_security(current)->audit) {

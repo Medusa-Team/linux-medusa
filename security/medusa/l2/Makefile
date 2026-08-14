@@ -17,7 +17,7 @@ export-objs :=
 obj-y += kobject_process.o
 obj-y += kobject_file.o
 obj-y += kobject_printk.o
-obj-y += kobject_fuck.o
+obj-y += kobject_path_guard.o
 obj-y += kobject_ipc.o
 obj-y += kobject_socket.o
 #obj-$(CONFIG_MEDUSA_FORCE) += kobject_force.o
@@ -47,6 +47,6 @@ obj-y += acctype_ptrace.o
 #obj-$(CONFIG_MEDUSA_SYSCALL) += acctype_syscall.o
 #obj-y += acctype_syscall.o
 # event types
-obj-y += evtype_getprocess.o evtype_getfile.o evtype_fuck.o evtype_getipc.o evtype_getsocket.o
+obj-y += evtype_getprocess.o evtype_getfile.o evtype_getipc.o evtype_getsocket.o
 # audit
 obj-y += audit_medusa.o

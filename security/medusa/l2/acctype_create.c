@@ -30,23 +30,22 @@ static int __init create_acctype_init(void)
 }
 
 /* XXX Don't try to inline this. GCC tries to be too smart about stack. */
-static enum medusa_answer_t medusa_do_create(struct dentry *parent, struct dentry *dentry, int mode)
+static struct medusa_decision_result
+medusa_do_create(struct dentry *parent, struct dentry *dentry, int mode)
 {
 	struct create_access access;
 	struct process_kobject process;
 	struct file_kobject file;
-	enum medusa_answer_t retval;
+	struct medusa_decision_result result;
 
 	file_kobj_dentry2string(dentry, access.filename);
 	access.mode = mode;
 	process_kern2kobj(&process, current);
 	file_kern2kobj(&file, parent->d_inode);
 	file_kobj_live_add(parent->d_inode);
-	retval = MED_DECIDE(create_access, &access, &process, &file);
-	if (retval == MED_ERR)
-		retval = MED_ALLOW;
+	result = MED_DECIDE_RESULT(create_access, &access, &process, &file);
 	file_kobj_live_remove(parent->d_inode);
-	return retval;
+	return result;
 }
 
 static void medusa_create_pacb(struct audit_buffer *ab, void *pcad)
@@ -61,10 +60,11 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 {
 	struct path ndcurrent, ndupper, ndparent;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(create_access))
 		return mad.ans;
 
 	ndcurrent.dentry = dentry;
@@ -72,7 +72,8 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 	medusa_get_upper_and_parent(&ndcurrent, &ndupper, &ndparent);
 
 	if (!is_med_magic_valid(&(inode_security(ndparent.dentry->d_inode)->med_object)) &&
-	    file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, NULL) <= 0) {
+	    file_kobj_validate_dentry(ndparent.dentry, ndparent.mnt, NULL) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(create_access)) {
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
 		return mad.ans;
 	}
@@ -84,12 +85,14 @@ enum medusa_answer_t medusa_create(struct dentry *dentry, int mode)
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
 		medusa_put_upper_and_parent(&ndupper, &ndparent);
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto audit;
 	}
 	if (MEDUSA_MONITORED_ACCESS_O(create_access, inode_security(ndparent.dentry->d_inode))) {
-		mad.ans = medusa_do_create(ndparent.dentry, ndupper.dentry, mode);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    medusa_do_create(ndparent.dentry,
+							     ndupper.dentry, mode));
 	}
 	medusa_put_upper_and_parent(&ndupper, &ndparent);
 audit:

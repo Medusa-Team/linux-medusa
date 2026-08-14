@@ -5,6 +5,7 @@
 #include <linux/security.h>
 #include <linux/seq_file.h>
 
+#include "l3/audit_schema.h"
 #include "l3/arch.h"
 #include "l3/health.h"
 #include "l3/pending.h"
@@ -58,6 +59,8 @@ static int medusa_status_show(struct seq_file *m, void *unused)
 	seq_printf(m, "kernel_release=%s\n", UTS_RELEASE);
 	seq_printf(m, "protocol_version=%llu\n",
 		   (unsigned long long)MEDUSA_COMM_VERSION);
+	seq_printf(m, "audit_schema_version=%u\n",
+		   MEDUSA_AUDIT_SCHEMA_VERSION);
 	seq_printf(m, "authorization_server=%s\n", authorization_server);
 	seq_printf(m, "authorization_server_name=%s\n",
 		   status.server_state == MEDUSA_AUTHSERVER_DISCONNECTED ?

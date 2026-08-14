@@ -69,9 +69,8 @@ int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 {
 	struct common_audit_data cad;
 	struct medusa_audit_data mad = {
+		MEDUSA_AUDIT_DATA_INIT,
 		.ipc.ipc_class = ipc_security(ipcp)->ipc_class,
-		.ans = MED_ALLOW,
-		.as = AS_NO_REQUEST
 	};
 	struct ipc_associate_access access;
 	struct process_kobject process;
@@ -84,18 +83,27 @@ int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 		return err;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ipc_associate_access)) {
+		medusa_audit_apply_local(&mad, MED_ALLOW,
+					 MEDUSA_DECISION_VALIDATION);
 		goto out;
+	}
 	if (!is_med_magic_valid(&(ipc_security(ipcp)->med_object)) &&
-	    ipc_kobj_validate_ipcp(ipcp) <= 0)
+	    ipc_kobj_validate_ipcp(ipcp) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ipc_associate_access)) {
+		medusa_audit_apply_local(&mad, MED_ALLOW,
+					 MEDUSA_DECISION_VALIDATION);
 		goto out;
+	}
 
 	if (!vs_intersects(VSS(task_security(current)), VS(ipc_security(ipcp))) ||
 	    !vs_intersects(VSW(task_security(current)), VS(ipc_security(ipcp)))) {
 		mad.vs.sw.vst = VS(ipc_security(ipcp));
 		mad.vs.sw.vss = VSS(task_security(current));
 		mad.vs.sw.vsw = VSW(task_security(current));
-		mad.ans = MED_DENY;
+		medusa_audit_apply_local(&mad, MED_DENY,
+					 MEDUSA_DECISION_VIRTUAL_SPACE);
 		goto out;
 	}
 
@@ -108,8 +116,10 @@ int medusa_ipc_associate(struct kern_ipc_perm *ipcp, int flag, char *operation)
 		access.flag = flag;
 		access.ipc_class = object.ipc_class;
 
-		mad.ans = MED_DECIDE(ipc_associate_access, &access, &process, &object);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    MED_DECIDE_RESULT(ipc_associate_access,
+							      &access, &process,
+							      &object));
 	}
 out:
 	/* second argument true: returns with locked IPC object */

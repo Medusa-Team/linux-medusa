@@ -1,0 +1,5 @@
+MEDUSA_RESULT fallback-policy startup PASS
+MEDUSA_RESULT fallback-policy policy_installed PASS
+MEDUSA_RESULT fallback-policy installed_deny PASS
+MEDUSA_RESULT fallback-policy disconnected PASS
+MEDUSA_RESULT fallback-policy installed_deny_survives_disconnect PASS

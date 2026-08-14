@@ -15,6 +15,7 @@
 #include <linux/capability.h>
 #include <linux/hashtable.h>
 #include <linux/lsm_hooks.h>
+#include <linux/spinlock.h>
 #include "l3/med_model.h"
 #include "l3/constants.h"
 
@@ -71,7 +72,9 @@ struct medusa_l1_inode_s {
 	/* for kobject_file.c - don't touch! */
 	struct inode *next_live;
 	int use_count;
-	DECLARE_HASHTABLE(fuck, CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE);
+	/* Protects the path_guard digest table below. */
+	spinlock_t path_guard_lock;
+	DECLARE_HASHTABLE(path_guard, CONFIG_MEDUSA_PATH_GUARD_HASH_TABLE_SIZE);
 };
 
 static inline struct medusa_l1_inode_s *
@@ -82,7 +85,8 @@ inode_security(const struct inode *inode)
 
 static inline void medusa_inode_context_init(struct medusa_l1_inode_s *context)
 {
-	hash_init(context->fuck);
+	spin_lock_init(&context->path_guard_lock);
+	hash_init(context->path_guard);
 	init_med_object(&context->med_object);
 }
 

@@ -11,6 +11,10 @@ MEDUSA_RESULT degraded timeout_fallback PASS
 MEDUSA_RESULT degraded status_degraded PASS
 MEDUSA_RESULT degraded degraded_counter PASS
 MEDUSA_RESULT degraded breaker_fast_fallback PASS
+MEDUSA_RESULT degraded lease_server_ready PASS
+MEDUSA_RESULT degraded lease_wait_extended PASS
+MEDUSA_RESULT degraded lease_reply_matched PASS
+MEDUSA_RESULT degraded lease_accounting PASS
 MEDUSA_RESULT degraded handshake_started PASS
 MEDUSA_RESULT degraded status_handshaking PASS
 MEDUSA_RESULT degraded protocol_error_counters PASS
@@ -19,17 +23,28 @@ MEDUSA_RESULT degraded status_disconnected PASS
 MEDUSA_RESULT degraded reconnect PASS
 MEDUSA_RESULT degraded delegation_recovered PASS
 MEDUSA_RESULT degraded status_recovered PASS
+MEDUSA_RESULT degraded restart_stopped PASS
+MEDUSA_RESULT degraded flood_pending PASS
+MEDUSA_RESULT degraded flood_disconnect PASS
+MEDUSA_RESULT degraded flood_baseline_allow PASS
+MEDUSA_RESULT degraded flood_status_disconnected PASS
+MEDUSA_RESULT degraded restart_reconnect PASS
+MEDUSA_RESULT degraded restart_policy_recovered PASS
 MEDUSA_RESULT degraded securityfs_concurrent_reads PASS
 authorization server circuit breaker opened, reason=2
-Medusa: op=decision event=ipc_perm
-subject_class=process object_class=ipc protocol=3 policy_generation=
-decision_source=baseline unavailable=decision_timed_out as_request=1
+Medusa: audit_schema=1 record=decision protocol=3
+event_id=ipc_perm
+subject_class_id=process object_class_id=ipc
+request_present=1 request_id=
+verdict=ALLOW verdict_source=baseline unavailable=decision_timed_out authserver_contacted=1
 degraded_sequence=
 Medusa: op=msgsnd ans=ALLOW as_request=0 decision_source=baseline unavailable=auth_server_unhealthy
-Medusa: op=protocol_error protocol=3
+request_present=0 request_id=0
+Medusa: audit_schema=1 record=protocol_error protocol=3
 error_kind=malformed_message
 error_sequence=13 suppressed=9
 error_kind=invalid_answer
 error_kind=unknown_request
 error_kind=unknown_command
+!MEDUSA_SECURITYFS_READER_FAIL
 !MEDUSA_QEMU_FAIL degraded

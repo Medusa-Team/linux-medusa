@@ -69,13 +69,14 @@ enum medusa_answer_t medusa_setresuid(struct cred *new,
 	struct setresuid access;
 	struct process_kobject process;
 	struct common_audit_data cad;
-	struct medusa_audit_data mad = { .ans = MED_ALLOW, .as = AS_NO_REQUEST };
+	struct medusa_audit_data mad = { MEDUSA_AUDIT_DATA_INIT };
 	uid_t ruid = new->uid.val;
 	uid_t euid = new->euid.val;
 	uid_t suid = new->suid.val;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
-	    process_kobj_validate_task(current) <= 0)
+	    process_kobj_validate_task(current) <= 0 &&
+	    !MEDUSA_FALLBACK_REQUIRES_DECISION(setresuid))
 		return MED_ALLOW;
 
 	if (MEDUSA_MONITORED_ACCESS_S(setresuid, task_security(current))) {
@@ -84,8 +85,9 @@ enum medusa_answer_t medusa_setresuid(struct cred *new,
 		access.suid = suid;
 		access.flags = flags;
 		process_kern2kobj(&process, current);
-		mad.ans = MED_DECIDE(setresuid, &access, &process, &process);
-		mad.as = AS_REQUEST;
+		medusa_audit_apply_decision(&mad,
+					    MED_DECIDE_RESULT(setresuid, &access,
+							      &process, &process));
 	}
 
 	if (task_security(current)->audit) {
