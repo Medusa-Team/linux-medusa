@@ -283,7 +283,7 @@ static int medusa_l1_task_fix_setuid(struct cred *new,
 * being created.
 */
 static int medusa_l1_task_alloc(struct task_struct *task,
-				unsigned long clone_flags)
+				u64 clone_flags)
 {
 	struct medusa_l1_task_s *med = task_security(task);
 
@@ -799,7 +799,7 @@ struct lsm_blob_sizes medusa_blob_sizes __ro_after_init = {
 };
 
 DEFINE_LSM(medusa) = {
-	.name = "medusa",
+	.id = &medusa_lsmid,
 	.order = LSM_ORDER_MUTABLE,
 	.flags = LSM_FLAG_LEGACY_MAJOR | LSM_FLAG_EXCLUSIVE,
 	.enabled = &medusa_enabled,

@@ -47,6 +47,7 @@ MED_EVTYPE(getfile_event, "getfile", file_kobject, "file",
 static struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
 {
 	int depth, last_depth, maxdepth, can_nest;
+	struct path init_root;
 	struct mount *p;
 	int count = 0;
 
@@ -69,12 +70,12 @@ static struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
 		last_depth = -1; depth = 0;
 
 		/* hope that init isn't chrooted; get "global" root */
-		spin_lock(&init_task.fs->lock);
-		p = real_mount(init_task.fs->root.mnt);
+		get_fs_root(init_task.fs, &init_root);
+		p = real_mount(init_root.mnt);
 		while (p->mnt_parent != p->mnt_parent->mnt_parent)
 			p = p->mnt_parent;
 		mntget(&p->mnt);
-		spin_unlock(&init_task.fs->lock);
+		path_put(&init_root);
 
 		//spin_lock(&dcache_lock);
 		do {
@@ -118,7 +119,10 @@ static struct vfsmount *medusa_evocate_mnt(struct dentry *dentry)
 
 	dput(dentry);
 	med_pr_notice("Fatal error: too drunk to evocate mnt. Returning init's mnt instead.\n");
-	return mntget(init_task.fs->root.mnt);
+	get_fs_root(init_task.fs, &init_root);
+	p = real_mount(mntget(init_root.mnt));
+	path_put(&init_root);
+	return &p->mnt;
 }
 
 static enum medusa_answer_t do_file_kobj_validate_dentry(struct path *ndcurrent,

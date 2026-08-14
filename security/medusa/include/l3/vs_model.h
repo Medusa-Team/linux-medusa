@@ -30,17 +30,19 @@ struct act_t { DECLARE_BITMAP(pack, CONFIG_MEDUSA_ACT); };
 #define vs_complement(DST, SRC) \
 	bitmap_complement((DST).pack, (SRC).pack, CONFIG_MEDUSA_VS)
 
-static inline void vs_setbit(struct vs_t vs, int bitnr)
+static inline void __vs_setbit(struct vs_t *vs, int bitnr)
 {
 	if (!WARN_ONCE(bitnr >= CONFIG_MEDUSA_VS, "medusa: %s: bitnr overflow", __func__))
-		set_bit(bitnr, vs.pack);
+		set_bit(bitnr, vs->pack);
 }
+#define vs_setbit(VS, BITNR) __vs_setbit(&(VS), (BITNR))
 
-static inline void vs_clearbit(struct vs_t vs, int bitnr)
+static inline void __vs_clearbit(struct vs_t *vs, int bitnr)
 {
 	if (!WARN_ONCE(bitnr >= CONFIG_MEDUSA_VS, "medusa: %s: bitnr overflow", __func__))
-		clear_bit(bitnr, vs.pack);
+		clear_bit(bitnr, vs->pack);
 }
+#define vs_clearbit(VS, BITNR) __vs_clearbit(&(VS), (BITNR))
 
 /* ACT bitmap */
 
@@ -49,23 +51,26 @@ static inline void vs_clearbit(struct vs_t vs, int bitnr)
 #define act_clear(X) \
 	bitmap_clear((X).pack, 0, CONFIG_MEDUSA_ACT)
 
-static inline void act_setbit(struct act_t act, int bitnr)
+static inline void __act_setbit(struct act_t *act, int bitnr)
 {
 	if (!WARN_ONCE(bitnr >= CONFIG_MEDUSA_ACT, "medusa: %s: bitnr overflow", __func__))
-		set_bit(bitnr, act.pack);
+		set_bit(bitnr, act->pack);
 }
+#define act_setbit(ACT, BITNR) __act_setbit(&(ACT), (BITNR))
 
-static inline void act_clearbit(struct act_t act, int bitnr)
+static inline void __act_clearbit(struct act_t *act, int bitnr)
 {
 	if (!WARN_ONCE(bitnr >= CONFIG_MEDUSA_ACT, "medusa: %s: bitnr overflow", __func__))
-		clear_bit(bitnr, act.pack);
+		clear_bit(bitnr, act->pack);
 }
+#define act_clearbit(ACT, BITNR) __act_clearbit(&(ACT), (BITNR))
 
-static inline int act_testbit(struct act_t act, int bitnr)
+static inline int __act_testbit(const struct act_t *act, int bitnr)
 {
 	if (WARN_ONCE(bitnr >= CONFIG_MEDUSA_ACT, "medusa: %s: bitnr overflow", __func__))
 		return 0;
-	return test_bit(bitnr, act.pack);
+	return test_bit(bitnr, act->pack);
 }
+#define act_testbit(ACT, BITNR) __act_testbit(&(ACT), (BITNR))
 
 #endif /* VSMODEL_H */

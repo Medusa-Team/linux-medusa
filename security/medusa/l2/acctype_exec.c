@@ -101,7 +101,7 @@ static enum medusa_answer_t medusa_do_pexec(struct inode *inode,
 
 enum medusa_answer_t medusa_exec(struct linux_binprm *bprm)
 {
-	struct path *path = &bprm->file->f_path;
+	const struct path *path = &bprm->file->f_path;
 	// TODO: Can we use file_inode?
 	struct inode *inode = d_backing_inode(path->dentry);
 	struct common_audit_data cad;

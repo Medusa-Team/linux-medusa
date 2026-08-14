@@ -445,7 +445,7 @@ static int user_release(struct inode *inode, struct file *file);
 static const struct file_operations fops = {
 	.read		= user_read,
 	.write		= user_write,
-	.llseek		= no_llseek, /* -ESPIPE */
+	.llseek		= noop_llseek,
 	.poll		= user_poll,
 	.open		= user_open,
 	.release	= user_release

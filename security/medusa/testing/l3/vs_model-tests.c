@@ -14,6 +14,7 @@ static void vs_intersects_one_bit_intersects(struct kunit *test)
 {
 	struct vs_t a, b;
 	vs_set(a);
+	vs_clear(b);
 	vs_setbit(b, 8);
 
 	KUNIT_EXPECT_TRUE(test, vs_intersects(a,b));
