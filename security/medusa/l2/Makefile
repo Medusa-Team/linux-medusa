@@ -19,7 +19,7 @@ obj-y += kobject_file.o
 obj-y += kobject_printk.o
 obj-y += kobject_path_guard.o
 obj-y += kobject_ipc.o
-obj-y += kobject_socket.o
+obj-$(CONFIG_SECURITY_NETWORK) += kobject_socket.o socket_address.o
 #obj-$(CONFIG_MEDUSA_FORCE) += kobject_force.o
 #obj-$(CONFIG_MEDUSA_MEMKOBJECT) += kobject_memory.o kobject_cstrmem.o
 #obj-y += kobject_force.o
@@ -40,13 +40,14 @@ obj-y += acctype_chmod.o acctype_chown.o acctype_chroot.o
 obj-y += acctype_fcntl.o acctype_open.o
 obj-y += acctype_ipc_permission.o acctype_ipc_ctl.o acctype_ipc_associate.o
 obj-y += acctype_ipc_semop.o acctype_ipc_shmat.o acctype_ipc_msgsnd.o acctype_ipc_msgrcv.o
-obj-y += acctype_socket_create.o acctype_socket_bind.o acctype_socket_connect.o acctype_socket_listen.o acctype_socket_accept.o
-obj-y += acctype_socket_sendmsg.o acctype_socket_recvmsg.o
+obj-$(CONFIG_SECURITY_NETWORK) += acctype_socket_create.o acctype_socket_bind.o acctype_socket_connect.o acctype_socket_listen.o acctype_socket_accept.o
+obj-$(CONFIG_SECURITY_NETWORK) += acctype_socket_sendmsg.o acctype_socket_recvmsg.o
 # arch-dependent files
 obj-y += acctype_ptrace.o
 #obj-$(CONFIG_MEDUSA_SYSCALL) += acctype_syscall.o
 #obj-y += acctype_syscall.o
 # event types
-obj-y += evtype_getprocess.o evtype_getfile.o evtype_getipc.o evtype_getsocket.o
+obj-y += evtype_getprocess.o evtype_getfile.o evtype_getipc.o
+obj-$(CONFIG_SECURITY_NETWORK) += evtype_getsocket.o
 # audit
 obj-y += audit_medusa.o

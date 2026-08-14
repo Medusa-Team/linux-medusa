@@ -3,6 +3,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_socket.h"
+#include "l2/audit_medusa.h"
 
 struct socket_create_access {
 	MEDUSA_ACCESS_HEADER;
@@ -25,7 +26,8 @@ MED_ACCTYPE(socket_create_access, "socket_create",
 
 static int __init socket_create_acctype_init(void)
 {
-	MED_REGISTER_ACCTYPE(socket_create_access, MEDUSA_ACCTYPE_TRIGGEREDATOBJECT);
+	MED_REGISTER_ACCTYPE(socket_create_access,
+			     MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
 	return 0;
 }
 
@@ -45,10 +47,15 @@ enum medusa_answer_t medusa_socket_create(int family, int type, int protocol)
 		access.family = family;
 		access.type = type;
 		access.protocol = protocol;
-		return MED_DECIDE(socket_create_access, &access, &process, &process);
+		return medusa_audit_decision_result(
+			"socket_create",
+			MED_DECIDE_RESULT(socket_create_access, &access,
+					  &process, &process),
+			task_security(current)->audit);
 	}
 
-	return MED_ALLOW;
+	return medusa_audit_cached_allow("socket_create",
+					 task_security(current)->audit);
 }
 
 device_initcall(socket_create_acctype_init);

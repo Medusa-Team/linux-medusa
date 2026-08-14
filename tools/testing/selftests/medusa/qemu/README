@@ -41,6 +41,15 @@ The scenario also prints the securityfs event inventory for direct comparison
 of evaluations, cached checks, delegated decisions, fallbacks, and delegation
 context.
 
+The `network` scenario verifies the restored syscall-level socket subset. It
+requires delegated markers plus independent allow and `EACCES` results for
+create, bind, connect, listen, accept, send, and receive. IPv4, IPv6, and
+bounded abstract Unix-domain addresses are exercised. Packet/SKB hooks remain
+outside the supported subset. The scenario also checks active capability
+inventory, per-hook audit attribution, and online-required denial after
+Constable disconnects. Merge `network.config` into the kernel test
+configuration before building it.
+
 The `lockdep` scenario inherits `access` and adds negative assertions for
 atomic sleeping, scheduling while atomic, recursive/circular locking,
 inconsistent lock state, unlock imbalance, and spinlock failures. Build its
@@ -73,14 +82,16 @@ both AppArmor and Medusa. It loads a minimal AppArmor profile, proves that
 AppArmor can independently deny a directory creation while Medusa and
 Constable remain usable, and verifies that the short-circuited operation does
 not produce a Medusa audit record. It then proves that Medusa can independently
-deny a message-queue operation after Constable reconnects.
+deny a socket operation permitted by AppArmor, and a message-queue operation
+after Constable reconnects.
 
 The `selinux-stacking` scenario also inherits the lifecycle test and requires
 SELinux before Medusa in the runtime LSM list. It loads a generated enforcing
 policy, places only the guest helper in a restricted SELinux domain, and proves
 an audited SELinux directory denial while Medusa and Constable remain usable.
-The replacement Constable then reconnects and independently enforces Medusa's
-message-queue denial.
+SELinux permits that domain's socket operation and Medusa independently denies
+it. The replacement Constable then reconnects and independently enforces
+Medusa's message-queue denial.
 
 The kernel must be configured with:
 
@@ -146,3 +157,50 @@ the runner places only that blob in the minimal initramfs.
 
 A scenario containing the `selinux-policy` marker requires `SELINUX_POLICY` to
 name a precompiled binary SELinux policy.
+
+Network performance benchmark
+-----------------------------
+
+`network-bench.c` reports two stable, machine-readable records: abstract
+Unix-domain stream connection setups per second and persistent Unix-domain
+message throughput.
+The `network-benchmark`, `network-benchmark-cached`,
+`network-benchmark-audit`, and `network-benchmark-disabled` scenarios run 100
+iterations with a 64-byte payload. Run all four with the same kernel image,
+guest resources, and QEMU acceleration. The disabled run excludes Medusa from
+the runtime LSM list while retaining the identical kernel binary:
+
+  tools/testing/selftests/medusa/qemu/run.sh KERNEL CONSTABLE BUSYBOX \
+    network-benchmark
+  tools/testing/selftests/medusa/qemu/run.sh KERNEL CONSTABLE BUSYBOX \
+    network-benchmark-cached
+  tools/testing/selftests/medusa/qemu/run.sh KERNEL CONSTABLE BUSYBOX \
+    network-benchmark-audit
+  QEMU_APPEND_EXTRA="lsm=landlock,lockdown,yama,loadpin,safesetid" \
+    tools/testing/selftests/medusa/qemu/run.sh \
+    KERNEL CONSTABLE BUSYBOX network-benchmark-disabled
+
+For longer native or guest measurements, build the benchmark directly and use
+the same binary, iteration count, and payload size for each policy mode:
+
+  cc -static -O2 -Wall -Wextra -Werror \
+    -o network-bench network-bench.c
+  ./network-bench MODE 10000 64
+
+Use these four modes:
+
+  * `disabled`: build without `CONFIG_SECURITY_MEDUSA`;
+  * `cached`: enable Medusa, validate the process and sockets, set the process
+    network monitoring bits to zero, and set `process.audit = 0`;
+  * `audit-only`: use the same cached policy with `process.audit = 1`; the
+    socket hooks emit local `decision_source=cache` allow records but do not
+    contact Constable;
+  * `delegated`: enable all seven process network monitoring bits, set
+    `process.audit = 0`, keep Constable connected, and return `ALLOW` from
+    every network handler.
+
+Discard at least one warm-up run and retain the raw `MEDUSA_BENCH` lines plus
+kernel, QEMU, host CPU, and Constable revisions. Do not compare results from
+different acceleration modes. Audit output should be drained to the same sink
+in every audit-only repetition; otherwise console backpressure, rather than
+the hook cost, dominates the measurement.

@@ -43,9 +43,17 @@ enum medusa_answer_t socket_kobj_validate(struct socket *sock)
 	decision = MED_DECIDE_RESULT(socket_event, &event, &sock_kobj,
 				     &sock_kobj);
 	if (!medusa_decision_is_authoritative(&decision) ||
-	    !is_med_magic_valid(&sk_sec->med_object))
+	    decision.answer == MED_DENY)
 		return MED_ERR;
 
+	/*
+	 * Protocol v4 replies carry a verdict, not a mutable copy of the
+	 * request object.  The restored socket class is intentionally
+	 * event-scoped and has no unsafe inode-based update operation, so a
+	 * successful getsocket decision validates the kernel-owned default
+	 * context directly.
+	 */
+	med_magic_validate(&sk_sec->med_object);
 	return MED_ALLOW;
 }
 

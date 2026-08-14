@@ -39,6 +39,9 @@ awk '
 		print "allow medusa_test_t base_t:chr_file" \
 		      " { write ioctl getattr };"
 		print "allow medusa_test_t base_t:fd use;"
+		print "allow medusa_test_t self:" \
+		      "{ socket unix_stream_socket unix_dgram_socket" \
+		      " tcp_socket udp_socket } *;"
 	}
 ' "$work_dir/policy.conf" >"$work_dir/test-policy.conf"
 

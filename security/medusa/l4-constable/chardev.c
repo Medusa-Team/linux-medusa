@@ -31,6 +31,7 @@
 #include "l4/transport.h"
 
 #define MODULENAME "miscdevice/v4"
+#define MEDUSA_MISC_MINOR 111
 
 struct medusa_v4_frame {
 	struct list_head node;
@@ -906,7 +907,7 @@ static int medusa_v4_handle_hello(const u8 *data, size_t count)
 				 MEDUSA_AUTHSERVER_DEFINITIONS);
 
 	frame = medusa_v4_frame_new(
-		MEDUSA_MSG_HELLO_ACK, 0, v4_session.expected_generation, 48);
+		MEDUSA_MSG_HELLO_ACK, 0, v4_session.expected_generation, 64);
 	if (!frame)
 		return -ENOMEM;
 	error = medusa_v4_frame_add_u16(
@@ -1117,7 +1118,6 @@ static int medusa_v4_handle_object(const u8 *data, size_t count, bool update)
 				class->class->attr, class->class->kobject_size,
 				fetched, &snapshot);
 	}
-	kvfree(key);
 	if (error)
 		goto out;
 	reply = medusa_v4_frame_new(
@@ -1141,8 +1141,11 @@ static int medusa_v4_handle_object(const u8 *data, size_t count, bool update)
 	else
 		error = medusa_v4_queue(reply);
 out:
-	if (fetched)
-		med_cache_free(fetched);
+	/*
+	 * Class fetch callbacks populate and return the caller-owned key
+	 * object. They do not return a med_cache allocation.
+	 */
+	kvfree(key);
 	kvfree(snapshot);
 	return error;
 }
@@ -1394,7 +1397,12 @@ static const struct file_operations medusa_v4_fops = {
 };
 
 static struct miscdevice medusa_v4_device = {
-	.minor = MISC_DYNAMIC_MINOR,
+	/*
+	 * A stable minor lets an initramfs provide /dev/medusa before init can
+	 * mount devtmpfs. This is required by the supported "start Constable
+	 * before init" boot mode.
+	 */
+	.minor = MEDUSA_MISC_MINOR,
 	.name = "medusa",
 	.fops = &medusa_v4_fops,
 	.mode = 0600,

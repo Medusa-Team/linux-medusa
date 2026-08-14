@@ -3,6 +3,7 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_socket.h"
+#include "l2/audit_medusa.h"
 
 struct socket_listen_access {
 	MEDUSA_ACCESS_HEADER;
@@ -49,9 +50,14 @@ enum medusa_answer_t medusa_socket_listen(struct socket *sock, int backlog)
 		socket_kern2kobj(&sock_kobj, sock);
 		access.backlog = backlog;
 
-		return MED_DECIDE(socket_listen_access, &access, &process, &sock_kobj);
+		return medusa_audit_decision_result(
+			"socket_listen",
+			MED_DECIDE_RESULT(socket_listen_access, &access,
+					  &process, &sock_kobj),
+			task_security(current)->audit);
 	}
-	return MED_ALLOW;
+	return medusa_audit_cached_allow("socket_listen",
+					 task_security(current)->audit);
 }
 
 device_initcall(socket_listen_access_init);

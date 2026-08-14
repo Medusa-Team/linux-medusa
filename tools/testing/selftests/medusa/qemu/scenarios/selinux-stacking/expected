@@ -1,5 +1,6 @@
 MEDUSA_RESULT lifecycle active_lsms PASS
 MEDUSA_RESULT lifecycle selinux_policy_load PASS
 MEDUSA_RESULT lifecycle selinux_independent_deny PASS
+Medusa: op=socket_create ans=DENY as_request=1 decision_source=auth_server
 MEDUSA_RESULT lifecycle constable_after_selinux_deny PASS
 avc:  denied  { search } for  pid=

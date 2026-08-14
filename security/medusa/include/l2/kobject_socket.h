@@ -13,8 +13,8 @@ struct socket_kobject {
 
 	int type;
 	int family;
-	int addrlen;
-	union MED_ADDRESS address;
+	int protocol;
+	__u64 netns_cookie;
 	kuid_t uid;
 
 	struct medusa_object_s med_object;

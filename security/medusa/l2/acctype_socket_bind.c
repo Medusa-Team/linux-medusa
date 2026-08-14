@@ -3,12 +3,13 @@
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
 #include "l2/kobject_socket.h"
+#include "l2/audit_medusa.h"
 
 struct socket_bind_access {
 	MEDUSA_ACCESS_HEADER;
 	sa_family_t family;
 	int addrlen;
-	union MED_ADDRESS address;
+	struct medusa_socket_address address;
 };
 
 MED_ATTRS(socket_bind_access) {
@@ -28,13 +29,12 @@ static int __init socket_bind_access_init(void)
 	return 0;
 }
 
-static enum medusa_answer_t medusa_socket_bind_security(struct socket *sock,
-						 struct socket_bind_access *access)
+static enum medusa_answer_t
+medusa_socket_bind_security(struct socket *sock,
+			    struct socket_bind_access *access)
 {
 	struct process_kobject process;
 	struct socket_kobject sock_kobj;
-	struct medusa_l1_socket_s *sk_sec = sock_security(sock->sk);
-	enum medusa_answer_t retval;
 
 	if (!is_med_magic_valid(&(task_security(current)->med_object)) &&
 	    process_kobj_validate_task(current) <= 0 &&
@@ -52,69 +52,29 @@ static enum medusa_answer_t medusa_socket_bind_security(struct socket *sock,
 	if (MEDUSA_MONITORED_ACCESS_S(socket_bind_access, task_security(current))) {
 		process_kern2kobj(&process, current);
 		socket_kern2kobj(&sock_kobj, sock);
-		retval = MED_DECIDE(socket_bind_access, access, &process, &sock_kobj);
-		if (retval != MED_ERR) {
-			switch (sock->sk->sk_family) {
-			case AF_INET:
-				sk_sec->address.inet_i.port = access->address.inet_i.port;
-				memcpy(sk_sec->address.inet_i.addrdata,
-				       access->address.inet_i.addrdata,
-				       4);
-				break;
-			case AF_INET6:
-				sk_sec->address.inet6_i.port = access->address.inet6_i.port;
-				memcpy(sk_sec->address.inet6_i.addrdata,
-				       access->address.inet6_i.addrdata,
-				       16);
-				break;
-			case AF_UNIX:
-				memcpy(sk_sec->address.unix_i.addrdata,
-				       access->address.unix_i.addrdata,
-				       UNIX_PATH_MAX);
-				break;
-			default:
-				break;
-			}
-			sk_sec->addrlen = access->addrlen;
-		}
-		return retval;
+		return medusa_audit_decision_result(
+			"socket_bind",
+			MED_DECIDE_RESULT(socket_bind_access, access, &process,
+					  &sock_kobj),
+			task_security(current)->audit);
 	}
-	return MED_ALLOW;
+	return medusa_audit_cached_allow("socket_bind",
+					 task_security(current)->audit);
 }
 
 enum medusa_answer_t medusa_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
 {
-	const int family = sock->sk->sk_family;
-	struct socket_bind_access access;
+	struct socket_bind_access access = {};
+	int error;
 
-	access.family = family;
-	access.addrlen = addrlen;
-
-	switch (family) {
-	case AF_INET:
-		if (addrlen < sizeof(struct sockaddr_in))
-			return MED_ERR;
-		access.address.inet_i.port = ((struct sockaddr_in *)address)->sin_port;
-		memcpy(access.address.inet_i.addrdata,
-		       (__be32 *)&((struct sockaddr_in *)address)->sin_addr,
-		       4);
-		break;
-	case AF_INET6:
-		if (addrlen < SIN6_LEN_RFC2133)
-			return MED_ERR;
-		access.address.inet6_i.port = ((struct sockaddr_in6 *)address)->sin6_port;
-		memcpy(access.address.inet6_i.addrdata,
-		       (__be32 *)((struct sockaddr_in6 *)address)->sin6_addr.s6_addr,
-		       16);
-		break;
-	case AF_UNIX:
-		memcpy(access.address.unix_i.addrdata,
-		       ((struct sockaddr_un *)address)->sun_path,
-		       UNIX_PATH_MAX);
-		break;
-	default:
+	error = medusa_socket_address_parse(&access.address, address, addrlen);
+	if (error == -EAFNOSUPPORT)
 		return MED_ALLOW;
-	}
+	if (error)
+		return MED_ERR;
+
+	access.family = access.address.family;
+	access.addrlen = addrlen;
 	return medusa_socket_bind_security(sock, &access);
 }
 
