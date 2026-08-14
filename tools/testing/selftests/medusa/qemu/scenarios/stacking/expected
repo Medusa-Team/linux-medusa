@@ -1,0 +1,9 @@
+MEDUSA_RESULT lifecycle active_lsms PASS
+MEDUSA_RESULT lifecycle unlimited_audit_console PASS
+MEDUSA_RESULT lifecycle apparmor_policy_load PASS
+MEDUSA_RESULT stacking apparmor_deny PASS
+MEDUSA_RESULT stacking allow_after_apparmor_deny PASS
+MEDUSA_RESULT lifecycle apparmor_independent_deny PASS
+MEDUSA_RESULT lifecycle constable_after_apparmor_deny PASS
+apparmor="DENIED" operation="mkdir" class="file" profile="medusa-stacking"
+! name="medusa-apparmor-denied"

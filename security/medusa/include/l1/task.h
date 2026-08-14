@@ -43,7 +43,6 @@ extern int process_kobj_validate_task(struct task_struct *ts);
  */
 
 extern struct lsm_blob_sizes medusa_blob_sizes;
-#define task_security(task) ((struct medusa_l1_task_s *)(task->security + medusa_blob_sizes.lbs_task))
 
 struct medusa_l1_task_s {
 	kuid_t luid;
@@ -74,11 +73,24 @@ struct medusa_l1_task_s {
 	int audit;
 };
 
+static inline struct medusa_l1_task_s *
+task_security(const struct task_struct *task)
+{
+	return task->security + medusa_blob_sizes.lbs_task;
+}
+
 enum medusa_task_context_mode {
 	MEDUSA_TASK_CONTEXT_MONITORED,
 	MEDUSA_TASK_CONTEXT_UNMONITORED,
 	MEDUSA_TASK_CONTEXT_INHERIT,
 };
+
+static inline void
+medusa_task_context_enable_monitoring(struct medusa_l1_task_s *context)
+{
+	init_med_object(&context->med_object);
+	init_med_subject(&context->med_subject);
+}
 
 static inline void
 medusa_task_context_init(struct medusa_l1_task_s *context,
@@ -95,9 +107,7 @@ medusa_task_context_init(struct medusa_l1_task_s *context,
 		unmonitor_med_subject(&context->med_subject);
 		break;
 	case MEDUSA_TASK_CONTEXT_MONITORED:
-		med_magic_invalidate(&context->med_object);
-		init_med_object(&context->med_object);
-		init_med_subject(&context->med_subject);
+		medusa_task_context_enable_monitoring(context);
 		break;
 	}
 

@@ -8,7 +8,7 @@ check unless the scenario also requires a ``MEDUSA_EVENT`` console marker.
 Kernel unit coverage
 --------------------
 
-The KUnit configuration runs 38 tests in seven suites:
+The KUnit configuration runs 42 tests in nine suites:
 
 * virtual-space read, write, visibility, intersection, and bitmap boundaries;
 * subject and object action bitmaps and monitored/unmonitored contexts;
@@ -18,6 +18,8 @@ The KUnit configuration runs 38 tests in seven suites:
 * cached/delegated allow, deny, error/fail-open, and unsupported verdicts;
 * protocol-v3 answer lengths, verdicts, unknown IDs, and stale IDs;
 * cache allocator growth across a size-class boundary.
+* dynamic task, inode, and SysV IPC LSM blob offsets;
+* bounded audit-answer formatting and LSM return-value translation.
 
 QEMU scenario coverage
 ----------------------
@@ -37,10 +39,40 @@ QEMU scenario coverage
 
 ``lifecycle``
   Covers initial registration, disconnect, fail-open operation, replacement
-  registration, attempted policy reload, positive audit output for a
-  server-requested IPC operation, and the known missing audit record on the
-  disconnected stale-context path.  Negative expected-result lines make the
-  missing record an explicit assertion.
+  registration, enforcement of a reloaded deny policy, positive audit output
+  for a server-requested IPC operation, and the disconnected ``mkdir``
+  stale-context fail-open audit path.
+
+``stacking.config``
+  Enables AppArmor before Medusa in ``CONFIG_LSM``.  The ``stacking`` scenario
+  requires both names in the kernel's runtime LSM list and inherits the full
+  lifecycle scenario. A confined helper proves an audited AppArmor ``mkdir``
+  denial while Constable remains connected and a subsequent operation
+  succeeds. A negative assertion verifies that AppArmor's short-circuited
+  denial is not attributed to Medusa. The reconnected Constable then proves an
+  audited Medusa ``ipc_msgsnd`` denial while AppArmor permits the unconfined
+  init process.
+
+``selinux-stacking.config``
+  Enables SELinux before Medusa in ``CONFIG_LSM``. The ``selinux-stacking``
+  scenario requires both names in the runtime LSM list and inherits the full
+  lifecycle scenario. It loads an enforcing policy generated from the
+  kernel's minimal dummy policy, transitions only the guest helper into a
+  restricted domain, and proves an audited SELinux directory denial while
+  Constable remains connected. The replacement Constable then proves the same
+  independent Medusa ``ipc_msgsnd`` denial used by the other lifecycle runs.
+
+Stacked hook and audit composition
+----------------------------------
+
+All active Medusa authorization hooks return the LSM default value ``0`` for
+allow/fail-open or a negative errno for denial and object-lifetime errors.
+They therefore follow the LSM core's first-nondefault short-circuit semantics:
+with either reference order, an earlier AppArmor or SELinux denial prevents the
+later Medusa hook from running. Medusa's ``common_audit_data`` is allocated per
+call, and its private pointer occupies the standard LSM-specific union; it does
+not reuse another LSM's audit state. Stacked-LSM and Medusa denials
+consequently produce separate, correctly attributed ``AUDIT_AVC`` records.
 
 Wired access paths
 ------------------
@@ -84,11 +116,6 @@ Known defects kept separate from expected behaviour
 * Re-associating with an existing message queue, semaphore set, or shared
   memory object returns ``EACCES`` even when ``ipc_perm`` is allowed.
   ``ipc_associate`` is not observed.
-* A replacement Constable registers after disconnect, but rules for the
-  already-running init process and new IPC objects return ``MED_ERR``.  The
-  lifecycle deny policy therefore fails open.
-* The disconnected stale-context validation path returns before the access
-  callback's audit block, so its fail-open decision has no Medusa audit record.
 * Multiple ``getfile`` callbacks can overwrite one another's object snapshot;
   the Constable path-tree callback and an explicit policy callback are not
   safely composable.

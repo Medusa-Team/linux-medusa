@@ -60,7 +60,6 @@ extern enum medusa_answer_t medusa_write(struct file *file);
  */
 
 extern struct lsm_blob_sizes medusa_blob_sizes;
-#define inode_security(inode) ((struct medusa_l1_inode_s *)(inode->i_security + medusa_blob_sizes.lbs_inode))
 
 struct medusa_l1_inode_s {
 	struct medusa_object_s med_object;
@@ -74,6 +73,12 @@ struct medusa_l1_inode_s {
 	int use_count;
 	DECLARE_HASHTABLE(fuck, CONFIG_MEDUSA_FUCK_HASH_TABLE_SIZE);
 };
+
+static inline struct medusa_l1_inode_s *
+inode_security(const struct inode *inode)
+{
+	return inode->i_security + medusa_blob_sizes.lbs_inode;
+}
 
 static inline void medusa_inode_context_init(struct medusa_l1_inode_s *context)
 {

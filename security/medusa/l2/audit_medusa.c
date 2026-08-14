@@ -5,13 +5,22 @@
 /* array for auditing med_answer,
  * if answers will be modified, think about that too
  */
-static char *audit_answer[] = {
+static const char * const audit_answer[] = {
 	"ERROR",
 	"FORCE_ALLOW",
 	"DENY",
 	"FAKE_ALLOW",
 	"ALLOW"
 };
+
+const char *medusa_audit_answer_name(enum medusa_answer_t answer)
+{
+	int index = answer + 1;
+
+	if (index < 0 || index >= ARRAY_SIZE(audit_answer))
+		return "INVALID";
+	return audit_answer[index];
+}
 
 /*
  * medusa_pre - pre audit callback function to format audit record
@@ -29,9 +38,7 @@ static void medusa_pre(struct audit_buffer *ab, void *pcad)
 	struct medusa_audit_data *mad = cad->medusa_audit_data;
 
 	audit_log_format(ab, "Medusa: op=%s", mad->function);
-
-	audit_log_format(ab, " ans=");
-	audit_log_format(ab, audit_answer[mad->ans + 1]);
+	audit_log_format(ab, " ans=%s", medusa_audit_answer_name(mad->ans));
 
 	if (mad->ans == MED_DENY && mad->as == AS_NO_REQUEST) {
 		/* TODO: create a data structure that will be able to store this

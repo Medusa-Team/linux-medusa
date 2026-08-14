@@ -41,6 +41,14 @@ static int medusa_l1_creds_for_exec(struct linux_binprm *bprm)
 
 		med_pr_info("Exec of trigger task '%s' detected - start AS",
 			    bprm->filename);
+		/*
+		 * PID 1 starts life as a kernel thread and is therefore initially
+		 * exempt when kernel-thread monitoring is disabled.  It is a
+		 * userspace policy subject from this exec onward; retaining
+		 * MAGIC_NOT_MONITORED here would also exempt all descendants and
+		 * prevent authorization-server generations from revalidating them.
+		 */
+		medusa_task_context_enable_monitoring(task_security(current));
 		start_auth_server();
 		wait_for_auth_server();
 
@@ -782,7 +790,6 @@ struct lsm_blob_sizes medusa_blob_sizes __ro_after_init = {
 DEFINE_LSM(medusa) = {
 	.id = &medusa_lsmid,
 	.order = LSM_ORDER_MUTABLE,
-	.flags = LSM_FLAG_LEGACY_MAJOR | LSM_FLAG_EXCLUSIVE,
 	.enabled = &medusa_enabled,
 	.init = medusa_l1_init,
 	.blobs = &medusa_blob_sizes,

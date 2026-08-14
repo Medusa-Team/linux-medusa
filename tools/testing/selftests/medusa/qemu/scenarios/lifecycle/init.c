@@ -34,6 +34,180 @@ static void mount_one(const char *source, const char *target, const char *type)
 		perror(target);
 }
 
+static bool disable_printk_ratelimit(void)
+{
+	static const char value[] = "0\n";
+	int fd = open("/proc/sys/kernel/printk_ratelimit", O_WRONLY);
+	bool passed;
+
+	if (fd < 0)
+		return false;
+	passed = write(fd, value, sizeof(value) - 1) == sizeof(value) - 1;
+	close(fd);
+	return passed;
+}
+
+static bool list_has_token(const char *list, const char *token)
+{
+	char wrapped_list[1024];
+	char wrapped_token[128];
+
+	if (snprintf(wrapped_list, sizeof(wrapped_list), ",%s,", list) >=
+	    (int)sizeof(wrapped_list))
+		return false;
+	if (snprintf(wrapped_token, sizeof(wrapped_token), ",%s,", token) >=
+	    (int)sizeof(wrapped_token))
+		return false;
+	return strstr(wrapped_list, wrapped_token);
+}
+
+static bool expected_lsms_are_active(void)
+{
+	char active[1000];
+	char expected[1000];
+	char *token;
+	FILE *file;
+	bool passed = true;
+
+	file = fopen("/etc/expected-lsms", "r");
+	if (!file)
+		return true;
+	if (!fgets(expected, sizeof(expected), file)) {
+		fclose(file);
+		return false;
+	}
+	fclose(file);
+	expected[strcspn(expected, "\r\n")] = '\0';
+
+	mkdir("/sys/kernel/security", 0755);
+	mount_one("securityfs", "/sys/kernel/security", "securityfs");
+	file = fopen("/sys/kernel/security/lsm", "r");
+	if (!file)
+		return false;
+	if (!fgets(active, sizeof(active), file)) {
+		fclose(file);
+		return false;
+	}
+	fclose(file);
+	active[strcspn(active, "\r\n")] = '\0';
+	printf("MEDUSA_LSMS %s\n", active);
+
+	for (token = strtok(expected, ","); token; token = strtok(NULL, ","))
+		passed &= list_has_token(active, token);
+	return passed;
+}
+
+static bool load_apparmor_policy(void)
+{
+	struct stat status;
+	char *policy;
+	ssize_t count;
+	int input;
+	int load;
+	bool passed = false;
+
+	input = open("/etc/apparmor.policy", O_RDONLY);
+	if (input < 0 || fstat(input, &status) < 0 || status.st_size <= 0 ||
+	    status.st_size > 1024 * 1024)
+		goto out_input;
+
+	policy = malloc(status.st_size);
+	if (!policy)
+		goto out_input;
+	count = read(input, policy, status.st_size);
+	if (count != status.st_size)
+		goto out_policy;
+
+	load = open("/sys/kernel/security/apparmor/.load", O_WRONLY);
+	if (load < 0)
+		goto out_policy;
+	count = write(load, policy, status.st_size);
+	passed = count == status.st_size;
+	close(load);
+
+out_policy:
+	free(policy);
+out_input:
+	if (input >= 0)
+		close(input);
+	return passed;
+}
+
+static bool load_selinux_policy(void)
+{
+	struct stat status;
+	char *policy;
+	ssize_t count;
+	int enforce = -1;
+	int input = -1;
+	int load = -1;
+	bool passed = false;
+
+	mkdir("/sys/fs/selinux", 0755);
+	mount_one("selinuxfs", "/sys/fs/selinux", "selinuxfs");
+
+	input = open("/etc/selinux.policy", O_RDONLY);
+	if (input < 0 || fstat(input, &status) < 0 || status.st_size <= 0 ||
+	    status.st_size > 16 * 1024 * 1024)
+		goto out;
+
+	policy = malloc(status.st_size);
+	if (!policy)
+		goto out;
+	count = read(input, policy, status.st_size);
+	if (count != status.st_size)
+		goto out_policy;
+
+	load = open("/sys/fs/selinux/load", O_WRONLY);
+	if (load < 0 ||
+	    write(load, policy, status.st_size) != status.st_size)
+		goto out_policy;
+
+	enforce = open("/sys/fs/selinux/enforce", O_WRONLY);
+	if (enforce < 0 || write(enforce, "1", 1) != 1)
+		goto out_policy;
+	passed = true;
+
+out_policy:
+	free(policy);
+out:
+	if (enforce >= 0)
+		close(enforce);
+	if (load >= 0)
+		close(load);
+	if (input >= 0)
+		close(input);
+	return passed;
+}
+
+static bool run_stacking_guest(void)
+{
+	static const char context[] = "user_u:base_r:medusa_test_t:s0";
+	pid_t child;
+	int status;
+
+	child = fork();
+	if (child == 0) {
+		if (access("/etc/selinux.policy", F_OK) == 0) {
+			int attr = open("/proc/self/attr/exec", O_WRONLY);
+
+			if (attr < 0 ||
+			    write(attr, context, sizeof(context) - 1) !=
+			    sizeof(context) - 1) {
+				perror("set SELinux guest context");
+				_exit(126);
+			}
+			close(attr);
+		}
+		execl("/bin/medusa-guest", "medusa-guest", NULL);
+		perror("run stacking guest");
+		_exit(127);
+	}
+	if (child < 0 || waitpid(child, &status, 0) != child)
+		return false;
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 static pid_t read_initial_pid(void)
 {
 	FILE *file = fopen("/constable.pid", "r");
@@ -99,37 +273,56 @@ static bool stop_process(pid_t pid)
 	return false;
 }
 
-static bool exercise_reloaded_policy(void)
+static bool reloaded_policy_denies_message(void)
 {
 	struct {
 		long type;
 		char text[8];
 	} message = { 1, "reload" };
 	int id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
-	bool passed;
+	bool denied;
 
 	if (id < 0)
 		return false;
-	passed = msgsnd(id, &message, sizeof(message.text), 0) == 0;
+	errno = 0;
+	denied = msgsnd(id, &message, sizeof(message.text), 0) < 0 &&
+		 errno == EACCES;
 	msgctl(id, IPC_RMID, NULL);
-	return passed;
+	return denied;
 }
 
 int main(void)
 {
 	pid_t initial;
 	pid_t replacement;
+	bool unlimited_audit_console;
 
 	setvbuf(stdout, NULL, _IONBF, 0);
 	mount_one("proc", "/proc", "proc");
+	unlimited_audit_console = disable_printk_ratelimit();
 	mount_one("sysfs", "/sys", "sysfs");
 	mount_one("devtmpfs", "/dev", "devtmpfs");
+	if (access("/etc/expected-lsms", F_OK) == 0)
+		result("active_lsms", expected_lsms_are_active());
 	sleep(2);
 
 	initial = read_initial_pid();
 	if (initial <= 0 || kill(initial, 0) < 0)
 		initial = find_constable_pid();
 	result("startup", initial > 0 && kill(initial, 0) == 0);
+	if (access("/etc/apparmor.policy", F_OK) == 0) {
+		result("unlimited_audit_console", unlimited_audit_console);
+		result("apparmor_policy_load", load_apparmor_policy());
+		result("apparmor_independent_deny", run_stacking_guest());
+		result("constable_after_apparmor_deny",
+		       initial > 0 && kill(initial, 0) == 0);
+	}
+	if (access("/etc/selinux.policy", F_OK) == 0) {
+		result("selinux_policy_load", load_selinux_policy());
+		result("selinux_independent_deny", run_stacking_guest());
+		result("constable_after_selinux_deny",
+		       initial > 0 && kill(initial, 0) == 0);
+	}
 	result("connected_operation",
 	       mkdir("/tmp/medusa-connected", 0700) == 0);
 	result("disconnect", stop_process(initial));
@@ -147,7 +340,7 @@ int main(void)
 	}
 	sleep(2);
 	result("restart", replacement > 0 && kill(replacement, 0) == 0);
-	result("policy_reload_known_defect", exercise_reloaded_policy());
+	result("policy_reload", reloaded_policy_denies_message());
 
 	sleep(1);
 	sync();

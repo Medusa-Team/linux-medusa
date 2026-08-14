@@ -9,6 +9,11 @@ reference authorization server in a minimal initramfs. Each scenario owns:
   * `medusa.conf`: the Constable policy under test;
   * `expected`: exact result lines that must appear on the guest console.
 
+An optional `base` file names another scenario whose programs, policies, and
+expected results are inherited. Programs and policies can be overridden by
+adding the corresponding file to the derived scenario; derived expectations
+are checked in addition to the base expectations.
+
 Blank lines and lines beginning with `#` in `expected` are ignored. A line
 beginning with `!` is a negative assertion: the remaining text must not occur
 on the console.
@@ -27,13 +32,25 @@ SysV operations that demonstrably reached Constable.
 
 The `lifecycle` scenario verifies initial Constable registration, clean
 disconnect, the configured fail-open behavior without a server, and
-registration of a replacement server. It also characterizes a known defect:
-after restart, policy rules for the already-running init process and newly
-created IPC objects return `MED_ERR`, so a reloaded deny rule fails open.
-The scenario names this result `policy_reload_known_defect`; it must not be
-read as successful enforcement of the replacement policy. It also verifies
-normal connected audit output and records the known absence of an audit record
-when stale-context validation takes the disconnected fail-open path.
+registration of a replacement server. The replacement loads a different
+policy and proves that its `ipc_msgsnd` deny rule is enforced. The scenario
+also verifies that stale-context validation emits an audit record when it
+takes the disconnected fail-open path for `mkdir`.
+
+The `stacking` scenario inherits the complete lifecycle test and additionally
+mounts securityfs and verifies that the kernel's runtime LSM list contains
+both AppArmor and Medusa. It loads a minimal AppArmor profile, proves that
+AppArmor can independently deny a directory creation while Medusa and
+Constable remain usable, and verifies that the short-circuited operation does
+not produce a Medusa audit record. It then proves that Medusa can independently
+deny a message-queue operation after Constable reconnects.
+
+The `selinux-stacking` scenario also inherits the lifecycle test and requires
+SELinux before Medusa in the runtime LSM list. It loads a generated enforcing
+policy, places only the guest helper in a restricted SELinux domain, and proves
+an audited SELinux directory denial while Medusa and Constable remain usable.
+The replacement Constable then reconnects and independently enforces Medusa's
+message-queue denial.
 
 The kernel must be configured with:
 
@@ -54,7 +71,43 @@ If the optional scenario argument is omitted, `cache` is used. The runner
 exits successfully only after every non-comment line in the scenario's
 `expected` file is observed on the console.
 
+To exercise major-LSM stacking, merge `stacking.config` into the kernel
+configuration before building, verify the resulting configuration, then run
+the `stacking` scenario:
+
+  tools/testing/selftests/medusa/qemu/check-stacking-config.sh \
+    path/to/.config
+  tools/testing/selftests/medusa/qemu/run.sh \
+    path/to/arch/x86/boot/bzImage \
+    path/to/constable \
+    path/to/busybox \
+    stacking
+
+This enables AppArmor before Medusa in `CONFIG_LSM`. A successful run proves
+that both are present in the runtime LSM list, each LSM can deny independently,
+and Medusa still reconnects and enforces the replacement policy.
+
+For SELinux stacking coverage, merge `selinux-stacking.config`, verify it with
+`check-selinux-stacking-config.sh`, and generate a policy using the kernel's
+`scripts/selinux/mdp/mdp` helper:
+
+  tools/testing/selftests/medusa/qemu/make-selinux-test-policy.sh \
+    path/to/scripts/selinux/mdp/mdp \
+    path/to/medusa-selinux-test.policy
+
+Run the `selinux-stacking` scenario with `SELINUX_POLICY` naming that compiled
+policy. The runner places the policy in the initramfs and the lifecycle helper
+loads it before exercising the restricted guest.
+
 `GUEST_CC` selects the static compiler for scenario C programs. Prebuilt
 programs may instead be supplied with `INIT_TEST_BINARY` and
 `GUEST_TEST_BINARY`. `QEMU_ACCEL`, `QEMU_CPU`, and `QEMU_TIMEOUT` may also be
 overridden in the environment.
+
+A scenario containing `apparmor.profile` requires `apparmor_parser` on the
+host running the harness. `APPARMOR_PARSER` selects a non-default parser.
+Alternatively, `APPARMOR_POLICY` supplies a precompiled binary policy blob;
+the runner places only that blob in the minimal initramfs.
+
+A scenario containing the `selinux-policy` marker requires `SELINUX_POLICY` to
+name a precompiled binary SELinux policy.
