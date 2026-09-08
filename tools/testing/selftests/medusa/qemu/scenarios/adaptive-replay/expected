@@ -1,0 +1,7 @@
+MEDUSA_RESULT adaptive_replay recorded_workload_allowed PASS
+MEDUSA_RESULT adaptive_replay allow_cached_once PASS
+MEDUSA_RESULT adaptive_replay live_generation_commit PASS
+MEDUSA_RESULT adaptive_replay constable_pid_stable PASS
+MEDUSA_RESULT adaptive_replay withheld_negative_denied PASS
+MEDUSA_RESULT adaptive_replay denial_not_cached PASS
+!MEDUSA_QEMU_FAIL adaptive_replay

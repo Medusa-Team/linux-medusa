@@ -1,0 +1,9 @@
+MEDUSA_RESULT domain-cache ptrace_cached_deny PASS
+MEDUSA_RESULT domain-cache signal_cached_deny PASS
+MEDUSA_RESULT domain-cache complete PASS
+event=ptrace
+event=sendsig
+!MEDUSA_RESULT domain-cache ptrace_cached_deny FAIL
+!MEDUSA_RESULT domain-cache signal_cached_deny FAIL
+!MEDUSA_RESULT domain-cache complete FAIL
+!MEDUSA_EVENT ptrace

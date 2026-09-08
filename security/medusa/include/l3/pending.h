@@ -22,6 +22,7 @@ struct medusa_pending_request {
 	u64 policy_generation;
 	u64 lease_sequence;
 	enum medusa_answer_t answer;
+	u8 cache_update;
 	bool registered;
 };
 
@@ -32,6 +33,9 @@ int medusa_pending_request_cancel(struct medusa_pending_request *request,
 				  enum medusa_answer_t answer);
 int medusa_pending_request_complete(u64 id, u64 policy_generation,
 				    enum medusa_answer_t answer);
+int medusa_pending_request_complete_with_cache(
+	u64 id, u64 policy_generation, enum medusa_answer_t answer,
+	u8 cache_update);
 int medusa_pending_request_renew(u64 id, u64 policy_generation);
 enum medusa_answer_t
 medusa_pending_request_wait(struct medusa_pending_request *request);

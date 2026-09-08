@@ -27,7 +27,7 @@ static enum medusa_answer_t fake_decide(struct medusa_event_s *event,
 {
 	decision->request_id = 0x1234;
 	decision->policy_generation =
-		(u64)READ_ONCE(medusa_authserver_magic);
+		READ_ONCE(medusa_authserver_magic);
 	decision->unavailable = delegated_unavailable;
 	decision->request_present = true;
 	decision->contacted = true;
@@ -63,9 +63,18 @@ static struct medusa_kclass_s object_class = {
 };
 
 static struct medusa_evtype_s test_event_type = {
+	.kind = MEDUSA_EVENT_ACCESS,
 	.name = "test_decide",
 	.arg_kclass = { &subject_class, &object_class },
 	.arg_name = { "subject", "object" },
+	.event_size = sizeof(struct medusa_event_s),
+};
+
+static struct medusa_evtype_s notification_event_type = {
+	.kind = MEDUSA_EVENT_OBJECT_NOTIFICATION,
+	.name = "test_getobject",
+	.arg_kclass = { &subject_class, &object_class },
+	.arg_name = { "object", "parent" },
 	.event_size = sizeof(struct medusa_event_s),
 };
 
@@ -111,7 +120,7 @@ decide_without_server_uses_baseline_and_preserves_monitoring(struct kunit *test)
 	KUNIT_EXPECT_EQ(test, MEDUSA_DECISION_BASELINE, result.source);
 	KUNIT_EXPECT_EQ(test, MEDUSA_NO_AUTH_SERVER, result.unavailable);
 	KUNIT_EXPECT_EQ(test, (u64)0, result.request_id);
-	KUNIT_EXPECT_EQ(test, (u64)READ_ONCE(medusa_authserver_magic),
+	KUNIT_EXPECT_EQ(test, READ_ONCE(medusa_authserver_magic),
 			result.policy_generation);
 	KUNIT_EXPECT_FALSE(test, result.request_present);
 	KUNIT_EXPECT_FALSE(test, result.authserver_contacted);
@@ -205,7 +214,7 @@ static void expect_delegated_answer(struct kunit *test,
 	close_calls = 0;
 	result = med_register_authserver(&fake_server);
 	KUNIT_ASSERT_EQ(test, 0, result);
-	expected_generation = (u64)READ_ONCE(medusa_authserver_magic);
+	expected_generation = READ_ONCE(medusa_authserver_magic);
 
 	decision = med_decide_result(&test_event_type, &event, &subject,
 				     &object);
@@ -441,7 +450,11 @@ static void protocol_enforces_state_machine(struct kunit *test)
 	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
 		MEDUSA_STATE_POLICY_INSTALL, MEDUSA_MSG_POLICY_COMMIT));
 	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_POLICY_INSTALL, MEDUSA_MSG_POLICY_ABORT));
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
 		MEDUSA_STATE_READY, MEDUSA_MSG_DECISION_REPLY));
+	KUNIT_EXPECT_TRUE(test, medusa_v4_message_allowed(
+		MEDUSA_STATE_READY, MEDUSA_MSG_POLICY_BEGIN));
 	KUNIT_EXPECT_FALSE(test, medusa_v4_message_allowed(
 		MEDUSA_STATE_DEGRADED, MEDUSA_MSG_DECISION_REPLY));
 }
@@ -657,6 +670,40 @@ static void protocol_error_names_are_stable(struct kunit *test)
 			   medusa_protocol_error_name(MEDUSA_PROTOCOL_REPLIES));
 }
 
+static void object_notifications_reject_decisional_policy(struct kunit *test)
+{
+	struct medusa_event_s event = {};
+	struct medusa_kobject_s object;
+	struct medusa_kobject_s parent;
+	struct medusa_decision_result result;
+	int error;
+
+	medusa_decision_counters_init(&notification_event_type);
+	ratelimit_state_init(&notification_event_type.degraded_audit_ratelimit,
+			     HZ, 0);
+	error = medusa_set_fallback_policy(&notification_event_type,
+					   MEDUSA_FALLBACK_BASELINE_ALLOW);
+	KUNIT_ASSERT_EQ(test, 0, error);
+	error = medusa_set_fallback_policy(&notification_event_type,
+					   MEDUSA_FALLBACK_BASELINE_DENY);
+	KUNIT_EXPECT_EQ(test, -EOPNOTSUPP, error);
+	error = medusa_set_fallback_policy(&notification_event_type,
+					   MEDUSA_FALLBACK_ONLINE_REQUIRED);
+	KUNIT_EXPECT_EQ(test, -EOPNOTSUPP, error);
+
+	delegated_answer = MED_DENY;
+	decide_calls = 0;
+	KUNIT_ASSERT_EQ(test, 0, med_register_authserver(&fake_server));
+	result = med_decide_result(&notification_event_type, &event,
+				   &object, &parent);
+	med_unregister_authserver(&fake_server);
+
+	KUNIT_EXPECT_EQ(test, 1, decide_calls);
+	KUNIT_EXPECT_EQ(test, MED_ALLOW, result.answer);
+	KUNIT_EXPECT_EQ(test, MEDUSA_DECISION_AUTH_SERVER, result.source);
+	KUNIT_EXPECT_TRUE(test, medusa_decision_is_authoritative(&result));
+}
+
 static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(decide_without_server_uses_baseline_and_preserves_monitoring),
 	KUNIT_CASE(baseline_deny_is_enforced_without_server),
@@ -686,6 +733,7 @@ static struct kunit_case comm_test_cases[] = {
 	KUNIT_CASE(delegation_context_names_are_stable),
 	KUNIT_CASE(protocol_counters_are_cumulative),
 	KUNIT_CASE(protocol_error_names_are_stable),
+	KUNIT_CASE(object_notifications_reject_decisional_policy),
 	{}
 };
 

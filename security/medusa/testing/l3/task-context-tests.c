@@ -91,6 +91,7 @@ static void task_context_inherits_parent_state(struct kunit *test)
 	parent.med_object.magic = 77;
 	parent.med_object.cinfo.data[0] = 101;
 	parent.med_subject.cinfo.data[0] = 202;
+	atomic64_set(&parent.policy_domain, 303);
 	parent.audit = 1;
 	parent.luid = KUIDT_INIT(123);
 	strscpy(parent.cmdline, "inherited command", sizeof(parent.cmdline));
@@ -121,6 +122,8 @@ static void task_context_inherits_parent_state(struct kunit *test)
 			child.med_object.cinfo.data[0]);
 	KUNIT_EXPECT_EQ(test, parent.med_subject.cinfo.data[0],
 			child.med_subject.cinfo.data[0]);
+	KUNIT_EXPECT_EQ(test, atomic64_read(&parent.policy_domain),
+			atomic64_read(&child.policy_domain));
 	KUNIT_EXPECT_EQ(test, parent.audit, child.audit);
 	KUNIT_EXPECT_TRUE(test, uid_eq(parent.luid, child.luid));
 	KUNIT_EXPECT_STREQ(test, parent.cmdline, child.cmdline);

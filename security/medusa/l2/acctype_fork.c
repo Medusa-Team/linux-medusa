@@ -2,6 +2,7 @@
 
 #include "l3/registry.h"
 #include "l2/kobject_process.h"
+#include "l2/audit_medusa.h"
 
 /* let's define the 'fork' access type, with object=task and subject=task. */
 
@@ -25,7 +26,6 @@ static int __init fork_acctype_init(void)
 
 enum medusa_answer_t medusa_fork(unsigned long clone_flags)
 {
-	enum medusa_answer_t retval = MED_ALLOW;
 	struct fork_access access;
 	struct process_kobject parent;
 
@@ -37,9 +37,14 @@ enum medusa_answer_t medusa_fork(unsigned long clone_flags)
 	if (MEDUSA_MONITORED_ACCESS_S(fork_access, task_security(current))) {
 		access.clone_flags = clone_flags;
 		process_kern2kobj(&parent, current);
-		retval = MED_DECIDE(fork_access, &access, &parent, &parent);
+		return medusa_audit_decision_result("fork",
+			MED_DECIDE_RESULT(fork_access, &access,
+					  &parent, &parent),
+			task_security(current)->audit);
 	}
-	return retval;
+
+	return medusa_audit_cached_allow("fork",
+					 task_security(current)->audit);
 }
 
 device_initcall(fork_acctype_init);

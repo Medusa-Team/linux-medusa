@@ -33,7 +33,15 @@ extern void medusa_monitor_pexec(int flag);
 extern int medusa_monitored_afterexec(void);
 extern void medusa_monitor_afterexec(int flag);
 extern enum medusa_answer_t medusa_sexec(struct linux_binprm *bprm);
-extern enum medusa_answer_t medusa_ptrace(struct task_struct *tracer, struct task_struct *tracee);
+enum medusa_ptrace_operation {
+	MEDUSA_PTRACE_ACCESS_CHECK,
+	MEDUSA_PTRACE_TRACEME,
+};
+
+enum medusa_answer_t medusa_ptrace(struct task_struct *tracer,
+				   struct task_struct *tracee,
+				   unsigned int mode,
+				   enum medusa_ptrace_operation operation);
 extern void medusa_kernel_thread(int (*fn)(void *));
 
 extern int process_kobj_validate_task(struct task_struct *ts);
@@ -46,6 +54,7 @@ extern struct lsm_blob_sizes medusa_blob_sizes;
 
 struct medusa_l1_task_s {
 	kuid_t luid;
+	atomic64_t policy_domain;
 	struct medusa_subject_s med_subject;
 	struct medusa_object_s med_object;
 	char cmdline[128];
@@ -103,6 +112,9 @@ medusa_task_context_init(struct medusa_l1_task_s *context,
 			 const struct medusa_l1_task_s *parent,
 			 enum medusa_task_context_mode mode)
 {
+	u64 policy_domain = parent ?
+		atomic64_read(&parent->policy_domain) : 0;
+
 	switch (mode) {
 	case MEDUSA_TASK_CONTEXT_INHERIT:
 		*context = *parent;
@@ -116,6 +128,7 @@ medusa_task_context_init(struct medusa_l1_task_s *context,
 		medusa_task_context_enable_monitoring(context);
 		break;
 	}
+	atomic64_set(&context->policy_domain, policy_domain);
 
 	mutex_init(&context->validation_in_progress);
 	context->validation_depth_nesting = 1;

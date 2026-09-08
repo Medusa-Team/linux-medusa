@@ -61,7 +61,7 @@ static void is_med_magic_valid_changed_invalid(struct kunit *test)
 static void med_magic_validate_success(struct kunit *test)
 {
 	struct medusa_l1_task_s task;
-	int old_magic;
+	u64 old_magic;
 
 	fake_med_object_init(&task.med_object);
 	task.med_object.magic = medusa_authserver_magic == 1 ? 2 : 1;
@@ -201,7 +201,7 @@ static void action_bitmap_boundary_bits(struct kunit *test)
 static void magic_generation_rollover_invalidates_context(struct kunit *test)
 {
 	struct medusa_object_s object;
-	int saved_magic = medusa_authserver_magic;
+	u64 saved_magic = medusa_authserver_magic;
 
 	init_med_object(&object);
 	medusa_authserver_magic = 41;
@@ -221,7 +221,7 @@ static void not_monitored_context_survives_normal_generation_changes(
 	struct kunit *test)
 {
 	struct medusa_object_s object;
-	int saved_magic = medusa_authserver_magic;
+	u64 saved_magic = medusa_authserver_magic;
 
 	init_med_object(&object);
 	med_magic_not_monitored(&object);

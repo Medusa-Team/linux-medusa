@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include "l3/registry.h"
+#include "l3/arch.h"
 #include "l2/kobject_process.h"
+#include "l2/audit_medusa.h"
 
 /* let's define the 'ptrace' access type, with object=task and subject=task. */
 
 struct ptrace_access {
 	MEDUSA_ACCESS_HEADER;
+	unsigned int mode;
+	unsigned int operation;
 };
 
 MED_ATTRS(ptrace_access) {
+	MED_ATTR_RO(ptrace_access, mode, "mode", MED_UNSIGNED),
+	MED_ATTR_RO(ptrace_access, operation, "operation", MED_UNSIGNED),
 	MED_ATTR_END
 };
 
@@ -25,33 +31,64 @@ static int __init ptrace_acctype_init(void)
 	return 0;
 }
 
-enum medusa_answer_t medusa_ptrace(struct task_struct *tracer, struct task_struct *tracee)
+enum medusa_answer_t medusa_ptrace(struct task_struct *tracer,
+				   struct task_struct *tracee,
+				   unsigned int mode,
+				   enum medusa_ptrace_operation operation)
 {
 	struct ptrace_access access;
+	struct medusa_decision_result cached;
 	struct process_kobject tracer_p;
 	struct process_kobject tracee_p;
-	enum medusa_answer_t retval;
+	bool can_validate = in_task() && !preempt_count() && !irqs_disabled();
+	bool tracer_valid;
+	bool tracee_valid;
+	bool monitored;
 
-	if (!is_med_magic_valid(&(task_security(tracer)->med_object)) &&
-	    process_kobj_validate_task(tracer) <= 0 &&
-	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ptrace_access))
-		return MED_ALLOW;
+	tracer_valid =
+		is_med_magic_valid(&(task_security(tracer)->med_object));
+	tracee_valid =
+		is_med_magic_valid(&(task_security(tracee)->med_object));
 
-	if (!is_med_magic_valid(&(task_security(tracee)->med_object)) &&
-	    process_kobj_validate_task(tracee) <= 0 &&
-	    !MEDUSA_FALLBACK_REQUIRES_DECISION(ptrace_access))
-		return MED_ALLOW;
+	if (can_validate && !tracer_valid)
+		tracer_valid = process_kobj_validate_task(tracer) > 0;
+	if (can_validate && !tracee_valid)
+		tracee_valid = process_kobj_validate_task(tracee) > 0;
 
-	if (!vs_intersects(VSS(task_security(tracer)), VS(task_security(tracee))) ||
-	    !vs_intersects(VSW(task_security(tracer)), VS(task_security(tracee))))
+	if (tracer_valid && tracee_valid &&
+	    (!vs_intersects(VSS(task_security(tracer)),
+			    VS(task_security(tracee))) ||
+	     !vs_intersects(VSW(task_security(tracer)),
+			    VS(task_security(tracee)))))
 		return MED_DENY;
-	if (MEDUSA_MONITORED_ACCESS_S(ptrace_access, task_security(tracer))) {
+
+	monitored =
+		MEDUSA_MONITORED_ACCESS_S(ptrace_access, task_security(tracer));
+	if (monitored || !tracer_valid || !tracee_valid) {
+		u64 selector = ((u64)operation << 32) | mode;
+
+		if (medusa_domain_cache_decide(
+			    &MED_EVTYPEOF(ptrace_access),
+			    atomic64_read(
+				    &task_security(tracer)->policy_domain),
+			    atomic64_read(
+				    &task_security(tracee)->policy_domain),
+			    selector, &cached))
+			return medusa_audit_decision_result(
+				"ptrace", cached,
+				task_security(tracer)->audit);
+		access.mode = mode;
+		access.operation = operation;
 		process_kern2kobj(&tracer_p, tracer);
 		process_kern2kobj(&tracee_p, tracee);
-		retval = MED_DECIDE(ptrace_access, &access, &tracer_p, &tracee_p);
-		return retval;
+		return medusa_audit_decision_result("ptrace",
+			MED_DECIDE_RESULT(ptrace_access, &access,
+					  &tracer_p, &tracee_p),
+			task_security(tracer)->audit);
 	}
-	return MED_ALLOW;
+
+	return medusa_audit_cached_allow("ptrace",
+					 task_security(tracer)->audit);
 }
 
 device_initcall(ptrace_acctype_init);

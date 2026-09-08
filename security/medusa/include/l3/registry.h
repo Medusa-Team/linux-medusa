@@ -100,6 +100,12 @@ int med_authserver_stage_fallback_policy(
 	struct medusa_authserver_s *med_authserver,
 	struct medusa_evtype_s *event_id,
 	enum medusa_fallback_policy policy);
+int med_authserver_policy_replace_begin(
+	struct medusa_authserver_s *med_authserver);
+int med_authserver_policy_replace_commit(
+	struct medusa_authserver_s *med_authserver);
+int med_authserver_policy_replace_abort(
+	struct medusa_authserver_s *med_authserver);
 extern int med_register_authserver(struct medusa_authserver_s *med_authserver);
 extern void med_unregister_authserver(struct medusa_authserver_s *med_authserver);
 const char *medusa_authserver_state_name(enum medusa_authserver_state state);

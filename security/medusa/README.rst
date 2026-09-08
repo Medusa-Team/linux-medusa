@@ -31,7 +31,11 @@ Policy generations
 ``medusa_authserver_magic`` identifies the current authorization-server
 generation.  Cached object state is valid only when its ``magic`` value matches
 that generation.  Registering or unregistering an authorization server advances
-the generation and therefore invalidates old cached state lazily.
+the generation and therefore invalidates old cached state lazily. Live atomic
+replacement and reply-bound cache updates are specified in
+``security/medusa/ADAPTIVE_POLICY.rst``.
+Generation-scoped rules for hooks that cannot sleep are specified in
+``security/medusa/DECISION_CACHE.rst``.
 
 Protocol v3
 -----------
@@ -93,3 +97,6 @@ documented in ``security/medusa/OBSERVABILITY.rst``.
 The reviewed Phase 6 socket subset, address semantics, stacking contract, and
 the reasons the 2019 implementation cannot be re-enabled unchanged are
 documented in ``security/medusa/NETWORK.rst``.
+
+The guarded Phase 7 kernel boundary is documented in
+``security/medusa/ADAPTIVE_POLICY.rst``.

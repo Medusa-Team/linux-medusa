@@ -1,0 +1,15 @@
+MEDUSA_RESULT process-controls fork_allow PASS
+MEDUSA_RESULT process-controls fork_deny PASS
+MEDUSA_RESULT process-controls ptrace_attach_local_deny PASS
+MEDUSA_RESULT process-controls ptrace_traceme_local_deny PASS
+MEDUSA_RESULT process-controls complete PASS
+MEDUSA_EVENT fork
+MEDUSA_FORK DENY
+event=fork
+event=ptrace
+!MEDUSA_EVENT ptrace
+!MEDUSA_RESULT process-controls fork_allow FAIL
+!MEDUSA_RESULT process-controls fork_deny FAIL
+!MEDUSA_RESULT process-controls ptrace_attach_local_deny FAIL
+!MEDUSA_RESULT process-controls ptrace_traceme_local_deny FAIL
+!MEDUSA_RESULT process-controls complete FAIL

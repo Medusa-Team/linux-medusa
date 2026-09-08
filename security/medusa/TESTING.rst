@@ -262,9 +262,18 @@ QEMU scenario coverage
   Demonstrates one delegated ``ipc_msgsnd`` followed by a kernel-cached
   decision after Constable clears the message queue's monitoring bit.
 
+``domain-cache``
+  Installs wildcard ptrace and signal denials in the generation-scoped kernel
+  table, then proves both operations are denied without a Constable decision
+  event. This is the non-sleepable RCU lookup path.
+
+``fs-create``
+  Exercises pre-inode regular-file create allow/deny through the lock-safe
+  domain cache, plus ``creat``, exclusive create, and create-through-open.
+
 ``access``
-  Exercises create/open/write/fcntl/chmod/chown/truncate, symlink/link/rename/
-  unlink, mknod, mkdir/rmdir, chroot, exec, fork, signals, setresuid, and the
+  Exercises open/write/fcntl/chmod/chown/truncate, symlink/link/rename/unlink,
+  mknod, mkdir/rmdir, chroot, exec, fork, signals, setresuid, and the
   message-queue, semaphore, and shared-memory operations exposed by the active
   LSM hooks.  It requires a Constable marker for every active access type
   exercised; an operation-level success without its event marker is not
@@ -278,6 +287,15 @@ QEMU scenario coverage
   result.  Validation dependencies have central-engine counter and
   dedicated lifecycle coverage because nested logging from a protocol-v3
   validation callback can overwrite its legacy shared callback snapshot.
+
+``process-controls``
+  Uses global callbacks independent of the legacy path-tree policy to prove a
+  delegated ``CLONE_FILES`` denial followed by an ordinary-fork allow.  It
+  also guards against authorization-server self-recursion while Constable
+  creates its worker threads after READY.  Ptrace attach and
+  ``PTRACE_TRACEME`` prove the local virtual-space denial path.  Linux 7.1
+  invokes both ptrace hooks in a context where synchronous userspace
+  delegation is unsafe.
 
 ``lockdep``
   Inherits the complete ``access`` scenario and rejects atomic-sleep,
@@ -378,28 +396,25 @@ The Linux 7.1 LSM table currently calls Medusa for:
   chown, and chroot;
 * file open, fcntl, and truncate;
 * set-user-ID credential changes;
+* delegated fork and ptrace decisions;
 * signal virtual-space checks;
 * SysV IPC permission, associate, control, semop, shmat, msgsnd, and msgrcv;
 * socket create, bind, connect, listen, accept, sendmsg, and recvmsg;
 * task, inode, SysV IPC, and socket security-context allocation.
 
-Task allocation initializes or inherits a context, but does not call the
-registered ``fork`` access type.  Signal delivery performs a virtual-space
-check, but there is no registered delegated ``sendsig`` event.
+Signal delivery performs a virtual-space check, but there is no registered
+delegated ``sendsig`` event.
 
 Registered but not wired
 ------------------------
 
 The following access types are announced to Constable but have no active Linux
-7.1 LSM call site: ``after_exec``, ``capable``, ``create``, ``fork``, ``init``,
-``lookup``, ``notify_change``, ``permission``, ``readlink``, ``sexec``,
-and ``ptrace``. ``syscall`` is likewise not part of the normal tested
-configuration.
+7.1 LSM call site: ``after_exec``, ``capable``, ``create``, ``init``,
+``lookup``, ``notify_change``, ``permission``, ``readlink``, and ``sexec``.
+``syscall`` is likewise not part of the normal tested configuration.
 
 Consequently, file creation in ``access`` is currently observed through the
 post-create open path; it does not prove the registered ``create`` event.
-Process creation verifies context inheritance and syscall behaviour; it does
-not prove a delegated ``fork`` decision.
 
 Known defects kept separate from expected behaviour
 ---------------------------------------------------

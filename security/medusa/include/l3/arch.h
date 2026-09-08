@@ -33,6 +33,7 @@
 /* sanity checks for decision */
 #include <linux/sched.h>
 #include <linux/interrupt.h>
-#define ARCH_CANNOT_DECIDE(x) (!in_task() || current->pid == 0)
+#define ARCH_CANNOT_DECIDE() \
+	(!in_task() || preempt_count() || irqs_disabled() || current->pid == 0)
 
 #endif

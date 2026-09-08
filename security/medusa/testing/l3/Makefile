@@ -13,6 +13,7 @@ obj-$(CONFIG_MEDUSA_L3_TESTING) += path-guard-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += blob-access-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += audit-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += comm-tests.o
+obj-$(CONFIG_MEDUSA_L3_TESTING) += decision-cache-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += med_cache-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += pending-tests.o
 obj-$(CONFIG_MEDUSA_L3_TESTING) += health-tests.o

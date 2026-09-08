@@ -1,6 +1,29 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include "l2/audit_medusa.h"
 #include "l2/kobject_process.h"
+#include "l3/registry.h"
+
+struct sendsig_access {
+	MEDUSA_ACCESS_HEADER;
+	int signal;
+};
+
+MED_ATTRS(sendsig_access) {
+	MED_ATTR_RO(sendsig_access, signal, "signal", MED_SIGNED),
+	MED_ATTR_END
+};
+
+MED_ACCTYPE(sendsig_access, "sendsig",
+	    process_kobject, "sender",
+	    process_kobject, "receiver");
+
+static int __init sendsig_acctype_init(void)
+{
+	MED_REGISTER_ACCTYPE(sendsig_access,
+			     MEDUSA_ACCTYPE_TRIGGEREDATSUBJECT);
+	return 0;
+}
 
 static bool refcount_inc_if_zero(refcount_t *r)
 {
@@ -23,6 +46,10 @@ static void delayed_put_task_struct(struct rcu_head *rhp)
 enum medusa_answer_t medusa_sendsig(struct task_struct *p, struct kernel_siginfo *info,
 				    int sig, const struct cred *cred)
 {
+	struct sendsig_access access;
+	struct medusa_decision_result cached;
+	struct process_kobject sender;
+	struct process_kobject receiver;
 	enum medusa_answer_t retval = MED_ALLOW;
 
 	/* allow signalling from NMI, hard IRQ and soft IRQ */
@@ -110,5 +137,28 @@ enum medusa_answer_t medusa_sendsig(struct task_struct *p, struct kernel_siginfo
 	if (!vs_intersects(VSW(task_security(current)), VS(task_security(p))))
 		return MED_DENY;
 
+	if (MEDUSA_MONITORED_ACCESS_S(sendsig_access,
+				      task_security(current))) {
+		if (medusa_domain_cache_decide(
+			    &MED_EVTYPEOF(sendsig_access),
+			    atomic64_read(
+				    &task_security(current)->policy_domain),
+			    atomic64_read(&task_security(p)->policy_domain),
+			    (u64)(unsigned int)sig, &cached))
+			return medusa_audit_decision_result(
+				"sendsig", cached,
+				task_security(current)->audit);
+		access.signal = sig;
+		process_kern2kobj(&sender, current);
+		process_kern2kobj(&receiver, p);
+		return medusa_audit_decision_result(
+			"sendsig",
+			MED_DECIDE_RESULT(sendsig_access, &access,
+					  &sender, &receiver),
+			task_security(current)->audit);
+	}
+
 	return MED_ALLOW;
 }
+
+device_initcall(sendsig_acctype_init);

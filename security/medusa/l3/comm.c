@@ -8,6 +8,7 @@
 
 #include "l3/audit_schema.h"
 #include "l3/arch.h"
+#include "l3/decision_cache.h"
 #include "l3/registry.h"
 #include "l3/server.h"
 
@@ -194,7 +195,7 @@ bool medusa_event_fallback_requires_decision(
 
 u64 medusa_current_policy_generation(void)
 {
-	return (u64)READ_ONCE(medusa_authserver_magic);
+	return READ_ONCE(medusa_authserver_magic);
 }
 
 const char *medusa_fallback_policy_name(enum medusa_fallback_policy policy)
@@ -266,6 +267,9 @@ medusa_account_decision(struct medusa_evtype_s *evtype,
 		atomic64_inc(&evtype->decision_counters.delegated);
 
 	switch (result->source) {
+	case MEDUSA_DECISION_CACHE:
+		atomic64_inc(&evtype->decision_counters.cached);
+		break;
 	case MEDUSA_DECISION_AUTH_SERVER:
 		atomic64_inc(&evtype->decision_counters.auth_server);
 		break;
@@ -300,6 +304,26 @@ medusa_finish_decision(struct medusa_evtype_s *evtype,
 	return result;
 }
 
+bool medusa_domain_cache_decide(
+	struct medusa_evtype_s *evtype, u64 subject_domain, u64 object_domain,
+	u64 selector, struct medusa_decision_result *result)
+{
+	enum medusa_answer_t answer;
+
+	if (!result ||
+	    !medusa_decision_cache_lookup(evtype, subject_domain,
+					  object_domain, selector, &answer))
+		return false;
+	*result = medusa_finish_decision(evtype,
+		(struct medusa_decision_result) {
+			.answer = answer,
+			.source = MEDUSA_DECISION_CACHE,
+			.unavailable = MEDUSA_AVAILABLE,
+			.policy_generation = medusa_current_policy_generation(),
+		});
+	return true;
+}
+
 int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 			       enum medusa_fallback_policy policy)
 {
@@ -308,6 +332,9 @@ int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 	if (policy < MEDUSA_FALLBACK_BASELINE_ALLOW ||
 	    policy > MEDUSA_FALLBACK_ONLINE_REQUIRED)
 		return -EINVAL;
+	if (evtype->kind == MEDUSA_EVENT_OBJECT_NOTIFICATION &&
+	    policy != MEDUSA_FALLBACK_BASELINE_ALLOW)
+		return -EOPNOTSUPP;
 
 	WRITE_ONCE(evtype->fallback_policy[0], policy);
 	WRITE_ONCE(evtype->fallback_policy[1], policy);
@@ -337,21 +364,9 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	enum medusa_fallback_policy fallback_policy =
 		medusa_get_fallback_policy(evtype);
 	u64 policy_generation =
-		(u64)READ_ONCE(medusa_authserver_magic);
+		READ_ONCE(medusa_authserver_magic);
 
-	/*
-	 * An installed denial is authoritative and is never weakened by the
-	 * availability or answer of a userspace server.
-	 */
-	if (fallback_policy == MEDUSA_FALLBACK_BASELINE_DENY) {
-		result = medusa_fallback_result(evtype, fallback_policy,
-						MEDUSA_AVAILABLE,
-						0, policy_generation, false,
-						false);
-		return medusa_finish_decision(evtype, result);
-	}
-
-	if (ARCH_CANNOT_DECIDE(evtype)) {
+	if (ARCH_CANNOT_DECIDE()) {
 		result = medusa_fallback_result(evtype, fallback_policy,
 						MEDUSA_NON_SLEEPABLE_CONTEXT,
 						0, policy_generation, false,
@@ -367,14 +382,47 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 #endif
 	authserver = med_get_authserver();
 	if (!authserver) {
+		enum medusa_unavailable_reason unavailable =
+			fallback_policy == MEDUSA_FALLBACK_BASELINE_DENY ?
+				MEDUSA_AVAILABLE : MEDUSA_NO_AUTH_SERVER;
+
 		mutex_unlock(&registry_lock);
 		result = medusa_fallback_result(evtype, fallback_policy,
-						MEDUSA_NO_AUTH_SERVER,
+						unavailable,
 						0, policy_generation, false,
 						false);
 		return medusa_finish_decision(evtype, result);
 	}
 	mutex_unlock(&registry_lock);
+
+	/*
+	 * Never address an authorization request to the task that must answer
+	 * it.  This also lets Constable create its worker pool immediately after
+	 * READY invalidates the task generation.
+	 */
+	if (task_tgid(current) == authserver->tgid) {
+		med_put_authserver(authserver);
+		result = (struct medusa_decision_result) {
+			.answer = MED_ALLOW,
+			.source = MEDUSA_DECISION_CACHE,
+			.unavailable = MEDUSA_AVAILABLE,
+			.policy_generation = policy_generation,
+		};
+		return medusa_finish_decision(evtype, result);
+	}
+
+	/*
+	 * An installed denial is authoritative and is never weakened by the
+	 * availability or answer of a userspace server.
+	 */
+	if (fallback_policy == MEDUSA_FALLBACK_BASELINE_DENY) {
+		med_put_authserver(authserver);
+		result = medusa_fallback_result(evtype, fallback_policy,
+						MEDUSA_AVAILABLE,
+						0, policy_generation, false,
+						false);
+		return medusa_finish_decision(evtype, result);
+	}
 
 	if (authserver->is_healthy && !authserver->is_healthy()) {
 		med_pr_warn_ratelimited("authorization server unhealthy, using fallback for event '%s'\n",
@@ -388,12 +436,6 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 	}
 
 	((struct medusa_event_s *)event)->evtype_id = evtype;
-	if (task_tgid(current) == authserver->tgid) {
-		med_pr_info("med_decide for Constable for event %s(%s:%s->%s:%s)\n",
-			   evtype->name,
-			   evtype->arg_name[0], evtype->arg_kclass[0]->name,
-			   evtype->arg_name[1], evtype->arg_kclass[1]->name);
-	}
 	server_decision.policy_generation = policy_generation;
 	result.answer = authserver->decide(event, o1, o2, &server_decision);
 	result.source = MEDUSA_DECISION_AUTH_SERVER;
@@ -423,6 +465,13 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 			   evtype->arg_name[1], evtype->arg_kclass[1]->name);
 		result.answer = MED_DENY;
 		result.source = MEDUSA_DECISION_INVALID_REPLY;
+	} else if (evtype->kind == MEDUSA_EVENT_OBJECT_NOTIFICATION) {
+		/*
+		 * get* hooks announce an object so userspace can assign its
+		 * security context. A supported reply acknowledges completion;
+		 * it does not authorize or deny the kernel operation.
+		 */
+		result.answer = MED_ALLOW;
 	}
 #ifdef CONFIG_MEDUSA_PROFILING
 	else {

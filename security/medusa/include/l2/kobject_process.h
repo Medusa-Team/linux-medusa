@@ -19,6 +19,7 @@
 
 struct process_kobject {
 	int pid, pgrp, tgid, session;
+	u64 policy_domain;
 	int parent_pid, child_pid, sibling_pid;
 	unsigned int uid, euid, suid, fsuid;
 	unsigned int gid, egid, sgid, fsgid;
