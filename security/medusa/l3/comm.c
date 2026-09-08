@@ -332,6 +332,9 @@ int medusa_set_fallback_policy(struct medusa_evtype_s *evtype,
 	if (policy < MEDUSA_FALLBACK_BASELINE_ALLOW ||
 	    policy > MEDUSA_FALLBACK_ONLINE_REQUIRED)
 		return -EINVAL;
+	if (evtype->kind == MEDUSA_EVENT_OBJECT_NOTIFICATION &&
+	    policy != MEDUSA_FALLBACK_BASELINE_ALLOW)
+		return -EOPNOTSUPP;
 
 	WRITE_ONCE(evtype->fallback_policy[0], policy);
 	WRITE_ONCE(evtype->fallback_policy[1], policy);
@@ -462,6 +465,13 @@ med_decide_result(struct medusa_evtype_s *evtype, void *event,
 			   evtype->arg_name[1], evtype->arg_kclass[1]->name);
 		result.answer = MED_DENY;
 		result.source = MEDUSA_DECISION_INVALID_REPLY;
+	} else if (evtype->kind == MEDUSA_EVENT_OBJECT_NOTIFICATION) {
+		/*
+		 * get* hooks announce an object so userspace can assign its
+		 * security context. A supported reply acknowledges completion;
+		 * it does not authorize or deny the kernel operation.
+		 */
+		result.answer = MED_ALLOW;
 	}
 #ifdef CONFIG_MEDUSA_PROFILING
 	else {

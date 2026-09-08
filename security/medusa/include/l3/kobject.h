@@ -271,6 +271,7 @@ struct medusa_evtype_s {
 	char arg_name[2][MEDUSA_ATTRNAME_MAX];	/* names of arguments */
 	unsigned int event_size;		/* sizeof(event) */
 	struct medusa_attribute_s *attr;	/* attributes */
+	enum medusa_event_kind kind;
 };
 
 #ifdef CONFIG_MEDUSA_PROFILING
@@ -303,15 +304,24 @@ struct medusa_evtype_s {
 
 #define MED_EVTYPE(structname, evtypename, s1name, arg1name, s2name, arg2name) \
 	struct medusa_evtype_s (MED_EVTYPEOF(structname)) = {		\
-		MEDUSA_DEFAULT_ACCTYPE_HEADER,				\
+		MEDUSA_DEFAULT_EVTYPE_HEADER,				\
 		(evtypename),						\
 		{ &MED_KCLASSOF(s1name), &MED_KCLASSOF(s2name) },	\
 		{ (arg1name), (arg2name) },				\
 		sizeof(struct structname),				\
-		MED_ATTRSOF(structname)					\
+		MED_ATTRSOF(structname),				\
+		MEDUSA_EVENT_OBJECT_NOTIFICATION			\
 	}
 #define MED_ACCTYPE(structname, acctypename, s1name, arg1name, s2name, arg2name) \
-	MED_EVTYPE(structname, acctypename, s1name, arg1name, s2name, arg2name)
+	struct medusa_evtype_s (MED_EVTYPEOF(structname)) = {		\
+		MEDUSA_DEFAULT_ACCTYPE_HEADER,				\
+		(acctypename),						\
+		{ &MED_KCLASSOF(s1name), &MED_KCLASSOF(s2name) },	\
+		{ (arg1name), (arg2name) },				\
+		sizeof(struct structname),				\
+		MED_ATTRSOF(structname),				\
+		MEDUSA_EVENT_ACCESS					\
+	}
 
 /* this is the access header - use it at the beginning of l2 structures */
 #define MEDUSA_ACCESS_HEADER \

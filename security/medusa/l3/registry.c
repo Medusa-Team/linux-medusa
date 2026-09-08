@@ -445,6 +445,11 @@ int med_authserver_stage_fallback_policy(
 	for (event = evtypes; event; event = event->next) {
 		if (event != event_id)
 			continue;
+		if (event->kind == MEDUSA_EVENT_OBJECT_NOTIFICATION &&
+		    policy != MEDUSA_FALLBACK_BASELINE_ALLOW) {
+			error = -EOPNOTSUPP;
+			break;
+		}
 		WRITE_ONCE(event->fallback_policy[handshaking_fallback_slot],
 			   policy);
 		error = 0;

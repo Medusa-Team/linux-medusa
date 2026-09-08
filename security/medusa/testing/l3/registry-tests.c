@@ -10,6 +10,7 @@ static int evtype_calls;
 static bool server_healthy;
 static enum medusa_health_reason server_health_reason;
 static struct medusa_evtype_s *announced_event;
+static struct medusa_evtype_s *announced_notification;
 
 static void fake_close(void)
 {
@@ -25,8 +26,11 @@ static int fake_add_kclass(struct medusa_kclass_s *kclass)
 static int fake_add_evtype(struct medusa_evtype_s *evtype)
 {
 	evtype_calls++;
-	if (!announced_event)
+	if (!announced_event && evtype->kind == MEDUSA_EVENT_ACCESS)
 		announced_event = evtype;
+	if (!announced_notification &&
+	    evtype->kind == MEDUSA_EVENT_OBJECT_NOTIFICATION)
+		announced_notification = evtype;
 	return 0;
 }
 
@@ -131,6 +135,33 @@ static void registry_commits_staged_fallback_only_at_ready(struct kunit *test)
 	med_unregister_authserver(&fake_server);
 	KUNIT_ASSERT_EQ(test, 0,
 			medusa_set_fallback_policy(announced_event, original));
+}
+
+static int stage_notification_policy(enum medusa_fallback_policy policy)
+{
+	struct medusa_authserver_s *server = &fake_server;
+	struct medusa_evtype_s *event = announced_notification;
+
+	return med_authserver_stage_fallback_policy(server, event, policy);
+}
+
+static void registry_rejects_notification_fallback_policy(struct kunit *test)
+{
+	int error;
+
+	announced_notification = NULL;
+	KUNIT_ASSERT_EQ(test, 0,
+			med_register_authserver_prepare(&fake_server));
+	KUNIT_ASSERT_NOT_NULL(test, announced_notification);
+	KUNIT_ASSERT_EQ(test, 0,
+			med_authserver_handshake_begin(&fake_server));
+	error = stage_notification_policy(MEDUSA_FALLBACK_BASELINE_ALLOW);
+	KUNIT_EXPECT_EQ(test, 0, error);
+	error = stage_notification_policy(MEDUSA_FALLBACK_BASELINE_DENY);
+	KUNIT_EXPECT_EQ(test, -EOPNOTSUPP, error);
+	error = stage_notification_policy(MEDUSA_FALLBACK_ONLINE_REQUIRED);
+	KUNIT_EXPECT_EQ(test, -EOPNOTSUPP, error);
+	med_unregister_authserver(&fake_server);
 }
 
 static void registry_aborts_staged_fallback_with_handshake(struct kunit *test)
@@ -402,6 +433,7 @@ static void registry_status_reports_unknown_optional_health(struct kunit *test)
 static struct kunit_case registry_test_cases[] = {
 	KUNIT_CASE(registry_prepare_replays_definitions),
 	KUNIT_CASE(registry_commits_staged_fallback_only_at_ready),
+	KUNIT_CASE(registry_rejects_notification_fallback_policy),
 	KUNIT_CASE(registry_aborts_staged_fallback_with_handshake),
 	KUNIT_CASE(registry_atomically_replaces_live_policy),
 	KUNIT_CASE(registry_authserver_lifecycle),

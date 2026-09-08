@@ -404,7 +404,7 @@ medusa_v4_event_definition_locked(struct medusa_v4_event *entry)
 	object = medusa_v4_find_class_locked(event->arg_kclass[1]);
 	if (!subject || !object)
 		return NULL;
-	capacity = 96 + MEDUSA_TLV_ALIGN_UP(MEDUSA_TLV_HEADER_SIZE +
+	capacity = 112 + MEDUSA_TLV_ALIGN_UP(MEDUSA_TLV_HEADER_SIZE +
 					    name_length) +
 		   MEDUSA_TLV_ALIGN_UP(MEDUSA_TLV_HEADER_SIZE +
 				       subject_name_length) +
@@ -434,6 +434,8 @@ medusa_v4_event_definition_locked(struct medusa_v4_event *entry)
 		frame, MEDUSA_TLV_TRIGGER, event->bitnr);
 	error = error ?: medusa_v4_frame_add_u8(
 		frame, MEDUSA_TLV_ENFORCEMENT, event->enforced);
+	error = error ?: medusa_v4_frame_add_u8(frame, MEDUSA_TLV_EVENT_KIND,
+					       event->kind);
 	error = error ?: medusa_v4_add_attributes(frame, event->attr);
 	if (error) {
 		medusa_v4_frame_free(frame);
@@ -749,7 +751,8 @@ unlock:
 		if (cancel)
 			medusa_v4_queue(cancel);
 	}
-	if (!error && answer == MED_ALLOW && pending.cache_update)
+	if (!error && answer == MED_ALLOW && pending.cache_update &&
+	    event->evtype_id->kind == MEDUSA_EVENT_ACCESS)
 		medusa_v4_apply_reply_cache_update(
 			event, subject_class->class, subject,
 			object_class->class, object,
@@ -762,7 +765,7 @@ static bool medusa_v4_tlv_known(u16 type)
 	return (type >= MEDUSA_TLV_MIN_VERSION &&
 		type <= MEDUSA_TLV_STATE) ||
 	       (type >= MEDUSA_TLV_CLASS_ID &&
-		type <= MEDUSA_TLV_ENFORCEMENT) ||
+		type <= MEDUSA_TLV_EVENT_KIND) ||
 	       (type >= MEDUSA_TLV_FALLBACK_POLICY &&
 		type <= MEDUSA_TLV_DOMAIN_RULE) ||
 	       (type >= MEDUSA_TLV_ERROR_CODE &&
@@ -1084,6 +1087,8 @@ static int medusa_v4_handle_policy_event(const u8 *data, size_t count)
 		offset += MEDUSA_TLV_ALIGN_UP(length);
 	}
 	if (rule_count) {
+		if (event->event->kind == MEDUSA_EVENT_OBJECT_NOTIFICATION)
+			return -EOPNOTSUPP;
 		if (!(v4_session.enabled_features &
 		      MEDUSA_FEATURE_DOMAIN_DECISION_CACHE))
 			return -EOPNOTSUPP;
